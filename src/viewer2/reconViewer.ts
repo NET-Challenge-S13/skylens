@@ -47,6 +47,8 @@ const POINT_FRAG = /* glsl */ `
   }
 `;
 
+const RECON_UP = new THREE.Vector3(0, 1, 0);
+
 /** One marker's live visuals (pin + pulsing ring), kept in sync with a DetectionRuntime. */
 interface MarkerVisual {
   det: DetectionRuntime;
@@ -77,8 +79,13 @@ export class ReconViewer {
   // Free-orbit navigation of the reconstructed space.
   private readonly controls: OrbitControls;
   private readonly sceneCenter = new THREE.Vector3();
-  private readonly desiredTarget = new THREE.Vector3();
-  private allowAutoRotate = true;
+  private followDist = 40;
+  private followHeight = 30;
+  private floorY = 0;
+  // Lagged pose history of the active drone, so RECON trails the SIM view.
+  private readonly history: Array<{ t: number; pos: THREE.Vector3; forward: THREE.Vector3 }> = [];
+  private userDragging = false;
+  private dragGraceUntil = 0;
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -115,6 +122,10 @@ export class ReconViewer {
     const radius = Math.max(1, core);
     this.scene.fog = new THREE.Fog(CONFIG.color.reconBg, radius * 3, radius * 9);
 
+    this.floorY = sceneData.groundY;
+    this.followDist = radius * 1.6;
+    this.followHeight = radius * 1.3;
+
     const aspect = canvas.clientWidth / Math.max(1, canvas.clientHeight);
     this.camera = new THREE.PerspectiveCamera(50, aspect, 0.05, radius * 40);
     const dist = radius * 2.6;
@@ -124,22 +135,23 @@ export class ReconViewer {
       this.sceneCenter.z + dist * 0.75,
     );
 
-    // Free-orbit controls: drag to look around the space, wheel to zoom.
+    // RECON trails the active drone's view (PROJECT.md §8.3). OrbitControls stay
+    // available so the operator can drag to look around; the follow pauses while
+    // dragging and for a few seconds after.
     this.controls = new OrbitControls(this.camera, canvas);
     this.controls.target.copy(this.sceneCenter);
     this.controls.enableDamping = true;
     this.controls.dampingFactor = 0.08;
-    this.controls.autoRotate = true;
-    this.controls.autoRotateSpeed = 0.5;
-    // Gentle idle orbit; disable with ?spin=off.
-    if (typeof window !== 'undefined' &&
-        new URLSearchParams(window.location.search).get('spin') === 'off') {
-      this.allowAutoRotate = false;
-    }
-    this.controls.minDistance = radius * 0.3;
-    this.controls.maxDistance = radius * 8;
+    this.controls.minDistance = radius * 0.2;
+    this.controls.maxDistance = radius * 12;
+    this.controls.addEventListener('start', () => {
+      this.userDragging = true;
+    });
+    this.controls.addEventListener('end', () => {
+      this.userDragging = false;
+      this.dragGraceUntil = performance.now() + 3500;
+    });
     this.controls.update();
-    this.desiredTarget.copy(this.sceneCenter);
 
     // Full point cloud with a per-point aReveal attribute we drive over time.
     this.pointGeom = new THREE.BufferGeometry();
@@ -273,20 +285,27 @@ export class ReconViewer {
     // Detection state machine (focus card / confirm / reveal triggers).
     this.camSync.step(dt, state.detections);
 
-    // Free-orbit camera: gently aim at a focused detection, else the scene
-    // center; auto-rotate only when not focused. The user can drag/zoom anytime.
+    // Record the active drone's pose for the lagged follow.
+    const active = state.drones.find((d) => d.id === state.activeDroneId) ?? state.drones[0];
+    if (active) {
+      this.history.push({ t: now, pos: active.pos.clone(), forward: active.forward.clone() });
+      if (this.history.length > 400) this.history.shift();
+    }
+
+    // Desired camera pose: focus a detection, else trail the drone's view.
     const focused =
       state.cameraSync === 'FOCUSING' || state.cameraSync === 'LOCKED'
         ? this.markers.find((m) => m.det.id === state.focusedDetectionId)
         : undefined;
-    if (focused) {
-      this.desiredTarget.set(focused.det.pos[0], focused.det.pos[1], focused.det.pos[2]);
-      this.controls.autoRotate = false;
-    } else {
-      this.desiredTarget.copy(this.sceneCenter);
-      this.controls.autoRotate = this.allowAutoRotate;
+    const desired = focused ? this.focusPose(focused) : this.followPose(now);
+
+    // Follow (or ease to focus) unless the operator is dragging to look around.
+    const dragging = this.userDragging || performance.now() < this.dragGraceUntil;
+    if (!dragging && desired) {
+      const k = 1 - Math.exp(-2.5 * dt);
+      this.camera.position.lerp(desired.pos, k);
+      this.controls.target.lerp(desired.target, k);
     }
-    this.controls.target.lerp(this.desiredTarget, 1 - Math.exp(-3 * dt));
     this.controls.update();
 
     this.renderer.render(this.scene, this.camera);
@@ -331,6 +350,46 @@ export class ReconViewer {
 
   get splatProgress(): number {
     return this.splat?.progress ?? 0;
+  }
+
+  /** Lagged follow of the active drone: look at the ground it's scanning, from
+   *  behind + above its heading, so steering the drone rotates the RECON view. */
+  private followPose(now: number): { pos: THREE.Vector3; target: THREE.Vector3 } | null {
+    if (this.history.length === 0) return null;
+    const targetT = now - CONFIG.sim.revealLagSeconds;
+    let s = this.history[0];
+    for (const h of this.history) {
+      if (h.t <= targetT) s = h;
+      else break;
+    }
+    const P = s.pos;
+    const F = s.forward;
+    const headingXZ = new THREE.Vector3(F.x, 0, F.z);
+    if (headingXZ.lengthSq() < 1e-6) headingXZ.set(0, 0, 1);
+    headingXZ.normalize();
+
+    // Where the drone's look ray meets the ground plane (the scanned spot).
+    let t = F.y < -1e-3 ? (P.y - this.floorY) / -F.y : this.followDist;
+    t = Math.min(Math.max(t, 0), this.followDist * 3);
+    const groundHit = P.clone().addScaledVector(F, t);
+
+    const pos = groundHit
+      .clone()
+      .addScaledVector(headingXZ, -this.followDist)
+      .addScaledVector(RECON_UP, this.followHeight);
+    return { pos, target: groundHit };
+  }
+
+  private focusPose(m: MarkerVisual): { pos: THREE.Vector3; target: THREE.Vector3 } {
+    const det = new THREE.Vector3(m.det.pos[0], m.det.pos[1], m.det.pos[2]);
+    const dir = det.clone().sub(this.camera.position);
+    if (dir.lengthSq() < 1e-6) dir.set(0, 0, 1);
+    dir.normalize();
+    const pos = det
+      .clone()
+      .addScaledVector(dir, -CONFIG.camera.focusDistance)
+      .addScaledVector(RECON_UP, CONFIG.camera.focusDistance * 0.35);
+    return { pos, target: det };
   }
 
   resize(): void {

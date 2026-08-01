@@ -14,6 +14,14 @@ export interface DroneController {
 
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
 
+/** Formation slots for follower drones, in the leader's heading frame:
+ *  (right, up, forward). They sit behind-left / behind-right / high-ahead. */
+const FORMATION = [
+  new THREE.Vector3(-9, 2, -6),
+  new THREE.Vector3(9, -2, -6),
+  new THREE.Vector3(0, 3, 9),
+];
+
 /** How often (sim seconds) we record a visited sample per drone. */
 const VISITED_INTERVAL = 0.15;
 /** Minimum world-unit movement before a new visited sample is recorded. */
@@ -137,6 +145,32 @@ export function createDroneController(paths: DronePath[]): DroneController {
     }
   }
 
+  /** Non-active drones cluster around the leader in formation (swarm). */
+  function updateFollow(
+    drone: DroneRuntime,
+    leader: DroneRuntime,
+    slot: number,
+    local: DroneLocal,
+    dt: number,
+  ): void {
+    local.idleTime = 0;
+    const fwd = new THREE.Vector3(leader.forward.x, 0, leader.forward.z);
+    if (fwd.lengthSq() < 1e-8) fwd.set(0, 0, 1);
+    fwd.normalize();
+    const right = new THREE.Vector3().crossVectors(WORLD_UP, fwd).normalize();
+
+    const off = FORMATION[slot % FORMATION.length];
+    const target = leader.pos
+      .clone()
+      .addScaledVector(right, off.x)
+      .addScaledVector(WORLD_UP, off.y)
+      .addScaledVector(fwd, off.z);
+
+    drone.pos.lerp(target, dampFactor(3.5, dt));
+    drone.forward.lerp(leader.forward, dampFactor(3.5, dt)).normalize();
+    drone.quat.slerp(quatFromForward(drone.forward), dampFactor(5, dt));
+  }
+
   function beginReturning(drone: DroneRuntime, local: DroneLocal): void {
     const path = pathFor(drone.id);
     if (!path) return;
@@ -176,30 +210,35 @@ export function createDroneController(paths: DronePath[]): DroneController {
 
   return {
     update(dt: number): void {
+      const leader = state.drones.find((d) => d.id === state.activeDroneId) ?? state.drones[0];
+      let slot = 0;
+
       for (const drone of state.drones) {
         const local = locals.get(drone.id);
         if (!local) continue;
 
-        // Manual input switches the active drone into MANUAL from AUTO/RETURNING.
-        if (drone.id === state.activeDroneId && input.active && drone.mode !== 'MANUAL') {
-          drone.mode = 'MANUAL';
-          local.idleTime = 0;
-        }
-        // If this drone is no longer active but still MANUAL, hand it back to AUTO.
-        if (drone.mode === 'MANUAL' && drone.id !== state.activeDroneId) {
+        if (leader && drone.id === leader.id) {
+          // Leader: the active drone flies its path or is steered.
+          if (input.active && drone.mode !== 'MANUAL') {
+            drone.mode = 'MANUAL';
+            local.idleTime = 0;
+          }
+          switch (drone.mode) {
+            case 'MANUAL':
+              updateManual(drone, local, dt);
+              break;
+            case 'RETURNING':
+              updateReturning(drone, local, dt);
+              break;
+            default:
+              updateAuto(drone, local, dt);
+          }
+        } else if (leader) {
+          // Followers cluster around the leader (swarm).
           drone.mode = 'AUTO';
-        }
-
-        switch (drone.mode) {
-          case 'AUTO':
-            updateAuto(drone, local, dt);
-            break;
-          case 'MANUAL':
-            updateManual(drone, local, dt);
-            break;
-          case 'RETURNING':
-            updateReturning(drone, local, dt);
-            break;
+          updateFollow(drone, leader, slot++, local, dt);
+        } else {
+          updateAuto(drone, local, dt);
         }
 
         recordVisited(drone, local, dt);

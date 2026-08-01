@@ -61,12 +61,15 @@ async function main(): Promise<void> {
 
   // --- Main loop ---
   const MAX_DT = 1 / 20;
-  let last = performance.now();
+  // Seed from the first rAF timestamp (its epoch differs from performance.now()).
+  let last = -1;
 
   const frame = (now: number): void => {
+    if (last < 0) last = now;
     const real = (now - last) / 1000;
     last = now;
-    const dt = Math.min(real, MAX_DT) * CONFIG.sim.speed;
+    // Clamp to [0, MAX_DT]: never negative (guards damping from exploding).
+    const dt = Math.max(0, Math.min(real, MAX_DT)) * CONFIG.sim.speed;
 
     if (state.running) {
       state.time += dt;

@@ -79,10 +79,11 @@ async function main(): Promise<void> {
   // state.time advances from incoming snapshots; dt here only drives frame-rate-
   // independent camera damping/tweening and marker pulsing.
   const MAX_DT = 1 / 20;
-  let last = performance.now();
+  let last = -1; // seed from first rAF timestamp (different epoch than performance.now())
 
   const frame = (now: number): void => {
-    const dt = Math.min((now - last) / 1000, MAX_DT);
+    if (last < 0) last = now;
+    const dt = Math.max(0, Math.min((now - last) / 1000, MAX_DT));
     last = now;
     recon.update(dt);
     ui.update();
