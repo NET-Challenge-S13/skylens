@@ -12,6 +12,8 @@ export interface DroneController {
   dispose(): void;
 }
 
+const WORLD_UP = new THREE.Vector3(0, 1, 0);
+
 /** How often (sim seconds) we record a visited sample per drone. */
 const VISITED_INTERVAL = 0.15;
 /** Minimum world-unit movement before a new visited sample is recorded. */
@@ -107,22 +109,26 @@ export function createDroneController(paths: DronePath[]): DroneController {
   function updateManual(drone: DroneRuntime, local: DroneLocal, dt: number): void {
     if (input.active) {
       local.idleTime = 0;
-      // Build local frame from current forward, flattened to XZ plane.
+
+      // Left/right = gradual YAW (steering), so the view turns a little per press
+      // instead of the drone snapping to face a sideways strafe direction.
+      if (input.move.x !== 0) {
+        drone.forward
+          .applyAxisAngle(WORLD_UP, -input.move.x * CONFIG.drone.manualYawRate * dt)
+          .normalize();
+      }
+
+      // Travel along the heading, flattened to the XZ plane; Q/E change altitude.
       const fwd = new THREE.Vector3(drone.forward.x, 0, drone.forward.z);
       if (fwd.lengthSq() < 1e-8) fwd.set(0, 0, 1);
       fwd.normalize();
-      const strafe = new THREE.Vector3().crossVectors(new THREE.Vector3(0, 1, 0), fwd).normalize();
 
       const delta = new THREE.Vector3();
       delta.addScaledVector(fwd, input.move.z * CONFIG.drone.manualSpeed * dt);
-      delta.addScaledVector(strafe, -input.move.x * CONFIG.drone.manualSpeed * dt);
       delta.y += input.move.y * CONFIG.drone.manualAltitudeSpeed * dt;
       drone.pos.add(delta);
 
-      if (delta.lengthSq() > 1e-10) {
-        drone.forward.copy(delta).normalize();
-        drone.quat.slerp(quatFromForward(drone.forward), dampFactor(10, dt));
-      }
+      drone.quat.slerp(quatFromForward(drone.forward), dampFactor(10, dt));
     } else {
       local.idleTime += dt;
       if (local.idleTime > CONFIG.drone.manualIdleReturn) {

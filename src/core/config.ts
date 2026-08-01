@@ -33,6 +33,8 @@ export const CONFIG = {
     manualSpeed: 8.0,
     /** Manual altitude speed (world units / s). */
     manualAltitudeSpeed: 5.0,
+    /** Manual yaw (turn) rate for left/right keys (radians / s). ~55°/s. */
+    manualYawRate: 0.95,
     /** Return-tween duration (s) back onto the preset path. */
     returnTween: 1.2,
   },

@@ -2,7 +2,7 @@
 import { state, emit } from '../core/store.ts';
 
 export interface ManualInput {
-  /** Local move vector: x=strafe, y=up/down, z=forward/back, each in [-1,1]. */
+  /** Control axes, each in [-1,1]: x=yaw (turn L/R), y=up/down, z=forward/back. */
   readonly move: { x: number; y: number; z: number };
   /** True if any movement key is currently down. */
   readonly active: boolean;
