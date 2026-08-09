@@ -7,13 +7,22 @@
 // detection markers, and the camera state machine locally. The clock and drone
 // poses come from the wire; confirmations happen here and stay local.
 //
-// The scene is the SAME splat SIM shows as low-fi points — here rendered as the
-// full Gaussian splat, fit with the transform derived from its own bounds.
+// The scene is the SAME splat SIM shows as low-fi points. The point cloud +
+// auto-fit transform (loadScene) is still computed locally for framing/reveal/
+// detection-gating, but the actual splat RENDER and the detections now arrive
+// progressively from the server (server/serverSource.ts): splat chunks via
+// onSplatChunk (ingested into the splat scene one at a time), and detections
+// via onDetection (placed with gpsToScene against the shared geo anchor).
 
 import './style.css';
+import './ui/recon-panels.css';
 import { state } from '../skylens_core/store.ts';
+import { CONFIG } from '../skylens_core/config.ts';
+import { isDemo } from '../skylens_core/mode.ts';
+import { gpsToScene } from '../skylens_core/geo.ts';
+import { IDENTITY_ALIGN } from '../skylens_core/protocol.ts';
+import type { DetectionRuntime } from '../skylens_core/types.ts';
 import { loadScene, resolveSplatUrl } from './data/sceneSource.ts';
-import { buildDetections } from './data/detections.ts';
 import { ReconViewer } from './viewer2/reconViewer.ts';
 import { initUI } from './ui/overlay.ts';
 import { createTransport } from './net/peer.ts';
@@ -21,6 +30,9 @@ import { applyState } from '../skylens_core/protocol.ts';
 import type { StateSnapshot } from '../skylens_core/protocol.ts';
 import { roomFromQuery, mountNetBadge } from './net/statusUi.ts';
 import { createLoadingScreen } from './ui/loadingScreen.ts';
+import { createServerSource } from './server/serverSource.ts';
+import { mountMinimap } from './ui/minimap.ts';
+import { mountServerStatus } from './ui/serverStatus.ts';
 
 function getCanvas(id: string): HTMLCanvasElement {
   const el = document.getElementById(id);
@@ -40,13 +52,7 @@ async function main(): Promise<void> {
   // (to check the fit/camera independently of the splat renderer).
   const renderPoints = new URLSearchParams(window.location.search).get('render') === 'points';
 
-  const detections = buildDetections(loaded.data);
-  const recon = new ReconViewer(
-    getCanvas('view2'),
-    loaded.data,
-    detections,
-    !!loaded.splat && !renderPoints,
-  );
+  const recon = new ReconViewer(getCanvas('view2'), loaded.data, !!loaded.splat && !renderPoints);
   const ui = initUI();
 
   // ?reveal=on|off overrides the splat reveal MASK (default from CONFIG.reveal.splatMask).
@@ -57,11 +63,56 @@ async function main(): Promise<void> {
   if (renderPoints) {
     recon.revealAll();
   } else if (loaded.splat) {
-    // Render the full splat with the same transform the point cloud was fit with.
-    // (Re-downloads the same URL, served from browser cache — see sceneSource.ts.)
-    recon.loadSplat(loaded.splat);
     mountSplatLoading(recon);
   }
+
+  // --- Server data source: progressive splat chunks + GPS detections. ---
+  const serverSource = createServerSource({ demo: isDemo(), splatUrl: resolveSplatUrl() });
+
+  if (!renderPoints && loaded.splat) {
+    // Serialize chunk ingestion (the underlying loader isn't reentrant-safe).
+    const localSplat = loaded.splat;
+    let ingestChain: Promise<void> = Promise.resolve();
+    serverSource.onSplatChunk((chunk) => {
+      ingestChain = ingestChain.then(() => {
+        // An identity align means the server hasn't computed its own placement
+        // yet — use the locally fit transform so the sample scene lands right.
+        const isIdentity =
+          chunk.align.position.every((v, i) => v === IDENTITY_ALIGN.position[i]) &&
+          chunk.align.rotation.every((v, i) => v === IDENTITY_ALIGN.rotation[i]) &&
+          chunk.align.scale.every((v, i) => v === IDENTITY_ALIGN.scale[i]) &&
+          !chunk.align.anchor;
+        const align = isIdentity
+          ? {
+              position: localSplat.position,
+              rotation: localSplat.rotation,
+              scale: localSplat.scale,
+            }
+          : chunk.align;
+        return recon.ingestSplatChunk(chunk.url, align);
+      });
+    });
+  }
+
+  serverSource.onDetection((d) => {
+    const pos = gpsToScene(d.gps, CONFIG.geo.anchor);
+    const det: DetectionRuntime = {
+      id: d.id,
+      kind: d.category,
+      pos,
+      label: d.label,
+      confidence: d.confidence,
+      revealed: false,
+      confirmed: false,
+      revealedAt: null,
+    };
+    recon.addDetection(det);
+  });
+
+  mountServerStatus(serverSource);
+  serverSource.start();
+
+  mountMinimap(loaded.data.bounds);
 
   const transport = createTransport('recon', roomFromQuery());
   mountNetBadge(transport, 'recon');
@@ -104,6 +155,12 @@ async function main(): Promise<void> {
       get progress() {
         return recon.splatProgress;
       },
+      get chunks() {
+        return recon.splatChunks;
+      },
+    },
+    get server() {
+      return serverSource.status;
     },
     get dbg() {
       return recon.debugInfo;
@@ -123,7 +180,8 @@ function mountSplatLoading(recon: ReconViewer): void {
   const tick = (): void => {
     const s = recon.splatStatus;
     let text = '';
-    if (s === 'loading') text = `실사 3D 렌더 준비… ${Math.round(recon.splatProgress)}%`;
+    if (s === 'idle') text = '서버 · 실사 3D 스트리밍 대기 중';
+    else if (s === 'loading') text = `실사 3D 렌더 준비… ${Math.round(recon.splatProgress)}%`;
     else if (s === 'error') text = '실사 3D 로드 실패 — 포인트클라우드로 진행';
     if (text !== lastText) {
       lastText = text;
@@ -132,6 +190,7 @@ function mountSplatLoading(recon: ReconViewer): void {
     }
     if (s === 'loading' || s === 'idle') requestAnimationFrame(tick);
     else if (s === 'error') setTimeout(() => el.classList.remove('is-visible'), 4000);
+    else if (s === 'ready') setTimeout(() => el.classList.remove('is-visible'), 1500);
   };
   requestAnimationFrame(tick);
 }

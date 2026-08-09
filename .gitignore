@@ -163,3 +163,8 @@ vite.config.ts.timestamp-*
 # AI Agents
 .omc
 .claude
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/

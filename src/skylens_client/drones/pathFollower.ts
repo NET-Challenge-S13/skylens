@@ -10,6 +10,9 @@ import type { DroneRuntime, DronePath } from '../../skylens_core/types';
 export interface DroneController {
   update(dt: number): void;
   dispose(): void;
+  /** Replace a drone's path at runtime (used by the route modal to assign a
+   *  freshly planned GPS route to the leader) and start flying it from t0. */
+  setLeaderRoute(path: DronePath): void;
 }
 
 const WORLD_UP = new THREE.Vector3(0, 1, 0);
@@ -56,6 +59,7 @@ function quatFromForward(forward: THREE.Vector3): THREE.Quaternion {
 export function createDroneController(paths: DronePath[]): DroneController {
   const input = createManualInput();
   const locals = new Map<number, DroneLocal>();
+  const pathsById = new Map<number, DronePath>(paths.map((p) => [p.id, p]));
 
   // Initialize state.drones from the preset paths, one per path, at t=0.
   state.drones = paths.map((path): DroneRuntime => {
@@ -81,7 +85,7 @@ export function createDroneController(paths: DronePath[]): DroneController {
   });
 
   function pathFor(id: number) {
-    return paths.find((p) => p.id === id);
+    return pathsById.get(id);
   }
 
   function recordVisited(drone: DroneRuntime, local: DroneLocal, dt: number): void {
@@ -246,6 +250,16 @@ export function createDroneController(paths: DronePath[]): DroneController {
     },
     dispose(): void {
       input.dispose();
+    },
+    setLeaderRoute(path: DronePath): void {
+      pathsById.set(path.id, path);
+      const drone = state.drones.find((d) => d.id === path.id);
+      const local = locals.get(path.id);
+      if (drone) {
+        drone.pathTime = path.waypoints[0]?.t ?? 0;
+        drone.mode = 'AUTO';
+      }
+      if (local) local.idleTime = 0;
     },
   };
 }

@@ -1,0 +1,210 @@
+/* SIM-owned styling: control-tower toolbar, route modal, video panel.
+   Everything shared/global stays in style.css (owned elsewhere). */
+
+.sim-toolbar {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  z-index: 20;
+  display: flex;
+  gap: 8px;
+}
+
+.sim-toolbar__btn {
+  font: inherit;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  font-weight: 600;
+  padding: 8px 14px;
+  border-radius: 6px;
+  background: rgba(10, 14, 22, 0.82);
+  border: 1px solid rgba(120, 160, 220, 0.28);
+  color: #7fb4ff;
+  cursor: pointer;
+}
+
+.sim-toolbar__btn:hover {
+  background: rgba(20, 30, 48, 0.92);
+}
+
+/* --- Route modal --- */
+
+.route-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(2, 4, 8, 0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.route-modal-overlay.is-hidden {
+  display: none;
+}
+
+.route-modal {
+  position: relative;
+  width: min(440px, 92vw);
+  max-height: 82vh;
+  overflow: auto;
+  background: rgba(10, 14, 22, 0.96);
+  border: 1px solid rgba(120, 160, 220, 0.3);
+  border-radius: 10px;
+  padding: 20px;
+  color: #dbe6f5;
+  font-size: 13px;
+}
+
+.route-modal__title {
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  margin-bottom: 14px;
+  color: #9fe8ff;
+}
+
+.route-modal__close {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  background: none;
+  border: none;
+  color: #9fb3cc;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.route-modal__form {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr auto;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.route-modal__form input {
+  width: 100%;
+  min-width: 0;
+  font: inherit;
+  padding: 6px 8px;
+  border-radius: 5px;
+  border: 1px solid rgba(120, 160, 220, 0.28);
+  background: rgba(255, 255, 255, 0.04);
+  color: #dbe6f5;
+}
+
+.route-modal__list {
+  list-style: none;
+  margin: 0 0 14px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.route-modal__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.route-modal__remove {
+  font: inherit;
+  font-size: 11px;
+  background: none;
+  border: 1px solid rgba(255, 100, 100, 0.35);
+  color: #ff8a8a;
+  border-radius: 4px;
+  padding: 3px 7px;
+  cursor: pointer;
+}
+
+.route-modal__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.route-modal__btn {
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 8px 16px;
+  border-radius: 6px;
+  border: 1px solid rgba(120, 160, 220, 0.28);
+  background: rgba(255, 255, 255, 0.04);
+  color: #dbe6f5;
+  cursor: pointer;
+}
+
+.route-modal__btn--primary {
+  background: #2f6fd6;
+  border-color: #2f6fd6;
+  color: #fff;
+}
+
+.route-modal__btn--ghost {
+  background: none;
+}
+
+/* --- Video panel --- */
+
+.video-panel {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  z-index: 20;
+  width: 320px;
+  height: 200px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid rgba(120, 160, 220, 0.28);
+  background: #05070c;
+}
+
+.video-panel__canvas,
+.video-panel__video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.video-panel__canvas.is-hidden,
+.video-panel__video.is-hidden {
+  display: none;
+}
+
+.video-panel__label {
+  position: absolute;
+  top: 8px;
+  left: 10px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  color: #9fe8ff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  pointer-events: none;
+}
+
+.video-panel__overlay {
+  position: absolute;
+  bottom: 6px;
+  left: 10px;
+  right: 10px;
+  font-size: 10px;
+  letter-spacing: 0.03em;
+  color: #c8e8ff;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  pointer-events: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

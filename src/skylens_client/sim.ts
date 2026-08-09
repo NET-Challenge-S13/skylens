@@ -11,16 +11,22 @@
 // cloud derived from the splat's own points (PROJECT.md §1: one source, two views).
 
 import './style.css';
+import './sim/sim.css';
 import { state } from '../skylens_core/store.ts';
 import { CONFIG } from '../skylens_core/config.ts';
+import { isDemo } from '../skylens_core/mode.ts';
 import { loadScene, resolveSplatUrl } from './data/sceneSource.ts';
 import { buildDronePaths } from './data/paths.ts';
+import { buildIdlePaths, buildRouteFromGps } from './data/routes.ts';
 import { createDroneController } from './drones/pathFollower.ts';
 import { LowfiViewer } from './viewer1/lowfiViewer.ts';
 import { createTransport } from './net/peer.ts';
 import { encodeState } from '../skylens_core/protocol.ts';
 import { roomFromQuery, mountNetBadge } from './net/statusUi.ts';
 import { createLoadingScreen } from './ui/loadingScreen.ts';
+import { createServerSource } from './server/serverSource.ts';
+import { createRouteModal } from './sim/routeModal.ts';
+import { createVideoPanel } from './sim/videoPanel.ts';
 
 function getCanvas(id: string): HTMLCanvasElement {
   const el = document.getElementById(id);
@@ -36,12 +42,44 @@ async function main(): Promise<void> {
   });
   loading.done();
 
-  const paths = buildDronePaths(loaded.data.bounds);
+  const demo = isDemo();
+  // Demo: auto full-scene sweep, leader flies automatically. Real (default):
+  // drones idle-hover until the operator assigns a route via the modal.
+  const paths = demo ? buildDronePaths(loaded.data.bounds) : buildIdlePaths();
   const drones = createDroneController(paths);
   const lowfi = new LowfiViewer(getCanvas('view1'), loaded.data);
 
   const transport = createTransport('sim', roomFromQuery());
   mountNetBadge(transport, 'sim');
+
+  // --- Server connection (route commands out; status shown in the toolbar) ---
+  const server = createServerSource({ demo, splatUrl: resolveSplatUrl() });
+  server.start();
+
+  // --- Route planning modal (control-tower route assignment) ---
+  const modal = createRouteModal({
+    anchor: CONFIG.geo.anchor,
+    getLeaderId: () => state.activeDroneId,
+    onAssign: ({ droneId, waypoints }) => {
+      const route = buildRouteFromGps(waypoints, undefined, droneId);
+      drones.setLeaderRoute(route);
+      server.assignRoute({ kind: 'assign-route', droneId, waypoints });
+    },
+  });
+
+  const toolbar = document.getElementById('sim-toolbar');
+  if (toolbar) {
+    const routeBtn = document.createElement('button');
+    routeBtn.type = 'button';
+    routeBtn.className = 'sim-toolbar__btn';
+    routeBtn.textContent = '경로 계획 · Route';
+    routeBtn.addEventListener('click', () => modal.open());
+    toolbar.appendChild(routeBtn);
+  }
+
+  // --- Main drone camera placeholder (bottom-right) ---
+  const videoMount = document.getElementById('video-panel-mount');
+  const videoPanel = videoMount ? createVideoPanel(videoMount) : null;
 
   const resize = (): void => lowfi.resize();
   window.addEventListener('resize', resize);
@@ -101,6 +139,9 @@ async function main(): Promise<void> {
     scene: loaded.data,
     CONFIG,
     transport,
+    server,
+    videoPanel,
+    routeModal: modal,
   };
 }
 

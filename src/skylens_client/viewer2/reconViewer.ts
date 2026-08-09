@@ -10,14 +10,15 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import type { SceneData } from '../data/sceneData';
-import type { Detection, DetectionRuntime } from '../../skylens_core/types';
+import type { DetectionRuntime } from '../../skylens_core/types';
 import { state, emit } from '../../skylens_core/store';
 import { CONFIG } from '../../skylens_core/config';
+import type { SplatAlign } from '../../skylens_core/protocol.ts';
 import { RevealField } from './reveal.ts';
 import { SplatReveal } from './splatReveal.ts';
 import { CameraSync } from './cameraSync.ts';
 import { SplatScene } from './splatScene.ts';
-import type { SplatOptions, SplatStatus } from './splatScene.ts';
+import type { SplatStatus } from './splatScene.ts';
 
 const POINT_VERT = /* glsl */ `
   attribute float aReveal;
@@ -66,10 +67,12 @@ export class ReconViewer {
   private readonly points: THREE.Points;
   private readonly pointGeom: THREE.BufferGeometry;
   private readonly revealAttr: THREE.BufferAttribute;
-  // Reveal is driven on the point cloud (fallback) OR on the splat itself
-  // (photorealistic mode, via a coverage texture + patched splat shader).
-  private readonly reveal: RevealField | null;
-  private readonly splatReveal: SplatReveal | null;
+  // Reveal is driven on the point cloud (fallback + "waiting for server") OR on
+  // the splat itself (photorealistic mode, once a chunk has actually arrived).
+  private reveal: RevealField | null;
+  private splatReveal: SplatReveal | null;
+  private readonly splatCapable: boolean;
+  private readonly sceneBounds: THREE.Box3;
   private splatAttached = false;
   private splatMaskEnabled: boolean = CONFIG.reveal.splatMask;
   private readonly camSync: CameraSync;
@@ -87,12 +90,7 @@ export class ReconViewer {
   private userDragging = false;
   private dragGraceUntil = 0;
 
-  constructor(
-    canvas: HTMLCanvasElement,
-    sceneData: SceneData,
-    detections: Detection[],
-    useSplat: boolean,
-  ) {
+  constructor(canvas: HTMLCanvasElement, sceneData: SceneData, useSplat: boolean) {
     this.canvas = canvas;
     this.camSync = new CameraSync(sceneData.bounds);
 
@@ -171,33 +169,30 @@ export class ReconViewer {
     });
     this.points = new THREE.Points(this.pointGeom, material);
 
-    if (useSplat) {
-      // RECON is photorealistic: the splat itself reveals. The point cloud is
-      // NOT shown — it's the SIM's representation.
-      this.reveal = null;
-      this.splatReveal = new SplatReveal(sceneData.bounds);
-    } else {
-      // No splat (disabled/failed): show the point cloud and reveal on it.
-      this.scene.add(this.points);
-      this.reveal = new RevealField(sceneData.positions, sceneData.count);
-      this.splatReveal = null;
-    }
-
-    // Initialize shared detection state on first construction (state owner).
-    if (state.detections.length === 0) {
-      state.detections = detections.map((d) => ({
-        ...d,
-        revealed: false,
-        confirmed: false,
-        revealedAt: null,
-      }));
-    }
-
-    for (const det of state.detections) {
-      this.markers.push(this.buildMarker(det));
-    }
+    // Start in point-cloud reveal mode regardless: the splat only arrives
+    // progressively from the server (ingestSplatChunk), so until the first
+    // chunk lands the point cloud IS the reconstruction ("waiting for
+    // server"). If splat rendering is disabled/unavailable (useSplat=false —
+    // e.g. ?render=points), stay in point-cloud mode permanently.
+    this.scene.add(this.points);
+    this.reveal = new RevealField(sceneData.positions, sceneData.count);
+    this.splatReveal = null;
+    this.splatCapable = useSplat;
+    this.sceneBounds = sceneData.bounds.clone();
 
     this.resize();
+  }
+
+  /**
+   * Add a detection received from the server. Detections now arrive
+   * progressively (serverSource.onDetection) instead of being pre-derived
+   * from the cloud, so ReconViewer owns adding them to the store + building
+   * their marker on demand. Idempotent per id.
+   */
+  addDetection(det: DetectionRuntime): void {
+    if (state.detections.some((d) => d.id === det.id)) return;
+    state.detections.push(det);
+    this.markers.push(this.buildMarker(det));
   }
 
   private buildMarker(det: DetectionRuntime): MarkerVisual {
@@ -312,13 +307,23 @@ export class ReconViewer {
   }
 
   /**
-   * Attach the real Gaussian splat layer (TEST asset). Fit into the same frame
-   * as the procedural cloud so reveal/markers/camera stay aligned. Idempotent.
+   * Progressive splat ingestion from the server: add one chunk placed by its
+   * align transform, fit into the same frame as the procedural cloud so
+   * reveal/markers/camera stay aligned. Creates the underlying SplatScene
+   * lazily on the first chunk. Callers should serialize (await) calls.
    */
-  loadSplat(opts: SplatOptions): void {
-    if (this.splat) return;
-    this.splat = new SplatScene(this.scene);
-    this.splat.load(opts);
+  ingestSplatChunk(url: string, align: SplatAlign): Promise<void> {
+    if (!this.splat) {
+      this.splat = new SplatScene(this.scene);
+      if (this.splatCapable && this.reveal) {
+        // First real chunk arrived — switch from the placeholder point-cloud
+        // reveal to the photorealistic splat reveal.
+        this.scene.remove(this.points);
+        this.reveal = null;
+        this.splatReveal = new SplatReveal(this.sceneBounds);
+      }
+    }
+    return this.splat.addChunk(url, align);
   }
 
   /** Toggle the splat reveal mask. When off, the full splat renders regardless. */
@@ -350,6 +355,10 @@ export class ReconViewer {
 
   get splatProgress(): number {
     return this.splat?.progress ?? 0;
+  }
+
+  get splatChunks(): number {
+    return this.splat?.chunks ?? 0;
   }
 
   /** Lagged follow of the active drone: look at the ground it's scanning, from
