@@ -4,10 +4,11 @@
 // server. NAT traversal uses Google's public STUN server. Once the peers hand
 // shake through the broker, live state flows over the P2P DataChannel directly.
 //
-// Deterministic ids let the two sides find each other without exchanging ids
-// out of band: given a room token, SIM registers `skylens-<room>-sim` and RECON
-// connects to it. Change the room via `?room=` to avoid collisions on the shared
-// public broker.
+// Only the LISTENER needs a stable id so the other side can find it: SIM
+// registers `skylens-<room>-sim`; RECON uses a RANDOM id and connects out to
+// SIM (so RECON can never collide). If SIM's id is already taken on the shared
+// public broker (usually a stale registration), SIM recreates its peer after a
+// backoff to self-heal. Use a distinct `?room=` to avoid clashing with others.
 
 import { Peer } from 'peerjs';
 import type { DataConnection } from 'peerjs';
@@ -46,11 +47,8 @@ export function createTransport(role: PeerRole, room = 'default'): Transport {
   let conn: DataConnection | null = null;
   let disposed = false;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
-
-  const peer = new Peer(peerId(room, role), {
-    config: { iceServers: [STUN] },
-    debug: 1,
-  });
+  let idRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  let peer: Peer;
 
   function setStatus(s: PeerStatus, detail?: string): void {
     status = s;
@@ -91,36 +89,58 @@ export function createTransport(role: PeerRole, room = 'default'): Transport {
     retryTimer = setTimeout(connectToSim, RETRY_MS);
   }
 
-  peer.on('open', () => {
-    if (role === 'recon') connectToSim();
-    else setStatus('connecting'); // SIM waits for RECON to connect
-  });
-
-  // SIM side: accept the inbound connection from RECON.
-  peer.on('connection', (c) => {
-    wireConnection(c);
-  });
-
-  peer.on('disconnected', () => {
+  function makePeer(): void {
     if (disposed) return;
-    setStatus('disconnected');
-    // PeerJS lost its broker socket; try to get it back so re-connect can happen.
-    try {
-      peer.reconnect();
-    } catch {
-      /* ignore */
-    }
-  });
+    // SIM = deterministic listener id; RECON = random id (it only connects out).
+    peer =
+      role === 'sim'
+        ? new Peer(peerId(room, 'sim'), { config: { iceServers: [STUN] }, debug: 1 })
+        : new Peer({ config: { iceServers: [STUN] }, debug: 1 });
 
-  peer.on('error', (e: unknown) => {
-    const msg = (e as { type?: string; message?: string }) ?? {};
-    // 'peer-unavailable' just means SIM isn't online yet — retry quietly.
-    if (msg.type === 'peer-unavailable') {
-      scheduleConnect();
-      return;
-    }
-    setStatus('error', msg.message ?? String(e));
-  });
+    peer.on('open', () => {
+      if (role === 'recon') connectToSim();
+      else setStatus('connecting'); // SIM waits for RECON to connect
+    });
+
+    // SIM side: accept the inbound connection from RECON.
+    peer.on('connection', (c) => {
+      wireConnection(c);
+    });
+
+    peer.on('disconnected', () => {
+      if (disposed) return;
+      setStatus('disconnected');
+      // PeerJS lost its broker socket; try to get it back so re-connect can happen.
+      try {
+        peer.reconnect();
+      } catch {
+        /* ignore */
+      }
+    });
+
+    peer.on('error', (e: unknown) => {
+      const msg = (e as { type?: string; message?: string }) ?? {};
+      // Target (SIM) not online yet — retry quietly.
+      if (msg.type === 'peer-unavailable') {
+        scheduleConnect();
+        return;
+      }
+      // SIM's fixed id is taken (usually a stale registration) — recreate to heal.
+      if (msg.type === 'unavailable-id') {
+        setStatus('connecting', 'id taken — retrying');
+        try {
+          peer.destroy();
+        } catch {
+          /* ignore */
+        }
+        if (idRetryTimer) clearTimeout(idRetryTimer);
+        idRetryTimer = setTimeout(makePeer, 3000);
+        return;
+      }
+      setStatus('error', msg.message ?? String(e));
+    });
+  }
+  makePeer();
 
   return {
     send(data: unknown): void {
@@ -139,6 +159,7 @@ export function createTransport(role: PeerRole, room = 'default'): Transport {
     dispose(): void {
       disposed = true;
       if (retryTimer) clearTimeout(retryTimer);
+      if (idRetryTimer) clearTimeout(idRetryTimer);
       try {
         conn?.close();
       } catch {
