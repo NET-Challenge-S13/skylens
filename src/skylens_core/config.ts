@@ -87,3 +87,19 @@ export const CONFIG = {
 
 /** Drone id palette so viewer 1 can distinguish the swarm. */
 export const DRONE_TINTS = [0x9fe8ff, 0xffd27f, 0xc79fff] as const;
+
+/**
+ * Map scenes (?map=…) span kilometers while the drone rig is sized for a
+ * tens-of-meters splat scene. Shrinking ONLY the drone turns it into a dot, so
+ * instead the rig, chase-camera offsets, and formation spread all shrink by
+ * this one factor together. On screen that reads as the MAP being magnified:
+ * the drone keeps its apparent size while terrain/buildings loom ~1/scale
+ * larger. `?drone=<n>` overrides (smaller n = more map magnification).
+ */
+export function droneViewScale(): number {
+  if (typeof window === 'undefined') return 1.0;
+  const q = new URLSearchParams(window.location.search);
+  const manual = parseFloat(q.get('drone') ?? '');
+  if (Number.isFinite(manual) && manual > 0) return manual;
+  return q.get('map') != null ? 0.15 : 1.0;
+}

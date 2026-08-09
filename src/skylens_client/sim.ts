@@ -16,6 +16,7 @@ import { state } from '../skylens_core/store.ts';
 import { CONFIG } from '../skylens_core/config.ts';
 import { isDemo } from '../skylens_core/mode.ts';
 import { loadScene, resolveSplatUrl } from './data/sceneSource.ts';
+import { startWorldStream } from './data/streamSource.ts';
 import { buildDronePaths } from './data/paths.ts';
 import { buildIdlePaths, buildRouteFromGps } from './data/routes.ts';
 import { createDroneController } from './drones/pathFollower.ts';
@@ -47,7 +48,23 @@ async function main(): Promise<void> {
   // drones idle-hover until the operator assigns a route via the modal.
   const paths = demo ? buildDronePaths(loaded.data.bounds) : buildIdlePaths();
   const drones = createDroneController(paths);
-  const lowfi = new LowfiViewer(getCanvas('view1'), loaded.data);
+  const lowfi = new LowfiViewer(
+    getCanvas('view1'),
+    loaded.data,
+    loaded.terrainVisual,
+    loaded.terrainPointCount,
+    loaded.buildingVisual,
+    loaded.surroundVisual,
+  );
+  // World streamer: terrain + building cells load around the ACTIVE drone as
+  // it travels (auto sweep or manual flight) — display-only, SIM-only.
+  if (loaded.streamSeed) {
+    const seed = loaded.streamSeed;
+    startWorldStream(seed.coreBbox, seed.ctx, lowfi, () => {
+      const d = state.drones.find((x) => x.id === state.activeDroneId) ?? state.drones[0];
+      return d ? { x: d.pos.x, z: d.pos.z } : null;
+    });
+  }
 
   const transport = createTransport('sim', roomFromQuery());
   mountNetBadge(transport, 'sim');
@@ -142,6 +159,8 @@ async function main(): Promise<void> {
     server,
     videoPanel,
     routeModal: modal,
+    lowfi,
+    terrainVisual: loaded.terrainVisual,
   };
 }
 
