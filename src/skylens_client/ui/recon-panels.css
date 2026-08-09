@@ -1,18 +1,44 @@
 /* RECON-only panels: minimap + server-status. Kept separate from style.css
-   (owned by a different pass) — imported directly from recon.ts. */
+   (owned by a different pass) — imported directly from recon.ts. Uses the
+   token system defined in style.css (--surface-*, --border-*, --font-*). */
 
 /* --- Minimap (bottom-right) --- */
 #minimap {
   position: absolute;
   right: 16px;
   bottom: 16px;
-  width: 190px;
-  height: 190px;
-  border-radius: 8px;
+  z-index: 10;
+  width: 200px;
+  height: 200px;
+  border-radius: var(--radius-md);
   overflow: hidden;
-  background: rgba(10, 14, 22, 0.72);
-  border: 1px solid rgba(120, 160, 220, 0.28);
+  background: var(--surface-1);
+  border: 1px solid var(--border-hairline);
+  box-shadow: var(--shadow-panel);
   pointer-events: none;
+}
+
+#minimap::before {
+  content: 'MINIMAP · TOP-DOWN';
+  position: absolute;
+  top: 7px;
+  left: 9px;
+  z-index: 1;
+  font-family: var(--font-display);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: var(--text-tertiary);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+}
+
+#minimap::after {
+  /* Instrument-readout corner frame, matching the video panel on SIM. */
+  content: '';
+  position: absolute;
+  inset: 5px;
+  border: 1px solid rgba(159, 232, 255, 0.1);
+  border-radius: 3px;
 }
 
 .minimap__canvas {
@@ -24,18 +50,21 @@
 /* --- Server-status panel (top-left, below the pane label) --- */
 #server-status.server-status {
   position: absolute;
-  top: 52px;
+  top: 54px;
   left: 16px;
+  z-index: 5;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  border-radius: 4px;
-  background: rgba(10, 14, 22, 0.82);
-  border: 1px solid rgba(120, 160, 220, 0.28);
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-1);
+  border: 1px solid var(--border-hairline);
+  box-shadow: var(--shadow-panel);
   pointer-events: none;
-  font-size: 11px;
-  color: #9fb2cc;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
 }
 
 .server-status__dot {
@@ -43,16 +72,19 @@
   height: 8px;
   border-radius: 50%;
   flex: 0 0 auto;
-  background: #8a93a6;
+  background: var(--neutral-dot);
+  box-shadow: 0 0 6px currentColor;
 }
 .server-status__dot[data-state='waiting'] {
-  background: #ffd27f;
+  background: var(--warn);
+  animation: dot-pulse 1.8s ease-in-out infinite;
 }
 .server-status__dot[data-state='connected'] {
-  background: #4a90d9;
+  background: var(--info);
 }
 .server-status__dot[data-state='receiving'] {
-  background: #39d98a;
+  background: var(--person);
+  animation: dot-pulse 1.8s ease-in-out infinite;
 }
 
 .server-status__body {
@@ -62,12 +94,22 @@
 }
 
 .server-status__text {
+  font-family: var(--font-display);
   font-weight: 600;
-  letter-spacing: 0.05em;
-  color: #cdd7e6;
+  font-size: var(--text-xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-primary);
 }
 
 .server-status__detail {
   font-variant-numeric: tabular-nums;
-  opacity: 0.85;
+  color: var(--text-tertiary);
+  letter-spacing: 0.02em;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .server-status__dot {
+    animation: none;
+  }
 }
