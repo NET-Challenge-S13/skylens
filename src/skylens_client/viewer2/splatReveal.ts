@@ -7,8 +7,8 @@
 // clip is always on; the reveal is toggled by a uniform.
 
 import * as THREE from 'three';
-import type { Visited } from '../core/types';
-import { CONFIG } from '../core/config';
+import type { Visited } from '../../skylens_core/types';
+import { CONFIG } from '../../skylens_core/config';
 
 const RES = 256;
 

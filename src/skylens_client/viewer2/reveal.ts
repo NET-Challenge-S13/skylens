@@ -9,9 +9,9 @@
 // are bucketed in a 2D (XZ) uniform grid so each new visited spot only tests
 // points in nearby cells instead of the whole cloud.
 
-import type { Visited } from '../core/types';
-import { CONFIG } from '../core/config';
-import { clamp } from '../core/math';
+import type { Visited } from '../../skylens_core/types';
+import { CONFIG } from '../../skylens_core/config';
+import { clamp } from '../../skylens_core/math';
 
 const CELL_SIZE = CONFIG.reveal.radius * 2;
 

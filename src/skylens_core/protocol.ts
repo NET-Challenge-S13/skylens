@@ -7,7 +7,8 @@
 // needs to travel back.
 
 import * as THREE from 'three';
-import type { AppState, DroneMode, Vec3 } from '../core/types';
+import type { AppState, DroneMode, Vec3 } from './types';
+import type { Gps } from './geo.ts';
 
 /** One drone's pose on the wire (plain arrays, no THREE objects). */
 export interface WireDrone {
@@ -105,3 +106,67 @@ export function applyState(snap: StateSnapshot, state: AppState): void {
     state.visited.push({ pos: v.pos, t: v.t });
   }
 }
+
+// ---------------------------------------------------------------------------
+// Server messages (server -> client). In real operation these come from the
+// backend (detection model, splat reconstructor, drone telemetry). With no live
+// backend yet they are produced by a mock provider (see server/serverSource.ts).
+// ---------------------------------------------------------------------------
+
+/** Where a splat chunk lands in the shared ENU/scene frame. */
+export interface SplatAlign {
+  /** Optional GPS anchor to place the chunk at; else it uses the scene origin. */
+  anchor?: Gps;
+  /** Explicit transform (scene units), applied after any anchor placement. */
+  position: Vec3;
+  rotation: [number, number, number, number]; // quaternion
+  scale: [number, number, number];
+}
+
+export interface SplatChunk {
+  kind: 'splat-chunk';
+  id: string;
+  url: string;
+  align: SplatAlign;
+}
+
+export interface DroneTelemetry {
+  kind: 'telemetry';
+  id: number;
+  gps: Gps;
+  headingDeg: number;
+}
+
+export interface DetectionResult {
+  kind: 'detection';
+  id: string;
+  category: 'person' | 'danger';
+  gps: Gps;
+  confidence: number;
+  label: string;
+}
+
+export interface ServerStatus {
+  kind: 'server-status';
+  connected: boolean;
+  receiving: boolean;
+  chunks: number;
+  detections: number;
+  lastSeq: number;
+  latencyMs: number | null;
+}
+
+/** client -> server: assign a GPS route to a drone. */
+export interface AssignRoute {
+  kind: 'assign-route';
+  droneId: number;
+  waypoints: Gps[];
+}
+
+export type ServerMessage = SplatChunk | DroneTelemetry | DetectionResult | ServerStatus;
+
+export const IDENTITY_ALIGN: SplatAlign = {
+  position: [0, 0, 0],
+  rotation: [0, 0, 0, 1],
+  scale: [1, 1, 1],
+};

@@ -11,14 +11,14 @@
 // full Gaussian splat, fit with the transform derived from its own bounds.
 
 import './style.css';
-import { state } from './core/store.ts';
+import { state } from '../skylens_core/store.ts';
 import { loadScene, resolveSplatUrl } from './data/sceneSource.ts';
 import { buildDetections } from './data/detections.ts';
 import { ReconViewer } from './viewer2/reconViewer.ts';
 import { initUI } from './ui/overlay.ts';
 import { createTransport } from './net/peer.ts';
-import { applyState } from './net/protocol.ts';
-import type { StateSnapshot } from './net/protocol.ts';
+import { applyState } from '../skylens_core/protocol.ts';
+import type { StateSnapshot } from '../skylens_core/protocol.ts';
 import { roomFromQuery, mountNetBadge } from './net/statusUi.ts';
 import { createLoadingScreen } from './ui/loadingScreen.ts';
 

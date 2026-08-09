@@ -3,7 +3,7 @@
 // splat is loaded (and so they get revealed as drones sweep past). Kind/label/
 // confidence stay authored. Both computers derive from the identical cloud.
 
-import type { Detection, Vec3 } from '../core/types';
+import type { Detection, Vec3 } from '../../skylens_core/types';
 import type { SceneData } from './sceneData.ts';
 
 interface DetectionTemplate {

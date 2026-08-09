@@ -13,7 +13,7 @@
 
 import * as THREE from 'three';
 import { SplatLoader } from '@mkkellogg/gaussian-splats-3d';
-import { CONFIG } from '../core/config.ts';
+import { CONFIG } from '../../skylens_core/config.ts';
 import { buildSceneData } from './sceneData.ts';
 import type { SceneData } from './sceneData.ts';
 

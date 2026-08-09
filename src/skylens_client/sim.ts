@@ -11,14 +11,14 @@
 // cloud derived from the splat's own points (PROJECT.md §1: one source, two views).
 
 import './style.css';
-import { state } from './core/store.ts';
-import { CONFIG } from './core/config.ts';
+import { state } from '../skylens_core/store.ts';
+import { CONFIG } from '../skylens_core/config.ts';
 import { loadScene, resolveSplatUrl } from './data/sceneSource.ts';
 import { buildDronePaths } from './data/paths.ts';
 import { createDroneController } from './drones/pathFollower.ts';
 import { LowfiViewer } from './viewer1/lowfiViewer.ts';
 import { createTransport } from './net/peer.ts';
-import { encodeState } from './net/protocol.ts';
+import { encodeState } from '../skylens_core/protocol.ts';
 import { roomFromQuery, mountNetBadge } from './net/statusUi.ts';
 import { createLoadingScreen } from './ui/loadingScreen.ts';
 

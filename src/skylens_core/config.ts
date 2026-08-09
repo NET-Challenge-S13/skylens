@@ -2,6 +2,12 @@
 // Tuning knobs for look, timing, and the two-viewer choreography (see PROJECT.md).
 
 export const CONFIG = {
+  // Real-world anchor: local ENU frame origin (see geo.ts). Default is a
+  // plausible site; a real deployment sets this from the operation area.
+  geo: {
+    anchor: { lat: 37.5665, lon: 126.978, alt: 30 },
+  },
+
   // Simulation clock
   sim: {
     /** Multiplier on real elapsed time; 1 = real-time playback. */

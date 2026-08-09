@@ -8,10 +8,10 @@
 // the UI interoperates purely through state.cameraSync / focusedDetectionId.
 
 import * as THREE from 'three';
-import type { DetectionRuntime } from '../core/types';
-import { state, emit, setCameraState } from '../core/store';
-import { CONFIG } from '../core/config';
-import { easeInOut, toVector3 } from '../core/math';
+import type { DetectionRuntime } from '../../skylens_core/types';
+import { state, emit, setCameraState } from '../../skylens_core/store';
+import { CONFIG } from '../../skylens_core/config';
+import { easeInOut, toVector3 } from '../../skylens_core/math';
 
 const ORBIT_SPEED = 0.12; // rad/s
 

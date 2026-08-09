@@ -1,5 +1,5 @@
 // Keyboard input helper for manually flying the active drone. §4.2
-import { state, emit } from '../core/store.ts';
+import { state, emit } from '../../skylens_core/store.ts';
 
 export interface ManualInput {
   /** Control axes, each in [-1,1]: x=yaw (turn L/R), y=up/down, z=forward/back. */

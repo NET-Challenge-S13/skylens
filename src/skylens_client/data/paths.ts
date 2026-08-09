@@ -8,8 +8,8 @@
 // and the swarm films it together — no gaps in the reveal.
 
 import * as THREE from 'three';
-import { CONFIG } from '../core/config.ts';
-import type { DronePath, Waypoint } from '../core/types';
+import { CONFIG } from '../../skylens_core/config.ts';
+import type { DronePath, Waypoint } from '../../skylens_core/types';
 
 const DURATION = 30; // seconds for one full sweep
 const ZONE_NAMES = ['리더 (조종)', '군집 #2', '군집 #3'];

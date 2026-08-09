@@ -11,6 +11,7 @@
 
 import type * as THREE from 'three';
 import { DropInViewer } from '@mkkellogg/gaussian-splats-3d';
+import type { SplatAlign } from '../../skylens_core/protocol.ts';
 
 export type SplatStatus = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -27,6 +28,7 @@ export class SplatScene {
   private readonly viewer: DropInViewer;
   private _status: SplatStatus = 'idle';
   private _progress = 0;
+  private _chunks = 0;
   private readonly cbs: StatusCb[] = [];
   private readonly parent: THREE.Scene;
 
@@ -84,6 +86,39 @@ export class SplatScene {
         },
       })
       .then(() => this.set('ready'))
+      .catch((e: unknown) => {
+        const msg = e instanceof Error ? e.message : String(e);
+        this.set('error', msg);
+      });
+  }
+
+  /** Number of splat chunks successfully added. */
+  get chunks(): number {
+    return this._chunks;
+  }
+
+  /**
+   * Progressive ingestion: add one splat chunk placed by its align transform.
+   * Call repeatedly as the server streams chunks. Returns when the chunk is in.
+   * Callers should serialize (await) additions to avoid loader races.
+   */
+  addChunk(url: string, align: SplatAlign): Promise<void> {
+    if (this._status === 'idle') this.set('loading');
+    return this.viewer
+      .addSplatScene(url, {
+        position: [...align.position],
+        rotation: [...align.rotation],
+        scale: [...align.scale],
+        showLoadingUI: false,
+        progressiveLoad: true,
+        onProgress: (percent) => {
+          if (typeof percent === 'number') this._progress = percent;
+        },
+      })
+      .then(() => {
+        this._chunks += 1;
+        this.set('ready');
+      })
       .catch((e: unknown) => {
         const msg = e instanceof Error ? e.message : String(e);
         this.set('error', msg);

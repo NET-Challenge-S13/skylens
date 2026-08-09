@@ -1,11 +1,11 @@
 // Drone path-following + mode state machine. PROJECT.md §4.2.
 // Owns state.drones and advances them each frame: AUTO -> MANUAL -> RETURNING -> AUTO.
 import * as THREE from 'three';
-import { state } from '../core/store.ts';
-import { CONFIG } from '../core/config.ts';
-import { samplePath, pathDuration, dampFactor, easeInOut, clamp } from '../core/math.ts';
+import { state } from '../../skylens_core/store.ts';
+import { CONFIG } from '../../skylens_core/config.ts';
+import { samplePath, pathDuration, dampFactor, easeInOut, clamp } from '../../skylens_core/math.ts';
 import { createManualInput } from './manualControl.ts';
-import type { DroneRuntime, DronePath } from '../core/types';
+import type { DroneRuntime, DronePath } from '../../skylens_core/types';
 
 export interface DroneController {
   update(dt: number): void;
