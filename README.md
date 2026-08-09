@@ -4,17 +4,16 @@
 
 **멀티드론 영상을 실시간 3D로 복원하고, 그 위에 AI가 위험구역·사람을 표시하는 재난 인텔리전스 플랫폼**
 
-*NET 챌린지 캠프 시즌13 — 중간평가 프로토타입*
+*NET 챌린지 캠프 시즌13*
 
 <br/>
 
 ![status](https://img.shields.io/badge/status-prototype-9fe8ff)
-![stack](https://img.shields.io/badge/Three.js-r0.185-c8c2b8)
-![lang](https://img.shields.io/badge/TypeScript-6.0-3178c6)
-![build](https://img.shields.io/badge/Vite-8-646cff)
+![stack](https://img.shields.io/badge/Three.js%20+%20TS-c8c2b8)
 ![sync](https://img.shields.io/badge/WebRTC-PeerJS%20%2B%20STUN-ff9a4d)
 ![splat](https://img.shields.io/badge/Gaussian%20Splatting-real-c084fc)
-![tests](https://img.shields.io/badge/e2e-Playwright%206%2F6-39d98a)
+![coords](https://img.shields.io/badge/coords-GPS%20%2F%20ENU-4ade80)
+![tests](https://img.shields.io/badge/e2e-Playwright%209%2F9-39d98a)
 
 </div>
 
@@ -24,147 +23,96 @@
 
 SkyLens는 여러 대의 드론이 재난 현장을 분할 탐색하며 보낸 영상을 고속망으로 모아 **현장을 실시간 3D(Gaussian Splatting)로 복원**하고, 같은 영상에 **AI를 돌려 위험구역·사람을 감지**해 3D 현장 위에 마커로 얹는 재난 대응 시스템입니다.
 
-이 저장소는 그중 **중간평가용 프로토타입**입니다 — 하드웨어·인프라 없이도 *"드론이 날아가며 탐색 → 그 자리에 3D 공간이 피어남 → AI가 위험/사람을 찾아냄"* 이라는 핵심 서사가 **실제로 작동함**을 보여주는 것이 목표입니다.
+이 저장소는 **두 대의 분리된 컴퓨터**에서 각각 한 화면씩 띄우는 운영 프로토타입입니다:
 
-> 📄 기획·설계 문서: [IDEA.md](IDEA.md) (기획서) · [ARCHITECTURE.md](ARCHITECTURE.md) (통합 아키텍처) · [PROJECT.md](PROJECT.md) (프로토타입 구현 계획)
+- **SIM (관제탑)** — 오퍼레이터가 **실제 GPS로 드론 경로를 지정**하는 컨트롤타워. 지정된 경로를 리더 드론이 비행하고 군집 드론이 동행하며, 메인 드론의 촬영 영상을 확인합니다.
+- **RECON (3D 복원 상황판)** — 드론이 수집한 사진을 **서버가 Gaussian 스플랫 청크로 점진 전송**하면 3D가 계속 확장되고, **서버의 인간 탐지 모델 결과(GPS)**가 도착하면 3D 위에 마커로 표시됩니다.
+
+> 📄 기획·설계: [IDEA.md](IDEA.md) · [ARCHITECTURE.md](ARCHITECTURE.md) · [PROJECT.md](PROJECT.md)
 
 ---
 
-## 데모 구성 — 두 컴퓨터, 두 화면
+## 데모 모드 vs 실서버 모드
 
-데모는 **물리적으로 분리된 두 컴퓨터**에서 각각 한 화면씩 띄우고, **WebRTC(P2P)** 로 상태를 주고받습니다.
+기본값은 **실제 서버 데이터로 동작**합니다. 자체 완결형 자동 데모는 **명시적 옵션**으로만 켜집니다.
 
-| | **SIM** (컴퓨터 A) | **RECON** (컴퓨터 B) |
+| | 기본 (실모드) | 데모 (`?demo`) |
 |---|---|---|
-| URL | `/sim.html` | `/recon.html` |
-| 성격 | 로우파이 · 남색 · 스캐닝 도트 | 실사 지향 3D 복원 (placeholder) |
-| 내용 | 드론 3대가 경로 따라 분할 탐색, 3인칭 추적 카메라 | 드론이 지나간 자리가 시간차를 두고 점점 복원(reveal) |
-| 역할 | 시뮬레이션을 **소유**하고 상태를 스트리밍 | 받은 상태로 복원·AI 탐지·카메라를 **로컬 계산** |
+| 드론 | 경로 지정 전까지 **대기** | 자동 스윕 경로 비행 |
+| 스플랫 | 서버 청크 수신 시 표시 (없으면 **대기**) | mock이 청크 스트리밍 → 즉시 복원 |
+| 탐지 | 서버 탐지 결과 도착 시 | mock이 순차 전송 |
+| 용도 | 실제 파이프라인 연결용 | 전체 흐름 시연 |
 
-SIM에서 드론이 훑고 지나가면 몇 초 뒤 RECON에서 3D가 피어나고, **사람/위험이 감지되면 카메라가 자동으로 줌인 → 탐지 카드 표시 → `탐지 확인` → 원위치 복귀**의 사이클이 돕니다.
+서버는 아직 실 백엔드가 없어 **인터페이스 + mock provider**로 구현돼 있습니다([serverSource.ts](src/skylens_client/server/serverSource.ts)). 실 백엔드는 `connect(url)` 지점에 연결하면 됩니다.
 
-> **핵심 트릭 (PROJECT.md §1)**: 두 뷰어는 **같은 하나의 소스**를 씁니다. **Gaussian 스플랫이 유일한 소스**이고, SIM은 그 스플랫의 점들을 뽑아 **로우파이 포인트클라우드**로, RECON은 **풀 스플랫**으로 렌더합니다. 두 컴퓨터가 같은 URL을 받아 동일한 결정적 파이프라인(추출→auto-fit→다운샘플)을 돌리므로 포인트클라우드가 서로 **완전히 동일**합니다. (스플랫이 없거나 로드 실패 시 양쪽 모두 동일한 절차적 폴백 클라우드로 degrade.)
+---
+
+## 좌표계 (GPS ↔ ENU ↔ 씬)
+
+실세계 GPS를 1급 좌표계로 씁니다([geo.ts](src/skylens_core/geo.ts)):
+
+- **GeoAnchor**(기준 GPS, `CONFIG.geo.anchor`)를 원점으로 하는 **로컬 ENU(동/북/상) 미터** 프레임 — 1 unit = 1 m.
+- 드론 경로는 **GPS로 지정** → ENU → 씬으로 변환. 탐지 결과도 **GPS로 수신** → 씬 좌표로 변환해 마커 배치.
+- 각 스플랫 청크는 **명시적 align transform**(pos/rot/scale, 선택적 GPS anchor)을 가져 공통 ENU 프레임에 정렬됩니다.
 
 ---
 
 ## 빠른 시작
 
-> **요구 사항**: Node.js 18+ 와 npm · 두 컴퓨터가 **인터넷**(PeerJS 브로커·STUN)에 접속 가능해야 함
-
 ```bash
-# 1. 의존성 설치
 npm install
-
-# 2. 개발 서버 실행 (LAN에 노출됨 → 다른 컴퓨터에서도 접속 가능)
-npm run dev
+npm run dev          # LAN 노출 (다른 컴퓨터에서도 접속)
 ```
-
-개발 서버가 뜨면 두 개의 주소가 출력됩니다:
-
-```
-➜  Local:   http://localhost:5173/
-➜  Network: http://192.168.x.x:5173/     ← 다른 컴퓨터는 이 주소 사용
-```
-
-이제 **두 컴퓨터에서 같은 방(room)으로** 각자의 화면을 엽니다:
 
 | 컴퓨터 | 접속 주소 |
 |---|---|
 | A (SIM) | `http://<서버IP>:5173/sim.html?room=demo` |
 | B (RECON) | `http://<서버IP>:5173/recon.html?room=demo` |
 
-같은 `?room=` 값이면 자동으로 P2P 연결됩니다. 우측 상단 배지가 **`연결됨`(초록)** 이 되면 성공. (랜딩 페이지 `/` 에서 두 화면 링크와 room 안내를 볼 수 있습니다.)
+같은 `?room=` 값이면 WebRTC(PeerJS 공개 브로커 + 구글 STUN)로 자동 연결. 전체 흐름을 바로 보려면 뒤에 **`&demo`** 를 붙이세요.
 
 | 명령어 | 설명 |
 |---|---|
-| `npm run dev` | 개발 서버 (HMR, LAN 노출) |
-| `npm run build` | 타입체크(`tsc`) + 멀티페이지 프로덕션 빌드 → `dist/` |
-| `npm run preview` | 빌드 결과물 로컬 서빙 |
-| `npm test` | Playwright E2E (페이지별 부팅 + 실제 WebRTC 연결/스트리밍) |
-| `npm run test:headed` | 브라우저를 띄워서 테스트 실행 |
+| `npm run dev` | 개발 서버 (HMR, LAN) |
+| `npm run build` | 타입체크 + 멀티페이지 빌드 |
+| `npm test` | Playwright E2E |
+
+### 주요 쿼리 옵션
+`?demo` 자동 데모 · `?room=<이름>` P2P 방 · `?splat=off|light|<url>` 스플랫 자산 · `?reveal=on/off` 스플랫 reveal 마스크 · `?spin=off` 카메라 자동회전 끔 · `?up=<preset|euler>` 스플랫 방향 · `?level=on` PCA 자동 레벨링.
 
 ---
 
-## 연결 방식 (WebRTC)
-
-- **시그널링**: PeerJS 공개 브로커(0.peerjs.com)를 사용합니다. 자체 시그널링 서버를 띄우지 않습니다. `room` 토큰으로 두 피어가 결정적 ID(`skylens-<room>-sim` / `-recon`)로 서로를 찾습니다.
-- **NAT 통과**: 구글 공개 STUN 서버(`stun.l.google.com:19302`).
-- **데이터**: 연결 수립 후에는 상태(드론 포즈·visited·시각)가 **P2P DataChannel로 직접** 흐릅니다. 브로커는 최초 핸드셰이크만 중계합니다.
-- **데이터 흐름**: 단방향 SIM → RECON. `탐지 확인`은 RECON에서 로컬 처리됩니다.
-
-> 방을 나누려면 두 URL의 `?room=` 값을 똑같이 바꾸면 됩니다. 공개 브로커를 공유하므로 데모마다 고유한 room 이름을 권장합니다.
-
-### RECON 스플랫 옵션 (`?splat=`)
-
-RECON 페이지는 실사 Gaussian Splatting을 렌더합니다. 에셋은 공개 CDN에서 런타임 로드되며 저장소에 커밋되지 않습니다.
-
-| 쿼리 | 동작 |
-|---|---|
-| (없음) | 기본 실외 건물 샘플(colosseum, ~10 MB) 로드 |
-| `?splat=light` | 가벼운 실외 건물 샘플(church, ~8.6 MB) — e2e/빠른 확인용 |
-| `?splat=off` | 스플랫 끄고 포인트클라우드만 (가장 가벼움) |
-| `?splat=https://…` | 임의의 `.splat`/`.ply` URL 로드 |
-
-> 스플랫의 위치·회전·스케일은 [src/core/config.ts](src/core/config.ts)의 `splat`에서 조정합니다(첫 실제 렌더에서 씬에 맞게 튜닝).
-
----
-
-## 조작법 (SIM 화면)
-
-| 입력 | 동작 |
-|---|---|
-| **방향키 ↑ ↓ ← →** | 활성 드론 수동 비행 (전/후진 · 좌우 이동) |
-| **Q / E** | 활성 드론 고도 하강 / 상승 |
-| **1 / 2 / 3** | 조작할 드론 선택 |
-| **Tab** | 다음 드론으로 전환 |
-| **Space** | 시뮬레이션 일시정지 / 재개 |
-
-> 수동 조작 중 일정 시간(1.5초) 입력이 없으면 드론이 프리셋 경로로 부드럽게 복귀합니다.
+## 조작법 (SIM)
+- **경로 계획 모달** — 툴바 `경로 계획 · ROUTE` → GPS 웨이포인트 추가 → **배정**하면 리더가 그 경로를 비행.
+- **방향키 ↑↓←→** 수동 조향(전/후진 + 좌/우 점진 회전), **Q/E** 고도, **1/2/3·Tab** 드론 전환, **Space** 일시정지.
 
 ---
 
 ## 프로젝트 구조
 
 ```
-├─ index.html            랜딩 (두 화면 링크 + room 안내)
-├─ sim.html              SIM 페이지 (컴퓨터 A)
-├─ recon.html            RECON 페이지 (컴퓨터 B)
-├─ vite.config.ts        멀티페이지 + LAN 노출 설정
-└─ src/
-   ├─ sim.ts             SIM 부트스트랩: 시뮬 소유 + 상태 송신
-   ├─ recon.ts           RECON 부트스트랩: 상태 수신 + 복원/AI 계산
-   ├─ core/
-   │  ├─ config.ts       룩·타이밍·색상 등 튜닝 상수
-   │  ├─ types.ts        공통 타입 (모든 모듈의 계약)
-   │  ├─ store.ts        공유 상태 + pub/sub
-   │  └─ math.ts         Catmull-Rom 보간, 이징, 댐핑
-   ├─ net/
-   │  ├─ peer.ts         PeerJS(WebRTC) 트랜스포트 + 구글 STUN
-   │  ├─ protocol.ts     SIM→RECON 상태 스냅샷 직렬화
-   │  └─ statusUi.ts     room 파싱 + 연결 상태 배지
-   ├─ data/
-   │  ├─ sceneSource.ts  ★유일 소스: 스플랫 로드→점 추출→auto-fit→다운샘플
-   │  ├─ sceneData.ts    절차적 폴백 클라우드 (스플랫 off/실패 시)
-   │  ├─ paths.ts        드론 경로 (씬 bounds에서 파생)
-   │  └─ detections.ts   탐지 마커 (씬 클라우드에서 파생)
-   ├─ drones/
-   │  ├─ pathFollower.ts AUTO → MANUAL → RETURNING 상태머신
-   │  └─ manualControl.ts 키보드 입력
-   ├─ viewer1/
-   │  └─ lowfiViewer.ts  SIM: 로우파이 시뮬 + 추적 카메라
-   ├─ viewer2/
-   │  ├─ reconViewer.ts  RECON: 3D 복원 상황판
-   │  ├─ reveal.ts       (폴백) 포인트클라우드 XZ-컬럼 reveal
-   │  ├─ splatScene.ts   실사 Gaussian Splatting 레이어 (DropInViewer)
-   │  ├─ splatReveal.ts  스플랫 자체 reveal (커버리지 텍스처 + 셰이더 패치)
-   │  └─ cameraSync.ts   SYNCED → FOCUSING → LOCKED → RETURNING
-   └─ ui/
-      ├─ overlay.ts       HUD · 탐지 카드 · 확인 버튼
-      ├─ loadingScreen.ts 장면 로딩 오버레이
-      └─ toast.ts         알림 토스트
+src/
+├─ skylens_core/        # 순수 공유 (DOM·Three 없음)
+│  ├─ config · types · store · math
+│  ├─ geo.ts            # GPS↔ENU↔씬
+│  ├─ mode.ts           # isDemo() (?demo)
+│  └─ protocol.ts       # p2p 스냅샷 + 서버 메시지 스키마
+├─ skylens_client/      # 브라우저 앱 (Three.js + DOM)
+│  ├─ sim.ts  recon.ts  style.css
+│  ├─ server/serverSource.ts   # 서버 인터페이스 + mock
+│  ├─ net/     peer.ts (WebRTC) · statusUi.ts
+│  ├─ data/    sceneSource.ts · routes.ts(GPS경로) · paths.ts(데모) · ...
+│  ├─ drones/  pathFollower.ts (리더 경로 + 군집) · manualControl.ts
+│  ├─ sim/     routeModal.ts · videoPanel.ts · sim.css
+│  ├─ viewer1/ lowfiViewer.ts        # SIM 관제 3D 뷰
+│  ├─ viewer2/ reconViewer · splatScene(다중 청크) · splatReveal · reveal · cameraSync
+│  └─ ui/      overlay · minimap · serverStatus · recon-panels.css · loading · toast
+└─ skylens_model/       # AI 모델 (Python 스캐폴드)
+   ├─ models/   detection.py · splat.py   # 인터페이스 스텁
+   ├─ datasets/                            # 데이터셋 자리
+   └─ utils/geo.py                         # ENU 수식 미러 (TS와 동기)
 
-tests/
-└─ smoke.spec.ts         Playwright E2E (페이지별 부팅 + 실제 WebRTC 통합)
+tests/smoke.spec.ts     # Playwright E2E
 ```
 
 ---
@@ -172,25 +120,25 @@ tests/
 ## 현재 상태 & 로드맵
 
 **구현됨**
-- ✅ 두 컴퓨터 분리 구성 (`/sim.html` · `/recon.html`)
-- ✅ WebRTC P2P 동기화 (PeerJS 공개 브로커 + 구글 STUN), 연결 상태 배지
-- ✅ 드론 3대 커버리지 스윕(lawnmower) 경로 — 씬 전체를 훑어 건물 전체가 빠짐없이 복원됨 (+ 수동 조작/자동 복귀)
-- ✅ 시간차 progressive reveal (드론이 지나간 자리를 지연 복원)
-- ✅ 탐지 → 자동 포커스 → 확인 → 복귀 카메라 상태머신
-- ✅ **실사 Gaussian Splatting 렌더링** — `@mkkellogg/gaussian-splats-3d`로 RECON에 실제 스플랫을 얹음 (현재는 **공개 샘플**을 런타임 로드하는 테스트 에셋)
-- ✅ **단일 소스 일관성** — SIM(로우파이 점)과 RECON(풀 스플랫)이 같은 스플랫에서 파생된 **동일 포인트클라우드**를 사용 (E2E로 검증)
-- ✅ **스플랫 자체 progressive reveal** — RECON은 점 오버레이 없이 **실사 스플랫**만 표시하고, 드론 스캔에 따라 스플랫 자체가 드러남 (커버리지 텍스처 + 스플랫 셰이더 패치)
-- ✅ E2E 6종 (페이지별 런타임 + WebRTC 연결·스트리밍·탐지 사이클 + 실사 스플랫 로드/셰이더 컴파일 + 양쪽 클라우드 동일성 + 스플랫 reveal)
+- ✅ 두 컴퓨터 분리 구성 + WebRTC P2P 동기화, 연결/서버 수신 상태 표기
+- ✅ **관제탑 SIM**: GPS 경로 계획 모달 · 리더 경로 비행 · 군집 동행 · 드론 카메라 패널
+- ✅ **서버 구동 RECON**: 스플랫 청크 점진 복원 · GPS 탐지 마커 · 미니맵 · 대기 상태
+- ✅ GPS/ENU 좌표계 + 명시적 스플랫 정렬
+- ✅ 실사 Gaussian Splatting(정원 씬, 자동 레벨·프레이밍·floater clip) + 드론 스캔 progressive reveal
+- ✅ 데모 옵트인(`?demo`) — 기본은 실서버 데이터
+- ✅ 전문 컨트롤룸 UI 디자인 시스템
+- ✅ Python 모델 스캐폴드(detection/splat 인터페이스 + geo 미러)
+- ✅ E2E 9종 통과
 
-**후순위 / 다음 단계**
-- ⏳ **자체 촬영 스플랫으로 교체** — 지금 스플랫은 공개 샘플(테스트용)입니다. [PROJECT.md §2](PROJECT.md)대로 현장 촬영→GLOMAP/gsplat으로 만든 `.ply`/`.splat`으로 교체 + 씬 정합(transform) 튜닝
-- ⏳ 최종 평가: 실제 드론 텔레메트리 · KOREN · Core HPC 파이프라인 연동
+**다음 단계**
+- ⏳ 실 백엔드 연결(`serverSource.connect`) — 실드론 텔레메트리 · 탐지 모델 · 스플랫 재구성
+- ⏳ `skylens_model` 실제 추론(UNet 4채널 탐지 + gsplat) 통합
+- ⏳ 자체 촬영 스플랫으로 교체 · KOREN/Core HPC 파이프라인
 
 ---
 
 ## 기술 스택
-
-**Three.js** (3D 렌더링) · **@mkkellogg/gaussian-splats-3d** (실사 스플랫) · **TypeScript** · **Vite** (멀티페이지 번들·개발 서버) · **PeerJS / WebRTC** (P2P 동기화) · **Playwright** (E2E 테스트)
+**Three.js** · **@mkkellogg/gaussian-splats-3d** · **TypeScript** · **Vite** · **PeerJS/WebRTC** · **Playwright** · **Python**(모델)
 
 <div align="center">
 <sub>SkyLens — 재난 현장을 실시간 3D로, 그 위에 AI를 얹다.</sub>
