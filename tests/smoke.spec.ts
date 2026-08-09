@@ -32,7 +32,8 @@ interface SkylensHandle {
   };
   transport: { status: string };
   scene: { count: number; positions: Float32Array };
-  splat?: { status: string; progress: number };
+  splat?: { status: string; progress: number; chunks: number };
+  server?: { connected: boolean; receiving: boolean; chunks: number; detections: number };
   CONFIG?: { sim: { speed: number } };
 }
 
@@ -72,7 +73,8 @@ test.describe('per-page boot', () => {
   test('SIM page boots, drives drones, no uncaught errors', async ({ page }) => {
     const errors = trackPageErrors(page);
     // splat=off → shared procedural fallback: fast + CDN-independent.
-    await page.goto(`/sim.html?room=${uniqueRoom()}&splat=off`);
+    // ?demo → drones auto-fly; real (default) mode idles until a route is assigned.
+    await page.goto(`/sim.html?room=${uniqueRoom()}&splat=off&demo`);
     await page.waitForFunction(
       () => window.skylens?.role === 'sim' && window.skylens.state.drones.length === 3,
       undefined,
@@ -116,11 +118,12 @@ test.describe('per-page boot', () => {
     expect(errors, errors.join('\n')).toEqual([]);
   });
 
-  test('RECON page boots, initializes detections, no uncaught errors', async ({
+  test('RECON page boots cleanly, no uncaught errors', async ({
     page,
   }) => {
     const errors = trackPageErrors(page);
     // splat=off keeps this test fast + independent of the CDN asset.
+    // Real (default, no ?demo) mode: detections arrive only from the server.
     await page.goto(`/recon.html?room=${uniqueRoom()}&splat=off`);
     await page.waitForFunction(
       () => window.skylens?.role === 'recon',
@@ -129,10 +132,10 @@ test.describe('per-page boot', () => {
     );
 
     expect(await hasWebGL(page, 'view2')).toBeTruthy();
-    // Detections are initialized locally (3 authored markers).
-    await expect
-      .poll(() => page.evaluate(() => window.skylens.state.detections.length))
-      .toBe(3);
+
+    // Server-status + minimap panels are present (real-mode UI).
+    await expect(page.locator('.server-status')).toBeAttached();
+    await expect(page.locator('#minimap')).toBeAttached();
 
     // Render a few frames with no drones yet (unconnected) — must not throw.
     await page.waitForTimeout(800);
@@ -153,8 +156,8 @@ test.describe('WebRTC integration (SIM <-> RECON)', () => {
     const simErrors = trackPageErrors(sim);
     const reconErrors = trackPageErrors(recon);
 
-    await sim.goto(`/sim.html?room=${room}&splat=off`);
-    await recon.goto(`/recon.html?room=${room}&splat=off`);
+    await sim.goto(`/sim.html?room=${room}&splat=off&demo`);
+    await recon.goto(`/recon.html?room=${room}&splat=off&demo`);
 
     // Both peers report a live DataChannel.
     await expect
@@ -189,6 +192,16 @@ test.describe('WebRTC integration (SIM <-> RECON)', () => {
     await sim.evaluate(() => {
       window.skylens.CONFIG!.sim.speed = 25;
     });
+
+    // Detections now trickle in from RECON's own mock server on a real-time
+    // timer (independent of sim speed), landing by ~8s. Wait for all of them
+    // to arrive before counting "total" below, or late arrivals would keep
+    // kicking the camera back into FOCUSING after we think we're done.
+    await expect
+      .poll(() => recon.evaluate(() => window.skylens.state.detections.length), {
+        timeout: 20_000,
+      })
+      .toBe(3);
 
     // RECON's camera focuses a detection once its area is revealed.
     await recon.waitForFunction(
@@ -271,7 +284,8 @@ test.describe('real Gaussian splat (public sample)', () => {
     // Shader-compile failures (e.g. a bad onBeforeCompile injection) surface as
     // console errors — track them so a broken splat-reveal patch fails here.
     const errors = trackPageErrors(page);
-    await page.goto(`/recon.html?room=${uniqueRoom()}&splat=light`);
+    // ?demo → the mock server streams the splat chunk; real mode idles.
+    await page.goto(`/recon.html?room=${uniqueRoom()}&splat=light&demo`);
     await page.waitForFunction(() => window.skylens?.role === 'recon', undefined, {
       timeout: 15_000,
     });
@@ -342,8 +356,8 @@ test.describe('real Gaussian splat (public sample)', () => {
     const recon = await ctx.newPage();
     const reconErrors = trackPageErrors(recon);
 
-    await sim.goto(`/sim.html?room=${room}&splat=light`);
-    await recon.goto(`/recon.html?room=${room}&splat=light`);
+    await sim.goto(`/sim.html?room=${room}&splat=light&demo`);
+    await recon.goto(`/recon.html?room=${room}&splat=light&demo`);
 
     await Promise.all([
       sim.waitForFunction(() => window.skylens?.role === 'sim', undefined, { timeout: 60_000 }),
@@ -370,6 +384,104 @@ test.describe('real Gaussian splat (public sample)', () => {
       .toBeGreaterThan(0);
 
     expect(reconErrors, reconErrors.join('\n')).toEqual([]);
+    await ctx.close();
+  });
+});
+
+test.describe('real vs demo server gating', () => {
+  test('real mode (no ?demo): RECON idles waiting for the server', async ({
+    page,
+  }) => {
+    const errors = trackPageErrors(page);
+    await page.goto(`/recon.html?room=${uniqueRoom()}&splat=off`);
+    await page.waitForFunction(() => window.skylens?.role === 'recon', undefined, {
+      timeout: 15_000,
+    });
+
+    await expect(page.locator('.server-status')).toBeAttached();
+
+    // No server wired yet in real mode → nothing streams in over several seconds.
+    await page.waitForTimeout(4_000);
+    expect(await page.evaluate(() => window.skylens.splat?.status)).toBe('idle');
+    expect(await page.evaluate(() => window.skylens.state.detections.length)).toBe(0);
+
+    expect(errors, errors.join('\n')).toEqual([]);
+  });
+
+  test('demo mode: RECON receives a splat chunk and detections from the mock server', async ({
+    page,
+  }) => {
+    test.setTimeout(60_000);
+    const errors = trackPageErrors(page);
+    await page.goto(`/recon.html?room=${uniqueRoom()}&splat=light&demo`);
+    await page.waitForFunction(() => window.skylens?.role === 'recon', undefined, {
+      timeout: 15_000,
+    });
+
+    await expect(page.locator('#minimap')).toBeAttached();
+
+    await expect
+      .poll(() => page.evaluate(() => window.skylens.splat?.status), { timeout: 30_000 })
+      .toBe('ready');
+    await expect
+      .poll(() => page.evaluate(() => window.skylens.state.detections.length), {
+        timeout: 30_000,
+      })
+      .toBeGreaterThan(0);
+
+    expect(errors, errors.join('\n')).toEqual([]);
+  });
+
+  test('SIM: demo drones auto-fly; real drones idle until a route is assigned', async ({
+    browser,
+  }) => {
+    test.setTimeout(60_000);
+    const ctx = await browser.newContext();
+    const demoPage = await ctx.newPage();
+    const realPage = await ctx.newPage();
+    const demoErrors = trackPageErrors(demoPage);
+    const realErrors = trackPageErrors(realPage);
+
+    await demoPage.goto(`/sim.html?room=${uniqueRoom()}&splat=off&demo`);
+    await realPage.goto(`/sim.html?room=${uniqueRoom()}&splat=off`);
+    await Promise.all([
+      demoPage.waitForFunction(
+        () => window.skylens?.role === 'sim' && window.skylens.state.drones.length === 3,
+        undefined,
+        { timeout: 15_000 },
+      ),
+      realPage.waitForFunction(
+        () => window.skylens?.role === 'sim' && window.skylens.state.drones.length === 3,
+        undefined,
+        { timeout: 15_000 },
+      ),
+    ]);
+
+    const demoStart = await demoPage.evaluate(() => window.skylens.state.drones[0].pos);
+    const realStart = await realPage.evaluate(() => window.skylens.state.drones[0].pos);
+
+    // Demo drone moves within a few seconds.
+    await expect
+      .poll(
+        () =>
+          demoPage.evaluate((start) => {
+            const p = window.skylens.state.drones[0].pos;
+            return Math.abs(p.x - start.x) + Math.abs(p.y - start.y) + Math.abs(p.z - start.z);
+          }, demoStart),
+        { timeout: 8_000 },
+      )
+      .toBeGreaterThan(0.05);
+
+    // Real drone stays idle over the same window (no route assigned).
+    await realPage.waitForTimeout(4_000);
+    const realDelta = await realPage.evaluate((start) => {
+      const p = window.skylens.state.drones[0].pos;
+      return Math.abs(p.x - start.x) + Math.abs(p.y - start.y) + Math.abs(p.z - start.z);
+    }, realStart);
+    expect(realDelta).toBeLessThan(0.05);
+
+    expect(demoErrors, demoErrors.join('\n')).toEqual([]);
+    expect(realErrors, realErrors.join('\n')).toEqual([]);
     await ctx.close();
   });
 });
