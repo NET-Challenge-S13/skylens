@@ -9,16 +9,16 @@
 // Both surfaces (SIM, RECON) create their own source; RECON consumes
 // detections/splats, SIM sends assign-route and shows reception status.
 
-import { CONFIG } from '../../skylens_core/config.ts';
-import { enuToGps } from '../../skylens_core/geo.ts';
-import { IDENTITY_ALIGN } from '../../skylens_core/protocol.ts';
+import { CONFIG } from '../config.ts';
+import { enuToGps } from '../geo.ts';
+import { IDENTITY_ALIGN } from '../protocol.ts';
 import type {
   AssignRoute,
   DetectionResult,
   DroneTelemetry,
   ServerStatus,
   SplatChunk,
-} from '../../skylens_core/protocol.ts';
+} from '../protocol.ts';
 
 export interface ServerSource {
   onStatus(cb: (s: ServerStatus) => void): void;

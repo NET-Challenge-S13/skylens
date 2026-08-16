@@ -3,7 +3,7 @@
 // leader then flies the assigned route (see pathFollower.ts setLeaderRoute)
 // and the swarm clusters around it.
 
-import type { Gps } from '../../skylens_core/geo.ts';
+import type { Gps } from '../geo.ts';
 
 export interface AssignedRoute {
   droneId: number;

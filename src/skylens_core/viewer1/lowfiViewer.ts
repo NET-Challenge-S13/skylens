@@ -5,9 +5,9 @@
 
 import * as THREE from 'three';
 import type { SceneData } from '../data/sceneData.ts';
-import type { DroneRuntime } from '../../skylens_core/types.ts';
-import { state, subscribe } from '../../skylens_core/store.ts';
-import { CONFIG, DRONE_TINTS } from '../../skylens_core/config.ts';
+import type { DroneRuntime } from '../types.ts';
+import { state, subscribe } from '../store.ts';
+import { CONFIG, DRONE_TINTS } from '../config.ts';
 
 /** Keep 1 of every N points from the source cloud. */
 const DOWNSAMPLE_STRIDE = 5;

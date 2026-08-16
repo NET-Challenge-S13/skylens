@@ -2,7 +2,7 @@
 // (animated gradient + scanlines + crosshair + a small telemetry overlay) on
 // a canvas until a real feed is wired up via setSource().
 
-import { state } from '../../skylens_core/store.ts';
+import { state } from '../store.ts';
 
 export interface VideoPanel {
   /** Seam for a real feed later: a MediaStream, a video URL, or null to fall

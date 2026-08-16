@@ -9,7 +9,7 @@
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import type { SceneData } from '../data/sceneData';
+import type { SceneData } from '../../skylens_core/data/sceneData';
 import type { DetectionRuntime } from '../../skylens_core/types';
 import { state, emit } from '../../skylens_core/store';
 import { CONFIG } from '../../skylens_core/config';

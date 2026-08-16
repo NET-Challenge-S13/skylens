@@ -2,7 +2,7 @@
 // state (waiting / receiving), chunk + detection counts, and latency.
 // Pure DOM, subscribes to serverSource.onStatus.
 
-import type { ServerSource } from '../server/serverSource.ts';
+import type { ServerSource } from '../../skylens_core/server/serverSource.ts';
 import type { ServerStatus } from '../../skylens_core/protocol.ts';
 
 export interface ServerStatusPanel {

@@ -1,7 +1,7 @@
 // SIM page bootstrap — the "drone simulation" computer (컴퓨터 A).
 //
-// Access URL:  http://<서버IP>:5173/sim.html?room=<방이름>
-// Pair with RECON at the SAME room: /recon.html?room=<방이름>
+// Access URL:  http://<서버IP>:5173/res/static/sim.html?room=<방이름>
+// Pair with RECON at the SAME room: /res/static/recon.html?room=<방이름>
 //
 // Owns the simulation: runs the drone controller + the low-fi viewer, advances
 // the shared clock, and streams state snapshots to the RECON computer over the
@@ -12,16 +12,16 @@
 
 import './style.css';
 import './sim/sim.css';
-import { state } from '../skylens_core/store.ts';
-import { CONFIG } from '../skylens_core/config.ts';
-import { isDemo } from '../skylens_core/mode.ts';
+import { state } from './store.ts';
+import { CONFIG } from './config.ts';
+import { isDemo } from './mode.ts';
 import { loadScene, resolveSplatUrl } from './data/sceneSource.ts';
 import { buildDronePaths } from './data/paths.ts';
 import { buildIdlePaths, buildRouteFromGps } from './data/routes.ts';
 import { createDroneController } from './drones/pathFollower.ts';
 import { LowfiViewer } from './viewer1/lowfiViewer.ts';
 import { createTransport } from './net/peer.ts';
-import { encodeState } from '../skylens_core/protocol.ts';
+import { encodeState } from './protocol.ts';
 import { roomFromQuery, mountNetBadge } from './net/statusUi.ts';
 import { createLoadingScreen } from './ui/loadingScreen.ts';
 import { createServerSource } from './server/serverSource.ts';

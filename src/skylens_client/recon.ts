@@ -1,7 +1,7 @@
 // RECON page bootstrap — the "3D reconstruction situation board" computer (컴퓨터 B).
 //
-// Access URL:  http://<서버IP>:5173/recon.html?room=<방이름>
-// Pair with SIM at the SAME room: /sim.html?room=<방이름>
+// Access URL:  http://<서버IP>:5173/res/static/recon.html?room=<방이름>
+// Pair with SIM at the SAME room: /res/static/sim.html?room=<방이름>
 //
 // Consumes state snapshots from the SIM computer over WebRTC and computes reveal,
 // detection markers, and the camera state machine locally. The clock and drone
@@ -14,7 +14,7 @@
 // onSplatChunk (ingested into the splat scene one at a time), and detections
 // via onDetection (placed with gpsToScene against the shared geo anchor).
 
-import './style.css';
+import '../skylens_core/style.css';
 import './ui/recon-panels.css';
 import { state } from '../skylens_core/store.ts';
 import { CONFIG } from '../skylens_core/config.ts';
@@ -22,15 +22,15 @@ import { isDemo } from '../skylens_core/mode.ts';
 import { gpsToScene } from '../skylens_core/geo.ts';
 import { IDENTITY_ALIGN } from '../skylens_core/protocol.ts';
 import type { DetectionRuntime } from '../skylens_core/types.ts';
-import { loadScene, resolveSplatUrl } from './data/sceneSource.ts';
+import { loadScene, resolveSplatUrl } from '../skylens_core/data/sceneSource.ts';
 import { ReconViewer } from './viewer2/reconViewer.ts';
 import { initUI } from './ui/overlay.ts';
-import { createTransport } from './net/peer.ts';
+import { createTransport } from '../skylens_core/net/peer.ts';
 import { applyState } from '../skylens_core/protocol.ts';
 import type { StateSnapshot } from '../skylens_core/protocol.ts';
-import { roomFromQuery, mountNetBadge } from './net/statusUi.ts';
-import { createLoadingScreen } from './ui/loadingScreen.ts';
-import { createServerSource } from './server/serverSource.ts';
+import { roomFromQuery, mountNetBadge } from '../skylens_core/net/statusUi.ts';
+import { createLoadingScreen } from '../skylens_core/ui/loadingScreen.ts';
+import { createServerSource } from '../skylens_core/server/serverSource.ts';
 import { mountMinimap } from './ui/minimap.ts';
 import { mountServerStatus } from './ui/serverStatus.ts';
 

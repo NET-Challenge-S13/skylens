@@ -43,7 +43,7 @@ SkyLens는 여러 대의 드론이 재난 현장을 분할 탐색하며 보낸 �
 | 탐지 | 서버 탐지 결과 도착 시 | mock이 순차 전송 |
 | 용도 | 실제 파이프라인 연결용 | 전체 흐름 시연 |
 
-서버는 아직 실 백엔드가 없어 **인터페이스 + mock provider**로 구현돼 있습니다([serverSource.ts](src/skylens_client/server/serverSource.ts)). 실 백엔드는 `connect(url)` 지점에 연결하면 됩니다.
+서버는 아직 실 백엔드가 없어 **인터페이스 + mock provider**로 구현돼 있습니다([serverSource.ts](src/skylens_core/server/serverSource.ts)). 실 백엔드는 `connect(url)` 지점에 연결하면 됩니다.
 
 ---
 
@@ -66,8 +66,10 @@ npm run dev          # LAN 노출 (다른 컴퓨터에서도 접속)
 
 | 컴퓨터 | 접속 주소 |
 |---|---|
-| A (SIM) | `http://<서버IP>:5173/sim.html?room=demo` |
-| B (RECON) | `http://<서버IP>:5173/recon.html?room=demo` |
+| A (SIM · 관제탑) | `http://<서버IP>:5173/res/static/sim.html?room=demo` |
+| B (RECON · 지휘관) | `http://<서버IP>:5173/res/static/recon.html?room=demo` |
+
+> 랜딩 페이지 `http://<서버IP>:5173/res/static/` 에서 두 화면 링크를 눌러 들어가도 됩니다.
 
 같은 `?room=` 값이면 WebRTC(PeerJS 공개 브로커 + 구글 STUN)로 자동 연결. 전체 흐름을 바로 보려면 뒤에 **`&demo`** 를 붙이세요.
 
@@ -91,24 +93,29 @@ npm run dev          # LAN 노출 (다른 컴퓨터에서도 접속)
 ## 프로젝트 구조
 
 ```
+res/static/             # 정적 html 셸 (진입점) — /src 모듈을 로드
+│  └─ index.html · sim.html · recon.html
 src/
-├─ skylens_core/        # 순수 공유 (DOM·Three 없음)
+├─ skylens_core/        # 관제탑(SIM) + 공유 토대 — client가 단방향 의존
 │  ├─ config · types · store · math
 │  ├─ geo.ts            # GPS↔ENU↔씬
 │  ├─ mode.ts           # isDemo() (?demo)
-│  └─ protocol.ts       # p2p 스냅샷 + 서버 메시지 스키마
-├─ skylens_client/      # 브라우저 앱 (Three.js + DOM)
-│  ├─ sim.ts  recon.ts  style.css
+│  ├─ protocol.ts       # p2p 스냅샷 + 서버 메시지 스키마
+│  ├─ sim.ts  style.css                   # SIM 진입점 + 공유 베이스 스타일
 │  ├─ server/serverSource.ts   # 서버 인터페이스 + mock
 │  ├─ net/     peer.ts (WebRTC) · statusUi.ts
-│  ├─ data/    sceneSource.ts · routes.ts(GPS경로) · paths.ts(데모) · ...
+│  ├─ data/    sceneSource.ts · routes.ts(GPS경로) · paths.ts(데모) · sceneData.ts
 │  ├─ drones/  pathFollower.ts (리더 경로 + 군집) · manualControl.ts
 │  ├─ sim/     routeModal.ts · videoPanel.ts · sim.css
-│  ├─ viewer1/ lowfiViewer.ts        # SIM 관제 3D 뷰
+│  ├─ viewer1/ lowfiViewer.ts             # SIM 관제 3D 뷰
+│  └─ ui/      loadingScreen · toast      # 공유 UI
+├─ skylens_client/      # 지휘관(RECON) — 서버 구동 3D 복원 상황판
+│  ├─ recon.ts
 │  ├─ viewer2/ reconViewer · splatScene(다중 청크) · splatReveal · reveal · cameraSync
-│  └─ ui/      overlay · minimap · serverStatus · recon-panels.css · loading · toast
+│  ├─ ui/      overlay · minimap · serverStatus · recon-panels.css
+│  └─ data/    detections.ts
 └─ skylens_model/       # AI 모델 (Python 스캐폴드)
-   ├─ models/   detection.py · splat.py   # 인터페이스 스텁
+   ├─ models/   skylens/   # transformers 표준 모델 (config·modeling)
    ├─ datasets/                            # 데이터셋 자리
    └─ utils/geo.py                         # ENU 수식 미러 (TS와 동기)
 

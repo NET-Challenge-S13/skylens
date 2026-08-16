@@ -74,7 +74,7 @@ test.describe('per-page boot', () => {
     const errors = trackPageErrors(page);
     // splat=off → shared procedural fallback: fast + CDN-independent.
     // ?demo → drones auto-fly; real (default) mode idles until a route is assigned.
-    await page.goto(`/sim.html?room=${uniqueRoom()}&splat=off&demo`);
+    await page.goto(`/res/static/sim.html?room=${uniqueRoom()}&splat=off&demo`);
     await page.waitForFunction(
       () => window.skylens?.role === 'sim' && window.skylens.state.drones.length === 3,
       undefined,
@@ -124,7 +124,7 @@ test.describe('per-page boot', () => {
     const errors = trackPageErrors(page);
     // splat=off keeps this test fast + independent of the CDN asset.
     // Real (default, no ?demo) mode: detections arrive only from the server.
-    await page.goto(`/recon.html?room=${uniqueRoom()}&splat=off`);
+    await page.goto(`/res/static/recon.html?room=${uniqueRoom()}&splat=off`);
     await page.waitForFunction(
       () => window.skylens?.role === 'recon',
       undefined,
@@ -156,8 +156,8 @@ test.describe('WebRTC integration (SIM <-> RECON)', () => {
     const simErrors = trackPageErrors(sim);
     const reconErrors = trackPageErrors(recon);
 
-    await sim.goto(`/sim.html?room=${room}&splat=off&demo`);
-    await recon.goto(`/recon.html?room=${room}&splat=off&demo`);
+    await sim.goto(`/res/static/sim.html?room=${room}&splat=off&demo`);
+    await recon.goto(`/res/static/recon.html?room=${room}&splat=off&demo`);
 
     // Both peers report a live DataChannel.
     await expect
@@ -285,7 +285,7 @@ test.describe('real Gaussian splat (public sample)', () => {
     // console errors — track them so a broken splat-reveal patch fails here.
     const errors = trackPageErrors(page);
     // ?demo → the mock server streams the splat chunk; real mode idles.
-    await page.goto(`/recon.html?room=${uniqueRoom()}&splat=light&demo`);
+    await page.goto(`/res/static/recon.html?room=${uniqueRoom()}&splat=light&demo`);
     await page.waitForFunction(() => window.skylens?.role === 'recon', undefined, {
       timeout: 15_000,
     });
@@ -315,8 +315,8 @@ test.describe('real Gaussian splat (public sample)', () => {
     const sim = await ctx.newPage();
     const recon = await ctx.newPage();
 
-    await sim.goto(`/sim.html?room=${room}&splat=light`);
-    await recon.goto(`/recon.html?room=${room}&splat=light`);
+    await sim.goto(`/res/static/sim.html?room=${room}&splat=light`);
+    await recon.goto(`/res/static/recon.html?room=${room}&splat=light`);
 
     const ready = (p: Page) =>
       p.waitForFunction(() => window.skylens?.scene?.count > 0, undefined, {
@@ -356,8 +356,8 @@ test.describe('real Gaussian splat (public sample)', () => {
     const recon = await ctx.newPage();
     const reconErrors = trackPageErrors(recon);
 
-    await sim.goto(`/sim.html?room=${room}&splat=light&demo`);
-    await recon.goto(`/recon.html?room=${room}&splat=light&demo`);
+    await sim.goto(`/res/static/sim.html?room=${room}&splat=light&demo`);
+    await recon.goto(`/res/static/recon.html?room=${room}&splat=light&demo`);
 
     await Promise.all([
       sim.waitForFunction(() => window.skylens?.role === 'sim', undefined, { timeout: 60_000 }),
@@ -393,7 +393,7 @@ test.describe('real vs demo server gating', () => {
     page,
   }) => {
     const errors = trackPageErrors(page);
-    await page.goto(`/recon.html?room=${uniqueRoom()}&splat=off`);
+    await page.goto(`/res/static/recon.html?room=${uniqueRoom()}&splat=off`);
     await page.waitForFunction(() => window.skylens?.role === 'recon', undefined, {
       timeout: 15_000,
     });
@@ -413,7 +413,7 @@ test.describe('real vs demo server gating', () => {
   }) => {
     test.setTimeout(60_000);
     const errors = trackPageErrors(page);
-    await page.goto(`/recon.html?room=${uniqueRoom()}&splat=light&demo`);
+    await page.goto(`/res/static/recon.html?room=${uniqueRoom()}&splat=light&demo`);
     await page.waitForFunction(() => window.skylens?.role === 'recon', undefined, {
       timeout: 15_000,
     });
@@ -442,8 +442,8 @@ test.describe('real vs demo server gating', () => {
     const demoErrors = trackPageErrors(demoPage);
     const realErrors = trackPageErrors(realPage);
 
-    await demoPage.goto(`/sim.html?room=${uniqueRoom()}&splat=off&demo`);
-    await realPage.goto(`/sim.html?room=${uniqueRoom()}&splat=off`);
+    await demoPage.goto(`/res/static/sim.html?room=${uniqueRoom()}&splat=off&demo`);
+    await realPage.goto(`/res/static/sim.html?room=${uniqueRoom()}&splat=off`);
     await Promise.all([
       demoPage.waitForFunction(
         () => window.skylens?.role === 'sim' && window.skylens.state.drones.length === 3,

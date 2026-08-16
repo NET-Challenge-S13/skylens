@@ -11,9 +11,9 @@ export default defineConfig({
   build: {
     rollupOptions: {
       input: {
-        main: 'index.html',
-        sim: 'sim.html',
-        recon: 'recon.html',
+        main: 'res/static/index.html',
+        sim: 'res/static/sim.html',
+        recon: 'res/static/recon.html',
       },
     },
   },
