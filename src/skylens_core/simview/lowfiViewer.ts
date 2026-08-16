@@ -255,9 +255,10 @@ export class LowfiViewer {
 
   /** Streamed building cells pop in as the drone travels (world streamer).
    *  Same prism look as the core so streamed territory reads first-class.
-   *  Same prism look as the core so streamed territory reads first-class. */
-  addSurroundBuildings(visual: import('../sources/buildingSource.ts').BuildingVisual): void {
-    if (visual.positions.length === 0) return;
+   *  Returns a disposer so the streamer can evict cells that fall far behind
+   *  (unbounded flight range — see streamSource.ts). */
+  addSurroundBuildings(visual: import('../sources/buildingSource.ts').BuildingVisual): () => void {
+    if (visual.positions.length === 0) return () => {};
     const geom = new THREE.BufferGeometry();
     geom.setAttribute('position', new THREE.BufferAttribute(visual.positions, 3));
     geom.setAttribute('color', new THREE.BufferAttribute(visual.colors, 3));
@@ -267,12 +268,23 @@ export class LowfiViewer {
       side: THREE.DoubleSide,
       emissive: this.cyber ? 0x152a33 : 0x000000,
     });
-    this.scene.add(new THREE.Mesh(geom, mat));
-    if (visual.edges) this.addPrismEdges(visual.edges);
+    const mesh = new THREE.Mesh(geom, mat);
+    this.scene.add(mesh);
+    const edgeLines = visual.edges ? this.addPrismEdges(visual.edges) : null;
+    return () => {
+      this.scene.remove(mesh);
+      geom.dispose();
+      mat.dispose();
+      if (edgeLines) {
+        this.scene.remove(edgeLines);
+        edgeLines.geometry.dispose();
+        (edgeLines.material as THREE.Material).dispose();
+      }
+    };
   }
 
   /** Restrained tactical linework. Mission objects stay brighter than this. */
-  private addPrismEdges(edges: Float32Array): void {
+  private addPrismEdges(edges: Float32Array): THREE.LineSegments {
     const geom = new THREE.BufferGeometry();
     geom.setAttribute('position', new THREE.BufferAttribute(edges, 3));
     const mat = new THREE.LineBasicMaterial({
@@ -282,12 +294,15 @@ export class LowfiViewer {
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     });
-    this.scene.add(new THREE.LineSegments(geom, mat));
+    const lines = new THREE.LineSegments(geom, mat);
+    this.scene.add(lines);
+    return lines;
   }
 
   /** Streamed terrain cells (world streamer) — sharper than the coarse ring
-   *  they cover, so streamed territory looks like the core scene. */
-  addStreamedTerrain(visual: import('../sources/terrainSource.ts').TerrainVisual): void {
+   *  they cover, so streamed territory looks like the core scene. Returns a
+   *  disposer so the streamer can evict cells that fall far behind. */
+  addStreamedTerrain(visual: import('../sources/terrainSource.ts').TerrainVisual): () => void {
     const geom = new THREE.BufferGeometry();
     geom.setAttribute('position', new THREE.BufferAttribute(visual.positions, 3));
     geom.setAttribute('uv', new THREE.BufferAttribute(visual.uvs, 2));
@@ -297,7 +312,14 @@ export class LowfiViewer {
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.needsUpdate = true;
     const mat = new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide });
-    this.scene.add(new THREE.Mesh(geom, mat));
+    const mesh = new THREE.Mesh(geom, mat);
+    this.scene.add(mesh);
+    return () => {
+      this.scene.remove(mesh);
+      geom.dispose();
+      mat.dispose();
+      tex.dispose();
+    };
   }
 
   private updateRig(rig: DroneRig, drone: DroneRuntime, isActive: boolean): void {
