@@ -312,13 +312,21 @@ class SkyLensModel(SkyLensPreTrainedModel):
         """transformers Backbone API로 인코더를 만든다.
 
         `use_pretrained_backbone=False`면 config만 가져와 랜덤 초기화한다.
+
+        SkyLensNet 자체를 `from_pretrained` 로 되살릴 때는 백본 가중치도 체크포인트에
+        들어 있으므로 허브에서 다시 받을 필요가 없다. 게다가 transformers 5 의
+        `from_pretrained` 는 meta device 컨텍스트에서 모델을 구성하는데, 그 안에서
+        중첩 `from_pretrained` 를 호출하면 RuntimeError 로 죽는다. meta 컨텍스트에서는
+        항상 config 만으로 뼈대를 만든다.
         """
         out_indices = tuple(config.backbone_out_indices)
+        on_meta = torch.get_default_device().type == "meta"
+        want_pretrained = config.use_pretrained_backbone and not on_meta
 
         if config.use_timm_backbone:
             from transformers import TimmBackbone, TimmBackboneConfig
 
-            if config.use_pretrained_backbone:
+            if want_pretrained:
                 return TimmBackbone.from_pretrained(
                     config.backbone, out_indices=out_indices, use_pretrained_backbone=True
                 )
@@ -329,7 +337,7 @@ class SkyLensModel(SkyLensPreTrainedModel):
 
         from transformers import AutoBackbone, AutoConfig
 
-        if config.use_pretrained_backbone:
+        if want_pretrained:
             return AutoBackbone.from_pretrained(
                 config.backbone, out_indices=out_indices, use_timm_backbone=False
             )
