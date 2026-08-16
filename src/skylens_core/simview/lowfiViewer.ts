@@ -22,6 +22,7 @@ const CHASE_UP = 4;
 interface DroneRig {
   id: number;
   core: THREE.Mesh;
+  halo: THREE.Mesh | null;
   trailLine: THREE.Line;
   trailGeom: THREE.BufferGeometry;
   trailPositions: Float32Array;
@@ -39,6 +40,7 @@ export class LowfiViewer {
   private pointsGeom: THREE.BufferGeometry;
   private pointsMat: THREE.PointsMaterial;
   private grid: THREE.GridHelper;
+  private cyber = false;
 
   private rigs = new Map<number, DroneRig>();
   private rigGroup: THREE.Group;
@@ -69,12 +71,33 @@ export class LowfiViewer {
     this.scene = new THREE.Scene();
     // `?tex=sat` (real satellite colors): photo colors are unreadable on the
     // dark navy + tight fog, so that mode gets a neutral gray sky and far fog.
-    const satMode =
-      typeof window !== 'undefined' &&
-      new URLSearchParams(window.location.search).get('tex') === 'sat';
-    const bg = satMode ? new THREE.Color(0x4a515c) : new THREE.Color(CONFIG.color.simBg);
+    // `?tex=cyber` grades the drape into the SIM's own cold palette, so it
+    // keeps the dark navy sky — just with the far fog of the map scale.
+    const texParam =
+      typeof window !== 'undefined'
+        ? new URLSearchParams(window.location.search).get('tex')
+        : null;
+    this.cyber = texParam === 'cyber';
+    const satMode = texParam === 'sat' || this.cyber;
+    // Matches the cyber terrain LUT's own darkest stop (terrainSource.ts) so
+    // distant geometry dissolves into the same tone as the ground/sky instead
+    // of a mismatched backdrop color.
+    const CYBER_HORIZON = 0x040912;
+    const bg = this.cyber
+      ? new THREE.Color(CYBER_HORIZON)
+      : satMode
+        ? new THREE.Color(0x4a515c)
+        : new THREE.Color(CONFIG.color.simBg);
     this.scene.background = bg;
-    this.scene.fog = satMode ? new THREE.Fog(bg.getHex(), 80, 320) : new THREE.Fog(bg.getHex(), 20, 90);
+    this.scene.fog = this.cyber
+      // Tight enough that the downtown skyline — well inside the mapped core
+      // (TARGET_EXTENT=44) — softens with distance instead of reading as a
+      // flat wireframe thicket. Sat mode's 80/320 never reaches the core at
+      // all, which is right for photoreal imagery but wrong for this look.
+      ? new THREE.Fog(bg.getHex(), 26, 150)
+      : satMode
+        ? new THREE.Fog(bg.getHex(), 80, 320)
+        : new THREE.Fog(bg.getHex(), 20, 90);
 
     this.camera = new THREE.PerspectiveCamera(55, 1, 0.1, 500);
     this.camera.position.set(0, 20, 40);
@@ -111,7 +134,9 @@ export class LowfiViewer {
       const surMat = new THREE.MeshBasicMaterial({
         map: surTex,
         side: THREE.DoubleSide,
-        color: 0xb8bdc4,
+        // Cyber ring keeps the same hue and only falls back in luminance. The
+        // old neutral tint created a visible gray seam around the core map.
+        color: this.cyber ? 0x7b8f96 : 0xb8bdc4,
       });
       this.scene.add(new THREE.Mesh(surGeom, surMat));
     }
@@ -129,15 +154,22 @@ export class LowfiViewer {
       const bldMat = new THREE.MeshLambertMaterial({
         vertexColors: true,
         side: THREE.DoubleSide,
+        // Cyber-only floor so shadow-side faces stay readable instead of
+        // crushing to near-black next to the (also dark) terrain.
+        emissive: this.cyber ? 0x152a33 : 0x000000,
       });
       this.scene.add(new THREE.Mesh(bldGeom, bldMat));
+      if (buildingVisual.edges) this.addPrismEdges(buildingVisual.edges);
     }
     if (useMesh) {
       // Lambert needs light for volume; Basic materials (terrain/points) ignore
       // it. Intensities look high because three's physical lighting units make
       // legacy-looking values render dark.
-      this.scene.add(new THREE.HemisphereLight(0xe8eef5, 0x5f676f, 2.6));
-      const sun = new THREE.DirectionalLight(0xffffff, 1.8);
+      const hemi = this.cyber
+        ? new THREE.HemisphereLight(0x80b9cc, 0x071019, 1.35)
+        : new THREE.HemisphereLight(0xe8eef5, 0x5f676f, 2.6);
+      this.scene.add(hemi);
+      const sun = new THREE.DirectionalLight(this.cyber ? 0xa4d9e8 : 0xffffff, this.cyber ? 0.85 : 1.8);
       sun.position.set(40, 70, -30);
       this.scene.add(sun);
     }
@@ -184,6 +216,22 @@ export class LowfiViewer {
     const core = new THREE.Mesh(coreGeom, coreMat);
     this.rigGroup.add(core);
 
+    // Selected drone gets a quiet white outer cage. Its luminance, not another
+    // cyan hue, separates the mission focus from the cyan tactical map.
+    let halo: THREE.Mesh | null = null;
+    if (this.cyber) {
+      const haloMat = new THREE.MeshBasicMaterial({
+        color: 0xe8fbff,
+        wireframe: true,
+        transparent: true,
+        opacity: 0.72,
+        depthWrite: false,
+      });
+      halo = new THREE.Mesh(coreGeom, haloMat);
+      halo.visible = false;
+      this.rigGroup.add(halo);
+    }
+
     const trailPositions = new Float32Array(TRAIL_LENGTH * 3);
     const trailColors = new Float32Array(TRAIL_LENGTH * 4);
     const trailGeom = new THREE.BufferGeometry();
@@ -200,12 +248,13 @@ export class LowfiViewer {
     const trailLine = new THREE.Line(trailGeom, trailMat);
     this.rigGroup.add(trailLine);
 
-    rig = { id: drone.id, core, trailLine, trailGeom, trailPositions, trailColors, trailCount: 0 };
+    rig = { id: drone.id, core, halo, trailLine, trailGeom, trailPositions, trailColors, trailCount: 0 };
     this.rigs.set(drone.id, rig);
     return rig;
   }
 
   /** Streamed building cells pop in as the drone travels (world streamer).
+   *  Same prism look as the core so streamed territory reads first-class.
    *  Same prism look as the core so streamed territory reads first-class. */
   addSurroundBuildings(visual: import('../sources/buildingSource.ts').BuildingVisual): void {
     if (visual.positions.length === 0) return;
@@ -216,8 +265,24 @@ export class LowfiViewer {
     const mat = new THREE.MeshLambertMaterial({
       vertexColors: true,
       side: THREE.DoubleSide,
+      emissive: this.cyber ? 0x152a33 : 0x000000,
     });
     this.scene.add(new THREE.Mesh(geom, mat));
+    if (visual.edges) this.addPrismEdges(visual.edges);
+  }
+
+  /** Restrained tactical linework. Mission objects stay brighter than this. */
+  private addPrismEdges(edges: Float32Array): void {
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.BufferAttribute(edges, 3));
+    const mat = new THREE.LineBasicMaterial({
+      color: 0x7dd8ec,
+      transparent: true,
+      opacity: 0.58,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    this.scene.add(new THREE.LineSegments(geom, mat));
   }
 
   /** Streamed terrain cells (world streamer) — sharper than the coarse ring
@@ -243,6 +308,12 @@ export class LowfiViewer {
     const mat = rig.core.material as THREE.MeshBasicMaterial;
     mat.opacity = isActive ? 1 : 0.65;
     mat.transparent = !isActive;
+    if (rig.halo) {
+      rig.halo.visible = isActive;
+      rig.halo.position.copy(drone.pos);
+      rig.halo.quaternion.copy(drone.quat);
+      rig.halo.scale.setScalar(scale * 1.32);
+    }
 
     // Push a new trail sample every frame (rolling buffer, oldest dropped).
     const count = Math.min(rig.trailCount + 1, TRAIL_LENGTH);

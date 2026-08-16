@@ -248,6 +248,91 @@ function imageryWanted(): boolean {
   return new URLSearchParams(window.location.search).get('tex') !== 'off';
 }
 
+/** `?tex=cyber`: same satellite drape, graded into the SIM's cold tactical
+ *  palette. The map deliberately stays dim so drones and mission overlays own
+ *  the brightest cyan values. */
+export function cyberOn(): boolean {
+  if (typeof window === 'undefined') return false;
+  return new URLSearchParams(window.location.search).get('tex') === 'cyber';
+}
+
+// Luminance → restrained navy/teal ramp. This is a BACKGROUND palette: even
+// the brightest satellite pixels remain below the UI/drone highlight range.
+let CYBER_LUT: Uint8ClampedArray | null = null;
+function cyberLut(): Uint8ClampedArray {
+  if (CYBER_LUT) return CYBER_LUT;
+  const stops: Array<[number, [number, number, number]]> = [
+    [0.0, [4, 9, 18]],
+    [0.38, [8, 27, 42]],
+    [0.7, [15, 57, 72]],
+    [0.9, [30, 87, 104]],
+    [1.0, [58, 126, 142]],
+  ];
+  const lut = new Uint8ClampedArray(256 * 3);
+  for (let i = 0; i < 256; i++) {
+    // Bake the midtone lift into the LUT so streamed cells need only one table
+    // lookup per pixel instead of an expensive Math.pow in the hot loop.
+    const t = Math.pow(i / 255, 0.88);
+    let k = 0;
+    while (k < stops.length - 2 && t > stops[k + 1][0]) k++;
+    const [t0, c0] = stops[k];
+    const [t1, c1] = stops[k + 1];
+    const f = Math.min(1, Math.max(0, (t - t0) / (t1 - t0)));
+    lut[i * 3] = c0[0] + (c1[0] - c0[0]) * f;
+    lut[i * 3 + 1] = c0[1] + (c1[1] - c0[1]) * f;
+    lut[i * 3 + 2] = c0[2] + (c1[2] - c0[2]) * f;
+  }
+  CYBER_LUT = lut;
+  return lut;
+}
+
+/** Regrade the mosaic in place — for the mesh TEXTURE only. The rgba array the
+ *  shared point cloud samples is read before this runs, so point colors (and
+ *  with them the SIM/RECON determinism contract) are untouched. The graticule
+ *  aligns to GLOBAL tile-pixel coords so seams between streamed cells match. */
+function applyCyberGrade(
+  ctx: OffscreenCanvasRenderingContext2D,
+  width: number,
+  height: number,
+  originX: number,
+  originY: number,
+  zoom: number,
+  centerLat: number,
+): void {
+  const img = ctx.getImageData(0, 0, width, height);
+  const d = img.data;
+  const lut = cyberLut();
+  for (let i = 0; i < d.length; i += 4) {
+    const lum = Math.min(255, (d[i] * 54 + d[i + 1] * 183 + d[i + 2] * 19) >> 8);
+    d[i] = lut[lum * 3];
+    d[i + 1] = lut[lum * 3 + 1];
+    d[i + 2] = lut[lum * 3 + 2];
+  }
+  ctx.putImageData(img, 0, 0);
+  const grid = (step: number, style: string): void => {
+    ctx.strokeStyle = style;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let x = (step - (originX % step)) % step; x < width; x += step) {
+      ctx.moveTo(x + 0.5, 0);
+      ctx.lineTo(x + 0.5, height);
+    }
+    for (let y = (step - (originY % step)) % step; y < height; y += step) {
+      ctx.moveTo(0, y + 0.5);
+      ctx.lineTo(width, y + 0.5);
+    }
+    ctx.stroke();
+  };
+  // Keep the graticule stable in REAL distance as imagery zoom changes.
+  // Web Mercator ground resolution at this latitude, metres per pixel.
+  const metresPerPixel =
+    (156543.03392 * Math.cos((centerLat * Math.PI) / 180)) / 2 ** zoom;
+  const minorStep = Math.max(48, Math.round(250 / metresPerPixel));
+  const majorStep = Math.max(minorStep * 2, Math.round(1000 / metresPerPixel));
+  grid(minorStep, 'rgba(92, 190, 208, 0.035)');
+  grid(majorStep, 'rgba(102, 210, 226, 0.085)');
+}
+
 interface ImageryGrid {
   rgba: Uint8ClampedArray;
   width: number;
@@ -307,6 +392,19 @@ async function buildImageryGrid(
 
   // Read pixels BEFORE transferToImageBitmap — the transfer empties the canvas.
   const rgba = new Uint8ClampedArray(ctx.getImageData(0, 0, width, height).data);
+  // Cyber grade applies AFTER the rgba read: point colors stay real (contract),
+  // only the mesh texture is restyled.
+  if (cyberOn()) {
+    applyCyberGrade(
+      ctx,
+      width,
+      height,
+      tx0 * 256,
+      ty0 * 256,
+      zoom,
+      (bbox[1] + bbox[3]) / 2,
+    );
+  }
   const bitmap = canvas.transferToImageBitmap();
   return { rgba, width, height, originX: tx0 * 256, originY: ty0 * 256, zoom, bitmap };
 }

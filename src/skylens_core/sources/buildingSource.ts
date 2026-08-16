@@ -12,6 +12,7 @@
 //   No proxy (prod build) → fetch fails → caller degrades to terrain-only.
 
 import * as THREE from 'three';
+import { cyberOn } from './terrainSource.ts';
 import type { Bbox, TerrainContext } from './terrainSource.ts';
 
 const WFS_PATH = '/vworld/wfs';
@@ -54,6 +55,8 @@ export interface PointPatch {
 export interface BuildingVisual {
   positions: Float32Array;
   colors: Float32Array;
+  /** Restrained roof/base/vertical linework (`?tex=cyber` only). */
+  edges?: Float32Array;
 }
 
 export interface BuildingLayer {
@@ -222,8 +225,13 @@ export async function loadBuildings(
   // renders the prisms.
   const vPos: number[] = [];
   const vCol: number[] = [];
-  const wallC = new THREE.Color(0x9aa2ab).convertSRGBToLinear();
-  const roofC = new THREE.Color(0xdde2e7).convertSRGBToLinear();
+  const vEdge: number[] = [];
+  // `?tex=cyber`: dark hulls + neon roof outlines instead of daylight gray.
+  const cyber = cyberOn();
+  // Pushed above the terrain LUT's own brightness band (peaks ~0x3a7e8e) so
+  // buildings read as foreground volumes instead of blending into the ground.
+  const wallC = new THREE.Color(cyber ? 0x2c4f5e : 0x9aa2ab).convertSRGBToLinear();
+  const roofC = new THREE.Color(cyber ? 0x4f8398 : 0xdde2e7).convertSRGBToLinear();
   const pushTri = (
     ax: number, ay: number, az: number,
     bx: number, by: number, bz: number,
@@ -377,11 +385,21 @@ export async function loadBuildings(
           -(lat - ctx.lat0) * ctx.mPerDegLat * ctx.s,
         ] as [number, number],
     );
+    const verticalStride = Math.max(1, Math.ceil(ringXZ.length / 4));
     for (let i = 0; i < ringXZ.length; i++) {
       const [x1, z1] = ringXZ[i];
       const [x2, z2] = ringXZ[(i + 1) % ringXZ.length];
       pushTri(x1, yb, z1, x2, yb, z2, x2, yt, z2, wallC);
       pushTri(x1, yb, z1, x2, yt, z2, x1, yt, z1, wallC);
+      if (cyber) {
+        // Roof and base establish the volume and keep it visually grounded.
+        vEdge.push(x1, yt, z1, x2, yt, z2);
+        vEdge.push(x1, yb + 0.035, z1, x2, yb + 0.035, z2);
+        // Cap vertical line density on complex footprints. Four-ish uprights
+        // are enough to read height without turning dense city blocks into a
+        // wireframe thicket.
+        if (i % verticalStride === 0) vEdge.push(x1, yb, z1, x1, yt, z1);
+      }
     }
     try {
       const shape = ringXZ.map(([x, z]) => new THREE.Vector2(x, z));
@@ -410,7 +428,11 @@ export async function loadBuildings(
       bounds,
     },
     visual: vPos.length
-      ? { positions: new Float32Array(vPos), colors: new Float32Array(vCol) }
+      ? {
+          positions: new Float32Array(vPos),
+          colors: new Float32Array(vCol),
+          edges: vEdge.length ? new Float32Array(vEdge) : undefined,
+        }
       : null,
   };
 }
