@@ -15,8 +15,9 @@ Caveat: fixed CCTV viewpoint, not aerial. Treat as structural pre-training only
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 import numpy as np
 

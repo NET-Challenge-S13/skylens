@@ -16,14 +16,14 @@ from typing import TYPE_CHECKING, Any
 from .geo import Enu, GeoAnchor, Gps, enu_to_gps, gps_to_enu
 
 if TYPE_CHECKING:
+    from .callbacks import GracefulInterruptCallback, find_resume_checkpoint
+    from .collate import SkyLensCollator
     from .metrics import (
         PointDetectionMetrics,
         SegmentationMetrics,
         build_compute_metrics,
         decode_heatmap_peaks,
     )
-    from .callbacks import GracefulInterruptCallback, find_resume_checkpoint
-    from .collate import SkyLensCollator
     from .trainer import FreezeBackboneCallback, SkyLensTrainer
     from .training_args import SkyLensTrainingArguments
 

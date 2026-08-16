@@ -35,8 +35,9 @@ dropped.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any
 
 import numpy as np
 
@@ -130,7 +131,19 @@ class VisDronePerson(SkyLensDatasetBase):
         base = self.root / self._SPLIT_DIRS[self.split][0]
         return base / "images", base / "annotations"
 
+    #: FiftyOne export (HF 미러 Voxel51/VisDrone2019-DET) 의 어노테이션 파일.
+    _FIFTYONE_MANIFEST = "samples.json"
+    #: FiftyOne 라벨 중 사람으로 취급할 것.
+    _FIFTYONE_PERSON_LABELS = frozenset({"pedestrians", "people"})
+
+    def _fiftyone_manifest(self) -> Path | None:
+        """FiftyOne 배치이면 manifest 경로를, 아니면 None."""
+        p = self.root / self._FIFTYONE_MANIFEST
+        return p if p.is_file() and (self.root / "data").is_dir() else None
+
     def _check_exists(self) -> bool:
+        if self._fiftyone_manifest() is not None:
+            return True
         img, _ = self._dirs()
         return img.is_dir() and any(p.suffix in _IMG_EXT for p in img.iterdir())
 
@@ -147,17 +160,53 @@ class VisDronePerson(SkyLensDatasetBase):
         if not self._check_exists():
             raise ManualDownloadRequired(self.manual_download_message())
 
+    def _build_index_fiftyone(self, manifest: Path) -> Sequence[Any]:
+        """FiftyOne export 를 (이미지경로, xyxy박스) 레코드로 편다.
+
+        bounding_box 는 [x, y, w, h] 정규화 좌표(좌상단 기준)이므로
+        metadata 의 width/height 를 곱해 절대 xyxy 로 바꾼다.
+        스플릿은 sample 의 ``tags`` 로 구분된다.
+        """
+        import json
+
+        with manifest.open(encoding="utf-8") as fh:
+            samples = json.load(fh)["samples"]
+
+        records = []
+        for s in samples:
+            if self.split not in (s.get("tags") or []):
+                continue
+            meta = s.get("metadata") or {}
+            w, h = meta.get("width"), meta.get("height")
+            boxes = []
+            for det in (s.get("ground_truth") or {}).get("detections") or []:
+                if det.get("label") not in self._FIFTYONE_PERSON_LABELS:
+                    continue
+                bb = det.get("bounding_box")
+                if not bb or not w or not h:
+                    continue
+                x, y, bw, bh = bb
+                boxes.append([x * w, y * h, (x + bw) * w, (y + bh) * h])
+            records.append(
+                (self.root / s["filepath"], np.asarray(boxes, dtype=np.float32).reshape(-1, 4))
+            )
+        return records
+
     def _build_index(self) -> Sequence[Any]:
+        manifest = self._fiftyone_manifest()
+        if manifest is not None:
+            return self._build_index_fiftyone(manifest)
         img_dir, ann_dir = self._dirs()
         return [(p, ann_dir / f"{p.stem}.txt")
                 for p in sorted(q for q in img_dir.iterdir() if q.suffix in _IMG_EXT)]
 
     def _load_sample(self, record: Any) -> Sample:
-        img_path, ann_path = record
+        img_path, ann = record
+        boxes = ann if isinstance(ann, np.ndarray) else read_visdrone_annotation(ann)
         return {
             "image": self._read_rgb(img_path),
             "has_rgb": True,
             "has_thermal": False,
             "danger_mask": None,
-            "person_boxes": read_visdrone_annotation(ann_path),
+            "person_boxes": boxes,
         }

@@ -18,17 +18,17 @@ import numpy as np
 import tifffile
 import torch
 
-from skylens_model.utils.collate import SkyLensCollator
 from skylens_model.datasets import (
-    AIResQ,
-    Flame3Pairs,
-    FlameSegmentation,
     LLVIP,
     SARD,
+    AIResQ,
     DangerClass,
+    Flame3Pairs,
+    FlameSegmentation,
     RescueNetSegmentation,
-        VisDronePerson,
+    VisDronePerson,
 )
+from skylens_model.utils.collate import SkyLensCollator
 
 H, W, N = 64, 96, 4
 rng = np.random.default_rng(0)
@@ -104,7 +104,7 @@ def make_llvip(root: Path):
             o = ET.SubElement(ann, "object")
             ET.SubElement(o, "name").text = "person"
             bb = ET.SubElement(o, "bndbox")
-            for k, v in zip(("xmin", "ymin", "xmax", "ymax"), (x, 10, x + 9, 34)):
+            for k, v in zip(("xmin", "ymin", "xmax", "ymax"), (x, 10, x + 9, 34), strict=False):
                 ET.SubElement(bb, k).text = str(v)
         (root / "Annotations").mkdir(parents=True, exist_ok=True)
         ET.ElementTree(ann).write(root / "Annotations" / f"l{i:03d}.xml")
@@ -242,6 +242,11 @@ def main() -> int:
         return 0
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
+
+
+def test_dataset_contracts() -> None:
+    """pytest 진입점 — 계약 검증 전체를 돌린다."""
+    assert main() == 0
 
 
 if __name__ == "__main__":

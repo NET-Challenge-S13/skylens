@@ -11,10 +11,9 @@ Samples come back with ``has_rgb=False, has_thermal=True`` and a single-channel
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Sequence
-
-import numpy as np
+from typing import Any
 
 from .base import Sample, SkyLensDatasetBase
 from .sard import read_yolo_labels
