@@ -122,5 +122,5 @@ res/docs/            # IDEA · ARCHITECTURE · DATASETS
 - `.claude/`, `.omc/`도 git 제외 대상이다.
 - `src/skylens_core/geo.ts` ↔ `src/skylens_model/utils/geo.py`는 **같은 수식의 두 구현**이다. 한쪽만 고치지 말 것.
 - 문서는 한국어로 작성한다. 코드 주석은 기존 파일의 언어(TS는 영어, Python 독스트링은 영어)를 따른다.
-- `res/docs/` 안 문서의 이미지 링크는 `../figures/...` 로 `res/figures/` 디렉터리를 가리킨다 (해당 디렉터리는 아직 저장소에 없음 — 이미지 추가 시 `res/figures/` 생성).
+- `res/docs/` 안 문서의 이미지는 `res/docs/figures/`에 있다.
 - 문서 상단 YAML frontmatter의 `[[...]]` 링크는 Obsidian 위키링크로, 파일명 기반이라 경로 이동과 무관하다.
