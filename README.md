@@ -145,7 +145,7 @@ src/
 │  ├─ recon.ts
 │  ├─ reconview/ reconViewer · splatScene(다중 청크) · splatReveal · reveal · cameraSync
 │  ├─ ui/      overlay · minimap · serverStatus · recon-panels.css
-│  └─ data/    detections.ts
+│  └─ sources/ detections.ts
 └─ skylens_model/       # AI 모델 (Python 스캐폴드)
    ├─ models/   skylens/   # transformers 표준 모델 (config·modeling)
    ├─ datasets/                            # 데이터셋 자리

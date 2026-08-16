@@ -80,7 +80,7 @@ res/docs/DATASETS.md   ──→  src/skylens_model/README.md  ──→  datase
 res/static/          # 정적 html 셸(진입점): index / sim / recon .html → /src 모듈을 절대경로로 로드
 src/
 ├─ skylens_core/     # TS 관제탑(SIM) + 공유 토대. 순수 core(DOM·Three 없음: config·types·store·geo·mode·protocol) + SIM·공유 브라우저 코드(sim.ts, net, server, sources, drones, simview, sim/, 공유 ui, style.css)
-├─ skylens_client/   # TS 지휘관(RECON) 앱: recon.ts, reconview, recon ui, data/detections — **core에 단방향 의존**
+├─ skylens_client/   # TS 지휘관(RECON) 앱: recon.ts, reconview, recon ui, sources/detections — **core에 단방향 의존**
 └─ skylens_model/    # Python AI 모델 패키지: models/(skylensnet 인지 · skylens 3DGS 복원), datasets/, utils/
 src/test/smoke.spec.ts  # Playwright E2E
 res/docs/            # IDEA · ARCHITECTURE · DATASETS
