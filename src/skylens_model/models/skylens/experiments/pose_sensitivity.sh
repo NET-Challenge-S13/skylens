@@ -36,7 +36,7 @@ run_condition() {
   mkdir -p "$work"
   ln -sfn "$IMAGES" "$work/images"
 
-  python3 -m skylens_recon.pose_noise \
+  python3 -m skylens_model.models.skylens.pose_noise \
     --src "$SRC" --dst "$work/sparse/0" \
     --rot-deg "$rot" --trans-ratio "$trans" --seed 42
 

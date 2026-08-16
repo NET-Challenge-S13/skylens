@@ -6,7 +6,7 @@ SkyLens의 AI·복원 모델 코드를 담는 Python 패키지.
    (위험구역 세그멘테이션 / 사람 점 검출). Depth Map 레이캐스팅으로
    2D 탐지를 3D 세계좌표에 투영한다. → `models/skylensnet/`
 2. **Reconstruction** — 3DGS 실시간 3D 복원 (GLOMAP 포즈추정 → gsplat 학습 →
-   Open3D ICP 멀티드론 융합). → `models/skylensgsplat/` (미구현)
+   Open3D ICP 멀티드론 융합). → `models/skylens/` — 구현됨, 해당 README 참조
 
 학습은 루트의 `train.ipynb` 에서 돌린다.
 
@@ -262,7 +262,7 @@ skylens_model/
       README.md         모델 설계 결정 — 구조·입력 규약·학습 전략
       configuration_skylensnet.py
       modeling_skylensnet.py
-    skylensgsplat/    3DGS 복원 (미구현)
+    skylens/          3DGS 복원 (COLMAP → gsplat, 셸 파이프라인 + 도구)
   datasets/
     README.md         데이터셋 API 계약 · 다운로드 판정
     base.py           SkyLensDatasetBase + 통합 스키마 + 다운로드 유틸
