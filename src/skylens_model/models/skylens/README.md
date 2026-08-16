@@ -56,10 +56,15 @@ src/skylens_model/models/skylens/
 │  ├─ 01_extract_frames.sh
 │  ├─ 02_reconstruct.sh
 │  └─ 03_train.sh
-└─ experiments/
-   ├─ pose_sensitivity.sh   # 실험 3 — 포즈 정확도 요구사항
-   └─ formation_sweep.sh    # 실험 4 — 편대 간격 vs 시선각
+├─ experiments/
+│  ├─ pose_sensitivity.sh   # 실험 3 — 포즈 정확도 요구사항
+│  └─ formation_sweep.sh    # 실험 4 — 편대 간격 vs 시선각
+└─ asrun/                   # 실제로 돌린 스크립트 원본 (RESULTS.md 의 정본)
 ```
+
+⚠️ `pipeline/`·`experiments/` 는 `asrun/` 을 저장소용으로 일반화한 것이고,
+**그 형태 그대로 끝까지 돌려본 적은 없다.** 결과를 재현하거나 정확히 무엇을 돌렸는지
+확인해야 하면 [`asrun/`](asrun/README.md) 을 본다.
 
 파이프라인이 파이썬 모듈이 아니라 셸 스크립트인 이유는,
 ffmpeg와 COLMAP이라는 **외부 바이너리를 순서대로 부르는 일**이 본질이기 때문이다.

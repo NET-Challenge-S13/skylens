@@ -88,7 +88,15 @@ fused-ssim = { git = "https://github.com/rahul-goel/fused-ssim", rev = "328dc983
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-extend-exclude = ["node_modules", "dist", "__pycache__", "data", "res"]
+extend-exclude = [
+    "node_modules",
+    "dist",
+    "__pycache__",
+    "data",
+    "res",
+    # 실행된 그대로 보존하는 아카이브 — 린트로 고치면 재현 정본이 아니게 된다.
+    "src/skylens_model/models/skylens/asrun",
+]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
