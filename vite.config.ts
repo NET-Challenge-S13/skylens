@@ -2,23 +2,24 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vite';
 
-// VWorld dev proxy credentials. The key lives OUTSIDE the repo (../.env.vworld)
-// on purpose — never commit it. The proxy injects key+domain server-side so the
-// browser (and the bundle) never sees them. Building layer degrades gracefully
-// when the file is absent (terrain-only scene).
+// VWorld dev proxy credentials. Prefer the key OUTSIDE the repo (../.env.vworld)
+// so it can never be committed, but also accept it at the repo root
+// (.env.vworld) for convenience — .gitignore's `.env.*` rule keeps that ignored
+// too. The proxy injects key+domain server-side so the browser (and the bundle)
+// never see them. The map layer degrades gracefully when no key is found.
 function loadVworld(): { key: string; domain: string } | null {
-  try {
-    const txt = readFileSync(
-      fileURLToPath(new URL('../.env.vworld', import.meta.url)),
-      'utf8',
-    );
-    const key = /^VWORLD_KEY=(.+)$/m.exec(txt)?.[1]?.trim();
-    const domain =
-      /^VWORLD_DOMAIN=(.+)$/m.exec(txt)?.[1]?.trim() ?? 'http://localhost:5173';
-    return key ? { key, domain } : null;
-  } catch {
-    return null;
+  for (const rel of ['../.env.vworld', '.env.vworld']) {
+    try {
+      const txt = readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8');
+      const key = /^VWORLD_KEY=(.+)$/m.exec(txt)?.[1]?.trim();
+      const domain =
+        /^VWORLD_DOMAIN=(.+)$/m.exec(txt)?.[1]?.trim() ?? 'http://localhost:5173';
+      if (key) return { key, domain };
+    } catch {
+      // try the next location
+    }
   }
+  return null;
 }
 const vworld = loadVworld();
 

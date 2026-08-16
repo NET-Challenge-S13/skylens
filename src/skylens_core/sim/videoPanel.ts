@@ -3,6 +3,8 @@
 // a canvas until a real feed is wired up via setSource().
 
 import { state } from '../store.ts';
+import { CONFIG } from '../config.ts';
+import { sceneToGps } from '../geo.ts';
 
 export interface VideoPanel {
   /** Seam for a real feed later: a MediaStream, a video URL, or null to fall
@@ -97,9 +99,14 @@ export function createVideoPanel(container: HTMLElement): VideoPanel {
       return;
     }
     const p = leader.pos;
+    // Show real GPS (lat/lon/alt) instead of raw scene X/Y/Z — convert the
+    // drone's scene position through the shared ENU frame to WGS84.
+    const g = sceneToGps([p.x, p.y, p.z], CONFIG.geo.anchor);
+    const ns = g.lat >= 0 ? 'N' : 'S';
+    const ew = g.lon >= 0 ? 'E' : 'W';
     overlay.textContent =
       `DRONE #${leader.id} · ${leader.mode}  ` +
-      `X${p.x.toFixed(1)} Y${p.y.toFixed(1)} Z${p.z.toFixed(1)}`;
+      `${Math.abs(g.lat).toFixed(5)}°${ns} ${Math.abs(g.lon).toFixed(5)}°${ew} · ${g.alt.toFixed(0)}m`;
   }
 
   raf = requestAnimationFrame(draw);

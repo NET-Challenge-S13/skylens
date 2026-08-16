@@ -55,8 +55,8 @@
 
 .route-modal {
   position: relative;
-  width: min(460px, 92vw);
-  max-height: 82vh;
+  width: min(520px, 94vw);
+  max-height: 88vh;
   overflow: auto;
   background: var(--surface-2);
   border: 1px solid var(--border-hairline);
@@ -289,4 +289,78 @@
   .video-panel__label::before {
     animation: none;
   }
+}
+
+/* --- Route planner: click-to-place map --- */
+.route-modal__hint {
+  font-size: var(--text-sm);
+  color: var(--text-tertiary);
+  margin-bottom: 12px;
+}
+.route-modal__hint.is-warn {
+  color: var(--sim-warn, #ffcc55);
+}
+
+.route-modal__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.route-modal__spans {
+  display: inline-flex;
+  gap: 4px;
+}
+.route-modal__span {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  padding: 5px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-hairline);
+  background: var(--surface-inset);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.route-modal__span:hover {
+  color: var(--text-primary);
+  border-color: var(--border-focus);
+}
+.route-modal__span.is-active {
+  background: var(--sim-ink);
+  color: #0a0f18;
+  border-color: var(--sim-ink);
+}
+
+.route-modal__alt {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.route-modal__alt input[type='range'] {
+  width: 120px;
+  accent-color: var(--sim-ink);
+}
+
+.route-modal__map {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  border: 1px solid var(--border-hairline);
+  margin-bottom: 14px;
+  background: #0d1522;
+}
+.route-modal__canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: crosshair;
 }
