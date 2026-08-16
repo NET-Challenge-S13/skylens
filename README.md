@@ -82,11 +82,43 @@ npm run dev          # LAN 노출 (다른 컴퓨터에서도 접속)
 ### 주요 쿼리 옵션
 `?demo` 자동 데모 · `?room=<이름>` P2P 방 · `?splat=off|light|<url>` 스플랫 자산 · `?reveal=on/off` 스플랫 reveal 마스크 · `?spin=off` 카메라 자동회전 끔 · `?up=<preset|euler>` 스플랫 방향 · `?level=on` PCA 자동 레벨링.
 
+**실지형 지도 옵션** (`?map` 사용 시)
+- `?map` — 실지형 지도 씬 활성화; `?map=uljin|gangneung|서,남,동,북` 으로 씬/영역 선택 가능
+- `?tex=sat|off` — 위성 드레이프 (sat: VWorld 위성영상, off: 없음)
+- `?drone=<n>` — 드론 뷰 스케일 (기본값 0.15)
+- `?ring=off` — 배경 지형 링 비활성화
+- `?bld=off` — 3D 건물 렌더링 비활성화
+
 ---
 
 ## 조작법 (SIM)
 - **경로 계획 모달** — 툴바 `경로 계획 · ROUTE` → GPS 웨이포인트 추가 → **배정**하면 리더가 그 경로를 비행.
 - **방향키 ↑↓←→** 수동 조향(전/후진 + 좌/우 점진 회전), **Q/E** 고도, **1/2/3·Tab** 드론 전환, **Space** 일시정지.
+
+### 실지형 지도 씬 (`?map`)
+
+지형 메시와 건물 3D 모델을 실제 고도·영상·위치 데이터로 렌더하여 현장을 사실적으로 재구성합니다.
+
+- **지형 메시** — AWS Terrain Tiles DEM(한국 약 30m급) 기반 고도 데이터
+- **위성 드레이프** — VWorld WMTS 위성 이미지를 지형 위에 매핑
+- **3D 건물** — VWorld 건물 폴리곤 데이터(WFS lt_c_bldginfo)를 지붕까지 입체 프리즘으로 렌더
+- **월드 스트리밍** — 드론 반경 내 미로드 셀을 가까운 순으로 실시간 로드 · 씬 주변 3배 저해상 배경 지형 링
+
+**기준 씬**: 대전(충남대~카이스트 일대, ~3km, 약 6,191동)
+
+#### VWorld 키 설정
+
+VWorld 위성/건물 데이터는 API 인증 키가 필요합니다. 저장소 **부모 폴더**에 다음 파일을 생성하세요:
+
+```bash
+# 저장소 바로 바깥 디렉터리에서:
+cat > .env.vworld << EOF
+VWORLD_KEY=<vworld.kr에서 발급한 인증키>
+VWORLD_DOMAIN=http://localhost:5173
+EOF
+```
+
+키가 없으면 지형·건물 렌더링 없이 기존 씬만 동작합니다(graceful degradation). Vite dev 프록시에서만 서버측에서 키를 주입하며, 프론트엔드 번들에는 절대 노출되지 않습니다.
 
 ---
 
@@ -145,7 +177,7 @@ tests/smoke.spec.ts     # Playwright E2E
 ---
 
 ## 기술 스택
-**Three.js** · **@mkkellogg/gaussian-splats-3d** · **TypeScript** · **Vite** · **PeerJS/WebRTC** · **Playwright** · **Python**(모델)
+**Three.js** · **@mkkellogg/gaussian-splats-3d** · **TypeScript** · **Vite** · **PeerJS/WebRTC** · **Playwright** · **Python**(모델) · **AWS Terrain Tiles** · **VWorld**(위성/건물)
 
 <div align="center">
 <sub>SkyLens — 재난 현장을 실시간 3D로, 그 위에 AI를 얹다.</sub>

@@ -2,7 +2,7 @@
 // Owns state.drones and advances them each frame: AUTO -> MANUAL -> RETURNING -> AUTO.
 import * as THREE from 'three';
 import { state } from '../store.ts';
-import { CONFIG } from '../config.ts';
+import { CONFIG, droneViewScale } from '../config.ts';
 import { samplePath, pathDuration, dampFactor, easeInOut, clamp } from '../math.ts';
 import { createManualInput } from './manualControl.ts';
 import type { DroneRuntime, DronePath } from '../types';
@@ -60,6 +60,9 @@ export function createDroneController(paths: DronePath[]): DroneController {
   const input = createManualInput();
   const locals = new Map<number, DroneLocal>();
   const pathsById = new Map<number, DronePath>(paths.map((p) => [p.id, p]));
+  // Formation spread scales with the drone view scale — a swarm 9 units wide
+  // around a 0.15-scale drone would scatter offscreen from the close-in camera.
+  const formationScale = droneViewScale();
 
   // Initialize state.drones from the preset paths, one per path, at t=0.
   state.drones = paths.map((path): DroneRuntime => {
@@ -166,9 +169,9 @@ export function createDroneController(paths: DronePath[]): DroneController {
     const off = FORMATION[slot % FORMATION.length];
     const target = leader.pos
       .clone()
-      .addScaledVector(right, off.x)
-      .addScaledVector(WORLD_UP, off.y)
-      .addScaledVector(fwd, off.z);
+      .addScaledVector(right, off.x * formationScale)
+      .addScaledVector(WORLD_UP, off.y * formationScale)
+      .addScaledVector(fwd, off.z * formationScale);
 
     drone.pos.lerp(target, dampFactor(3.5, dt));
     drone.forward.lerp(leader.forward, dampFactor(3.5, dt)).normalize();

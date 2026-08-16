@@ -69,6 +69,8 @@ web_modules/
 .env
 .env.*
 !.env.example
+# VWorld 키 템플릿(값 없음). 실제 ../.env.vworld 는 위 .env.* 규칙으로 무시된다.
+!.env.vworld.example
 
 # parcel-bundler cache (https://parceljs.org/)
 .cache
