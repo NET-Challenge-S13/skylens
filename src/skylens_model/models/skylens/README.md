@@ -42,10 +42,11 @@
 ## 2. 구조
 
 ```
-skylens_recon/
+src/skylens_model/models/skylens/
 ├─ README.md            # 이 문서 — 설계 결정과 근거
-├─ INSTALL.md           # COLMAP·gsplat 설치, 밟았던 함정 7건
+├─ INSTALL.md           # COLMAP·gsplat 설치, 밟았던 함정 10건
 ├─ RESULTS.md           # 실험 5건 측정값 전체
+├─ __init__.py
 ├─ colmap_io.py         # COLMAP 바이너리 모델 읽기/쓰기 (공용)
 ├─ ckpt_to_ply.py       # 체크포인트 → 표준 3DGS PLY
 ├─ subset_model.py      # 촬영본 단위로 모델 부분집합 추출
@@ -60,9 +61,25 @@ skylens_recon/
    └─ formation_sweep.sh    # 실험 4 — 편대 간격 vs 시선각
 ```
 
-파이프라인이 파이썬 패키지가 아니라 셸 스크립트인 이유는,
+파이프라인이 파이썬 모듈이 아니라 셸 스크립트인 이유는,
 ffmpeg와 COLMAP이라는 **외부 바이너리를 순서대로 부르는 일**이 본질이기 때문이다.
 파이썬은 그 스크립트가 호출하는 도구들만 담당한다.
+
+### 형제 패키지 `skylensnet` 과의 차이
+
+같은 `models/` 아래 있지만 성격이 다르다.
+`skylensnet` 은 가중치를 학습해 두고 추론하는 신경망이라
+`configuration_*.py` / `modeling_*.py` 구조를 따르지만,
+3DGS 는 **장면마다 처음부터 도는 최적화**라 사전학습 체크포인트가 없다 (§1).
+그래서 여기에는 모델 클래스가 없고 파이프라인과 도구만 있다.
+
+파이썬 도구는 모듈로 실행한다.
+
+```bash
+python3 -m skylens_model.models.skylens.ckpt_to_ply --ckpt ... --out ... --light
+python3 -m skylens_model.models.skylens.subset_model --src ... --dst ... --keep cam2037
+python3 -m skylens_model.models.skylens.pose_noise  --src ... --dst ... --rot-deg 0.3
+```
 
 ### 실행
 
@@ -70,7 +87,7 @@ ffmpeg와 COLMAP이라는 **외부 바이너리를 순서대로 부르는 일**�
 export SKYLENS_WORK=~/skylens-work          # 산출물 위치 (저장소 바깥)
 export GSPLAT_EXAMPLES=~/gsplat/examples    # gsplat 체크아웃
 
-cd src/skylens_recon/pipeline
+cd src/skylens_model/models/skylens/pipeline
 ./01_extract_frames.sh corridor IMG_2037.MP4:135 IMG_2038.MP4:270 IMG_2039.MP4:135
 ./02_reconstruct.sh corridor
 ./03_train.sh corridor 30000

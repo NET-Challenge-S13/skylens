@@ -47,7 +47,7 @@ run_condition() {
   mkdir -p "$work"
   ln -sfn "$IMAGES" "$work/images"
 
-  python3 -m skylens_recon.subset_model --src "$SRC" --dst "$work/sparse/0" --keep "$@"
+  python3 -m skylens_model.models.skylens.subset_model --src "$SRC" --dst "$work/sparse/0" --keep "$@"
 
   ( cd "$GSPLAT_EXAMPLES" && python3 simple_trainer.py default \
       --data_dir "$work" --result_dir "$out" \

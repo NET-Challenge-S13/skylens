@@ -35,9 +35,9 @@ SkyLens는 **멀티드론 영상을 실시간 3D(Gaussian Splatting)로 복원�
 | `res/docs/ARCHITECTURE.md` | **통합 아키텍처(무엇을)**. 3대 설계 원칙, 4-Tier 구성(캡처/전송/Core HPC/Edge·클라이언트), 데이터 플로우, **§3-A AI 모델·융합 파이프라인**(UNet 4채널, Depth Map 레이캐스팅, Hybrid Fusion, 기술 선택 배제 근거) |
 | `res/docs/DATASETS.md` | **학습 데이터셋 조사**. "RGB+열 페어 + 재난 + 사람 + 위험구역"을 모두 가진 공개 데이터는 없다는 결론과, A(4채널 정합)/B(위험구역 세그)/C(사람 인스턴스) 3축 조합 권장. FLAME 3, RescueNet, SARD, AIResQ, LLVIP, VisDrone 등 |
 | `src/skylens_model/README.md` | **AI 모델 설계 철학의 단일 출처(어떻게)**. 레이어 분리 원칙(탐지/투영/랜드마크 융합/소리 보정), UNet 채택·TransUNet 보류 근거, 단일 백본+이중 헤드, modality dropout, 점 검출 헤드, 헤드별 분리 학습, 배제한 대안 표. **결정과 그 근거**를 기록 |
-| `src/skylens_recon/README.md` | **3DGS 복원 설계의 단일 출처**. 파이프라인 3단계(프레임 추출 → COLMAP SfM → gsplat 학습), 특징점을 ALIKED로 정한 근거, 전수매칭이 필요한 이유, 내부 파라미터 명시 + 자기보정 조합, 점진적 출력(30초 첫 화면), PLY 경량판. **촬영 가이드**(포즈 정확도 요구·편대 배치·드론 자동비행 가능 범위)와 증분 복원 가능 여부 결론 |
-| `src/skylens_recon/RESULTS.md` | 위 결정들의 **측정 근거**. 실험 5건 · 학습 조건 28개 수치 전체. 판정이 보류된 실험은 그 이유까지 명시 |
-| `src/skylens_recon/INSTALL.md` | COLMAP(CUDA 빌드)·gsplat 설치 절차, `recon` 의존성 그룹에서 뺀 항목과 이유, **밟았던 함정 10건** |
+| `src/skylens_model/models/skylens/README.md` | **3DGS 복원 설계의 단일 출처**. 파이프라인 3단계(프레임 추출 → COLMAP SfM → gsplat 학습), 특징점을 ALIKED로 정한 근거, 전수매칭이 필요한 이유, 내부 파라미터 명시 + 자기보정 조합, 점진적 출력(30초 첫 화면), PLY 경량판. **촬영 가이드**(포즈 정확도 요구·편대 배치·드론 자동비행 가능 범위)와 증분 복원 가능 여부 결론 |
+| `src/skylens_model/models/skylens/RESULTS.md` | 위 결정들의 **측정 근거**. 실험 5건 · 학습 조건 28개 수치 전체. 판정이 보류된 실험은 그 이유까지 명시 |
+| `src/skylens_model/models/skylens/INSTALL.md` | COLMAP(CUDA 빌드)·gsplat 설치 절차, `recon` 의존성 그룹에서 뺀 항목과 이유, **밟았던 함정 10건** |
 | `src/skylens_model/datasets/README.md` | 데이터셋 **API 계약**(`__getitem__` 반환 dict, `None`은 정상값), 통합 클래스 스키마(0 normal / 1 fire / 2 collapse / 3 road_blocked / 255 ignore), RescueNet·VisDrone 매핑, 자동 다운로드 가능 여부 판정 |
 | `src/skylens_model/utils/README.md` | `geo.py`가 `src/skylens_core/geo.ts`의 순수 파이썬 미러라는 사실 — **두 파일은 수치적으로 동기 유지** |
 | `train.ipynb` (루트) | 데이터셋 → 학습 → 추론 결과를 마커 좌표로 흘려보내는 학습 노트북 |
@@ -69,7 +69,7 @@ res/docs/DATASETS.md   ──→  src/skylens_model/README.md  ──→  datase
 | 학습 노트북 / 학습 루프 | `src/skylens_model/README.md` §6(학습 전략) → `train.ipynb` |
 | 데모·뷰어(SIM/RECON) UI·연출 작업 | **`PROJECT.md`** → `README.md` |
 | 좌표계·GPS 관련 | `README.md` 좌표계 절 → `src/skylens_core/geo.ts` + `src/skylens_model/utils/geo.py` (둘 다 고칠 것) |
-| 3DGS 복원·촬영 계획 (`src/skylens_recon`) | **`src/skylens_recon/README.md` 필독** → `RESULTS.md`(수치) → `INSTALL.md`(환경) |
+| 3DGS 복원·촬영 계획 (`src/skylens_model/models/skylens`) | **`src/skylens_model/models/skylens/README.md` 필독** → `RESULTS.md`(수치) → `INSTALL.md`(환경) |
 | 기획 문구·발표 자료 | `res/docs/IDEA.md` → `res/docs/ARCHITECTURE.md` |
 
 ---
@@ -81,8 +81,7 @@ res/static/          # 정적 html 셸(진입점): index / sim / recon .html →
 src/
 ├─ skylens_core/     # TS 관제탑(SIM) + 공유 토대. 순수 core(DOM·Three 없음: config·types·store·geo·mode·protocol) + SIM·공유 브라우저 코드(sim.ts, net, server, data, drones, simview, sim/, 공유 ui, style.css)
 ├─ skylens_client/   # TS 지휘관(RECON) 앱: recon.ts, reconview, recon ui, data/detections — **core에 단방향 의존**
-├─ skylens_model/    # Python AI 모델 패키지: models/, datasets/, utils/
-└─ skylens_recon/    # Python 3DGS 복원: pipeline/(셸 3단계) + COLMAP 모델 도구 + experiments/
+└─ skylens_model/    # Python AI 모델 패키지: models/(skylensnet 인지 · skylens 3DGS 복원), datasets/, utils/
 src/test/smoke.spec.ts  # Playwright E2E
 res/docs/            # IDEA · ARCHITECTURE · DATASETS
 ```

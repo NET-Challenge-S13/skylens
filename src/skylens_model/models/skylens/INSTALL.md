@@ -130,5 +130,5 @@ pip install --no-build-isolation -e .
 ```bash
 python3 -c "import gsplat, torch; print(gsplat.__version__, torch.cuda.is_available())"
 colmap feature_extractor --help | grep -c ALIKED     # 0이면 CUDA 빌드가 아니다
-python3 -c "from skylens_recon import colmap_io; print('ok')"
+python3 -c "from skylens_model.models.skylens import colmap_io; print('ok')"
 ```

@@ -1,4 +1,4 @@
-"""SkyLens 모델 패키지 — `skylensnet`(인지) · `skylensgsplat`(3DGS 복원). 심볼은 지연 로딩한다."""
+"""SkyLens 모델 패키지 — `skylensnet`(인지) · `skylens`(3DGS 복원). 심볼은 지연 로딩한다."""
 
 from __future__ import annotations
 

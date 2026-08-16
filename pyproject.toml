@@ -38,9 +38,9 @@ dev = [
     { include-group = "train" },
     { include-group = "notebook" },
 ]
-# 3DGS 복원 (src/skylens_recon). 기본 설치에 넣지 않는다 — gsplat 과 fused-ssim 이
+# 3DGS 복원 (src/skylens_model/models/skylens). 기본 설치에 넣지 않는다 — gsplat 과 fused-ssim 이
 # CUDA 툴체인을 요구해서, 복원 작업을 하지 않는 사람이 `uv sync` 에서 막히면 안 된다.
-# 설치: `uv sync --group recon` · 자세한 절차는 src/skylens_recon/INSTALL.md
+# 설치: `uv sync --group recon` · 자세한 절차는 src/skylens_model/models/skylens/INSTALL.md
 #
 # 여기 없는 것들은 일부러 뺐다:
 #   torch/torchvision/numpy/tqdm/requests  최상위 dependencies 에 이미 있음
