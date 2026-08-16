@@ -16,6 +16,10 @@ import { SplatLoader } from '@mkkellogg/gaussian-splats-3d';
 import { CONFIG } from '../../skylens_core/config.ts';
 import { buildSceneData } from './sceneData.ts';
 import type { SceneData } from './sceneData.ts';
+import { loadTerrainScene, resolveMapSpec } from './terrainSource.ts';
+import type { TerrainVisual, TerrainContext, Bbox } from './terrainSource.ts';
+import { loadBuildings } from './buildingSource.ts';
+import type { PointPatch, BuildingVisual } from './buildingSource.ts';
 
 /**
  * Resolve which splat URL to load from `?splat=` + config. Both SIM and RECON
@@ -48,6 +52,17 @@ export interface LoadedScene {
   data: SceneData;
   /** Non-null when the real splat should be rendered (RECON); null on fallback. */
   splat: SplatTransform | null;
+  /** Textured DEM surface for map scenes (SIM `?tex=sat` renders it as a mesh). */
+  terrainVisual?: TerrainVisual;
+  /** Points [0, terrainPointCount) are terrain; the rest are buildings. */
+  terrainPointCount?: number;
+  /** Extruded building prisms for map scenes (SIM `?tex=sat` display-only). */
+  buildingVisual?: BuildingVisual;
+  /** Low-res backdrop terrain around the sim area (display-only). */
+  surroundVisual?: TerrainVisual;
+  /** Present when the SIM should run the world streamer: drone-position-driven
+   *  loading of surrounding terrain + building cells (display-only). */
+  streamSeed?: { coreBbox: Bbox; ctx: TerrainContext };
 }
 
 /** Longest world-space dimension we fit the scene into (matches the old footprint). */
@@ -176,7 +191,82 @@ export interface LoadSceneOptions {
   onProgress?: (percent: number) => void;
 }
 
+/** Point budgets in map mode — together they respect the 120k contract. */
+const TERRAIN_POINT_SHARE = 104_000;
+// 24k ≈ 4 anchor+wall+roof points per building even in city scenes (~6k
+// footprints in the daejeon preset) — below this, blocks read as floating.
+const BUILDING_POINT_BUDGET = 24_000;
+
+/** `?bld=off` disables the VWorld building layer (dev-proxy dependent). */
+function buildingsWanted(): boolean {
+  if (typeof window === 'undefined') return false;
+  return new URLSearchParams(window.location.search).get('bld') !== 'off';
+}
+
+/** The world streamer runs only in the textured SIM view. */
+function satModeOn(): boolean {
+  if (typeof window === 'undefined') return false;
+  return new URLSearchParams(window.location.search).get('tex') === 'sat';
+}
+
+/** Append a point patch (e.g., buildings) onto a base scene cloud. */
+function mergePatch(base: SceneData, patch: PointPatch): SceneData {
+  if (patch.count === 0) return base;
+  const positions = new Float32Array(base.positions.length + patch.positions.length);
+  positions.set(base.positions, 0);
+  positions.set(patch.positions, base.positions.length);
+  const colors = new Float32Array(base.colors.length + patch.colors.length);
+  colors.set(base.colors, 0);
+  colors.set(patch.colors, base.colors.length);
+  const bounds = base.bounds.clone().union(patch.bounds);
+  return { positions, colors, count: base.count + patch.count, bounds, groundY: base.groundY };
+}
+
 export async function loadScene(opts: LoadSceneOptions): Promise<LoadedScene> {
+  // Real-world terrain mode (?map=…): DEM tiles instead of a splat. Same
+  // deterministic pipeline on both computers → identical clouds (§1). No splat
+  // exists for these scenes, so RECON falls back to its reveal cloud.
+  const mapSpec = resolveMapSpec();
+  if (mapSpec) {
+    try {
+      const wantBld = buildingsWanted();
+      const terrain = await loadTerrainScene(
+        mapSpec,
+        opts.onProgress,
+        wantBld ? TERRAIN_POINT_SHARE : undefined,
+      );
+      let data = terrain.data;
+      const terrainPointCount = terrain.data.count;
+      let buildingVisual: BuildingVisual | undefined;
+      if (wantBld) {
+        // Building layer is best-effort: VWorld is proxy-only (no CORS), so a
+        // missing proxy/key or API hiccup degrades to terrain-only — never a
+        // broken scene during a demo.
+        try {
+          const bld = await loadBuildings(mapSpec, terrain.ctx, BUILDING_POINT_BUDGET);
+          data = mergePatch(data, bld.points);
+          buildingVisual = bld.visual ?? undefined;
+        } catch (err) {
+          console.warn('[buildings] layer unavailable — terrain-only scene:', err);
+        }
+      }
+      return {
+        data,
+        splat: null,
+        terrainVisual: terrain.visual,
+        terrainPointCount,
+        buildingVisual,
+        surroundVisual: terrain.surround,
+        // World streamer (SIM only): surrounding cells load as the drone moves.
+        streamSeed:
+          wantBld && buildingVisual && satModeOn()
+            ? { coreBbox: mapSpec, ctx: terrain.ctx }
+            : undefined,
+      };
+    } catch {
+      return fallback();
+    }
+  }
   if (!opts.url) return fallback();
   try {
     const buffer = await SplatLoader.loadFromURL(

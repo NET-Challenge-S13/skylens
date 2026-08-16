@@ -18,8 +18,13 @@ export function buildDronePaths(bounds: THREE.Box3): DronePath[] {
   const size = new THREE.Vector3();
   bounds.getSize(size);
   const minX = bounds.min.x;
-  const minZ = bounds.min.z;
-  const maxZ = bounds.max.z;
+  // Catmull-Rom turns swing PAST the leg ends by 12.5% of the leg span (the
+  // uniform spline's corner overshoot; measured z=-27.5 on a ±22 scene). Inset
+  // the sweep by 10% per side so the swing lands ON the map edge, not beyond —
+  // off-map excursions are glaring from the close-in map camera.
+  const inset = size.z * 0.1;
+  const minZ = bounds.min.z + inset;
+  const maxZ = bounds.max.z - inset;
 
   // Constant scan altitude above the scene top.
   const flightY = bounds.max.y + THREE.MathUtils.clamp(size.y * 0.15, 2, 8);
