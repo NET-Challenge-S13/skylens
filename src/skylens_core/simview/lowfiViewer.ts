@@ -206,9 +206,11 @@ export class LowfiViewer {
   }
 
   /** Streamed building cells pop in as the drone travels (world streamer).
-   *  Same prism look as the core so streamed territory reads first-class. */
-  addSurroundBuildings(visual: import('../sources/buildingSource.ts').BuildingVisual): void {
-    if (visual.positions.length === 0) return;
+   *  Same prism look as the core so streamed territory reads first-class.
+   *  Returns a disposer so the streamer can evict cells that fall far behind
+   *  (unbounded flight range — see streamSource.ts). */
+  addSurroundBuildings(visual: import('../sources/buildingSource.ts').BuildingVisual): () => void {
+    if (visual.positions.length === 0) return () => {};
     const geom = new THREE.BufferGeometry();
     geom.setAttribute('position', new THREE.BufferAttribute(visual.positions, 3));
     geom.setAttribute('color', new THREE.BufferAttribute(visual.colors, 3));
@@ -217,12 +219,19 @@ export class LowfiViewer {
       vertexColors: true,
       side: THREE.DoubleSide,
     });
-    this.scene.add(new THREE.Mesh(geom, mat));
+    const mesh = new THREE.Mesh(geom, mat);
+    this.scene.add(mesh);
+    return () => {
+      this.scene.remove(mesh);
+      geom.dispose();
+      mat.dispose();
+    };
   }
 
   /** Streamed terrain cells (world streamer) — sharper than the coarse ring
-   *  they cover, so streamed territory looks like the core scene. */
-  addStreamedTerrain(visual: import('../sources/terrainSource.ts').TerrainVisual): void {
+   *  they cover, so streamed territory looks like the core scene. Returns a
+   *  disposer so the streamer can evict cells that fall far behind. */
+  addStreamedTerrain(visual: import('../sources/terrainSource.ts').TerrainVisual): () => void {
     const geom = new THREE.BufferGeometry();
     geom.setAttribute('position', new THREE.BufferAttribute(visual.positions, 3));
     geom.setAttribute('uv', new THREE.BufferAttribute(visual.uvs, 2));
@@ -232,7 +241,14 @@ export class LowfiViewer {
     tex.colorSpace = THREE.SRGBColorSpace;
     tex.needsUpdate = true;
     const mat = new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide });
-    this.scene.add(new THREE.Mesh(geom, mat));
+    const mesh = new THREE.Mesh(geom, mat);
+    this.scene.add(mesh);
+    return () => {
+      this.scene.remove(mesh);
+      geom.dispose();
+      mat.dispose();
+      tex.dispose();
+    };
   }
 
   private updateRig(rig: DroneRig, drone: DroneRuntime, isActive: boolean): void {
