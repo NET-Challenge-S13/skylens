@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 from .geo import Enu, GeoAnchor, Gps, enu_to_gps, gps_to_enu
 
 if TYPE_CHECKING:
+    from .cache import ResizedCache, build_resized_cache, resize_sample
     from .callbacks import GracefulInterruptCallback, find_resume_checkpoint
     from .collate import SkyLensCollator
     from .metrics import (
@@ -42,6 +43,9 @@ __all__ = [
     "GracefulInterruptCallback",
     "find_resume_checkpoint",
     "SkyLensCollator",
+    "ResizedCache",
+    "build_resized_cache",
+    "resize_sample",
     # metrics
     "decode_heatmap_peaks",
     "SegmentationMetrics",
@@ -56,6 +60,9 @@ _LAZY: dict[str, str] = {
     "GracefulInterruptCallback": ".callbacks",
     "find_resume_checkpoint": ".callbacks",
     "SkyLensCollator": ".collate",
+    "ResizedCache": ".cache",
+    "build_resized_cache": ".cache",
+    "resize_sample": ".cache",
     "decode_heatmap_peaks": ".metrics",
     "SegmentationMetrics": ".metrics",
     "PointDetectionMetrics": ".metrics",
