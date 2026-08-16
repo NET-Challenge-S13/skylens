@@ -151,7 +151,7 @@ src/
    ├─ datasets/                            # 데이터셋 자리
    └─ utils/geo.py                         # ENU 수식 미러 (TS와 동기)
 
-tests/smoke.spec.ts     # Playwright E2E
+src/test/smoke.spec.ts     # Playwright E2E
 ```
 
 ---

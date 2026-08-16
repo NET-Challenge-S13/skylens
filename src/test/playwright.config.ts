@@ -29,8 +29,8 @@ export default defineConfig({
   ],
   webServer: {
     command: 'npm run dev',
-    // Run the dev server from the repo root (this config is in tests/).
-    cwd: '..',
+    // Run the dev server from the repo root (this config is in src/test/).
+    cwd: '../..',
     // The entry html live under res/static, so `/` returns 404 — poll a real page
     // (Playwright treats 404 as "not ready" and would time out on `/`).
     url: 'http://localhost:5173/res/static/index.html',
