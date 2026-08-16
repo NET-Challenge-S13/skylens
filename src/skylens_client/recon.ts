@@ -23,7 +23,7 @@ import { gpsToScene } from '../skylens_core/geo.ts';
 import { IDENTITY_ALIGN } from '../skylens_core/protocol.ts';
 import type { DetectionRuntime } from '../skylens_core/types.ts';
 import { loadScene, resolveSplatUrl } from '../skylens_core/data/sceneSource.ts';
-import { ReconViewer } from './viewer2/reconViewer.ts';
+import { ReconViewer } from './reconview/reconViewer.ts';
 import { initUI } from './ui/overlay.ts';
 import { createTransport } from '../skylens_core/net/peer.ts';
 import { applyState } from '../skylens_core/protocol.ts';
@@ -52,7 +52,7 @@ async function main(): Promise<void> {
   // (to check the fit/camera independently of the splat renderer).
   const renderPoints = new URLSearchParams(window.location.search).get('render') === 'points';
 
-  const recon = new ReconViewer(getCanvas('view2'), loaded.data, !!loaded.splat && !renderPoints);
+  const recon = new ReconViewer(getCanvas('recon-view'), loaded.data, !!loaded.splat && !renderPoints);
   const ui = initUI();
 
   // ?reveal=on|off overrides the splat reveal MASK (default from CONFIG.reveal.splatMask).

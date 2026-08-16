@@ -20,7 +20,7 @@ import { startWorldStream } from './data/streamSource.ts';
 import { buildDronePaths } from './data/paths.ts';
 import { buildIdlePaths, buildRouteFromGps } from './data/routes.ts';
 import { createDroneController } from './drones/pathFollower.ts';
-import { LowfiViewer } from './viewer1/lowfiViewer.ts';
+import { LowfiViewer } from './simview/lowfiViewer.ts';
 import { createTransport } from './net/peer.ts';
 import { encodeState } from './protocol.ts';
 import { roomFromQuery, mountNetBadge } from './net/statusUi.ts';
@@ -49,7 +49,7 @@ async function main(): Promise<void> {
   const paths = demo ? buildDronePaths(loaded.data.bounds) : buildIdlePaths();
   const drones = createDroneController(paths);
   const lowfi = new LowfiViewer(
-    getCanvas('view1'),
+    getCanvas('sim-view'),
     loaded.data,
     loaded.terrainVisual,
     loaded.terrainPointCount,
