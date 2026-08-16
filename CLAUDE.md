@@ -15,6 +15,12 @@ SkyLens는 **멀티드론 영상을 실시간 3D(Gaussian Splatting)로 복원�
 >
 > 커밋 메시지는 사람이 쓴 것처럼 변경 내용만 담는다. 기존 히스토리 스타일(`feat:`, `fix:`, `docs:`, `test:` 접두사)을 따른다.
 
+> **커밋 메시지는 영어로 쓴다.**
+>
+> - 제목·본문 모두 **한글 금지**. `feat: 경로계획 클릭 지도` (X) → `feat: click-to-plan route on map` (O)
+> - 명령형 현재시제(`add`, `fix`, `move`), 제목은 소문자로 시작하고 마침표 없이.
+> - 문서(`.md`) 본문은 계속 한국어로 쓴다 — 이 규칙은 **커밋 메시지에만** 적용된다.
+
 또한 **요청받지 않았으면 커밋하지 않는다.**
 
 ---
@@ -69,8 +75,8 @@ res/docs/DATASETS.md   ──→  src/skylens_model/README.md  ──→  datase
 ```
 res/static/          # 정적 html 셸(진입점): index / sim / recon .html → /src 모듈을 절대경로로 로드
 src/
-├─ skylens_core/     # TS 관제탑(SIM) + 공유 토대. 순수 core(DOM·Three 없음: config·types·store·geo·mode·protocol) + SIM·공유 브라우저 코드(sim.ts, net, server, data, drones, viewer1, sim/, 공유 ui, style.css)
-├─ skylens_client/   # TS 지휘관(RECON) 앱: recon.ts, viewer2, recon ui, data/detections — **core에 단방향 의존**
+├─ skylens_core/     # TS 관제탑(SIM) + 공유 토대. 순수 core(DOM·Three 없음: config·types·store·geo·mode·protocol) + SIM·공유 브라우저 코드(sim.ts, net, server, data, drones, simview, sim/, 공유 ui, style.css)
+├─ skylens_client/   # TS 지휘관(RECON) 앱: recon.ts, reconview, recon ui, data/detections — **core에 단방향 의존**
 └─ skylens_model/    # Python AI 모델 패키지: models/, datasets/, utils/
 tests/smoke.spec.ts  # Playwright E2E
 res/docs/            # IDEA · ARCHITECTURE · DATASETS

@@ -139,11 +139,11 @@ src/
 │  ├─ data/    sceneSource.ts · routes.ts(GPS경로) · paths.ts(데모) · sceneData.ts
 │  ├─ drones/  pathFollower.ts (리더 경로 + 군집) · manualControl.ts
 │  ├─ sim/     routeModal.ts · videoPanel.ts · sim.css
-│  ├─ viewer1/ lowfiViewer.ts             # SIM 관제 3D 뷰
+│  ├─ simview/ lowfiViewer.ts             # SIM 관제 3D 뷰
 │  └─ ui/      loadingScreen · toast      # 공유 UI
 ├─ skylens_client/      # 지휘관(RECON) — 서버 구동 3D 복원 상황판
 │  ├─ recon.ts
-│  ├─ viewer2/ reconViewer · splatScene(다중 청크) · splatReveal · reveal · cameraSync
+│  ├─ reconview/ reconViewer · splatScene(다중 청크) · splatReveal · reveal · cameraSync
 │  ├─ ui/      overlay · minimap · serverStatus · recon-panels.css
 │  └─ data/    detections.ts
 └─ skylens_model/       # AI 모델 (Python 스캐폴드)
