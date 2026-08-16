@@ -114,6 +114,7 @@ splat하고, 반경은 CornerNet `gaussian_radius`(세 경우의 최소근), 겹
 | **SARD** | 계정필요 | Kaggle / Roboflow Universe 미러 | 공식 직접 URL 없음. **HF에는 미러 없음(확인함)** — `?search=SARD` 결과는 전부 동명이인(SW 취약점 SARD, 사르데냐어 등). Kaggle API 토큰(`~/.kaggle/kaggle.json`) 또는 Roboflow API 키 필요. slug는 `SARD.kaggle_slug`로 주입 |
 | **VisDrone** | 계정필요 | [GitHub](https://github.com/VisDrone/VisDrone-Dataset) + HF 미러 | 공식은 Google Drive/OneDrive라 wget 불가. **HF 미러 `Voxel51/VisDrone2019-DET` 존재 확인함** → `download=True` 자동화 가능. 단 FiftyOne 포맷이라 배치 재정리 필요 |
 | **LLVIP** | **자동** | HF `jsonhash/LLVIP` | **확인함**: public·non-gated, `LLVIP.zip`(~4GB) + `coco_annotations.7z`. `huggingface_hub`로 받아진다. 단 repo가 단일 zip이라 압축 해제는 별도. 공식 페이지는 Drive/Baidu라 불가 |
+| **Fire Segmentation** | **자동** | HF `sreeharivp23/fire-segmentation-dataset` | public·non-gated. YOLO-seg 폴리곤(1,146 train / 202 val, 단일 클래스 `fire`). Xet 백엔드라 429가 잦아 `HF_HUB_DISABLE_XET=1`로 우회한다 |
 | **AIResQ** | 계정필요 | [Sci Data 논문](https://www.nature.com/articles/s41597-026-07663-9)의 Data Records DOI | DOI가 Zenodo/Figshare로 풀리면 **직접 URL로 자동 가능**. 해당 URL을 `AIResQ.direct_url`에 넣으면 `download=True` 동작 |
 | **KAIST Multispectral** | 계정필요 | [프로젝트 페이지](https://soonminhwang.github.io/rgbt-ped-detection/) | Drive/FTP 배포. 로더 미구현 |
 | **AIDER** | 계정필요 | [GitHub (ckyrkou)](https://github.com/ckyrkou/AIDER) | Drive 배포. 분류 라벨뿐이라 세그 헤드에 못 씀 → 로더 미구현 |
@@ -148,6 +149,7 @@ repo 존재·gated 여부를 확인했다. 위 표에서 "확인함"이라고 �
 |---|---|---|---|---|
 | `FlameSegmentation` | `flame.py` | 세그 | RGB | `danger_mask` {0,1} |
 | `Flame3Pairs` | `flame.py` | (검증용) | **RGB+thermal** | 4채널 `image` |
+| `FireSegmentation` | `fireseg.py` | 세그 | RGB | `danger_mask` {0,1} |
 | `RescueNetSegmentation` | `rescuenet.py` | 세그 | RGB | `danger_mask` {0,2,3,255} |
 | `SARD` | `sard.py` | 점 검출 | RGB | `person_boxes` |
 | `VisDronePerson` | `visdrone.py` | 점 검출(워밍업) | RGB | `person_boxes` |

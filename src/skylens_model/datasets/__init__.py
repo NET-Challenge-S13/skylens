@@ -16,6 +16,7 @@ from .base import (
     download_kaggle,
     download_url,
 )
+from .fireseg import FireSegmentation
 from .flame import Flame3Pairs, FlameSegmentation
 from .llvip import LLVIP
 from .rescuenet import RESCUENET_CLASSES, RESCUENET_TO_SKYLENS, RescueNetSegmentation
@@ -35,6 +36,7 @@ __all__ = [
     "download_kaggle",
     "download_and_extract",
     "AIResQ",
+    "FireSegmentation",
     "FlameSegmentation",
     "Flame3Pairs",
     "LLVIP",
