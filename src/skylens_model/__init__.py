@@ -28,11 +28,11 @@ __version__ = "0.1.0"
 # 이름 -> 실제 정의된 서브모듈 경로
 _LAZY_EXPORTS: dict[str, str] = {
     # models
-    "SkyLensConfig": "skylens_model.models.skylens",
-    "SkyLensModel": "skylens_model.models.skylens",
-    "SkyLensPreTrainedModel": "skylens_model.models.skylens",
-    "SkyLensForDisasterPerception": "skylens_model.models.skylens",
-    "SkyLensOutput": "skylens_model.models.skylens",
+    "SkyLensConfig": "skylens_model.models.skylensnet",
+    "SkyLensModel": "skylens_model.models.skylensnet",
+    "SkyLensPreTrainedModel": "skylens_model.models.skylensnet",
+    "SkyLensForDisasterPerception": "skylens_model.models.skylensnet",
+    "SkyLensOutput": "skylens_model.models.skylensnet",
     # utils
     "SkyLensTrainer": "skylens_model.utils.trainer",
     "SkyLensTrainingArguments": "skylens_model.utils.training_args",
@@ -56,13 +56,13 @@ def __dir__() -> list[str]:
 
 
 if TYPE_CHECKING:  # 정적 분석기용 — 런타임에는 실행되지 않는다
-    from skylens_model.utils.collate import SkyLensCollator
-    from skylens_model.models.skylens import (
+    from skylens_model.models.skylensnet import (
         SkyLensConfig,
         SkyLensForDisasterPerception,
         SkyLensModel,
         SkyLensOutput,
         SkyLensPreTrainedModel,
     )
+    from skylens_model.utils.collate import SkyLensCollator
     from skylens_model.utils.trainer import SkyLensTrainer
     from skylens_model.utils.training_args import SkyLensTrainingArguments

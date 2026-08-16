@@ -1,4 +1,4 @@
-"""SkyLens 모델 패키지. 심볼은 지연 로딩한다."""
+"""SkyLens 모델 패키지 — `skylensnet`(인지) · `skylensgsplat`(3DGS 복원). 심볼은 지연 로딩한다."""
 
 from __future__ import annotations
 
@@ -6,11 +6,11 @@ import importlib
 from typing import TYPE_CHECKING, Any
 
 _LAZY: dict[str, str] = {
-    "SkyLensConfig": ".skylens",
-    "SkyLensModel": ".skylens",
-    "SkyLensPreTrainedModel": ".skylens",
-    "SkyLensForDisasterPerception": ".skylens",
-    "SkyLensOutput": ".skylens",
+    "SkyLensConfig": ".skylensnet",
+    "SkyLensModel": ".skylensnet",
+    "SkyLensPreTrainedModel": ".skylensnet",
+    "SkyLensForDisasterPerception": ".skylensnet",
+    "SkyLensOutput": ".skylensnet",
 }
 
 __all__ = sorted(_LAZY)
@@ -28,7 +28,7 @@ def __dir__() -> list[str]:
 
 
 if TYPE_CHECKING:
-    from .skylens import (
+    from .skylensnet import (
         SkyLensConfig,
         SkyLensForDisasterPerception,
         SkyLensModel,
