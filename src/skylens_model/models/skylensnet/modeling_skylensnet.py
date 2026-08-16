@@ -18,7 +18,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -26,8 +25,7 @@ import torch.nn.functional as F
 from transformers.modeling_outputs import ModelOutput
 from transformers.modeling_utils import PreTrainedModel
 
-from .configuration_skylens import SkyLensConfig
-
+from .configuration_skylensnet import SkyLensConfig
 
 # ---------------------------------------------------------------------------
 # 출력 자료구조
@@ -46,8 +44,8 @@ class SkyLensOutput(ModelOutput):
         person_wh: `(B, 2, H/s, W/s)` — 중심점 기준 (w, h) 회귀값.
     """
 
-    loss: Optional[torch.FloatTensor] = None
-    loss_dict: Optional[dict] = None
+    loss: torch.FloatTensor | None = None
+    loss_dict: dict | None = None
     danger_logits: torch.FloatTensor = None
     person_heatmap: torch.FloatTensor = None
     person_wh: torch.FloatTensor = None
@@ -83,7 +81,7 @@ class SkyLensDecoderBlock(nn.Module):
         super().__init__()
         self.conv = SkyLensConvBlock(in_channels + skip_channels, out_channels)
 
-    def forward(self, hidden_state: torch.Tensor, skip: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def forward(self, hidden_state: torch.Tensor, skip: torch.Tensor | None = None) -> torch.Tensor:
         if skip is not None:
             # 스킵 해상도에 정확히 맞춘다 (홀수 해상도 대비).
             hidden_state = F.interpolate(hidden_state, size=skip.shape[-2:], mode="nearest")
@@ -126,7 +124,7 @@ class SkyLensUNetDecoder(nn.Module):
 # ---------------------------------------------------------------------------
 
 
-def _find_first_conv(module: nn.Module) -> tuple[Optional[str], Optional[nn.Conv2d]]:
+def _find_first_conv(module: nn.Module) -> tuple[str | None, nn.Conv2d | None]:
     """모듈 트리에서 **첫 번째 Conv2d**를 (이름, 모듈)로 반환한다.
 
     ResNet / ConvNeXt / timm 등 백본 종류에 상관없이 동작하는 범용 헬퍼.
@@ -437,14 +435,16 @@ class SkyLensForDisasterPerception(SkyLensPreTrainedModel):
     def forward(
         self,
         pixel_values: torch.FloatTensor,
-        modality_mask: Optional[torch.Tensor] = None,
-        danger_labels: Optional[torch.LongTensor] = None,
-        person_heatmap: Optional[torch.FloatTensor] = None,
-        person_wh: Optional[torch.FloatTensor] = None,
-        person_reg_mask: Optional[torch.FloatTensor] = None,
-        return_dict: Optional[bool] = None,
+        modality_mask: torch.Tensor | None = None,
+        danger_labels: torch.LongTensor | None = None,
+        person_heatmap: torch.FloatTensor | None = None,
+        person_wh: torch.FloatTensor | None = None,
+        person_reg_mask: torch.FloatTensor | None = None,
+        return_dict: bool | None = None,
     ) -> SkyLensOutput:
-        return_dict = return_dict if return_dict is not None else self.config.use_return_dict
+        # transformers 5.x 에서 config.use_return_dict 는 deprecated.
+        if return_dict is None:
+            return_dict = getattr(self.config, "return_dict", True)
 
         batch_size, _, height, width = pixel_values.shape
 

@@ -1,14 +1,13 @@
 [project]
 name = "skylens"
 version = "0.1.0"
-description = "SkyLens - multi-drone disaster intelligence: 3DGS reconstruction + 4-channel UNet perception"
+description = "SkyLens - Multi-drone disaster intelligence: 3DGS reconstruction + 4-channel UNet perception"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
 license = { file = "LICENSE" }
-
 dependencies = [
     "torch>=2.4",
-    "torchvision>=0.19",
+    "torchvision>=0.19,<0.28",
     "transformers>=4.44",
     "timm>=1.0",
     "albumentations>=1.4",
@@ -44,7 +43,6 @@ dev = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-# `src/` 에는 TypeScript 코드도 있으므로 파이썬 패키지를 명시한다.
 [tool.hatch.build.targets.wheel]
 packages = ["src/skylens_model"]
 
@@ -68,6 +66,9 @@ extend-exclude = ["node_modules", "dist", "__pycache__", "data", "res"]
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
 ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"**/__init__.py" = ["F401"]
 
 [tool.pytest.ini_options]
 testpaths = ["src/skylens_model/tests"]

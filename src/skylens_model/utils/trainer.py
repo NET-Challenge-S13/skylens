@@ -17,7 +17,8 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Mapping
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any
 
 import torch
 import torch.nn as nn
@@ -77,7 +78,7 @@ class FreezeBackboneCallback(TrainerCallback):
     # 훅 -----------------------------------------------------------------
     def on_epoch_begin(
         self,
-        args: "TrainingArguments",
+        args: TrainingArguments,
         state: TrainerState,
         control: TrainerControl,
         model: nn.Module | None = None,
@@ -95,7 +96,7 @@ class FreezeBackboneCallback(TrainerCallback):
 
     def on_train_end(
         self,
-        args: "TrainingArguments",
+        args: TrainingArguments,
         state: TrainerState,
         control: TrainerControl,
         model: nn.Module | None = None,
