@@ -1,0 +1,111 @@
+# CLAUDE.md — SkyLens 작업 가이드
+
+SkyLens는 **멀티드론 영상을 실시간 3D(Gaussian Splatting)로 복원하고 그 위에 AI가 위험구역·사람을 표시하는 재난 인텔리전스 플랫폼**이다 (NET 챌린지 캠프 시즌13).
+이 저장소에는 **TypeScript 운영 프로토타입**과 **Python AI 모델 패키지**가 함께 들어 있다.
+
+---
+
+## 🚫 커밋 규정 (최우선)
+
+> **커밋 메시지에 Claude를 공동저자로 넣지 말 것.**
+>
+> - `Co-Authored-By: Claude ...` 줄 **금지**
+> - `🤖 Generated with Claude Code` 등 **어떤 형태의 AI 생성 표시도 금지**
+> - PR 본문에도 AI 생성 표기를 넣지 않는다.
+>
+> 커밋 메시지는 사람이 쓴 것처럼 변경 내용만 담는다. 기존 히스토리 스타일(`feat:`, `fix:`, `docs:`, `test:` 접두사)을 따른다.
+
+또한 **요청받지 않았으면 커밋하지 않는다.**
+
+---
+
+## 1. 문서 지도
+
+| 문서 | 역할 |
+|---|---|
+| `README.md` (루트) | 저장소 소개. 데모/실서버 모드, GPS↔ENU 좌표계, 빠른 시작(`npm run dev`), SIM/RECON 접속 주소와 쿼리 옵션, 조작법, 프로젝트 구조 트리, 현재 구현 상태·로드맵. **TypeScript 프로토타입(뷰어) 중심** |
+| `PROJECT.md` (루트) | **중간평가 프로토타입 구현 계획**. 무엇을 증명하고 무엇을 증명하지 않는지(§0), 2뷰(SIM 로우파이 / RECON 실사) 데모 컨셉(§1), 사전 촬영·gsplat 준비(§2), 기술 스택(§3), 드론 경로·뷰어1(§4), 탐지 리빌 흐름(§5), reveal 셰이더(§6), 연출과 실제의 경계 원칙(§7), 상태 동기화·카메라 싱크(§8) |
+| `res/docs/IDEA.md` | **기획서(왜)**. 과제명(안), 문제 정의(소방드론 현황·홍제동 사례·각주 출처), 해결 방법 3단계(분할탐색 → KOREN/Core HPC 3DGS+UNet → Edge VM 3D 상황판), YAMNet 소리 확장, KOREN 활용 논거 |
+| `res/docs/ARCHITECTURE.md` | **통합 아키텍처(무엇을)**. 3대 설계 원칙, 4-Tier 구성(캡처/전송/Core HPC/Edge·클라이언트), 데이터 플로우, **§3-A AI 모델·융합 파이프라인**(UNet 4채널, Depth Map 레이캐스팅, Hybrid Fusion, 기술 선택 배제 근거) |
+| `res/docs/DATASETS.md` | **학습 데이터셋 조사**. "RGB+열 페어 + 재난 + 사람 + 위험구역"을 모두 가진 공개 데이터는 없다는 결론과, A(4채널 정합)/B(위험구역 세그)/C(사람 인스턴스) 3축 조합 권장. FLAME 3, RescueNet, SARD, AIResQ, LLVIP, VisDrone 등 |
+| `src/skylens_model/README.md` | **AI 모델 설계 철학의 단일 출처(어떻게)**. 레이어 분리 원칙(탐지/투영/랜드마크 융합/소리 보정), UNet 채택·TransUNet 보류 근거, 단일 백본+이중 헤드, modality dropout, 점 검출 헤드, 헤드별 분리 학습, 배제한 대안 표. **결정과 그 근거**를 기록 |
+| `src/skylens_model/datasets/README.md` | 데이터셋 **API 계약**(`__getitem__` 반환 dict, `None`은 정상값), 통합 클래스 스키마(0 normal / 1 fire / 2 collapse / 3 road_blocked / 255 ignore), RescueNet·VisDrone 매핑, 자동 다운로드 가능 여부 판정 |
+| `src/skylens_model/utils/README.md` | `geo.py`가 `src/skylens_core/geo.ts`의 순수 파이썬 미러라는 사실 — **두 파일은 수치적으로 동기 유지** |
+| `train.ipynb` (루트) | 데이터셋 → 학습 → 추론 결과를 마커 좌표로 흘려보내는 학습 노트북 |
+
+### 문서 간 관계
+
+```
+res/docs/IDEA.md            왜 이걸 하는가 (문제·해결 구상·KOREN 필연성)
+      ↓
+res/docs/ARCHITECTURE.md    무엇을 만드는가 (4-Tier, §3-A 모델·융합 파이프라인)
+      ↓
+PROJECT.md              중간평가에서 어디까지 만드는가 (범위 축소 + 연출 계획)
+      ↓
+README.md               실제로 만들어진 것을 어떻게 돌리는가
+
+res/docs/DATASETS.md   ──→  src/skylens_model/README.md  ──→  datasets/README.md
+(학습 데이터 근거)       (모델을 어떻게 설계할 것인가)      (그 설계의 코드 계약)
+```
+
+- `res/docs/DATASETS.md`는 `ARCHITECTURE.md §3-A`를 학습 가능한 형태로 뒷받침하고, 모델 README의 여러 결정(데이터 부족 → UNet, modality dropout, 헤드별 분리 학습)의 **직접 근거**다.
+- ⚠️ `src/skylens_model/README.md`는 상위 문서보다 **최신**이다. `ARCHITECTURE.md`/`IDEA.md`에 남은 "UNet / TransUNet 병기", "인스턴스 헤드"(→ 점 검출 헤드) 같은 표현은 아직 정정 대기 상태다. **모델 문서가 우선한다.**
+
+### 작업별 필독 문서
+
+| 하려는 작업 | 먼저 읽을 것 |
+|---|---|
+| AI 모델 수정·추가 (`src/skylens_model/models`) | **`src/skylens_model/README.md` 필독** → `res/docs/ARCHITECTURE.md §3-A` |
+| 데이터셋 클래스 추가·수정 | `src/skylens_model/datasets/README.md` → `res/docs/DATASETS.md` |
+| 학습 노트북 / 학습 루프 | `src/skylens_model/README.md` §6(학습 전략) → `train.ipynb` |
+| 데모·뷰어(SIM/RECON) UI·연출 작업 | **`PROJECT.md`** → `README.md` |
+| 좌표계·GPS 관련 | `README.md` 좌표계 절 → `src/skylens_core/geo.ts` + `src/skylens_model/utils/geo.py` (둘 다 고칠 것) |
+| 기획 문구·발표 자료 | `res/docs/IDEA.md` → `res/docs/ARCHITECTURE.md` |
+
+---
+
+## 2. 저장소 구조
+
+```
+src/
+├─ skylens_core/     # TS 순수 공유 로직 (DOM·Three 없음): config, types, store, geo, protocol
+├─ skylens_client/   # TS 브라우저 앱 (Three.js): sim.ts / recon.ts, viewer1, viewer2, net, ui
+└─ skylens_model/    # Python AI 모델 패키지: models/, datasets/, utils/
+tests/smoke.spec.ts  # Playwright E2E
+res/docs/                # IDEA · ARCHITECTURE · DATASETS
+```
+
+두 스택은 **`src/` 아래에 공존**한다. `pyproject.toml`은 자동 탐색 대신 `packages = ["src/skylens_model"]`로 파이썬 패키지를 명시한다.
+
+---
+
+## 3. 빌드 · 테스트
+
+**TypeScript** (`package.json`)
+
+| 명령 | 설명 |
+|---|---|
+| `npm run dev` | Vite 개발 서버 (HMR, LAN 노출) |
+| `npm run build` | `tsc` 타입체크 + 멀티페이지 빌드 |
+| `npm test` | Playwright E2E |
+| `npm run test:headed` | 브라우저 표시 E2E |
+| `npm run preview` | 빌드 결과 미리보기 |
+
+접속: `http://<IP>:5173/sim.html?room=demo` / `recon.html?room=demo` (같은 `room`이면 WebRTC 연결, `&demo`로 자동 데모).
+
+**Python** (`pyproject.toml`, requires-python >= 3.11)
+
+- 패키지는 **editable 설치**되어 있다: `pip install -e .` (추가 그룹: `.[train]`, `.[notebook]`, `.[dev]`)
+- 린트: `ruff` (line-length 100, target py311, select `E,F,I,UP,B`)
+- 테스트: `pytest` (`testpaths = src/skylens_model/tests`, `pythonpath = src`)
+
+---
+
+## 4. 기타 규약
+
+- **학습 산출물·데이터는 커밋하지 않는다.** `.gitignore`가 `data/`, `runs/`, `outputs/`, `checkpoints/`, `wandb/`, `*.ckpt`, `*.pt`, `*.pth`, `*.safetensors`를 제외한다. 데이터셋은 저장소에 포함하지 않고 각 `Dataset` 클래스가 `root` 아래에서 찾는다.
+- `.claude/`, `.omc/`도 git 제외 대상이다.
+- `src/skylens_core/geo.ts` ↔ `src/skylens_model/utils/geo.py`는 **같은 수식의 두 구현**이다. 한쪽만 고치지 말 것.
+- 문서는 한국어로 작성한다. 코드 주석은 기존 파일의 언어(TS는 영어, Python 독스트링은 영어)를 따른다.
+- `res/docs/` 안 문서의 이미지 링크는 `../figures/...` 로 `res/figures/` 디렉터리를 가리킨다 (해당 디렉터리는 아직 저장소에 없음 — 이미지 추가 시 `res/figures/` 생성).
+- 문서 상단 YAML frontmatter의 `[[...]]` 링크는 Obsidian 위키링크로, 파일명 기반이라 경로 이동과 무관하다.

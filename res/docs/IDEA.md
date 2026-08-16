@@ -11,7 +11,7 @@ parent: '[[넷 챌린지 캠프]]'
 
 **"SkyLens: 멀티드론 영상을 KOREN 분산 AI로 실시간 3D 복원하고, 그 위에 위험구역·사람을 AI로 표시하는 재난 인텔리전스 플랫폼 (소리 기반 생존자 탐지는 확장)"**
 
-![메인 figure](figures/main.png)
+![메인 figure](../figures/main.png)
 
 ---
 
@@ -90,7 +90,7 @@ flowchart LR
 
 ## 아키텍처
 
-![최종 모델 파이프라인](figures/overall_pipeline.png)
+![최종 모델 파이프라인](../figures/overall_pipeline.png)
 
 
 ```mermaid
@@ -172,12 +172,12 @@ flowchart TB
 
 **영상 AI — UNet/TransUNet (RGB+열화상 4채널, 단일 백본 + 세그/인스턴스 이중 헤드)**
 
-![UNet 구조](figures/UNet.jpeg)
+![UNet 구조](../figures/UNet.jpeg)
 
 **소리 AI(확장) — YAMNet (경량 환경음 분류)**
 
-![YAMNet 구조](figures/YAMNet.png)
+![YAMNet 구조](../figures/YAMNet.png)
 
 **최종 통합 모델**
 
-![최종 모델 구조](figures/model_arch.png)
+![최종 모델 구조](../figures/model_arch.png)

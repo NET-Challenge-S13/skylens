@@ -3,7 +3,8 @@ import { defineConfig, devices } from '@playwright/test';
 // E2E smoke config. Boots the Vite dev server and drives it in headless Chromium
 // with a GPU-enabled flag set so WebGL actually initializes (SwiftShader fallback).
 export default defineConfig({
-  testDir: './tests',
+  // This config lives in tests/, so the test dir is the config's own directory.
+  testDir: '.',
   timeout: 30_000,
   expect: { timeout: 10_000 },
   fullyParallel: false,
@@ -26,6 +27,8 @@ export default defineConfig({
   ],
   webServer: {
     command: 'npm run dev',
+    // Run the dev server from the repo root (this config is in tests/).
+    cwd: '..',
     url: 'http://localhost:5173',
     reuseExistingServer: true,
     timeout: 60_000,

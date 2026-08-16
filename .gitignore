@@ -168,3 +168,19 @@ vite.config.ts.timestamp-*
 __pycache__/
 *.py[cod]
 .venv/
+*.egg-info/
+build/
+.pytest_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# ML artifacts — 학습 산출물·데이터는 커밋하지 않는다
+data/
+runs/
+outputs/
+checkpoints/
+wandb/
+*.ckpt
+*.pt
+*.pth
+*.safetensors

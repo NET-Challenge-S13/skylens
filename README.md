@@ -28,7 +28,7 @@ SkyLens는 여러 대의 드론이 재난 현장을 분할 탐색하며 보낸 �
 - **SIM (관제탑)** — 오퍼레이터가 **실제 GPS로 드론 경로를 지정**하는 컨트롤타워. 지정된 경로를 리더 드론이 비행하고 군집 드론이 동행하며, 메인 드론의 촬영 영상을 확인합니다.
 - **RECON (3D 복원 상황판)** — 드론이 수집한 사진을 **서버가 Gaussian 스플랫 청크로 점진 전송**하면 3D가 계속 확장되고, **서버의 인간 탐지 모델 결과(GPS)**가 도착하면 3D 위에 마커로 표시됩니다.
 
-> 📄 기획·설계: [IDEA.md](IDEA.md) · [ARCHITECTURE.md](ARCHITECTURE.md) · [PROJECT.md](PROJECT.md)
+> 📄 기획·설계: [IDEA.md](res/docs/IDEA.md) · [ARCHITECTURE.md](res/docs/ARCHITECTURE.md) · [PROJECT.md](PROJECT.md)
 
 ---
 
