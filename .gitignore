@@ -177,12 +177,13 @@ build/
 .ruff_cache/
 .ipynb_checkpoints/
 
-# ML artifacts — 학습 산출물·데이터는 커밋하지 않는다
-data/
-runs/
-outputs/
-checkpoints/
-wandb/
+# ML artifacts — 학습 산출물·데이터는 커밋하지 않는다.
+# 루트 한정(/…)으로 앵커: src/skylens_core/data/ 같은 소스 디렉터리는 걸리면 안 된다.
+/data/
+/runs/
+/outputs/
+/checkpoints/
+/wandb/
 *.ckpt
 *.pt
 *.pth

@@ -4,7 +4,7 @@
 // device against viewer 2's warm realism — do not prettify this file.
 
 import * as THREE from 'three';
-import type { SceneData } from '../data/sceneData.ts';
+import type { SceneData } from '../sources/sceneData.ts';
 import type { DroneRuntime } from '../types.ts';
 import { state, subscribe } from '../store.ts';
 import { CONFIG, DRONE_TINTS, droneViewScale } from '../config.ts';
@@ -56,10 +56,10 @@ export class LowfiViewer {
   constructor(
     canvas: HTMLCanvasElement,
     sceneData: SceneData,
-    terrainVisual?: import('../data/terrainSource.ts').TerrainVisual,
+    terrainVisual?: import('../sources/terrainSource.ts').TerrainVisual,
     terrainPointCount?: number,
-    buildingVisual?: import('../data/buildingSource.ts').BuildingVisual,
-    surroundVisual?: import('../data/terrainSource.ts').TerrainVisual,
+    buildingVisual?: import('../sources/buildingSource.ts').BuildingVisual,
+    surroundVisual?: import('../sources/terrainSource.ts').TerrainVisual,
   ) {
     this.canvas = canvas;
 
@@ -207,7 +207,7 @@ export class LowfiViewer {
 
   /** Streamed building cells pop in as the drone travels (world streamer).
    *  Same prism look as the core so streamed territory reads first-class. */
-  addSurroundBuildings(visual: import('../data/buildingSource.ts').BuildingVisual): void {
+  addSurroundBuildings(visual: import('../sources/buildingSource.ts').BuildingVisual): void {
     if (visual.positions.length === 0) return;
     const geom = new THREE.BufferGeometry();
     geom.setAttribute('position', new THREE.BufferAttribute(visual.positions, 3));
@@ -222,7 +222,7 @@ export class LowfiViewer {
 
   /** Streamed terrain cells (world streamer) — sharper than the coarse ring
    *  they cover, so streamed territory looks like the core scene. */
-  addStreamedTerrain(visual: import('../data/terrainSource.ts').TerrainVisual): void {
+  addStreamedTerrain(visual: import('../sources/terrainSource.ts').TerrainVisual): void {
     const geom = new THREE.BufferGeometry();
     geom.setAttribute('position', new THREE.BufferAttribute(visual.positions, 3));
     geom.setAttribute('uv', new THREE.BufferAttribute(visual.uvs, 2));

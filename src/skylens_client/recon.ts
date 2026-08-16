@@ -22,7 +22,7 @@ import { isDemo } from '../skylens_core/mode.ts';
 import { gpsToScene } from '../skylens_core/geo.ts';
 import { IDENTITY_ALIGN } from '../skylens_core/protocol.ts';
 import type { DetectionRuntime } from '../skylens_core/types.ts';
-import { loadScene, resolveSplatUrl } from '../skylens_core/data/sceneSource.ts';
+import { loadScene, resolveSplatUrl } from '../skylens_core/sources/sceneSource.ts';
 import { ReconViewer } from './reconview/reconViewer.ts';
 import { initUI } from './ui/overlay.ts';
 import { createTransport } from '../skylens_core/net/peer.ts';

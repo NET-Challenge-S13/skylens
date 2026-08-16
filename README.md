@@ -136,7 +136,7 @@ src/
 │  ├─ sim.ts  style.css                   # SIM 진입점 + 공유 베이스 스타일
 │  ├─ server/serverSource.ts   # 서버 인터페이스 + mock
 │  ├─ net/     peer.ts (WebRTC) · statusUi.ts
-│  ├─ data/    sceneSource.ts · routes.ts(GPS경로) · paths.ts(데모) · sceneData.ts
+│  ├─ sources/ sceneSource.ts · routes.ts(GPS경로) · paths.ts(데모) · sceneData.ts
 │  ├─ drones/  pathFollower.ts (리더 경로 + 군집) · manualControl.ts
 │  ├─ sim/     routeModal.ts · videoPanel.ts · sim.css
 │  ├─ simview/ lowfiViewer.ts             # SIM 관제 3D 뷰

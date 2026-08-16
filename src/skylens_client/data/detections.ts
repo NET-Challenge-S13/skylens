@@ -4,8 +4,8 @@
 // confidence stay authored. Both computers derive from the identical cloud.
 
 import type { Detection, Vec3 } from '../../skylens_core/types';
-import type { SceneData } from '../../skylens_core/data/sceneData.ts';
-import { resolveMapSpec } from '../../skylens_core/data/terrainSource.ts';
+import type { SceneData } from '../../skylens_core/sources/sceneData.ts';
+import { resolveMapSpec } from '../../skylens_core/sources/terrainSource.ts';
 
 interface DetectionTemplate {
   id: string;
