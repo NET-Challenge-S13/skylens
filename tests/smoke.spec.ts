@@ -81,7 +81,7 @@ test.describe('per-page boot', () => {
       { timeout: 15_000 },
     );
 
-    expect(await hasWebGL(page, 'view1')).toBeTruthy();
+    expect(await hasWebGL(page, 'sim-view')).toBeTruthy();
 
     // Clock advances and the drone moves along its path (poll to avoid
     // flakiness from rAF throttling / slow warmup).
@@ -109,7 +109,7 @@ test.describe('per-page boot', () => {
       .toBeGreaterThan(0);
 
     // Active-drone switch via number key.
-    await page.locator('#view1').click({ position: { x: 50, y: 50 } });
+    await page.locator('#sim-view').click({ position: { x: 50, y: 50 } });
     await page.keyboard.press('3');
     await expect
       .poll(() => page.evaluate(() => window.skylens.state.activeDroneId))
@@ -131,7 +131,7 @@ test.describe('per-page boot', () => {
       { timeout: 15_000 },
     );
 
-    expect(await hasWebGL(page, 'view2')).toBeTruthy();
+    expect(await hasWebGL(page, 'recon-view')).toBeTruthy();
 
     // Server-status + minimap panels are present (real-mode UI).
     await expect(page.locator('.server-status')).toBeAttached();
