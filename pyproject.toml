@@ -3,7 +3,7 @@ name = "skylens"
 version = "0.1.0"
 description = "SkyLens - multi-drone disaster intelligence: 3DGS reconstruction + 4-channel UNet perception"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.14"
 license = { file = "LICENSE" }
 
 dependencies = [
@@ -17,9 +17,10 @@ dependencies = [
     "tifffile>=2024.1.1",
     "tqdm>=4.66",
     "requests>=2.32",
+    "huggingface-hub>=0.34",
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 train = [
     "accelerate>=0.34",
     "datasets>=2.20",
@@ -30,25 +31,40 @@ notebook = [
     "jupyter>=1.1",
     "ipywidgets>=8.1",
     "matplotlib>=3.9",
+    "nbformat>=5.10",
 ]
 dev = [
     "pytest>=8.3",
     "ruff>=0.6",
+    { include-group = "train" },
+    { include-group = "notebook" },
 ]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-# `src/` also holds the TypeScript client/core, so point hatch at the one
-# Python package explicitly rather than auto-discovering.
+# `src/` 에는 TypeScript 코드도 있으므로 파이썬 패키지를 명시한다.
 [tool.hatch.build.targets.wheel]
 packages = ["src/skylens_model"]
+
+[tool.uv]
+default-groups = ["dev"]
+
+# torch/torchvision 은 PyPI 기본 휠이 아니라 CUDA 12.8 빌드를 쓴다.
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu128" }
+torchvision = { index = "pytorch-cu128" }
 
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-extend-exclude = ["node_modules", "dist", "__pycache__"]
+extend-exclude = ["node_modules", "dist", "__pycache__", "data", "res"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]

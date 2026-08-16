@@ -155,7 +155,7 @@ repo 존재·gated 여부를 확인했다. 위 표에서 "확인함"이라고 �
 | `AIResQ` | `airesq.py` | 점 검출 | **thermal only** | 1채널 + `person_boxes` |
 
 지원 모듈: `base.py`(공통 베이스·스키마·IO) · `collate.py`(배치+타겟 인코딩) ·
-`download.py`(HTTP/HF/Kaggle 유틸) · `_selftest.py`(계약 검증).
+다운로드 유틸은 `base.py` 에, collator 는 `../utils/collate.py` 에, 계약 검증은 `../tests/test_datasets.py` 에 있다.
 
 `albumentations`와 `tifffile`은 **lazy import**다. 미설치 상태에서도 모듈은
 정상적으로 로드되고, 실제로 필요한 경로에 들어갔을 때만 설치 안내와 함께 실패한다.
@@ -218,7 +218,7 @@ def adapter(s):
 실데이터 없이 합성 더미로 전 경로를 돌린다:
 
 ```bash
-PYTHONPATH=src python -m skylens_model.datasets._selftest
+PYTHONPATH=src python -m skylens_model.tests.test_datasets
 ```
 
 검사 항목: 7개 Dataset의 `__getitem__` → collate shape/dtype 일치 ·

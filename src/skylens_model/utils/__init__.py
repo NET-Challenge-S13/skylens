@@ -23,6 +23,7 @@ if TYPE_CHECKING:
         decode_heatmap_peaks,
     )
     from .callbacks import GracefulInterruptCallback, find_resume_checkpoint
+    from .collate import SkyLensCollator
     from .trainer import FreezeBackboneCallback, SkyLensTrainer
     from .training_args import SkyLensTrainingArguments
 
@@ -40,6 +41,7 @@ __all__ = [
     # 중단·재개
     "GracefulInterruptCallback",
     "find_resume_checkpoint",
+    "SkyLensCollator",
     # metrics
     "decode_heatmap_peaks",
     "SegmentationMetrics",
@@ -53,6 +55,7 @@ _LAZY: dict[str, str] = {
     "FreezeBackboneCallback": ".trainer",
     "GracefulInterruptCallback": ".callbacks",
     "find_resume_checkpoint": ".callbacks",
+    "SkyLensCollator": ".collate",
     "decode_heatmap_peaks": ".metrics",
     "SegmentationMetrics": ".metrics",
     "PointDetectionMetrics": ".metrics",

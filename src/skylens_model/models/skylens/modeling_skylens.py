@@ -263,11 +263,8 @@ class SkyLensPreTrainedModel(PreTrainedModel):
         if getattr(module, "_skylens_skip_init", False):
             return
         if isinstance(module, nn.Conv2d):
-            # 예측 헤드는 kaiming(fan_out)을 쓰면 안 된다. 출력 채널이 1~4로 작아
-            # fan_out 이 작고 std = sqrt(2/fan_out) 이 1.4까지 커진다(1채널 히트맵의 경우).
-            # 그러면 로짓이 포화되어 heatmap 헤드의 bias=-2.19 (초기 sigmoid≈0.1) 트릭이
-            # 무력화되고, CenterNet focal loss 가 초기부터 수천대로 폭주한다.
-            # 따라서 출력 헤드는 작은 std 의 정규분포로 따로 초기화한다.
+            # 출력 헤드에 kaiming(fan_out) 금지: out_channels 가 1~4라 std 가 최대 1.4까지
+            # 커져 로짓이 포화되고 heatmap bias=-2.19 가 무력화된다.
             if getattr(module, "_skylens_head_init", False):
                 nn.init.normal_(module.weight, mean=0.0, std=0.01)
             else:

@@ -28,16 +28,16 @@ __version__ = "0.1.0"
 # 이름 -> 실제 정의된 서브모듈 경로
 _LAZY_EXPORTS: dict[str, str] = {
     # models
-    "SkyLensConfig": "skylens_model.models.configuration_skylens",
-    "SkyLensModel": "skylens_model.models.modeling_skylens",
-    "SkyLensPreTrainedModel": "skylens_model.models.modeling_skylens",
-    "SkyLensForDisasterPerception": "skylens_model.models.modeling_skylens",
-    "SkyLensOutput": "skylens_model.models.modeling_skylens",
+    "SkyLensConfig": "skylens_model.models.skylens",
+    "SkyLensModel": "skylens_model.models.skylens",
+    "SkyLensPreTrainedModel": "skylens_model.models.skylens",
+    "SkyLensForDisasterPerception": "skylens_model.models.skylens",
+    "SkyLensOutput": "skylens_model.models.skylens",
     # utils
     "SkyLensTrainer": "skylens_model.utils.trainer",
     "SkyLensTrainingArguments": "skylens_model.utils.training_args",
     # datasets
-    "SkyLensCollator": "skylens_model.datasets.collate",
+    "SkyLensCollator": "skylens_model.utils.collate",
 }
 
 __all__ = ["__version__", *sorted(_LAZY_EXPORTS)]
@@ -56,9 +56,9 @@ def __dir__() -> list[str]:
 
 
 if TYPE_CHECKING:  # 정적 분석기용 — 런타임에는 실행되지 않는다
-    from skylens_model.datasets.collate import SkyLensCollator
-    from skylens_model.models.configuration_skylens import SkyLensConfig
-    from skylens_model.models.modeling_skylens import (
+    from skylens_model.utils.collate import SkyLensCollator
+    from skylens_model.models.skylens import (
+        SkyLensConfig,
         SkyLensForDisasterPerception,
         SkyLensModel,
         SkyLensOutput,

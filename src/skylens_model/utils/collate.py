@@ -39,7 +39,7 @@ from typing import Any, Sequence
 import numpy as np
 import torch
 
-from .base import IGNORE_INDEX
+from skylens_model.datasets.base import IGNORE_INDEX
 
 __all__ = [
     "SkyLensCollator",

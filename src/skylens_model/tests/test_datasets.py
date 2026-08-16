@@ -1,7 +1,7 @@
 """Contract self-test -- builds synthetic dummy datasets in a temp dir and runs
 every loader through ``__getitem__`` -> :class:`SkyLensCollator`.
 
-Run with ``python -m skylens_model.datasets._selftest`` (needs ``src`` on the
+Run with ``python -m skylens_model.tests.test_datasets`` (needs ``src`` on the
 path). It asserts the exact shapes/dtypes documented in ``README.md``; no real
 data is required.
 """
@@ -18,7 +18,8 @@ import numpy as np
 import tifffile
 import torch
 
-from . import (
+from skylens_model.utils.collate import SkyLensCollator
+from skylens_model.datasets import (
     AIResQ,
     Flame3Pairs,
     FlameSegmentation,
@@ -26,8 +27,7 @@ from . import (
     SARD,
     DangerClass,
     RescueNetSegmentation,
-    SkyLensCollator,
-    VisDronePerson,
+        VisDronePerson,
 )
 
 H, W, N = 64, 96, 4
@@ -228,7 +228,7 @@ def main() -> int:
             "det-only sample must be all-ignore in the seg target"
 
         # -- manual-download error ----------------------------------------
-        from .download import ManualDownloadRequired
+        from skylens_model.datasets import ManualDownloadRequired
 
         try:
             RescueNetSegmentation(tmp / "nope", "train", download=True)

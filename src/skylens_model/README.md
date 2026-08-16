@@ -4,12 +4,11 @@ SkyLens의 AI·복원 모델 코드를 담는 Python 패키지.
 
 1. **Detection** — 4채널 입력(RGB + 열화상) 위의 UNet 백본 + 이중 헤드
    (위험구역 세그멘테이션 / 사람 점 검출). Depth Map 레이캐스팅으로
-   2D 탐지를 3D 세계좌표에 투영한다.
+   2D 탐지를 3D 세계좌표에 투영한다. → `models/skylens/`
 2. **Reconstruction** — 3DGS 실시간 3D 복원 (GLOMAP 포즈추정 → gsplat 학습 →
-   Open3D ICP 멀티드론 융합).
+   Open3D ICP 멀티드론 융합). 아직 미구현.
 
-현재는 **스캐폴드 상태**다 — dataclass와 인터페이스 스텁만 있고, 학습된 가중치도
-텐서 연산도 서드파티 ML 의존성도 없다.
+학습은 루트의 `train.ipynb` 에서 돌린다.
 
 > 관련 문서: [ARCHITECTURE.md](../../res/docs/ARCHITECTURE.md) §3-A (모델·융합 파이프라인) ·
 > [DATASETS.md](../../res/docs/DATASETS.md) (데이터셋 조사) · [IDEA.md](../../res/docs/IDEA.md) (기획)
@@ -112,13 +111,29 @@ TransUNet은 데이터 확보 후 실험 로드맵으로 남긴다.
   투영 단계에서 어차피 점 하나로 줄여야 하고, 소리 confidence 보정(④)도
   '점 위치 + confidence' 단위로 동작한다.
 
+**그럼 왜 세그멘테이션 하나로 끝내지 않는가** (헤드를 둘로 나누는 진짜 이유):
+
+1. **세만틱 세그는 인스턴스를 분리하지 못한다.** 세그는 "이 픽셀이 사람인가"만
+   답한다. 잔해 위에 두 사람이 인접해 있으면 **하나의 blob**이 되어 몇 명인지 셀 수 없다.
+   재난 현장에서 "요구조자 2명"과 "1명"은 출동 규모가 달라지는 정보다.
+2. **connected component 후처리로 대체할 수 없다.** 붙어 있으면 하나로 합쳐지고,
+   잔해에 가려 끊기면 한 사람이 여러 조각으로 쪼개진다. 드론 고도에서 사람이
+   수십 픽셀(§1.5)이라 이 실패가 특히 잦다.
+3. **랜드마크 융합(§5)이 성립하지 않는다.** 융합 레이어는 "탐지 1건 = 랜드마크 증거 1개"를
+   전제로 log-odds 를 누적하는데, blob 은 몇 개의 증거인지 모호하다.
+4. **사람 마스크 라벨이 아예 없다.** 확보 가능한 사람 데이터셋(SARD·LLVIP·VisDrone·KAIST)은
+   **전부 bbox** 다. 세그로 하려면 픽셀 마스크가 필요한데 존재하지 않는다.
+
+역으로 **위험구역은 개수를 셀 필요가 없다.** "화재 영역이 2개인가 3개인가"는 의미가 없고
+"어디가 위험한가"만 중요하다. 그래서 stuff 는 세그가 맞다.
+**개수를 세야 하는가**가 두 헤드를 가르는 기준이고, 이 대칭이 이중 헤드의 근거다.
+
 ### 1.3 "인스턴스 헤드" → **점 검출 헤드** (명칭 정정)
 
 기존 문서·코드의 "인스턴스 헤드"라는 이름은 통상 instance segmentation
 (인스턴스별 마스크)을 뜻하므로 **오해를 부른다.** 실제로 하는 일은 중심점 검출이다.
 
-> 🔧 **TODO**: `models/detection.py` 독스트링의 "instance head for people"과
-> ARCHITECTURE.md §3-A의 "인스턴스 헤드"를 **"점 검출 헤드"**로 정정할 것.
+> 🔧 **TODO**: ARCHITECTURE.md §3-A의 "인스턴스 헤드"를 **"점 검출 헤드"**로 정정할 것.
 
 ### 1.4 bbox와 점의 관계 — 둘 다 쓴다
 
@@ -458,8 +473,9 @@ skylens_model/
   README.md           이 문서 (설계 철학 + 스캐폴드 안내)
   __init__.py         패키지 버전/독스트링
   models/
-    detection.py      HumanDetector 인터페이스: Frame, Detection, HumanDetector
-    splat.py          SplatReconstructor 인터페이스: SplatChunkSpec, SplatAlign
+    skylens/          transformers 표준 모델 패키지
+      configuration_skylens.py   SkyLensConfig
+      modeling_skylens.py        SkyLensModel · SkyLensForDisasterPerception
   datasets/
     README.md         데이터셋 배치 규약
   utils/
@@ -473,11 +489,8 @@ TypeScript 클라이언트(`src/skylens_core/`)는 이 패키지를 직접 호�
 `src/skylens_core/protocol.ts`에 정의된 와이어 프로토콜로 결과만 소비한다.
 이 패키지의 역할은 결국 그 스키마로 직렬화될 값을 **생산**하는 것이다.
 
-- `HumanDetector.infer()` → `Detection` 객체. `protocol.ts`의 `DetectionResult`와
-  1:1 대응 (`category`, `gps`, `confidence`, `label`)
-- `SplatReconstructor.export_chunk()` → `SplatChunkSpec`. `protocol.ts`의 `SplatChunk`
-  (`id`, `url`, `align`)와 대응하며 `align`은 `SplatAlign`
-  (`anchor?`, `position`, `rotation`, `scale`)의 미러
+- `SkyLensForDisasterPerception` 의 출력(세그 맵 + 점 검출)이 Depth Map 레이캐스팅을
+  거쳐 `protocol.ts` 의 `DetectionResult`(`category`, `gps`, `confidence`, `label`)로 직렬화된다.
 
 좌표는 `src/skylens_core/geo.ts`에 정의되고 `skylens_model/utils/geo.py`에 미러된
 **ENU(East/North/Up) 규약**으로 공유한다 — GPS in, 로컬 미터 out.

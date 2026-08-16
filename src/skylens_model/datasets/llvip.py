@@ -20,8 +20,7 @@ from typing import Any, Sequence
 
 import numpy as np
 
-from .base import Sample, SkyLensDatasetBase
-from .download import ManualDownloadRequired, download_hf
+from .base import ManualDownloadRequired, Sample, SkyLensDatasetBase, download_hf
 
 __all__ = ["LLVIP", "read_voc_person_boxes"]
 

@@ -76,12 +76,7 @@ class SkyLensTrainingArguments(TrainingArguments):
         metadata={"help": "세그 라벨의 ignore 인덱스. loss와 지표 모두에서 제외된다."},
     )
 
-    # HF Trainer 의 기본값(True)은 우리 파이프라인과 충돌한다.
-    # remove_unused_columns=True 이면 Trainer 가 data_collator 를 RemoveColumnsCollator 로
-    # 감싸서, 모델 forward 시그니처에 없는 키를 **collator 호출 전에** 제거한다.
-    # 우리 Dataset 은 raw 샘플("image"/"has_rgb"/"danger_mask"/"person_boxes")을 내고
-    # SkyLensCollator 가 그것을 모델 입력으로 변환하는 구조라, 켜 두면 빈 dict 가 넘어와
-    # KeyError('image') 로 죽는다. 따라서 기본값을 False 로 덮어쓴다.
+    # True 이면 Trainer 가 collator 호출 전에 raw 키("image" 등)를 제거해 KeyError 가 난다.
     remove_unused_columns: bool = field(
         default=False,
         metadata={

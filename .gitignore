@@ -168,6 +168,7 @@ vite.config.ts.timestamp-*
 __pycache__/
 *.py[cod]
 .venv/
+# uv.lock 은 재현성을 위해 커밋한다 (무시하지 않음)
 *.egg-info/
 build/
 .pytest_cache/

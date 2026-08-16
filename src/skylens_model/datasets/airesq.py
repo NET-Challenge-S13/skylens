@@ -65,7 +65,7 @@ class AIResQ(SkyLensDatasetBase):
         if self._check_exists():
             return
         if self.direct_url:
-            from .download import download_and_extract
+            from .base import download_and_extract
 
             download_and_extract(self.direct_url, self.root)
             if self._check_exists():

@@ -21,8 +21,7 @@ from typing import Any, Sequence
 
 import numpy as np
 
-from .base import Sample, SkyLensDatasetBase
-from .download import ManualDownloadRequired, download_kaggle
+from .base import ManualDownloadRequired, Sample, SkyLensDatasetBase, download_kaggle
 
 __all__ = ["SARD", "read_yolo_labels"]
 
