@@ -170,19 +170,17 @@ vite.config.ts.timestamp-*
 __pycache__/
 *.py[cod]
 .venv/
-# uv.lock 은 재현성을 위해 커밋한다 (무시하지 않음)
 *.egg-info/
 build/
 .pytest_cache/
 .ruff_cache/
 .ipynb_checkpoints/
 
-# ML artifacts — 학습 산출물·데이터는 커밋하지 않는다
-data/
-runs/
-outputs/
-checkpoints/
-wandb/
+/data/
+/runs/
+/outputs/
+/checkpoints/
+/wandb/
 *.ckpt
 *.pt
 *.pth

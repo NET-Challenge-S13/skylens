@@ -25,7 +25,7 @@ import torch.nn as nn
 from transformers import Trainer, TrainerCallback
 from transformers.trainer_callback import TrainerControl, TrainerState
 
-from .metrics import decode_heatmap_peaks
+from .metrics import decode_gt_boxes, decode_heatmap_peaks
 from .training_args import SkyLensTrainingArguments
 
 if TYPE_CHECKING:  # 런타임 import 금지 — utils -> models 의존을 만들지 않는다
@@ -223,9 +223,11 @@ class SkyLensTrainer(Trainer):
         Returns:
             `(loss, predictions, labels)`
             - `predictions = (seg_pred (B,H,W) int16, detections (B,K,5) float32)`
-            - `labels      = (seg_gt (B,H,W) int16, gt_points (B,K,3) float32)`
+              — det = `(x, y, w, h, score)`
+            - `labels      = (seg_gt (B,H,W) int16, gt_boxes (B,K,5) float32)`
+              — gt = `(x, y, w, h, valid)`
 
-            `gt_points`의 3번째 성분은 valid 플래그다. 헤드별 분리 학습 때문에
+            `gt_boxes`의 5번째 성분은 valid 플래그다. 헤드별 분리 학습 때문에
             한쪽 GT가 없는 배치가 정상이므로, 없는 쪽은 seg는 ignore_index로,
             점은 valid=0으로 채워 shape을 항상 일정하게 유지한다
             (Trainer의 배치 누적이 고정 shape을 요구한다).
@@ -280,15 +282,29 @@ class SkyLensTrainer(Trainer):
                 threshold=thr,
                 stride=stride,
             ).to(torch.float32)
-            # GT 히트맵의 정점(가우시안 peak == 1.0)이 곧 GT 중심점이다.
-            gt_dec = decode_heatmap_peaks(gt_hm, None, k=k, threshold=0.99, stride=stride)
-            gt_points = torch.stack(
-                [gt_dec[..., 0], gt_dec[..., 1], (gt_dec[..., 4] > 0).float()], dim=-1
-            ).to(torch.float32)
+            # GT 박스는 collator의 회귀 타깃(person_reg_mask/person_wh)에서 복원한다.
+            gt_reg = inputs.get("person_reg_mask")
+            gt_wh = inputs.get("person_wh")
+            if gt_reg is not None and gt_wh is not None:
+                gt_boxes = decode_gt_boxes(gt_reg, gt_wh, k=k, stride=stride).to(torch.float32)
+            else:
+                # 회귀 타깃이 없으면 GT 히트맵 정점(가우시안 peak == 1.0)에서
+                # 중심만 복원하고 w=h=0으로 둔다.
+                gt_dec = decode_heatmap_peaks(gt_hm, None, k=k, threshold=0.99, stride=stride)
+                gt_boxes = torch.stack(
+                    [
+                        gt_dec[..., 0],
+                        gt_dec[..., 1],
+                        torch.zeros_like(gt_dec[..., 0]),
+                        torch.zeros_like(gt_dec[..., 0]),
+                        (gt_dec[..., 4] > 0).float(),
+                    ],
+                    dim=-1,
+                ).to(torch.float32)
         else:
             b = seg_pred.size(0)
             dev = seg_pred.device
             det = torch.zeros((b, k, 5), dtype=torch.float32, device=dev)
-            gt_points = torch.zeros((b, k, 3), dtype=torch.float32, device=dev)
+            gt_boxes = torch.zeros((b, k, 5), dtype=torch.float32, device=dev)
 
-        return (loss, (seg_pred, det), (seg_gt, gt_points))
+        return (loss, (seg_pred, det), (seg_gt, gt_boxes))

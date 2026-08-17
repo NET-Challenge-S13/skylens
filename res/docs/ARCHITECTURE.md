@@ -22,7 +22,7 @@
 
 ## 1. 전체 아키텍처 (4-Tier)
 
-![최종 모델 파이프라인](../figures/overall_pipeline.png)
+![최종 모델 파이프라인](figures/overall_pipeline.png)
 *그림. 최종 통합 모델 파이프라인. *
 
 > Mermaid — GitHub · VS Code(mermaid 확장) · 노션 등에서 그래픽 렌더링.
@@ -173,7 +173,7 @@ flowchart TB
 
 **설계 철학 — 왜 검증된 세그멘테이션 백본인가.** 재난 대응 시스템에서 모델을 고르는 첫 번째 기준은 최신성이 아니라 신뢰성이다. 인명이 걸린 현장에서는 결과가 안정적으로 재현되고 실시간성을 보장하는 구조가, 잠재력은 크지만 거동이 불확실한 기법보다 우선한다. 최근 주목받는 VLM 기반 Open-Vocabulary 분할(자연어 프롬프트로 임의의 객체를 찾는 방식)도 후보로 검토했으나, 연산이 무거워 30초 준실시간 갱신을 위협하고 출력이 프롬프트에 민감해 동일한 입력에도 판단이 흔들릴 수 있다. 반면 UNet 계열은 분할 분야에서 오래 검증된 표준 구조로 RGB+열화상 4채널로 확장하기 쉽고, 추론이 가볍고 빠르며 결과가 일관적이다. 따라서 구조대원이 진입 판단에 믿고 쓸 수 있는 **안정성과 실시간성**을 최우선으로, 검증된 4채널 세그멘테이션 백본을 채택했다.
 
-![UNet 구조 — 인코더–디코더 + 스킵 커넥션 세그멘테이션](../figures/UNet.jpeg)
+![UNet 구조 — 인코더–디코더 + 스킵 커넥션 세그멘테이션](figures/UNet.jpeg)
 *그림. 영상 AI 백본(UNet 계열). 입력단을 RGB+열화상 4채널로 확장하고, 공유 백본에서 세그멘테이션 헤드(위험구역 stuff)와 인스턴스 헤드(사람)로 분기한다.*
 
 ### ② 2D→3D 결합 — Depth Map 레이캐스팅 (Core HPC에서 1회 산출)
@@ -192,14 +192,14 @@ $$X_c = \frac{(u-c_x)Z}{f_x},\quad Y_c = \frac{(v-c_y)Z}{f_y},\quad Z_c = Z \;\;
 - 별도 경량 모델(**YAMNet**, MobileNet 기반)로 환경음(신음·기침·타격음·구조요청)을 분류 → **생존자 의심 지역** 판정 → 해당 **사람 인스턴스의 confidence를 상향**(놓침=false negative 감소) + **UI 알림** (Late Fusion). 마이크 다중 시 **majority voting**.
 - **WavLM(SOTA) 대신 YAMNet인 이유**: ① MobileNet 기반 초경량으로 **CPU 실시간** 추론 → 3DGS의 GPU 자원을 뺏지 않음, ② 우리 목적은 음성 인식이 아니라 **환경음 탐지**(YAMNet은 AudioSet 521개 환경음 클래스), ③ `Crying/Yell/Groan/Knock` 클래스를 이미 보유해 **zero-shot로 데모 가능**. 데이터셋은 **DroneAudioset**으로 추가 파인튜닝 가능.
 
-![YAMNet 구조 — MobileNet 기반 오디오 이벤트 분류](../figures/YAMNet.png)
+![YAMNet 구조 — MobileNet 기반 오디오 이벤트 분류](figures/YAMNet.png)
 *그림. 소리 AI(YAMNet). 경량 CNN으로 환경음을 분류해 생존자 의심 지역을 산출한다.*
 
 ### 최종 통합 모델 구조
 
 > 아래 그림은 영상(UNet 4채널)·소리(YAMNet)·포즈를 Hybrid Fusion으로 결합해 3D 위에 마커를 얹는 전체 추론 파이프라인을 나타낸다.
 
-![최종 모델 구조](../figures/model_arch.png)
+![최종 모델 구조](figures/model_arch.png)
 *그림. 최종 통합 모델 구조. *
 
 ---

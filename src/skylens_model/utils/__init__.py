@@ -16,12 +16,17 @@ from typing import TYPE_CHECKING, Any
 from .geo import Enu, GeoAnchor, Gps, enu_to_gps, gps_to_enu
 
 if TYPE_CHECKING:
+    from .cache import ResizedCache, build_resized_cache, resize_sample
     from .callbacks import GracefulInterruptCallback, find_resume_checkpoint
     from .collate import SkyLensCollator
     from .metrics import (
+        BoxDetectionMetrics,
+        PointAveragePrecision,
         PointDetectionMetrics,
         SegmentationMetrics,
+        box_iou_matrix,
         build_compute_metrics,
+        decode_gt_boxes,
         decode_heatmap_peaks,
     )
     from .trainer import FreezeBackboneCallback, SkyLensTrainer
@@ -42,10 +47,17 @@ __all__ = [
     "GracefulInterruptCallback",
     "find_resume_checkpoint",
     "SkyLensCollator",
+    "ResizedCache",
+    "build_resized_cache",
+    "resize_sample",
     # metrics
     "decode_heatmap_peaks",
+    "decode_gt_boxes",
+    "box_iou_matrix",
     "SegmentationMetrics",
     "PointDetectionMetrics",
+    "BoxDetectionMetrics",
+    "PointAveragePrecision",
     "build_compute_metrics",
 ]
 
@@ -56,9 +68,16 @@ _LAZY: dict[str, str] = {
     "GracefulInterruptCallback": ".callbacks",
     "find_resume_checkpoint": ".callbacks",
     "SkyLensCollator": ".collate",
+    "ResizedCache": ".cache",
+    "build_resized_cache": ".cache",
+    "resize_sample": ".cache",
     "decode_heatmap_peaks": ".metrics",
+    "decode_gt_boxes": ".metrics",
+    "box_iou_matrix": ".metrics",
     "SegmentationMetrics": ".metrics",
     "PointDetectionMetrics": ".metrics",
+    "BoxDetectionMetrics": ".metrics",
+    "PointAveragePrecision": ".metrics",
     "build_compute_metrics": ".metrics",
 }
 
