@@ -23,6 +23,7 @@ from skylens_model.datasets import (
     SARD,
     AIResQ,
     DangerClass,
+    FireSegmentation,
     Flame3Pairs,
     FlameSegmentation,
     RescueNetSegmentation,
@@ -64,6 +65,16 @@ def make_flame3(root: Path):
         d.mkdir(parents=True, exist_ok=True)
         tifffile.imwrite(str(d / f"q{i:03d}.tiff"),
                          rng.uniform(-5, 400, (H, W)).astype(np.float32))
+
+
+def make_fireseg(root: Path):
+    # 사각 폴리곤(행 10~30, 열 10~40)을 정규화 좌표로 적는다. i==1 은 빈 라벨(음성).
+    x0, x1, y0, y1 = 10 / W, 40 / W, 10 / H, 30 / H
+    poly = f"0 {x0} {y0} {x1} {y0} {x1} {y1} {x0} {y1}\n"
+    for s in ("train", "val"):
+        for i in range(N):
+            _img(root / "images" / s / f"g{i:03d}.jpg")
+            _txt(root / "labels" / s / f"g{i:03d}.txt", "" if i == 1 else poly)
 
 
 def make_rescuenet(root: Path):
@@ -175,6 +186,7 @@ def main() -> int:
     try:
         make_flame(tmp / "flame")
         make_flame3(tmp / "flame3")
+        make_fireseg(tmp / "fireseg")
         make_rescuenet(tmp / "rescuenet")
         make_sard(tmp / "sard")
         make_visdrone(tmp / "visdrone")
@@ -185,6 +197,8 @@ def main() -> int:
               expect_mask=True, expect_boxes=False)
         check("Flame3Pairs (RGB+thermal)", Flame3Pairs(tmp / "flame3", "train"),
               expect_mask=False, expect_boxes=False, validity=True)
+        check("FireSegmentation", FireSegmentation(tmp / "fireseg", "train"),
+              expect_mask=True, expect_boxes=False)
         check("RescueNetSegmentation", RescueNetSegmentation(tmp / "rescuenet", "train"),
               expect_mask=True, expect_boxes=False)
         check("SARD", SARD(tmp / "sard", "train"), expect_mask=False, expect_boxes=True)
@@ -203,6 +217,16 @@ def main() -> int:
         assert rn[60, 0] == DangerClass.IGNORE
         print("\nRescueNet 11->4 mapping OK "
               "(no-damage->0, major-damage->2, road-blocked->3, unlabeled->255)")
+
+        # -- YOLO-seg 폴리곤 래스터화 + 빈 라벨 -----------------------------
+        fs = FireSegmentation(tmp / "fireseg", "train")
+        pos, neg = fs[0]["danger_mask"], fs[1]["danger_mask"]
+        assert set(np.unique(pos).tolist()) == {DangerClass.NORMAL, DangerClass.FIRE}
+        assert pos[20, 25] == DangerClass.FIRE
+        assert pos[0, 0] == DangerClass.NORMAL and pos[H - 1, W - 1] == DangerClass.NORMAL
+        assert int(neg.max()) == DangerClass.NORMAL, "empty label must give an all-normal mask"
+        print(f"\nFireSeg polygon raster OK (fire {float((pos == 1).mean()):.3f} of pixels; "
+              "empty label -> all-normal mask, not None)")
 
         # -- VisDrone person filtering ------------------------------------
         vd = VisDronePerson(tmp / "visdrone", "train")[0]["person_boxes"]

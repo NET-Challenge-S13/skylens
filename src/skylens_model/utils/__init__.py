@@ -20,9 +20,13 @@ if TYPE_CHECKING:
     from .callbacks import GracefulInterruptCallback, find_resume_checkpoint
     from .collate import SkyLensCollator
     from .metrics import (
+        BoxDetectionMetrics,
+        PointAveragePrecision,
         PointDetectionMetrics,
         SegmentationMetrics,
+        box_iou_matrix,
         build_compute_metrics,
+        decode_gt_boxes,
         decode_heatmap_peaks,
     )
     from .trainer import FreezeBackboneCallback, SkyLensTrainer
@@ -48,8 +52,12 @@ __all__ = [
     "resize_sample",
     # metrics
     "decode_heatmap_peaks",
+    "decode_gt_boxes",
+    "box_iou_matrix",
     "SegmentationMetrics",
     "PointDetectionMetrics",
+    "BoxDetectionMetrics",
+    "PointAveragePrecision",
     "build_compute_metrics",
 ]
 
@@ -64,8 +72,12 @@ _LAZY: dict[str, str] = {
     "build_resized_cache": ".cache",
     "resize_sample": ".cache",
     "decode_heatmap_peaks": ".metrics",
+    "decode_gt_boxes": ".metrics",
+    "box_iou_matrix": ".metrics",
     "SegmentationMetrics": ".metrics",
     "PointDetectionMetrics": ".metrics",
+    "BoxDetectionMetrics": ".metrics",
+    "PointAveragePrecision": ".metrics",
     "build_compute_metrics": ".metrics",
 }
 

@@ -70,6 +70,12 @@ packages = ["src/skylens_model"]
 [tool.uv]
 default-groups = ["dev"]
 
+# fused-ssim 은 sdist 로만 배포되고 setup.py 가 torch 를 import 한다. 빌드 격리 환경에는
+# torch 가 없어서, recon 을 설치하지 않는 사람도 `uv sync` 가 여기서 막혔다.
+# recon 그룹을 실제로 쓸 때 빌드가 성공하도록 빌드 의존성을 명시한다.
+[tool.uv.extra-build-dependencies]
+fused-ssim = ["torch"]
+
 [[tool.uv.index]]
 name = "pytorch-cu126"
 url = "https://download.pytorch.org/whl/cu126"
