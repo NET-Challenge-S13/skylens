@@ -6,18 +6,19 @@
 ``skylensnet`` 과 성격이 다르다는 점을 먼저 알아둘 것. 3DGS 는 학습된 가중치가
 형상을 추론하는 방식이 아니라 **장면마다 처음부터 도는 최적화**라, 사전학습
 체크포인트가 없고 새 장면마다 전 과정을 다시 돌린다. 그래서 이 패키지에는
-``modeling_*.py`` / ``configuration_*.py`` 가 없고, 대신 외부 바이너리(ffmpeg,
-COLMAP)를 순서대로 부르는 셸 파이프라인과 그 파이프라인이 쓰는 도구가 들어 있다.
+``modeling_*.py`` / ``configuration_*.py`` 가 없고, 대신 COLMAP 모델을 다루는
+도구와 실제로 돌린 스크립트가 들어 있다.
 
 파이썬 도구는 모듈로 직접 실행한다::
 
     python3 -m skylens_model.models.skylens.subset_model --src ... --dst ... --keep cam2037
     python3 -m skylens_model.models.skylens.ckpt_to_ply --ckpt ... --out ... --light
+    python3 -m skylens_model.models.skylens.route_gen --center 36.7695,126.9316 --heading 90
 
 - 설계 결정과 근거: ``README.md``
 - 측정값(실험 5건): ``RESULTS.md``
 - 설치와 함정: ``INSTALL.md``
-- 파이프라인: ``pipeline/01_extract_frames.sh`` → ``02_reconstruct.sh`` → ``03_train.sh``
+- 결과를 만든 스크립트 원본: ``scripts/``
 
 의존성은 ``pyproject.toml`` 의 ``recon`` 그룹에 있고 기본 설치에는 들어가지 않는다
 (``uv sync --group recon``). gsplat 과 fused-ssim 이 CUDA 툴체인을 요구하기 때문이다.
