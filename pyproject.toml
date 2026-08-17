@@ -101,7 +101,7 @@ extend-exclude = [
     "data",
     "res",
     # 실행된 그대로 보존하는 아카이브 — 린트로 고치면 재현 정본이 아니게 된다.
-    "src/skylens_model/models/skylens/asrun",
+    "src/skylens_model/models/skylens/scripts",
 ]
 
 [tool.ruff.lint]
