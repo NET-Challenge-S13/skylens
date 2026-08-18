@@ -1,0 +1,175 @@
+{
+  "source": [
+    "step00250_light.ply",
+    "step01000_light.ply",
+    "step03500_light.ply",
+    "step07000_light.ply"
+  ],
+  "reference": "step07000_light.ply",
+  "axis": [
+    0.9995359262373039,
+    -0.027055255468184315,
+    -0.013998046738265796
+  ],
+  "origin": [
+    -0.5468356351048598,
+    0.3334127684902957,
+    0.1423745059194631
+  ],
+  "boundaries": [
+    -1.4292576994528936,
+    -0.031611320536913366,
+    1.0132892603665122
+  ],
+  "preview": "step00250_light.ply",
+  "segments": [
+    {
+      "index": 0,
+      "levels": [
+        {
+          "level": 1,
+          "steps": 250,
+          "label": "형상 윤곽만 식별",
+          "url": "segments/seg0_step00250.ply",
+          "splats": 1148,
+          "bytes": 64648
+        },
+        {
+          "level": 2,
+          "steps": 1000,
+          "label": "공간 구조 식별 가능",
+          "url": "segments/seg0_step01000.ply",
+          "splats": 3852,
+          "bytes": 216072
+        },
+        {
+          "level": 3,
+          "steps": 3500,
+          "label": "표면 형성",
+          "url": "segments/seg0_step03500.ply",
+          "splats": 55404,
+          "bytes": 3102985
+        },
+        {
+          "level": 4,
+          "steps": 7000,
+          "label": "실용 품질",
+          "url": "segments/seg0_step07000.ply",
+          "splats": 116381,
+          "bytes": 6517698
+        }
+      ]
+    },
+    {
+      "index": 1,
+      "levels": [
+        {
+          "level": 1,
+          "steps": 250,
+          "label": "형상 윤곽만 식별",
+          "url": "segments/seg1_step00250.ply",
+          "splats": 1914,
+          "bytes": 107544
+        },
+        {
+          "level": 2,
+          "steps": 1000,
+          "label": "공간 구조 식별 가능",
+          "url": "segments/seg1_step01000.ply",
+          "splats": 5102,
+          "bytes": 286072
+        },
+        {
+          "level": 3,
+          "steps": 3500,
+          "label": "표면 형성",
+          "url": "segments/seg1_step03500.ply",
+          "splats": 63792,
+          "bytes": 3572713
+        },
+        {
+          "level": 4,
+          "steps": 7000,
+          "label": "실용 품질",
+          "url": "segments/seg1_step07000.ply",
+          "splats": 116381,
+          "bytes": 6517698
+        }
+      ]
+    },
+    {
+      "index": 2,
+      "levels": [
+        {
+          "level": 1,
+          "steps": 250,
+          "label": "형상 윤곽만 식별",
+          "url": "segments/seg2_step00250.ply",
+          "splats": 2273,
+          "bytes": 127648
+        },
+        {
+          "level": 2,
+          "steps": 1000,
+          "label": "공간 구조 식별 가능",
+          "url": "segments/seg2_step01000.ply",
+          "splats": 6200,
+          "bytes": 347560
+        },
+        {
+          "level": 3,
+          "steps": 3500,
+          "label": "표면 형성",
+          "url": "segments/seg2_step03500.ply",
+          "splats": 61473,
+          "bytes": 3442849
+        },
+        {
+          "level": 4,
+          "steps": 7000,
+          "label": "실용 품질",
+          "url": "segments/seg2_step07000.ply",
+          "splats": 116380,
+          "bytes": 6517642
+        }
+      ]
+    },
+    {
+      "index": 3,
+      "levels": [
+        {
+          "level": 1,
+          "steps": 250,
+          "label": "형상 윤곽만 식별",
+          "url": "segments/seg3_step00250.ply",
+          "splats": 3099,
+          "bytes": 173904
+        },
+        {
+          "level": 2,
+          "steps": 1000,
+          "label": "공간 구조 식별 가능",
+          "url": "segments/seg3_step01000.ply",
+          "splats": 7266,
+          "bytes": 407256
+        },
+        {
+          "level": 3,
+          "steps": 3500,
+          "label": "표면 형성",
+          "url": "segments/seg3_step03500.ply",
+          "splats": 72354,
+          "bytes": 4052185
+        },
+        {
+          "level": 4,
+          "steps": 7000,
+          "label": "실용 품질",
+          "url": "segments/seg3_step07000.ply",
+          "splats": 116381,
+          "bytes": 6517698
+        }
+      ]
+    }
+  ]
+}
