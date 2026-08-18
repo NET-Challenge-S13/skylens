@@ -3,7 +3,7 @@
 // PROJECT.md §1 core trick: BOTH viewers must show the SAME data, differing only
 // in how they render it. So the real Gaussian splat is the source: we load it,
 // extract its splat centers+colors into a downsampled point cloud, and auto-fit
-// it into a normalized world frame. SIM renders that point cloud low-fi; RECON
+// it into a normalized world frame. CONTROL renders that point cloud low-fi; STATUS
 // renders the full splat (with the SAME transform) plus reveal over the same
 // points. Both computers load the same URL and run the same deterministic
 // pipeline, so their clouds are identical.
@@ -21,23 +21,44 @@ import type { TerrainVisual, TerrainContext, Bbox } from './terrainSource.ts';
 import { loadBuildings } from './buildingSource.ts';
 import type { PointPatch, BuildingVisual } from './buildingSource.ts';
 
+function query(name: string): string | null {
+  if (typeof window === 'undefined') return null;
+  return new URLSearchParams(window.location.search).get(name);
+}
+
 /**
- * Resolve which splat URL to load from `?splat=` + config. Both SIM and RECON
+ * Resolve which splat URL to load from `?splat=` + config. Both CONTROL and STATUS
  * call this so they load the same asset.
  *   off → null (procedural fallback) | light|nike → lighter sample
- *   http(s)://… → custom | (absent) → default
+ *   demo → our own capture | cdn → public sample
+ *   http(s)://… → custom | (absent) → the delay-pattern capture, else the sample
+ *
+ * Note this is only the asset both viewers derive the shared point cloud and fit
+ * transform from. On STATUS the rendered geometry arrives from the server, segment
+ * by segment (see resolveSegmentManifest).
  */
 export function resolveSplatUrl(): string | null {
   if (!CONFIG.splat.enabled) return null;
-  const q =
-    typeof window === 'undefined'
-      ? null
-      : new URLSearchParams(window.location.search).get('splat');
-  if (!q) return CONFIG.splat.url;
+  const q = query('splat');
+  if (!q) return CONFIG.delayPattern.enabled ? CONFIG.splat.demoPreview : CONFIG.splat.url;
   if (q === 'off') return null;
   if (q === 'light' || q === 'nike') return CONFIG.splat.urlLight;
+  if (q === 'demo') return CONFIG.splat.demoPreview;
+  if (q === 'cdn') return CONFIG.splat.url;
   if (/^https?:\/\//.test(q)) return q;
   return CONFIG.splat.url;
+}
+
+/**
+ * Manifest for the delay-pattern stream, or null when this page isn't showing
+ * our own capture (the segment assets are cut from THAT scene, so they only line
+ * up with it). `?delay=off` forces the single-scene stream.
+ */
+export function resolveSegmentManifest(): string | null {
+  if (!CONFIG.delayPattern.enabled) return null;
+  if (query('delay') === 'off') return null;
+  if (resolveSplatUrl() !== CONFIG.splat.demoPreview) return null;
+  return CONFIG.delayPattern.manifest;
 }
 
 /** Transform that places the splat identically to the derived point cloud. */
@@ -50,17 +71,17 @@ export interface SplatTransform {
 
 export interface LoadedScene {
   data: SceneData;
-  /** Non-null when the real splat should be rendered (RECON); null on fallback. */
+  /** Non-null when the real splat should be rendered (STATUS); null on fallback. */
   splat: SplatTransform | null;
-  /** Textured DEM surface for map scenes (SIM `?tex=sat` renders it as a mesh). */
+  /** Textured DEM surface for map scenes (CONTROL `?tex=sat` renders it as a mesh). */
   terrainVisual?: TerrainVisual;
   /** Points [0, terrainPointCount) are terrain; the rest are buildings. */
   terrainPointCount?: number;
-  /** Extruded building prisms for map scenes (SIM `?tex=sat` display-only). */
+  /** Extruded building prisms for map scenes (CONTROL `?tex=sat` display-only). */
   buildingVisual?: BuildingVisual;
-  /** Low-res backdrop terrain around the sim area (display-only). */
+  /** Low-res backdrop terrain around the control area (display-only). */
   surroundVisual?: TerrainVisual;
-  /** Present when the SIM should run the world streamer: drone-position-driven
+  /** Present when the CONTROL should run the world streamer: drone-position-driven
    *  loading of surrounding terrain + building cells (display-only). */
   streamSeed?: { coreBbox: Bbox; ctx: TerrainContext };
 }
@@ -203,7 +224,7 @@ function buildingsWanted(): boolean {
   return new URLSearchParams(window.location.search).get('bld') !== 'off';
 }
 
-/** The world streamer runs only in the textured SIM view. */
+/** The world streamer runs only in the textured CONTROL view. */
 function satModeOn(): boolean {
   if (typeof window === 'undefined') return false;
   return new URLSearchParams(window.location.search).get('tex') === 'sat';
@@ -225,7 +246,7 @@ function mergePatch(base: SceneData, patch: PointPatch): SceneData {
 export async function loadScene(opts: LoadSceneOptions): Promise<LoadedScene> {
   // Real-world terrain mode (?map=…): DEM tiles instead of a splat. Same
   // deterministic pipeline on both computers → identical clouds (§1). No splat
-  // exists for these scenes, so RECON falls back to its reveal cloud.
+  // exists for these scenes, so STATUS falls back to its reveal cloud.
   const mapSpec = resolveMapSpec();
   if (mapSpec) {
     try {
@@ -257,7 +278,7 @@ export async function loadScene(opts: LoadSceneOptions): Promise<LoadedScene> {
         terrainPointCount,
         buildingVisual,
         surroundVisual: terrain.surround,
-        // World streamer (SIM only): surrounding cells load as the drone moves.
+        // World streamer (CONTROL only): surrounding cells load as the drone moves.
         streamSeed:
           wantBld && buildingVisual && satModeOn()
             ? { coreBbox: mapSpec, ctx: terrain.ctx }

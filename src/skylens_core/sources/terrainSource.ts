@@ -1,5 +1,5 @@
 // Real-world terrain scene source (?map=…) — DEM tiles → the same SceneData
-// contract the splat pipeline produces, so SIM/RECON render it unchanged.
+// contract the splat pipeline produces, so CONTROL/STATUS render it unchanged.
 //
 // Data: AWS Open Data "Terrain Tiles" (Mapzen terrarium PNGs, SRTM ~30 m in
 // Korea). Public bucket, CORS-enabled, no API key:
@@ -248,7 +248,7 @@ function imageryWanted(): boolean {
   return new URLSearchParams(window.location.search).get('tex') !== 'off';
 }
 
-/** `?tex=cyber`: same satellite drape, graded into the SIM's cold tactical
+/** `?tex=cyber`: same satellite drape, graded into CONTROL's cold tactical
  *  palette. The map deliberately stays dim so drones and mission overlays own
  *  the brightest cyan values. */
 export function cyberOn(): boolean {
@@ -288,7 +288,7 @@ function cyberLut(): Uint8ClampedArray {
 
 /** Regrade the mosaic in place — for the mesh TEXTURE only. The rgba array the
  *  shared point cloud samples is read before this runs, so point colors (and
- *  with them the SIM/RECON determinism contract) are untouched. The graticule
+ *  with them the CONTROL/STATUS determinism contract) are untouched. The graticule
  *  aligns to GLOBAL tile-pixel coords so seams between streamed cells match. */
 function applyCyberGrade(
   ctx: OffscreenCanvasRenderingContext2D,
@@ -428,7 +428,7 @@ export interface TerrainContext {
 }
 
 /**
- * Display-only textured surface for the SIM viewer (`?tex=sat`): the DEM as a
+ * Display-only textured surface for the CONTROL viewer (`?tex=sat`): the DEM as a
  * triangulated height mesh with the satellite mosaic as its texture. The point
  * cloud stays the single data contract (paths/detections/reveal) — this is a
  * rendering upgrade, not a data change.
@@ -445,7 +445,7 @@ export interface TerrainScene {
   ctx: TerrainContext;
   /** Present when the satellite mosaic loaded — enables the mesh view. */
   visual?: TerrainVisual;
-  /** Decorative low-res terrain ring around the sim area (display-only), so
+  /** Decorative low-res terrain ring around the control area (display-only), so
    *  the world doesn't visibly end at the scene edge. No points, no paths —
    *  pure backdrop. `?ring=off` disables. */
   surround?: TerrainVisual;
@@ -455,7 +455,7 @@ export interface TerrainScene {
 }
 
 // --- Context ring ---------------------------------------------------------
-/** Ring bbox = sim bbox span × RING_SPAN (centered). */
+/** Ring bbox = control bbox span × RING_SPAN (centered). */
 const RING_SPAN = 3;
 /** Satellite tile budget for the ring — background quality is fine. */
 const RING_SAT_TILES = 40;
@@ -613,7 +613,7 @@ export async function loadTerrainScene(
   const imageryPromise: Promise<ImageryGrid | null> = wantImagery
     ? buildImageryGrid(bbox).catch(() => null)
     : Promise.resolve(null);
-  // Context ring (background terrain around the sim area) — fetches kick off
+  // Context ring (background terrain around the control area) — fetches kick off
   // in parallel too; a failed ring is silently skipped.
   const surBbox: Bbox | null = wantImagery && ringWanted() ? expandBbox(bbox, RING_SPAN) : null;
   const surGridPromise: Promise<ElevationGrid | null> = surBbox
@@ -672,7 +672,7 @@ export async function loadTerrainScene(
     new THREE.Vector3(-Infinity, -Infinity, -Infinity),
   );
 
-  // Hypsometric ramp for the RECON reveal cloud (SIM applies its own gradient).
+  // Hypsometric ramp for the STATUS reveal cloud (CONTROL applies its own gradient).
   const low = new THREE.Color(0x35543a); // valley forest green
   const mid = new THREE.Color(0x8a7a55); // ridge tan
   const high = new THREE.Color(0xd8d2c6); // peak light gray
@@ -755,7 +755,7 @@ export async function loadTerrainScene(
   }
 
   // Context ring: same transform, tucked slightly below the core surface so
-  // the seam hides under the sharper sim-area terrain.
+  // the seam hides under the sharper control-area terrain.
   let surround: TerrainVisual | undefined;
   let surroundCtx: TerrainContext | undefined;
   if (visual && surBbox) {

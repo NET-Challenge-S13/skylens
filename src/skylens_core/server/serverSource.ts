@@ -2,12 +2,12 @@
 // detection results, and Gaussian-splat chunks; the client sends route commands.
 // There is no live backend yet, so:
 //   - demo mode  → a MOCK provider synthesizes the stream on a timer (so the full
-//                  RECON flow plays out).
+//                  STATUS flow plays out).
 //   - real mode  → a stub connection point that idles "waiting for server" until
 //                  a real endpoint is wired via connect(url).
 //
-// Both surfaces (SIM, RECON) create their own source; RECON consumes
-// detections/splats, SIM sends assign-route and shows reception status.
+// Both surfaces (CONTROL, STATUS) create their own source; STATUS consumes
+// detections/splats, CONTROL sends assign-route and shows reception status.
 
 import { CONFIG } from '../config.ts';
 import { enuToGps } from '../geo.ts';
@@ -16,9 +16,18 @@ import type {
   AssignRoute,
   DetectionResult,
   DroneTelemetry,
+  SegmentStatus,
   ServerStatus,
   SplatChunk,
 } from '../protocol.ts';
+
+/** segments.json, written by models/skylens/split_segments.py. */
+interface SegmentManifest {
+  segments: Array<{
+    index: number;
+    levels: Array<{ level: number; steps: number; label: string; url: string }>;
+  }>;
+}
 
 export interface ServerSource {
   onStatus(cb: (s: ServerStatus) => void): void;
@@ -39,6 +48,9 @@ export interface ServerSourceOptions {
   demo: boolean;
   /** Splat URL the mock advertises as the reconstructed scene. */
   splatUrl?: string | null;
+  /** Segment × level manifest. When it loads, the mock streams the DELAY
+   *  PATTERN (segments refined in overlapping stages) instead of one scene. */
+  manifestUrl?: string | null;
 }
 
 type Cb<T> = (v: T) => void;
@@ -58,10 +70,24 @@ export function createServerSource(opts: ServerSourceOptions): ServerSource {
     detections: 0,
     lastSeq: 0,
     latencyMs: null,
+    segments: [],
   };
 
   const emitStatus = (): void => {
-    for (const cb of statusCbs) cb({ ...status });
+    const snap: ServerStatus = { ...status, segments: status.segments.map((s) => ({ ...s })) };
+    for (const cb of statusCbs) cb(snap);
+  };
+
+  const emitChunk = (chunk: SplatChunk, seg: SegmentStatus | null): void => {
+    status.chunks += 1;
+    status.lastSeq += 1;
+    if (seg) {
+      seg.level = chunk.level;
+      seg.steps = chunk.steps;
+      seg.label = chunk.label;
+    }
+    for (const cb of splatCbs) cb(chunk);
+    emitStatus();
   };
 
   const anchor = CONFIG.geo.anchor;
@@ -73,31 +99,98 @@ export function createServerSource(opts: ServerSourceOptions): ServerSource {
     { id: 'd3', category: 'danger', confidence: 0.91, label: '붕괴 위험구역 · 중앙', e: 0, n: 8, u: 3 },
   ];
 
-  function runMock(): void {
-    status.connected = true;
-    status.receiving = true;
-    status.latencyMs = 40;
+  /**
+   * Delay-pattern stream. Segment k is "captured" at
+   * `firstSegmentDelay + k * segmentPeriod`, then its levels land at that time
+   * plus `levelDelays[i]`. Because the later delays exceed segmentPeriod, a
+   * segment is still being refined while the next one delivers its first level
+   * — the stagger the report describes.
+   *
+   * Returns false when the manifest isn't there (no local capture generated),
+   * so the caller can fall back to the single-scene stream.
+   */
+  async function runDelayPattern(manifestUrl: string): Promise<boolean> {
+    let manifest: SegmentManifest;
+    try {
+      const res = await fetch(manifestUrl);
+      if (!res.ok) return false;
+      manifest = (await res.json()) as SegmentManifest;
+    } catch {
+      return false;
+    }
+    if (!manifest.segments?.length) return false;
+
+    const base = new URL(manifestUrl, window.location.href);
+    const { firstSegmentDelay, segmentPeriod, levelDelays } = CONFIG.delayPattern;
+
+    status.segments = manifest.segments.map((s) => ({
+      index: s.index,
+      level: 0,
+      levels: s.levels.length,
+      steps: 0,
+      label: '',
+    }));
     emitStatus();
 
-    // The reconstructed scene arrives as one (or more) splat chunk(s).
+    manifest.segments.forEach((seg, si) => {
+      const captured = firstSegmentDelay + si * segmentPeriod;
+      const track = status.segments[si];
+      seg.levels.forEach((lv, li) => {
+        const delay = levelDelays[Math.min(li, levelDelays.length - 1)] ?? 0;
+        timers.push(
+          setTimeout(
+            () => {
+              emitChunk(
+                {
+                  kind: 'splat-chunk',
+                  id: `seg${seg.index}-lv${lv.level}`,
+                  url: new URL(lv.url, base).toString(),
+                  // Identity: the server hasn't computed a placement, so the
+                  // client lands the chunk on its own fit transform. Every
+                  // segment is cut from ONE capture, so they share it.
+                  align: { ...IDENTITY_ALIGN },
+                  segment: seg.index,
+                  level: lv.level,
+                  steps: lv.steps,
+                  label: lv.label,
+                  final: li === seg.levels.length - 1,
+                },
+                track,
+              );
+            },
+            (captured + delay) * 1000,
+          ),
+        );
+      });
+    });
+    return true;
+  }
+
+  /** Fallback: the whole reconstruction as a single chunk (CDN sample asset). */
+  function runSingleScene(): void {
     timers.push(
       setTimeout(() => {
-        if (opts.splatUrl) {
-          status.chunks += 1;
-          status.lastSeq += 1;
-          const chunk: SplatChunk = {
+        if (!opts.splatUrl) return;
+        emitChunk(
+          {
             kind: 'splat-chunk',
             id: 'chunk-0',
             url: opts.splatUrl,
             align: { ...IDENTITY_ALIGN },
-          };
-          for (const cb of splatCbs) cb(chunk);
-          emitStatus();
-        }
+            segment: 0,
+            level: 1,
+            steps: 0,
+            label: '',
+            final: true,
+          },
+          null,
+        );
       }, 1200),
     );
+  }
 
-    // Human-detection results trickle in as the drone scans.
+  /** Human-detection results trickle in as the drone scans. */
+  function runDetections(): void {
     MOCK_DETECTIONS.forEach((d, i) => {
       timers.push(
         setTimeout(() => {
@@ -116,6 +209,20 @@ export function createServerSource(opts: ServerSourceOptions): ServerSource {
         }, 3000 + i * 2500),
       );
     });
+  }
+
+  function runMock(): void {
+    status.connected = true;
+    status.receiving = true;
+    status.latencyMs = 40;
+    emitStatus();
+
+    void (async () => {
+      const streamed = opts.manifestUrl ? await runDelayPattern(opts.manifestUrl) : false;
+      if (!streamed) runSingleScene();
+    })();
+
+    runDetections();
   }
 
   return {

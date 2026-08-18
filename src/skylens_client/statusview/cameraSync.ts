@@ -1,8 +1,8 @@
 // Camera state machine for viewer 2 (§8.3): SYNCED -> FOCUSING -> LOCKED ->
-// RETURNING -> SYNCED. The ReconViewer calls step() and applies getPose().
+// RETURNING -> SYNCED. The StatusViewer calls step() and applies getPose().
 //
 // SYNCED is a slow OVERVIEW ORBIT around the whole reconstructed scene, framed
-// from outside so the building is clearly visible as a 3D object (RECON has no
+// from outside so the building is clearly visible as a 3D object (STATUS has no
 // drone model to chase). On a detection it tweens in to focus, holds until the
 // operator confirms, then tweens back to the orbit. Drives shared store state so
 // the UI interoperates purely through state.cameraSync / focusedDetectionId.
@@ -27,7 +27,7 @@ export class CameraSync {
 
   // Tween bookkeeping for FOCUSING / RETURNING. Timed in REAL seconds (dt), not
   // the sim clock, so camera animation plays at a consistent speed regardless of
-  // sim playback speed or a throttled/paused sim.
+  // control playback speed or a throttled/paused control.
   private tweenElapsed = 0;
   private tweenFrom = { pos: new THREE.Vector3(), target: new THREE.Vector3() };
   private tweenTo = { pos: new THREE.Vector3(), target: new THREE.Vector3() };

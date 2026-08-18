@@ -1,4 +1,4 @@
-// Splat shader effects for RECON: (1) a floater CLIP that discards splats outside
+// Splat shader effects for STATUS: (1) a floater CLIP that discards splats outside
 // the robust scene box — photo/SfM splats have lots of far background gaussians
 // that otherwise fog up the view — and (2) an optional progressive REVEAL mask
 // driven by a top-down coverage texture (drones "scan" the building in).

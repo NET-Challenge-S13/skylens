@@ -4,18 +4,18 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>SkyLens · RECON — 실시간 3D 복원 상황판</title>
+    <title>SkyLens · 현황판 - 실시간 3D 복원</title>
   </head>
   <body>
-    <section class="pane pane--recon pane--full">
-      <canvas id="recon-view"></canvas>
-      <div class="pane__label">RECON · 실시간 3D 복원 상황판</div>
-      <div id="overlay-recon" class="overlay"></div>
+    <section class="pane pane--status pane--full">
+      <canvas id="status-view"></canvas>
+      <div class="pane__label">현황판 · 실시간 3D 복원</div>
+      <div id="overlay-status" class="overlay"></div>
       <div id="net-status" class="net-badge"></div>
       <div id="server-status"></div>
       <div id="minimap"></div>
     </section>
     <div id="toast-root"></div>
-    <script type="module" src="/src/skylens_client/recon.ts"></script>
+    <script type="module" src="/src/skylens_client/status.ts"></script>
   </body>
 </html>

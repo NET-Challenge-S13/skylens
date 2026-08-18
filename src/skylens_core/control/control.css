@@ -1,8 +1,8 @@
-/* SIM-owned styling: control-tower toolbar, route modal, video panel.
+/* CONTROL-owned styling: control-tower toolbar, route modal, video panel.
    Everything shared/global stays in style.css (owned elsewhere). Uses the
    token system defined there (--surface-*, --border-*, --font-*, etc). */
 
-.sim-toolbar {
+.control-toolbar {
   position: absolute;
   top: 14px;
   right: 16px;
@@ -11,7 +11,7 @@
   gap: 8px;
 }
 
-.sim-toolbar__btn {
+.control-toolbar__btn {
   font-family: var(--font-display);
   font-size: var(--text-sm);
   letter-spacing: 0.1em;
@@ -21,17 +21,17 @@
   border-radius: var(--radius-sm);
   background: var(--surface-1);
   border: 1px solid var(--border-hairline);
-  color: var(--sim-ink);
+  color: var(--control-ink);
   cursor: pointer;
   transition: background 0.15s ease, border-color 0.15s ease;
 }
 
-.sim-toolbar__btn:hover {
+.control-toolbar__btn:hover {
   background: var(--surface-2);
   border-color: var(--border-strong);
 }
 
-.sim-toolbar__btn:focus-visible {
+.control-toolbar__btn:focus-visible {
   outline: 2px solid var(--border-focus);
   outline-offset: 1px;
 }
@@ -60,7 +60,7 @@
   overflow: auto;
   background: var(--surface-2);
   border: 1px solid var(--border-hairline);
-  border-top: 2px solid var(--sim-ink);
+  border-top: 2px solid var(--control-ink);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-modal);
   padding: 22px 22px 20px;
@@ -78,7 +78,7 @@
   margin-bottom: 16px;
   padding-bottom: 12px;
   border-bottom: 1px solid var(--divider);
-  color: var(--sim-ink);
+  color: var(--control-ink);
 }
 
 .route-modal__close {
@@ -189,13 +189,13 @@
 }
 
 .route-modal__btn--primary {
-  background: var(--sim-ink);
-  border-color: var(--sim-ink);
+  background: var(--control-ink);
+  border-color: var(--control-ink);
   color: var(--text-on-accent);
 }
 .route-modal__btn--primary:hover {
   filter: brightness(1.1);
-  border-color: var(--sim-ink);
+  border-color: var(--control-ink);
 }
 
 .route-modal__btn--ghost {
@@ -253,7 +253,7 @@
   font-size: var(--text-xs);
   font-weight: 600;
   letter-spacing: 0.12em;
-  color: var(--sim-ink);
+  color: var(--control-ink);
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.85);
   pointer-events: none;
 }
@@ -298,7 +298,7 @@
   margin-bottom: 12px;
 }
 .route-modal__hint.is-warn {
-  color: var(--sim-warn, #ffcc55);
+  color: var(--control-warn, #ffcc55);
 }
 
 .route-modal__toolbar {
@@ -329,9 +329,9 @@
   border-color: var(--border-focus);
 }
 .route-modal__span.is-active {
-  background: var(--sim-ink);
+  background: var(--control-ink);
   color: #0a0f18;
-  border-color: var(--sim-ink);
+  border-color: var(--control-ink);
 }
 
 .route-modal__alt {
@@ -345,7 +345,7 @@
 }
 .route-modal__alt input[type='range'] {
   width: 120px;
-  accent-color: var(--sim-ink);
+  accent-color: var(--control-ink);
 }
 
 .route-modal__map {

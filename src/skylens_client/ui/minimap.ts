@@ -23,7 +23,7 @@ function noop(): Minimap {
   return { update() {}, dispose() {} };
 }
 
-/** Mount into `#minimap` (see recon.html). Bounds come from the scene's own box3. */
+/** Mount into `#minimap` (see status.html). Bounds come from the scene's own box3. */
 export function mountMinimap(bounds: THREE.Box3): Minimap {
   const hostEl = document.getElementById('minimap');
   if (!hostEl) return noop();

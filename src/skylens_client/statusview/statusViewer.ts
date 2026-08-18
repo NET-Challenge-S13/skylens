@@ -13,7 +13,7 @@ import type { SceneData } from '../../skylens_core/sources/sceneData';
 import type { DetectionRuntime } from '../../skylens_core/types';
 import { state, emit } from '../../skylens_core/store';
 import { CONFIG } from '../../skylens_core/config';
-import type { SplatAlign } from '../../skylens_core/protocol.ts';
+import type { SplatChunkInput } from './splatScene.ts';
 import { RevealField } from './reveal.ts';
 import { SplatReveal } from './splatReveal.ts';
 import { CameraSync } from './cameraSync.ts';
@@ -48,7 +48,7 @@ const POINT_FRAG = /* glsl */ `
   }
 `;
 
-const RECON_UP = new THREE.Vector3(0, 1, 0);
+const STATUS_UP = new THREE.Vector3(0, 1, 0);
 
 /** One marker's live visuals (pin + pulsing ring), kept in sync with a DetectionRuntime. */
 interface MarkerVisual {
@@ -58,7 +58,7 @@ interface MarkerVisual {
   visible: boolean;
 }
 
-export class ReconViewer {
+export class StatusViewer {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly scene = new THREE.Scene();
   private readonly camera: THREE.PerspectiveCamera;
@@ -73,7 +73,10 @@ export class ReconViewer {
   private splatReveal: SplatReveal | null;
   private readonly splatCapable: boolean;
   private readonly sceneBounds: THREE.Box3;
-  private splatAttached = false;
+  /** Material the reveal shader is patched into. The library REBUILDS the splat
+   *  mesh whenever a superseded level is removed, so this is re-checked every
+   *  frame and re-patched when the material identity changes. */
+  private attachedMaterial: THREE.ShaderMaterial | null = null;
   private splatMaskEnabled: boolean = CONFIG.reveal.splatMask;
   private readonly camSync: CameraSync;
   private readonly markers: MarkerVisual[] = [];
@@ -85,7 +88,7 @@ export class ReconViewer {
   private followDist = 40;
   private followHeight = 30;
   private floorY = 0;
-  // Lagged pose history of the active drone, so RECON trails the SIM view.
+  // Lagged pose history of the active drone, so STATUS trails the CONTROL view.
   private readonly history: Array<{ t: number; pos: THREE.Vector3; forward: THREE.Vector3 }> = [];
   private userDragging = false;
   private dragGraceUntil = 0;
@@ -97,7 +100,7 @@ export class ReconViewer {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
 
-    this.scene.background = new THREE.Color(CONFIG.color.reconBg);
+    this.scene.background = new THREE.Color(CONFIG.color.statusBg);
     // Subtle warm-neutral fill so the "real" reconstruction reads photographic.
     this.scene.add(new THREE.AmbientLight(0xffe8cf, 0.35));
     const key = new THREE.DirectionalLight(0xfff1d8, 0.5);
@@ -118,7 +121,7 @@ export class ReconViewer {
     dists.sort((a, b) => a - b);
     const core = dists.length ? dists[Math.floor(dists.length * 0.6)] : 10;
     const radius = Math.max(1, core);
-    this.scene.fog = new THREE.Fog(CONFIG.color.reconBg, radius * 3, radius * 9);
+    this.scene.fog = new THREE.Fog(CONFIG.color.statusBg, radius * 3, radius * 9);
 
     this.floorY = sceneData.groundY;
     this.followDist = radius * 1.6;
@@ -133,7 +136,7 @@ export class ReconViewer {
       this.sceneCenter.z + dist * 0.75,
     );
 
-    // RECON trails the active drone's view (PROJECT.md §8.3). OrbitControls stay
+    // STATUS trails the active drone's view (PROJECT.md §8.3). OrbitControls stay
     // available so the operator can drag to look around; the follow pauses while
     // dragging and for a few seconds after.
     this.controls = new OrbitControls(this.camera, canvas);
@@ -186,7 +189,7 @@ export class ReconViewer {
   /**
    * Add a detection received from the server. Detections now arrive
    * progressively (serverSource.onDetection) instead of being pre-derived
-   * from the cloud, so ReconViewer owns adding them to the store + building
+   * from the cloud, so StatusViewer owns adding them to the store + building
    * their marker on demand. Idempotent per id.
    */
   addDetection(det: DetectionRuntime): void {
@@ -229,17 +232,18 @@ export class ReconViewer {
     const now = state.time;
 
     // Lag the visited trail before feeding the reveal (§5.2).
-    const cutoff = now - CONFIG.sim.revealLagSeconds;
+    const cutoff = now - CONFIG.clock.revealLagSeconds;
     const lagged = state.visited.filter((v) => v.t <= cutoff);
 
-    // Patch the splat shader once its material exists (photorealistic reveal).
-    // Always patch the splat shader (floater clip); the reveal mask is toggled.
-    if (this.splatReveal && this.splat && !this.splatAttached) {
+    // Patch the splat shader whenever its material appears OR is replaced: the
+    // library rebuilds the mesh (and material) each time a superseded level is
+    // dropped, which would otherwise lose the floater clip + reveal mask.
+    if (this.splatReveal && this.splat) {
       const mat = this.splat.material;
-      if (mat) {
+      if (mat && mat !== this.attachedMaterial) {
         this.splatReveal.attachTo(mat);
         this.splatReveal.setRevealEnabled(this.splatMaskEnabled);
-        this.splatAttached = true;
+        this.attachedMaterial = mat;
       }
     }
 
@@ -312,7 +316,7 @@ export class ReconViewer {
    * reveal/markers/camera stay aligned. Creates the underlying SplatScene
    * lazily on the first chunk. Callers should serialize (await) calls.
    */
-  ingestSplatChunk(url: string, align: SplatAlign): Promise<void> {
+  ingestSplatChunk(chunk: SplatChunkInput): Promise<void> {
     if (!this.splat) {
       this.splat = new SplatScene(this.scene);
       if (this.splatCapable && this.reveal) {
@@ -323,7 +327,7 @@ export class ReconViewer {
         this.splatReveal = new SplatReveal(this.sceneBounds);
       }
     }
-    return this.splat.addChunk(url, align);
+    return this.splat.addChunk(chunk);
   }
 
   /** Toggle the splat reveal mask. When off, the full splat renders regardless. */
@@ -345,7 +349,8 @@ export class ReconViewer {
       target: this.controls.target.toArray().map((n) => Math.round(n * 10) / 10),
       center: this.sceneCenter.toArray().map((n) => Math.round(n * 10) / 10),
       camDist: Math.round(this.camera.position.distanceTo(this.sceneCenter) * 10) / 10,
-      splatAttached: this.splatAttached,
+      splatAttached: this.attachedMaterial !== null,
+      segmentLevels: this.splat?.segmentLevels ?? {},
     };
   }
 
@@ -361,11 +366,21 @@ export class ReconViewer {
     return this.splat?.chunks ?? 0;
   }
 
+  /** Superseded levels dropped after a refinement landed (delay pattern). */
+  get splatReplaced(): number {
+    return this.splat?.replaced ?? 0;
+  }
+
+  /** Highest refinement level rendering per segment. */
+  get splatSegmentLevels(): Record<number, number> {
+    return this.splat?.segmentLevels ?? {};
+  }
+
   /** Lagged follow of the active drone: look at the ground it's scanning, from
-   *  behind + above its heading, so steering the drone rotates the RECON view. */
+   *  behind + above its heading, so steering the drone rotates the STATUS view. */
   private followPose(now: number): { pos: THREE.Vector3; target: THREE.Vector3 } | null {
     if (this.history.length === 0) return null;
-    const targetT = now - CONFIG.sim.revealLagSeconds;
+    const targetT = now - CONFIG.clock.revealLagSeconds;
     let s = this.history[0];
     for (const h of this.history) {
       if (h.t <= targetT) s = h;
@@ -385,7 +400,7 @@ export class ReconViewer {
     const pos = groundHit
       .clone()
       .addScaledVector(headingXZ, -this.followDist)
-      .addScaledVector(RECON_UP, this.followHeight);
+      .addScaledVector(STATUS_UP, this.followHeight);
     return { pos, target: groundHit };
   }
 
@@ -397,7 +412,7 @@ export class ReconViewer {
     const pos = det
       .clone()
       .addScaledVector(dir, -CONFIG.camera.focusDistance)
-      .addScaledVector(RECON_UP, CONFIG.camera.focusDistance * 0.35);
+      .addScaledVector(STATUS_UP, CONFIG.camera.focusDistance * 0.35);
     return { pos, target: det };
   }
 

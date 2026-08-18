@@ -1,9 +1,9 @@
-// Wire protocol for SIM -> RECON state streaming over the WebRTC DataChannel.
+// Wire protocol for CONTROL -> STATUS state streaming over the WebRTC DataChannel.
 //
-// Data flow is one-directional: the SIM computer owns the simulation (drone
+// Data flow is one-directional: the CONTROL computer owns the simulation (drone
 // poses, the visited buffer, active drone, sim clock) and streams snapshots to
-// the RECON computer, which computes reveal + camera + detections locally from
-// what it receives. Confirmations happen on RECON and stay local, so nothing
+// the STATUS computer, which computes reveal + camera + detections locally from
+// what it receives. Confirmations happen on STATUS and stay local, so nothing
 // needs to travel back.
 
 import * as THREE from 'three';
@@ -26,19 +26,19 @@ export interface WireVisited {
   t: number;
 }
 
-/** A full SIM->RECON snapshot. `visitedDelta` carries only new visited spots. */
+/** A full CONTROL->STATUS snapshot. `visitedDelta` carries only new visited spots. */
 export interface StateSnapshot {
   kind: 'state';
   time: number;
   activeDroneId: number;
   drones: WireDrone[];
   visitedDelta: WireVisited[];
-  /** Running total of visited entries on the sender, so RECON can detect gaps. */
+  /** Running total of visited entries on the sender, so STATUS can detect gaps. */
   visitedTotal: number;
 }
 
 /**
- * Encode the SIM's current state into a snapshot. `sinceVisited` is the number
+ * Encode CONTROL's current state into a snapshot. `sinceVisited` is the number
  * of visited entries already sent, so we transmit only the delta.
  */
 export function encodeState(state: AppState, sinceVisited: number): StateSnapshot {
@@ -69,7 +69,7 @@ export function encodeState(state: AppState, sinceVisited: number): StateSnapsho
 }
 
 /**
- * Apply a received snapshot onto RECON's local store state, mutating in place.
+ * Apply a received snapshot onto STATUS's local store state, mutating in place.
  * Reuses existing DroneRuntime objects/vectors where possible to avoid churn.
  */
 export function applyState(snap: StateSnapshot, state: AppState): void {
@@ -123,11 +123,42 @@ export interface SplatAlign {
   scale: [number, number, number];
 }
 
+/**
+ * One reconstructed piece of the scene. The stream follows the DELAY PATTERN
+ * (interim report Ⅱ-3-다): the flight is cut into segments, each segment is
+ * delivered at a low training-step level first and refined afterwards, and the
+ * refinement of one segment overlaps the first delivery of the next.
+ *
+ * A higher `level` for a `segment` REPLACES the lower one already on the board;
+ * different segments accumulate side by side.
+ */
 export interface SplatChunk {
   kind: 'splat-chunk';
   id: string;
   url: string;
   align: SplatAlign;
+  /** Which capture segment this reconstructs (a piece of the scene, not a copy). */
+  segment: number;
+  /** Refinement level inside the segment; 1 lands first, higher ones replace it. */
+  level: number;
+  /** Training steps behind this level (report 표 8). 0 when unknown. */
+  steps: number;
+  /** What the commander can make out at this level (report 표 8). */
+  label: string;
+  /** True when no further level will arrive for this segment. */
+  final: boolean;
+}
+
+/** Refinement state of one segment, as the board currently holds it. */
+export interface SegmentStatus {
+  index: number;
+  /** Highest level delivered so far; 0 = still being processed. */
+  level: number;
+  /** Levels this segment will go through in total. */
+  levels: number;
+  /** Training steps behind the delivered level. */
+  steps: number;
+  label: string;
 }
 
 export interface DroneTelemetry {
@@ -154,6 +185,8 @@ export interface ServerStatus {
   detections: number;
   lastSeq: number;
   latencyMs: number | null;
+  /** Per-segment refinement state; empty when the source streams a single scene. */
+  segments: SegmentStatus[];
 }
 
 /** client -> server: assign a GPS route to a drone. */

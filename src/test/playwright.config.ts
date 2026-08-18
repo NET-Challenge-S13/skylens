@@ -5,7 +5,7 @@ import { defineConfig, devices } from '@playwright/test';
 export default defineConfig({
   // This config lives in tests/, so the test dir is the config's own directory.
   testDir: '.',
-  // Nested html entries (res/static/sim.html …) make Vite's first cold
+  // Nested html entries (res/static/control.html …) make Vite's first cold
   // transform heavy (~25s); give the first navigation room before the server warms.
   timeout: 45_000,
   expect: { timeout: 10_000 },

@@ -4,30 +4,30 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>SkyLens — 멀티드론 재난 인텔리전스</title>
+    <title>SkyLens - 멀티드론 재난 인텔리전스</title>
   </head>
   <body>
     <main class="landing">
       <h1>🛸 SkyLens</h1>
       <p class="landing__sub">
-        멀티드론 재난 인텔리전스 — 두 컴퓨터가 각자 아래 화면을 엽니다.
+        멀티드론 재난 인텔리전스 - 두 컴퓨터가 각자 아래 화면을 엽니다.
         연결은 WebRTC(P2P)로, 같은 <code>room</code>이면 자동으로 이어집니다.
       </p>
       <div class="landing__cards">
-        <a class="landing__card landing__card--sim" href="/res/static/sim.html">
+        <a class="landing__card landing__card--control" href="/res/static/control.html">
           <span class="landing__kicker">컴퓨터 A</span>
-          <span class="landing__title">SIM · 드론 탐색</span>
+          <span class="landing__title">관제탑 · 드론 탐색</span>
           <span class="landing__desc">드론 3대가 현장을 분할 탐색 · 키보드 조작</span>
         </a>
-        <a class="landing__card landing__card--recon" href="/res/static/recon.html">
+        <a class="landing__card landing__card--status" href="/res/static/status.html">
           <span class="landing__kicker">컴퓨터 B</span>
-          <span class="landing__title">RECON · 3D 복원 상황판</span>
+          <span class="landing__title">현황판 · 3D 복원 상황판</span>
           <span class="landing__desc">탐색된 자리를 실시간 3D로 복원 · AI 탐지 오버레이</span>
         </a>
       </div>
       <p class="landing__hint">
         같은 방을 쓰려면 두 URL 뒤에 <code>?room=이름</code>을 똑같이 붙이세요.
-        예: <code>/res/static/sim.html?room=demo</code> · <code>/res/static/recon.html?room=demo</code>
+        예: <code>/res/static/control.html?room=demo</code> · <code>/res/static/status.html?room=demo</code>
       </p>
     </main>
     <link rel="stylesheet" href="/src/skylens_core/style.css" />

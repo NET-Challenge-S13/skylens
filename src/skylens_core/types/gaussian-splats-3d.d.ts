@@ -26,7 +26,13 @@ declare module '@mkkellogg/gaussian-splats-3d' {
   /** A THREE.Group you add to your scene; renders in your own loop. */
   export class DropInViewer extends Group {
     constructor(options?: DropInViewerOptions);
+    /** The wrapped viewer. Exposed for the load/unload gate below. */
+    readonly viewer: { isLoadingOrUnloading(): boolean };
     addSplatScene(path: string, options?: AddSplatSceneOptions): Promise<void>;
+    /** Drop a loaded scene by index. Remaining scenes shift down, and the splat
+     *  mesh (hence its material) is REBUILT. */
+    removeSplatScene(index: number, showLoadingUI?: boolean): Promise<void>;
+    removeSplatScenes(indexes: number[], showLoadingUI?: boolean): Promise<void>;
     getSceneCount(): number;
     dispose(): Promise<void> | void;
     /** The mesh rendering the splats (present after a scene loads). */

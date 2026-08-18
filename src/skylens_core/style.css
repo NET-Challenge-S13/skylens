@@ -1,7 +1,7 @@
 /* ==========================================================================
    SkyLens — Mission Control design system
    Dark, dense, precise. Aerospace/disaster-ops control-room aesthetic.
-   Tokens defined here are consumed by sim.css and recon-panels.css.
+   Tokens defined here are consumed by control.css and status-panels.css.
    ========================================================================== */
 
 @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Barlow:wght@400;500;600&display=swap');
@@ -30,8 +30,8 @@
   --text-on-accent: #05070a;
 
   /* --- Accent roles --- */
-  --sim-ink: #5ec8ff;
-  --recon-ink: #d9cba8;
+  --control-ink: #5ec8ff;
+  --status-ink: #d9cba8;
   --person: #39d98a;
   --danger: #ff5252;
   --warn: #ffb454;
@@ -188,17 +188,17 @@ html {
   flex: 0 0 auto;
 }
 
-.pane--sim .pane__label {
-  color: var(--sim-ink);
+.pane--control .pane__label {
+  color: var(--control-ink);
 }
-.pane--sim .pane__label::before {
-  background: var(--sim-ink);
-  box-shadow: 0 0 8px var(--sim-ink);
+.pane--control .pane__label::before {
+  background: var(--control-ink);
+  box-shadow: 0 0 8px var(--control-ink);
 }
-.pane--recon .pane__label {
-  color: var(--recon-ink);
+.pane--status .pane__label {
+  color: var(--status-ink);
 }
-.pane--recon .pane__label::before {
+.pane--status .pane__label::before {
   background: var(--person);
   box-shadow: 0 0 8px var(--person);
 }
@@ -233,7 +233,7 @@ html {
 
 .hud__drone.is-active {
   border-color: var(--border-focus);
-  border-left-color: var(--sim-ink);
+  border-left-color: var(--control-ink);
   box-shadow: 0 0 0 1px rgba(94, 200, 255, 0.25), var(--shadow-panel);
 }
 
@@ -449,8 +449,8 @@ html {
   box-shadow: 0 0 6px currentColor;
 }
 
-/* RECON already shows cam-state? no — but net-badge and pane label share the
-   top row; give recon's net-badge room below nothing extra needed. */
+/* STATUS already shows cam-state? no — but net-badge and pane label share the
+   top row; give status's net-badge room below nothing extra needed. */
 
 /* --- Full-screen loading overlay --- */
 .loading-screen {
@@ -490,8 +490,8 @@ html {
   height: 100%;
   width: 0%;
   border-radius: 2px;
-  background: var(--sim-ink);
-  box-shadow: 0 0 8px var(--sim-ink);
+  background: var(--control-ink);
+  box-shadow: 0 0 8px var(--control-ink);
   transition: width 0.2s ease;
 }
 .loading-screen.is-error .loading-screen__bar > span {
@@ -581,12 +581,12 @@ html {
 .landing__card:hover {
   transform: translateY(-3px);
 }
-.landing__card--sim:hover {
-  border-color: var(--sim-ink);
-  border-top-color: var(--sim-ink);
+.landing__card--control:hover {
+  border-color: var(--control-ink);
+  border-top-color: var(--control-ink);
   box-shadow: var(--shadow-panel), 0 0 0 1px rgba(94, 200, 255, 0.25);
 }
-.landing__card--recon:hover {
+.landing__card--status:hover {
   border-color: var(--person);
   border-top-color: var(--person);
   box-shadow: var(--shadow-panel), 0 0 0 1px rgba(57, 217, 138, 0.25);
@@ -605,10 +605,10 @@ html {
   letter-spacing: 0.01em;
   color: var(--text-primary);
 }
-.landing__card--sim .landing__title {
-  color: var(--sim-ink);
+.landing__card--control .landing__title {
+  color: var(--control-ink);
 }
-.landing__card--recon .landing__title {
+.landing__card--status .landing__title {
   color: var(--person);
 }
 .landing__desc {

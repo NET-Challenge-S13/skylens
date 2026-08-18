@@ -25,7 +25,7 @@ const FORMATION = [
   new THREE.Vector3(0, 3, 9),
 ];
 
-/** How often (sim seconds) we record a visited sample per drone. */
+/** How often (control seconds) we record a visited sample per drone. */
 const VISITED_INTERVAL = 0.15;
 /** Minimum world-unit movement before a new visited sample is recorded. */
 const VISITED_MIN_DIST = 1.0;
@@ -34,7 +34,7 @@ const VISITED_MIN_DIST = 1.0;
 interface DroneLocal {
   /** World-up reference used to build a stable look-orientation. */
   idleTime: number;
-  /** Sim-time accumulator gating visited-buffer pushes. */
+  /** Control-time accumulator gating visited-buffer pushes. */
   visitedTimer: number;
   lastVisitedPos: THREE.Vector3 | null;
   /** Snapshot of position when a RETURNING tween begins. */

@@ -1,7 +1,7 @@
-// Display-only world streamer (?map= + ?tex=sat, SIM): as the ACTIVE drone
+// Display-only world streamer (?map= + ?tex=sat, CONTROL): as the ACTIVE drone
 // nears unloaded territory, fetch fine terrain + building prisms for grid
 // cells around it — the "slippy map" feel. Never touches the deterministic
-// SceneData contract: no points, no PRNG draws, and RECON never runs this.
+// SceneData contract: no points, no PRNG draws, and STATUS never runs this.
 //
 // Sliding window, not a bounded region: cells near the drone load in, cells
 // that fall far behind get disposed and forgotten (retryable later if

@@ -4,16 +4,16 @@
 // server. NAT traversal uses Google's public STUN server. Once the peers hand
 // shake through the broker, live state flows over the P2P DataChannel directly.
 //
-// Only the LISTENER needs a stable id so the other side can find it: SIM
-// registers `skylens-<room>-sim`; RECON uses a RANDOM id and connects out to
-// SIM (so RECON can never collide). If SIM's id is already taken on the shared
-// public broker (usually a stale registration), SIM recreates its peer after a
+// Only the LISTENER needs a stable id so the other side can find it: CONTROL
+// registers `skylens-<room>-control`; STATUS uses a RANDOM id and connects out to
+// CONTROL (so STATUS can never collide). If CONTROL's id is already taken on the shared
+// public broker (usually a stale registration), CONTROL recreates its peer after a
 // backoff to self-heal. Use a distinct `?room=` to avoid clashing with others.
 
 import { Peer } from 'peerjs';
 import type { DataConnection } from 'peerjs';
 
-export type PeerRole = 'sim' | 'recon';
+export type PeerRole = 'control' | 'status';
 
 export type PeerStatus =
   | 'idle'
@@ -71,38 +71,38 @@ export function createTransport(role: PeerRole, room = 'default'): Transport {
     c.on('error', (e) => setStatus('error', String(e)));
   }
 
-  function connectToSim(): void {
+  function connectToControl(): void {
     if (disposed || conn) return;
     setStatus('connecting');
-    // RECON initiates; reliable+ordered so visited deltas can't be lost.
-    const c = peer.connect(peerId(room, 'sim'), {
+    // STATUS initiates; reliable+ordered so visited deltas can't be lost.
+    const c = peer.connect(peerId(room, 'control'), {
       reliable: true,
       serialization: 'json',
-      metadata: { from: 'recon' },
+      metadata: { from: 'status' },
     });
     wireConnection(c);
   }
 
   function scheduleConnect(): void {
-    if (disposed || role !== 'recon') return;
+    if (disposed || role !== 'status') return;
     if (retryTimer) clearTimeout(retryTimer);
-    retryTimer = setTimeout(connectToSim, RETRY_MS);
+    retryTimer = setTimeout(connectToControl, RETRY_MS);
   }
 
   function makePeer(): void {
     if (disposed) return;
-    // SIM = deterministic listener id; RECON = random id (it only connects out).
+    // CONTROL = deterministic listener id; STATUS = random id (it only connects out).
     peer =
-      role === 'sim'
-        ? new Peer(peerId(room, 'sim'), { config: { iceServers: [STUN] }, debug: 1 })
+      role === 'control'
+        ? new Peer(peerId(room, 'control'), { config: { iceServers: [STUN] }, debug: 1 })
         : new Peer({ config: { iceServers: [STUN] }, debug: 1 });
 
     peer.on('open', () => {
-      if (role === 'recon') connectToSim();
-      else setStatus('connecting'); // SIM waits for RECON to connect
+      if (role === 'status') connectToControl();
+      else setStatus('connecting'); // CONTROL waits for STATUS to connect
     });
 
-    // SIM side: accept the inbound connection from RECON.
+    // CONTROL side: accept the inbound connection from STATUS.
     peer.on('connection', (c) => {
       wireConnection(c);
     });
@@ -120,12 +120,12 @@ export function createTransport(role: PeerRole, room = 'default'): Transport {
 
     peer.on('error', (e: unknown) => {
       const msg = (e as { type?: string; message?: string }) ?? {};
-      // Target (SIM) not online yet — retry quietly.
+      // Target (CONTROL) not online yet — retry quietly.
       if (msg.type === 'peer-unavailable') {
         scheduleConnect();
         return;
       }
-      // SIM's fixed id is taken (usually a stale registration) — recreate to heal.
+      // CONTROL's fixed id is taken (usually a stale registration) — recreate to heal.
       if (msg.type === 'unavailable-id') {
         setStatus('connecting', 'id taken — retrying');
         try {

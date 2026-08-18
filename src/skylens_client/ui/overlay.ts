@@ -26,8 +26,8 @@ const KICKER_LABEL: Record<string, string> = {
 };
 
 export function initUI(): UI {
-  const hudRoot = document.getElementById('hud-sim');
-  const overlayRoot = document.getElementById('overlay-recon');
+  const hudRoot = document.getElementById('hud-control');
+  const overlayRoot = document.getElementById('overlay-status');
   // toast-root is handled entirely by toast.ts.
 
   // --- HUD (viewer 1) ---

@@ -71,7 +71,7 @@ export class LowfiViewer {
     this.scene = new THREE.Scene();
     // `?tex=sat` (real satellite colors): photo colors are unreadable on the
     // dark navy + tight fog, so that mode gets a neutral gray sky and far fog.
-    // `?tex=cyber` grades the drape into the SIM's own cold palette, so it
+    // `?tex=cyber` grades the drape into CONTROL's own cold palette, so it
     // keeps the dark navy sky — just with the far fog of the map scale.
     const texParam =
       typeof window !== 'undefined'
@@ -87,7 +87,7 @@ export class LowfiViewer {
       ? new THREE.Color(CYBER_HORIZON)
       : satMode
         ? new THREE.Color(0x4a515c)
-        : new THREE.Color(CONFIG.color.simBg);
+        : new THREE.Color(CONFIG.color.controlBg);
     this.scene.background = bg;
     this.scene.fog = this.cyber
       // Tight enough that the downtown skyline — well inside the mapped core
@@ -119,9 +119,9 @@ export class LowfiViewer {
       this.scene.add(new THREE.Mesh(meshGeom, meshMat));
     }
 
-    // Context ring: low-res backdrop terrain around the sim area so the world
+    // Context ring: low-res backdrop terrain around the control area so the world
     // doesn't visibly end at the scene edge. Slightly dimmed (material.color
-    // multiplies the texture) so the sharper sim area still reads as the focus.
+    // multiplies the texture) so the sharper control area still reads as the focus.
     if (useMesh && surroundVisual) {
       const surGeom = new THREE.BufferGeometry();
       surGeom.setAttribute('position', new THREE.BufferAttribute(surroundVisual.positions, 3));
@@ -432,7 +432,7 @@ export class LowfiViewer {
 
 /** Downsample the source cloud into a small cyan->navy scanning-dot set.
  *  `?tex=sat` keeps the source cloud's real colors (satellite drape) instead —
- *  the terrain then reads as the actual place in SIM too. */
+ *  the terrain then reads as the actual place in CONTROL too. */
 function buildPointCloud(
   sceneData: SceneData,
   startIndex = 0,
@@ -448,8 +448,8 @@ function buildPointCloud(
   const pos = new Float32Array(keep * 3);
   const col = new Float32Array(keep * 3);
 
-  const near = new THREE.Color(CONFIG.color.simPoint);
-  const far = new THREE.Color(CONFIG.color.simPointFar);
+  const near = new THREE.Color(CONFIG.color.controlPoint);
+  const far = new THREE.Color(CONFIG.color.controlPointFar);
   const c = new THREE.Color();
   const heightSpan = Math.max(sceneData.bounds.max.y - sceneData.bounds.min.y, 0.001);
 

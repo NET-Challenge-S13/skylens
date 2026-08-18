@@ -61,7 +61,7 @@ export interface BuildingVisual {
 
 export interface BuildingLayer {
   points: PointPatch;
-  /** Extruded walls+roof per footprint; SIM `?tex=sat` renders these INSTEAD
+  /** Extruded walls+roof per footprint; CONTROL `?tex=sat` renders these INSTEAD
    *  of the building points, so buildings can't read as floating clumps. */
   visual: BuildingVisual | null;
 }
@@ -221,7 +221,7 @@ export async function loadBuildings(
   const p = new THREE.Vector3();
 
   // Display prisms (walls + roof cap). No PRNG draws in this path — the shared
-  // point stream must stay identical on both computers even though only SIM
+  // point stream must stay identical on both computers even though only CONTROL
   // renders the prisms.
   const vPos: number[] = [];
   const vCol: number[] = [];

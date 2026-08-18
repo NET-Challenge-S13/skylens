@@ -40,7 +40,7 @@ export interface DroneRuntime {
 /** A spot a drone has visited — the source for progressive reveal. §5.2 */
 export interface Visited {
   pos: Vec3;
-  /** Sim time the spot was visited. */
+  /** Control time the spot was visited. */
   t: number;
 }
 
@@ -59,7 +59,7 @@ export interface DetectionRuntime extends Detection {
   revealed: boolean;
   /** True once the operator clicked "탐지 확인". */
   confirmed: boolean;
-  /** Sim time it first became revealed (for staged triggering). */
+  /** Control time it first became revealed (for staged triggering). */
   revealedAt: number | null;
 }
 
@@ -72,7 +72,7 @@ export type CameraSyncState =
 
 /** The whole shared world state. Single source of truth (§8.2 single-app). */
 export interface AppState {
-  /** Sim clock in seconds. */
+  /** Control clock in seconds. */
   time: number;
   running: boolean;
   drones: DroneRuntime[];

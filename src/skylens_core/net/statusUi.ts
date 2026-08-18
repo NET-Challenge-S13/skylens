@@ -38,7 +38,7 @@ export function mountNetBadge(transport: Transport, role: PeerRole): void {
   host.classList.add('net-badge');
   host.append(dot, text);
 
-  const peer = role === 'sim' ? 'RECON' : 'SIM';
+  const peer = role === 'control' ? '현황판' : '관제탑';
 
   transport.onStatus((s, detail) => {
     dot.style.background = DOT[s];

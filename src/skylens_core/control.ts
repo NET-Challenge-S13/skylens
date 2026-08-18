@@ -1,17 +1,17 @@
-// SIM page bootstrap — the "drone simulation" computer (컴퓨터 A).
+// CONTROL page bootstrap — the "drone simulation" computer (컴퓨터 A).
 //
-// Access URL:  http://<서버IP>:5173/res/static/sim.html?room=<방이름>
-// Pair with RECON at the SAME room: /res/static/recon.html?room=<방이름>
+// Access URL:  http://<서버IP>:5173/res/static/control.html?room=<방이름>
+// Pair with STATUS at the SAME room: /res/static/status.html?room=<방이름>
 //
 // Owns the simulation: runs the drone controller + the low-fi viewer, advances
-// the shared clock, and streams state snapshots to the RECON computer over the
+// the shared clock, and streams state snapshots to the STATUS computer over the
 // WebRTC DataChannel. Keyboard control (fly / switch drone / pause) lives here.
 //
-// The scene is the SAME splat RECON renders — here it's shown as a low-fi point
+// The scene is the SAME splat STATUS renders — here it's shown as a low-fi point
 // cloud derived from the splat's own points (PROJECT.md §1: one source, two views).
 
 import './style.css';
-import './sim/sim.css';
+import './control/control.css';
 import { state } from './store.ts';
 import { CONFIG } from './config.ts';
 import { isDemo } from './mode.ts';
@@ -20,14 +20,14 @@ import { startWorldStream } from './sources/streamSource.ts';
 import { buildDronePaths } from './sources/paths.ts';
 import { buildIdlePaths, buildRouteFromGps } from './sources/routes.ts';
 import { createDroneController } from './drones/pathFollower.ts';
-import { LowfiViewer } from './simview/lowfiViewer.ts';
+import { LowfiViewer } from './controlview/lowfiViewer.ts';
 import { createTransport } from './net/peer.ts';
 import { encodeState } from './protocol.ts';
 import { roomFromQuery, mountNetBadge } from './net/statusUi.ts';
 import { createLoadingScreen } from './ui/loadingScreen.ts';
 import { createServerSource } from './server/serverSource.ts';
-import { createRouteModal } from './sim/routeModal.ts';
-import { createVideoPanel } from './sim/videoPanel.ts';
+import { createRouteModal } from './control/routeModal.ts';
+import { createVideoPanel } from './control/videoPanel.ts';
 
 function getCanvas(id: string): HTMLCanvasElement {
   const el = document.getElementById(id);
@@ -36,7 +36,7 @@ function getCanvas(id: string): HTMLCanvasElement {
 }
 
 async function main(): Promise<void> {
-  const loading = createLoadingScreen('SIM · 장면 로딩');
+  const loading = createLoadingScreen('관제탑 · 장면 로딩');
   const loaded = await loadScene({
     url: resolveSplatUrl(),
     onProgress: (p) => loading.progress(p),
@@ -49,7 +49,7 @@ async function main(): Promise<void> {
   const paths = demo ? buildDronePaths(loaded.data.bounds) : buildIdlePaths();
   const drones = createDroneController(paths);
   const lowfi = new LowfiViewer(
-    getCanvas('sim-view'),
+    getCanvas('control-view'),
     loaded.data,
     loaded.terrainVisual,
     loaded.terrainPointCount,
@@ -57,7 +57,7 @@ async function main(): Promise<void> {
     loaded.surroundVisual,
   );
   // World streamer: terrain + building cells load around the ACTIVE drone as
-  // it travels (auto sweep or manual flight) — display-only, SIM-only.
+  // it travels (auto sweep or manual flight) — display-only, CONTROL-only.
   if (loaded.streamSeed) {
     const seed = loaded.streamSeed;
     startWorldStream(seed.coreBbox, seed.ctx, lowfi, () => {
@@ -66,8 +66,8 @@ async function main(): Promise<void> {
     });
   }
 
-  const transport = createTransport('sim', roomFromQuery());
-  mountNetBadge(transport, 'sim');
+  const transport = createTransport('control', roomFromQuery());
+  mountNetBadge(transport, 'control');
 
   // --- Server connection (route commands out; status shown in the toolbar) ---
   const server = createServerSource({ demo, splatUrl: resolveSplatUrl() });
@@ -84,11 +84,11 @@ async function main(): Promise<void> {
     },
   });
 
-  const toolbar = document.getElementById('sim-toolbar');
+  const toolbar = document.getElementById('control-toolbar');
   if (toolbar) {
     const routeBtn = document.createElement('button');
     routeBtn.type = 'button';
-    routeBtn.className = 'sim-toolbar__btn';
+    routeBtn.className = 'control-toolbar__btn';
     routeBtn.textContent = '경로 계획 · Route';
     routeBtn.addEventListener('click', () => modal.open());
     toolbar.appendChild(routeBtn);
@@ -124,7 +124,7 @@ async function main(): Promise<void> {
     const real = (now - last) / 1000;
     last = now;
     // Clamp to [0, MAX_DT]: never negative (guards damping from exploding).
-    const dt = Math.max(0, Math.min(real, MAX_DT)) * CONFIG.sim.speed;
+    const dt = Math.max(0, Math.min(real, MAX_DT)) * CONFIG.clock.speed;
 
     if (state.running) {
       state.time += dt;
@@ -151,7 +151,7 @@ async function main(): Promise<void> {
 
   // Debug/e2e handle.
   (window as unknown as { skylens?: unknown }).skylens = {
-    role: 'sim',
+    role: 'control',
     state,
     scene: loaded.data,
     CONFIG,

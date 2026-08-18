@@ -29,8 +29,8 @@ SkyLens는 **멀티드론 영상을 실시간 3D(Gaussian Splatting)로 복원�
 
 | 문서 | 역할 |
 |---|---|
-| `README.md` (루트) | 저장소 소개. 데모/실서버 모드, GPS↔ENU 좌표계, 빠른 시작(`npm run dev`), SIM/RECON 접속 주소와 쿼리 옵션, 조작법, 프로젝트 구조 트리, 현재 구현 상태·로드맵. **TypeScript 프로토타입(뷰어) 중심** |
-| `PROJECT.md` (루트) | **중간평가 프로토타입 구현 계획**. 무엇을 증명하고 무엇을 증명하지 않는지(§0), 데모 컨셉(§1), 사전 촬영·gsplat 준비(§2), 기술 스택(§3), **SIM 제어탑·GPS 경로 계획(§4)**, **RECON 지휘관 상황판·서버 스트림 3D 축적(§5)**, 위험구역 오버레이(§6), 연출과 실제의 경계 원칙(§7), SIM↔RECON 동기화·카메라 협력(§8), 구현 로드맵(§9)·리스크(§10)·최종평가 확장(§11) |
+| `README.md` (루트) | 저장소 소개. 데모/실서버 모드, GPS↔ENU 좌표계, 빠른 시작(`npm run dev`), 관제탑/현황판 접속 주소와 쿼리 옵션, 조작법, 프로젝트 구조 트리, 현재 구현 상태·로드맵. **TypeScript 프로토타입(뷰어) 중심** |
+| `PROJECT.md` (루트) | **중간평가 프로토타입 구현 계획**. 무엇을 증명하고 무엇을 증명하지 않는지(§0), 데모 컨셉(§1), 사전 촬영·gsplat 준비(§2), 기술 스택(§3), **관제탑·GPS 경로 계획(§4)**, **현황판·서버 스트림 3D 축적(§5)**, 위험구역 오버레이(§6), 연출과 실제의 경계 원칙(§7), 관제탑↔현황판 동기화·카메라 협력(§8), 구현 로드맵(§9)·리스크(§10)·최종평가 확장(§11) |
 | `res/docs/IDEA.md` | **기획서(왜)**. 과제명(안), 문제 정의(소방드론 현황·홍제동 사례·각주 출처), 해결 방법 3단계(분할탐색 → KOREN/Core HPC 3DGS+UNet → Edge VM 3D 상황판), YAMNet 소리 확장, KOREN 활용 논거 |
 | `res/docs/ARCHITECTURE.md` | **통합 아키텍처(무엇을)**. 3대 설계 원칙, 4-Tier 구성(캡처/전송/Core HPC/Edge·클라이언트), 데이터 플로우, **§3-A AI 모델·융합 파이프라인**(UNet 4채널, Depth Map 레이캐스팅, Hybrid Fusion, 기술 선택 배제 근거) |
 | `res/docs/DATASETS.md` | **학습 데이터셋 조사**. "RGB+열 페어 + 재난 + 사람 + 위험구역"을 모두 가진 공개 데이터는 없다는 결론과, A(4채널 정합)/B(위험구역 세그)/C(사람 인스턴스) 3축 조합 권장. FLAME 3, RescueNet, SARD, AIResQ, LLVIP, VisDrone 등 |
@@ -67,7 +67,7 @@ res/docs/DATASETS.md   ──→  src/skylens_model/README.md  ──→  datase
 | AI 모델 수정·추가 (`src/skylens_model/models`) | **`src/skylens_model/README.md` 필독** → `res/docs/ARCHITECTURE.md §3-A` |
 | 데이터셋 클래스 추가·수정 | `src/skylens_model/datasets/README.md` → `res/docs/DATASETS.md` |
 | 학습 노트북 / 학습 루프 | `src/skylens_model/README.md` §6(학습 전략) → `train.ipynb` |
-| 데모·뷰어(SIM/RECON) UI·연출 작업 | **`PROJECT.md`** → `README.md` |
+| 데모·뷰어(관제탑/현황판) UI·연출 작업 | **`PROJECT.md`** → `README.md` |
 | 좌표계·GPS 관련 | `README.md` 좌표계 절 → `src/skylens_core/geo.ts` + `src/skylens_model/utils/geo.py` (둘 다 고칠 것) |
 | 3DGS 복원·촬영 계획 (`src/skylens_model/models/skylens`) | **`src/skylens_model/models/skylens/README.md` 필독** → `RESULTS.md`(수치) → `INSTALL.md`(환경) |
 | 기획 문구·발표 자료 | `res/docs/IDEA.md` → `res/docs/ARCHITECTURE.md` |
@@ -77,16 +77,17 @@ res/docs/DATASETS.md   ──→  src/skylens_model/README.md  ──→  datase
 ## 2. 저장소 구조
 
 ```
-res/static/          # 정적 html 셸(진입점): index / sim / recon .html → /src 모듈을 절대경로로 로드
+res/static/          # 정적 html 셸(진입점): index / control / status .html → /src 모듈을 절대경로로 로드
+                     # demo/ — 딜레이 패턴용 구간×수준 PLY (생성물, 커밋하지 않음)
 src/
-├─ skylens_core/     # TS 관제탑(SIM) + 공유 토대. 순수 core(DOM·Three 없음: config·types·store·geo·mode·protocol) + SIM·공유 브라우저 코드(sim.ts, net, server, sources, drones, simview, sim/, 공유 ui, style.css)
-├─ skylens_client/   # TS 지휘관(RECON) 앱: recon.ts, reconview, recon ui, sources/detections — **core에 단방향 의존**
+├─ skylens_core/     # TS 관제탑 + 공유 토대. 순수 core(DOM·Three 없음: config·types·store·geo·mode·protocol) + 관제탑·공유 브라우저 코드(control.ts, net, server, sources, drones, controlview, control/, 공유 ui, style.css)
+├─ skylens_client/   # TS 현황판 앱: status.ts, statusview, ui, sources/detections — **core에 단방향 의존**
 └─ skylens_model/    # Python AI 모델 패키지: models/(skylensnet 인지 · skylens 3DGS 복원), datasets/, utils/
 src/test/smoke.spec.ts  # Playwright E2E
 res/docs/            # IDEA · ARCHITECTURE · DATASETS
 ```
 
-두 스택은 **`src/` 아래에 공존**하고, 세 진입 html은 **`res/static/`** 에 모여 있다(루트는 설정 파일만). 접속 URL은 `/res/static/{sim,recon}.html` — `/`는 랜딩을 자동 서빙하지 않는다. `pyproject.toml`은 자동 탐색 대신 `packages = ["src/skylens_model"]`로 파이썬 패키지를 명시한다.
+두 스택은 **`src/` 아래에 공존**하고, 세 진입 html은 **`res/static/`** 에 모여 있다(루트는 설정 파일만). 접속 URL은 `/res/static/{control,status}.html` — `/`는 랜딩을 자동 서빙하지 않는다. `pyproject.toml`은 자동 탐색 대신 `packages = ["src/skylens_model"]`로 파이썬 패키지를 명시한다.
 
 ---
 
@@ -102,7 +103,7 @@ res/docs/            # IDEA · ARCHITECTURE · DATASETS
 | `npm run test:headed` | 브라우저 표시 E2E |
 | `npm run preview` | 빌드 결과 미리보기 |
 
-접속: `http://<IP>:5173/res/static/sim.html?room=demo` / `/res/static/recon.html?room=demo` (같은 `room`이면 WebRTC 연결, `&demo`로 자동 데모).
+접속: `http://<IP>:5173/res/static/control.html?room=demo` / `/res/static/status.html?room=demo` (같은 `room`이면 WebRTC 연결, `&demo`로 자동 데모).
 
 **Python** (`pyproject.toml`, requires-python >=3.11,<3.14 · `.python-version` = 3.13)
 

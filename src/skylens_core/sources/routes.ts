@@ -1,4 +1,4 @@
-// Real-world drone routes for the control-tower SIM. Unlike paths.ts (demo
+// Real-world drone routes for the control-tower CONTROL. Unlike paths.ts (demo
 // auto-sweep over the loaded scene's bounds), these are GPS routes the
 // operator plans by hand and assigns to the leader drone via the route modal.
 

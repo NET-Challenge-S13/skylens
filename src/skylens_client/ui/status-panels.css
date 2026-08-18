@@ -1,5 +1,5 @@
-/* RECON-only panels: minimap + server-status. Kept separate from style.css
-   (owned by a different pass) — imported directly from recon.ts. Uses the
+/* STATUS-only panels: minimap + server-status. Kept separate from style.css
+   (owned by a different pass) — imported directly from status.ts. Uses the
    token system defined in style.css (--surface-*, --border-*, --font-*). */
 
 /* --- Minimap (bottom-right) --- */
@@ -33,7 +33,7 @@
 }
 
 #minimap::after {
-  /* Instrument-readout corner frame, matching the video panel on SIM. */
+  /* Instrument-readout corner frame, matching the video panel on CONTROL. */
   content: '';
   position: absolute;
   inset: 5px;
@@ -55,6 +55,8 @@
   z-index: 5;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  max-width: 340px;
   gap: 10px;
   padding: 8px 12px;
   border-radius: var(--radius-sm);
@@ -112,4 +114,67 @@
   .server-status__dot {
     animation: none;
   }
+}
+
+
+/* --- Delay-pattern ladder: one row per capture segment ---
+   Each segment lands at a low training-step level first and is refined while the
+   NEXT segment delivers its own first level, so rows sit at different levels at
+   the same time. That staggering is the point (interim report Ⅱ-3-다). */
+.server-status__ladder {
+  /* Forces its own line inside the wrapping panel, under dot + body. */
+  flex: 1 0 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.server-status__ladder:empty {
+  display: none;
+}
+
+.segment-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--text-xs);
+}
+
+.segment-row__name {
+  flex: 0 0 auto;
+  min-width: 44px;
+  color: var(--text-tertiary);
+  letter-spacing: 0.04em;
+}
+
+.segment-row__bar {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 3px;
+}
+
+.segment-row__pip {
+  width: 12px;
+  height: 4px;
+  border-radius: 1px;
+  background: rgba(255, 255, 255, 0.12);
+  transition: background 260ms ease, box-shadow 260ms ease;
+}
+
+.segment-row__pip[data-on='1'] {
+  background: var(--person);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--person) 55%, transparent);
+}
+
+.segment-row__note {
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.segment-row__note[data-refining='1']::after {
+  content: ' · 정제 중';
+  color: var(--text-tertiary);
 }

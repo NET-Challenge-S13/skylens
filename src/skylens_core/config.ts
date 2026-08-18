@@ -9,7 +9,7 @@ export const CONFIG = {
   },
 
   // Simulation clock
-  sim: {
+  clock: {
     /** Multiplier on real elapsed time; 1 = real-time playback. */
     speed: 1.0,
     /** Seconds of delay between a drone visiting a spot (viewer 1) and
@@ -49,14 +49,14 @@ export const CONFIG = {
   camera: {
     /** FOCUSING / RETURNING tween duration (s). */
     tweenSeconds: 1.8,
-    /** Distance (world units) the recon camera holds from a focused detection. */
+    /** Distance (world units) the status camera holds from a focused detection. */
     focusDistance: 12.0,
     /** Smoothing factor for the SYNCED follow (0..1 per frame at 60fps). */
     syncLerp: 0.08,
   },
 
   // Real Gaussian-splat asset — the SINGLE SOURCE both viewers derive from
-  // (SIM = low-fi point cloud of the splat, RECON = full splat render). It is a
+  // (CONTROL = low-fi point cloud of the splat, STATUS = full splat render). It is a
   // public sample (TEST asset) loaded at runtime from a CDN, NOT committed. The
   // fit transform is auto-computed from the splat's own bounds (see
   // sceneSource.ts). Swap `url` for your own capture later.
@@ -69,17 +69,42 @@ export const CONFIG = {
     url: 'https://huggingface.co/datasets/dylanebert/3dgs/resolve/main/garden/garden-7k.splat',
     /** Lighter scene used by e2e tests (~8.6 MB, loads fast). */
     urlLight: 'https://huggingface.co/datasets/stpete2/splat/resolve/main/church.splat',
+    /** Our OWN capture (res/static/demo, not committed), cheapest level. Both
+     *  viewers derive the shared point cloud + fit transform from it while the
+     *  real geometry streams in segment by segment (see delayPattern). */
+    demoPreview: '/res/static/demo/step00250_light.ply',
+  },
+
+  // Delay-pattern reconstruction stream (interim report Ⅱ-3-다).
+  //
+  // The pipeline is online: a flight SEGMENT is reconstructed as soon as its
+  // frames land, at a low training-step LEVEL first, and refined afterwards —
+  // while the NEXT segment starts its own low level. Staggering the levels
+  // across segments is what puts a usable shape on the board seconds after the
+  // drone passes instead of hours after the flight ends.
+  delayPattern: {
+    enabled: true,
+    /** Segment × level assets + their cut geometry (split_segments.py). */
+    manifest: '/res/static/demo/segments.json',
+    /** Seconds before the first segment's level 1 lands. */
+    firstSegmentDelay: 1.5,
+    /** Seconds between consecutive segments being captured (drone moving on). */
+    segmentPeriod: 7.0,
+    /** Seconds from a segment being captured to each of its levels landing.
+     *  Later entries deliberately overrun segmentPeriod: that overlap IS the
+     *  delay pattern — segment k is still refining when k+1's level 1 arrives. */
+    levelDelays: [0, 4, 12, 22],
   },
 
   // Palette — viewer 1 is deliberately low-fi / cold; viewer 2 warmer/real.
   color: {
-    simBg: 0x0a1128,
-    simPoint: 0x3fd0e0,
-    simPointFar: 0x2a4a8a,
+    controlBg: 0x0a1128,
+    controlPoint: 0x3fd0e0,
+    controlPointFar: 0x2a4a8a,
     droneCore: 0x9fe8ff,
     droneTrail: 0x4a90d9,
-    reconBg: 0x0d0f14,
-    reconPoint: 0xc8c2b8,
+    statusBg: 0x0d0f14,
+    statusPoint: 0xc8c2b8,
     markerDanger: 0xff4d4d,
     markerPerson: 0x39d98a,
   },
