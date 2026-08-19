@@ -1,5 +1,5 @@
 // Keyboard input helper for manually flying the active drone. §4.2
-import { state, emit } from '../store.ts';
+import { state, emit } from '../../shared/viewer/store.ts';
 
 export interface ManualInput {
   /** Control axes, each in [-1,1]: x=yaw (turn L/R), y=up/down, z=forward/back. */

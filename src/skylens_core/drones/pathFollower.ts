@@ -1,11 +1,11 @@
 // Drone path-following + mode state machine. PROJECT.md §4.2.
 // Owns state.drones and advances them each frame: AUTO -> MANUAL -> RETURNING -> AUTO.
 import * as THREE from 'three';
-import { state } from '../store.ts';
-import { CONFIG, droneViewScale } from '../config.ts';
-import { samplePath, pathDuration, dampFactor, easeInOut, clamp } from '../math.ts';
+import { state } from '../../shared/viewer/store.ts';
+import { CONFIG, droneViewScale } from '../../shared/viewer/config.ts';
+import { samplePath, pathDuration, dampFactor, easeInOut, clamp } from '../../shared/viewer/math.ts';
 import { createManualInput } from './manualControl.ts';
-import type { DroneRuntime, DronePath } from '../types';
+import type { DroneRuntime, DronePath } from '../../shared/viewer/types';
 
 export interface DroneController {
   update(dt: number): void;
@@ -25,7 +25,7 @@ const FORMATION = [
   new THREE.Vector3(0, 3, 9),
 ];
 
-/** How often (sim seconds) we record a visited sample per drone. */
+/** How often (control seconds) we record a visited sample per drone. */
 const VISITED_INTERVAL = 0.15;
 /** Minimum world-unit movement before a new visited sample is recorded. */
 const VISITED_MIN_DIST = 1.0;
@@ -34,7 +34,7 @@ const VISITED_MIN_DIST = 1.0;
 interface DroneLocal {
   /** World-up reference used to build a stable look-orientation. */
   idleTime: number;
-  /** Sim-time accumulator gating visited-buffer pushes. */
+  /** Control-time accumulator gating visited-buffer pushes. */
   visitedTimer: number;
   lastVisitedPos: THREE.Vector3 | null;
   /** Snapshot of position when a RETURNING tween begins. */

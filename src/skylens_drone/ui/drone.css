@@ -1,0 +1,334 @@
+/* Operator panel styling. Deliberately self-contained: this page also runs
+   inside the Tauri window, which does not load the viewer stylesheet. */
+
+:root {
+  --bg: #0b0f14;
+  --panel: #141b23;
+  --line: #24303c;
+  --fg: #dfe7ef;
+  --dim: #8b9bab;
+  --ok: #3ddc84;
+  --warn: #ffb020;
+  --bad: #ff5d5d;
+  --accent: #5aa9ff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 13px/1.5 'Pretendard', 'Segoe UI', system-ui, sans-serif;
+}
+
+.drone {
+  display: grid;
+  grid-template-columns: minmax(320px, 1fr) minmax(320px, 1fr);
+  gap: 12px;
+  padding: 14px;
+  max-width: 1180px;
+  margin: 0 auto;
+}
+
+.drone__panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.drone__side {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.drone__head {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.drone__title {
+  margin: 0;
+  font-size: 18px;
+}
+
+.drone__model {
+  color: var(--dim);
+}
+
+.drone__note {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--accent);
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.card__title {
+  margin: 0;
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  color: var(--dim);
+  text-transform: uppercase;
+}
+
+.pill {
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  border: 1px solid currentcolor;
+}
+
+.pill--ok {
+  color: var(--ok);
+}
+.pill--warn {
+  color: var(--warn);
+}
+.pill--bad {
+  color: var(--bad);
+}
+.pill--idle {
+  color: var(--dim);
+}
+
+.row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 0;
+  border-bottom: 1px dotted #1e2833;
+}
+
+.row:last-child {
+  border-bottom: none;
+}
+
+.row__k {
+  color: var(--dim);
+  white-space: nowrap;
+}
+
+.row__v {
+  text-align: right;
+  word-break: break-all;
+  font-variant-numeric: tabular-nums;
+}
+
+.row--bad .row__v {
+  color: var(--bad);
+}
+.row--warn .row__v {
+  color: var(--warn);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.cell {
+  background: #0f151c;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 5px 7px;
+  display: flex;
+  flex-direction: column;
+}
+
+.cell__k {
+  color: var(--dim);
+  font-size: 11px;
+}
+
+.cell__v {
+  font-variant-numeric: tabular-nums;
+  font-size: 15px;
+}
+
+.bar {
+  height: 6px;
+  background: #0f151c;
+  border-radius: 3px;
+  overflow: hidden;
+  margin: 8px 0 4px;
+}
+
+.bar__fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 120ms linear;
+}
+
+.wp,
+.segs {
+  margin: 6px 0 0;
+  padding-left: 0;
+  list-style: none;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.segs__i {
+  display: flex;
+  gap: 8px;
+  padding: 2px 0;
+  border-bottom: 1px dotted #1e2833;
+}
+
+.segs__n {
+  color: var(--accent);
+  min-width: 34px;
+}
+
+.segs__u {
+  color: var(--fg);
+  flex: 1;
+  word-break: break-all;
+}
+
+.segs__m {
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+.empty {
+  margin: 4px 0 0;
+  color: var(--dim);
+  font-style: italic;
+}
+
+/* log ------------------------------------------------------------------- */
+
+.logview {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+
+.logview__head {
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 6px;
+}
+
+.logview__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-y: auto;
+  max-height: 40vh;
+  font-family: 'Cascadia Mono', ui-monospace, monospace;
+  font-size: 11px;
+}
+
+.logview__list li {
+  display: flex;
+  gap: 8px;
+  padding: 1px 0;
+}
+
+.logview__t {
+  color: var(--accent);
+  min-width: 48px;
+  text-align: right;
+}
+
+.logview__m {
+  color: var(--fg);
+  word-break: break-word;
+}
+
+/* sticks ---------------------------------------------------------------- */
+
+.sticks {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.sticks__head {
+  color: var(--dim);
+  margin-bottom: 4px;
+}
+
+.sticks__out {
+  font-family: 'Cascadia Mono', ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+/* preview --------------------------------------------------------------- */
+
+.preview {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.preview__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--dim);
+  margin-bottom: 6px;
+}
+
+.preview__toggle {
+  font-size: 11px;
+  color: var(--dim);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.preview__v {
+  width: 100%;
+  border-radius: 6px;
+  background: #000;
+  aspect-ratio: 16 / 9;
+}
+
+.preview__cap {
+  color: var(--dim);
+  font-size: 11px;
+  word-break: break-all;
+}
+
+@media (max-width: 860px) {
+  .drone {
+    grid-template-columns: 1fr;
+  }
+}

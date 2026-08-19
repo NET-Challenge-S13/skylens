@@ -7,6 +7,8 @@ SkyLens의 AI·복원 모델 코드를 담는 Python 패키지.
    2D 탐지를 3D 세계좌표에 투영한다. → `models/skylensnet/`
 2. **Reconstruction** — 3DGS 실시간 3D 복원 (GLOMAP 포즈추정 → gsplat 학습 →
    Open3D ICP 멀티드론 융합). → `models/skylens/` — 구현됨, 해당 README 참조
+3. **Serving** — 위 둘을 코어에 노출하는 FastAPI 연산 API. 진입점 `app.py`,
+   구현은 `serving/`. → 엔드포인트·데모 모드·실행법은 [`API.md`](API.md)
 
 학습은 루트의 `train.ipynb` 에서 돌린다.
 
@@ -148,7 +150,7 @@ voxel hash / KD-tree 등 후보가 있으나 아직 결정하지 않음. §6 참
 ## 3. 스플래팅 레벨과 탐지의 관계
 
 **중요: 3DGS 정제 레벨과 탐지 모델은 인과관계가 없다.**
-ARCHITECTURE.md §1의 흐름도에서 `RX → RECON`과 `RX → AI`가 **병렬 분기**인 것이 정확하다.
+ARCHITECTURE.md §1의 흐름도에서 `RX → 현황판`과 `RX → AI`가 **병렬 분기**인 것이 정확하다.
 프레임이 도착하면 UNet은 스플랫 상태와 무관하게 즉시 추론할 수 있다.
 
 레벨과 실제로 엮이는 것은 **투영 정밀도뿐**이다:

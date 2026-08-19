@@ -1,0 +1,201 @@
+{
+  "source": [
+    "step00250_light.ply",
+    "step01000_light.ply",
+    "step03500_light.ply",
+    "step07000_light.ply"
+  ],
+  "reference": "step07000_light.ply",
+  "axis": [
+    0.9992038439072035,
+    -0.00037046334829159144,
+    -0.039894123351398185
+  ],
+  "origin": [
+    -16.93230575036986,
+    -3.011883764595731,
+    10.890070159738222
+  ],
+  "boundaries": [
+    -44.013504368589246,
+    -0.8572774241628236,
+    31.387807478388513
+  ],
+  "metersPerUnit": 30.871604230438226,
+  "extent": 300.00001083940833,
+  "preview": "step00250_light.ply",
+  "segments": [
+    {
+      "index": 0,
+      "levels": [
+        {
+          "level": 1,
+          "steps": 250,
+          "label": "형상 윤곽만 식별",
+          "url": "segments/seg0_step00250.ply",
+          "splats": 1147,
+          "bytes": 64592
+        },
+        {
+          "level": 2,
+          "steps": 1000,
+          "label": "공간 구조 식별 가능",
+          "url": "segments/seg0_step01000.ply",
+          "splats": 3853,
+          "bytes": 216128
+        },
+        {
+          "level": 3,
+          "steps": 3500,
+          "label": "표면 형성",
+          "url": "segments/seg0_step03500.ply",
+          "splats": 55425,
+          "bytes": 3104161
+        },
+        {
+          "level": 4,
+          "steps": 7000,
+          "label": "실용 품질",
+          "url": "segments/seg0_step07000.ply",
+          "splats": 116381,
+          "bytes": 6517698
+        }
+      ],
+      "extent": 30.237495053092623,
+      "centroid": [
+        -84.3276596069336,
+        -1.679582953453064,
+        4.893361568450928
+      ]
+    },
+    {
+      "index": 1,
+      "levels": [
+        {
+          "level": 1,
+          "steps": 250,
+          "label": "형상 윤곽만 식별",
+          "url": "segments/seg1_step00250.ply",
+          "splats": 1914,
+          "bytes": 107544
+        },
+        {
+          "level": 2,
+          "steps": 1000,
+          "label": "공간 구조 식별 가능",
+          "url": "segments/seg1_step01000.ply",
+          "splats": 5098,
+          "bytes": 285848
+        },
+        {
+          "level": 3,
+          "steps": 3500,
+          "label": "표면 형성",
+          "url": "segments/seg1_step03500.ply",
+          "splats": 63775,
+          "bytes": 3571761
+        },
+        {
+          "level": 4,
+          "steps": 7000,
+          "label": "실용 품질",
+          "url": "segments/seg1_step07000.ply",
+          "splats": 116381,
+          "bytes": 6517698
+        }
+      ],
+      "extent": 42.0513821071434,
+      "centroid": [
+        -52.124305725097656,
+        -3.5905022621154785,
+        9.017251968383789
+      ]
+    },
+    {
+      "index": 2,
+      "levels": [
+        {
+          "level": 1,
+          "steps": 250,
+          "label": "형상 윤곽만 식별",
+          "url": "segments/seg2_step00250.ply",
+          "splats": 2271,
+          "bytes": 127536
+        },
+        {
+          "level": 2,
+          "steps": 1000,
+          "label": "공간 구조 식별 가능",
+          "url": "segments/seg2_step01000.ply",
+          "splats": 6202,
+          "bytes": 347672
+        },
+        {
+          "level": 3,
+          "steps": 3500,
+          "label": "표면 형성",
+          "url": "segments/seg2_step03500.ply",
+          "splats": 61468,
+          "bytes": 3442569
+        },
+        {
+          "level": 4,
+          "steps": 7000,
+          "label": "실용 품질",
+          "url": "segments/seg2_step07000.ply",
+          "splats": 116380,
+          "bytes": 6517642
+        }
+      ],
+      "extent": 30.755902969927817,
+      "centroid": [
+        0.6800922155380249,
+        -0.9619884490966797,
+        11.634605407714844
+      ]
+    },
+    {
+      "index": 3,
+      "levels": [
+        {
+          "level": 1,
+          "steps": 250,
+          "label": "형상 윤곽만 식별",
+          "url": "segments/seg3_step00250.ply",
+          "splats": 3102,
+          "bytes": 174072
+        },
+        {
+          "level": 2,
+          "steps": 1000,
+          "label": "공간 구조 식별 가능",
+          "url": "segments/seg3_step01000.ply",
+          "splats": 7267,
+          "bytes": 407312
+        },
+        {
+          "level": 3,
+          "steps": 3500,
+          "label": "표면 형성",
+          "url": "segments/seg3_step03500.ply",
+          "splats": 72355,
+          "bytes": 4052241
+        },
+        {
+          "level": 4,
+          "steps": 7000,
+          "label": "실용 품질",
+          "url": "segments/seg3_step07000.ply",
+          "splats": 116381,
+          "bytes": 6517698
+        }
+      ],
+      "extent": 242.54687832296497,
+      "centroid": [
+        58.555667877197266,
+        -2.5238447189331055,
+        0.09396293014287949
+      ]
+    }
+  ]
+}

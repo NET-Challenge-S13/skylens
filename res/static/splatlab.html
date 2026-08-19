@@ -1,0 +1,88 @@
+<!doctype html>
+<!-- Dev-only splat inspection bench (served by the Vite dev server, not built).
+
+     /res/static/splatlab.html?ply=/res/static/demo/step30000_final.ply
+       &view=side|top|along   camera preset (default side)
+       &h=<m>                 camera height above the cloud (default auto)
+
+     Renders ONE ply with no placement, no reveal, no UI — so a broken asset
+     can be told apart from a broken board. window.lab = {ready, bounds}. -->
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <title>splat lab</title>
+    <style>
+      html, body { margin: 0; height: 100%; background: #0d0f14; }
+      canvas { display: block; }
+    </style>
+  </head>
+  <body>
+    <script type="module">
+      import * as THREE from 'three';
+      import { DropInViewer } from '@mkkellogg/gaussian-splats-3d';
+
+      const q = new URLSearchParams(location.search);
+      const url = q.get('ply') ?? '/res/static/demo/step30000_final.ply';
+      const view = q.get('view') ?? 'side';
+
+      const renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(innerWidth, innerHeight);
+      document.body.appendChild(renderer.domElement);
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x0d0f14);
+      const camera = new THREE.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 5000);
+
+      const viewer = new DropInViewer({
+        sharedMemoryForWorkers: false,
+        gpuAcceleratedSort: false,
+        dynamicScene: false,
+      });
+      scene.add(viewer);
+
+      window.lab = { ready: false, bounds: null };
+      await viewer.addSplatScene(url, { showLoadingUI: false, progressiveLoad: false });
+
+      // Robust bounds off the mesh (1-99 pct per axis), so the camera frames
+      // the structure rather than the floaters.
+      const mesh = viewer.splatMesh;
+      const n = mesh.getSplatCount();
+      const step = Math.max(1, Math.floor(n / 20000));
+      const cols = [[], [], []];
+      const c = new THREE.Vector3();
+      for (let i = 0; i < n; i += step) {
+        mesh.getSplatCenter(i, c, true);
+        cols[0].push(c.x); cols[1].push(c.y); cols[2].push(c.z);
+      }
+      cols.forEach((a) => a.sort((x, y) => x - y));
+      const pct = (a, p) => a[Math.min(a.length - 1, Math.floor(p * (a.length - 1)))];
+      const lo = cols.map((a) => pct(a, 0.02));
+      const hi = cols.map((a) => pct(a, 0.98));
+      const mid = lo.map((v, i) => (v + hi[i]) / 2);
+      const span = hi.map((v, i) => v - lo[i]);
+      window.lab.bounds = { lo, hi };
+
+      const target = new THREE.Vector3(mid[0], mid[1], mid[2]);
+      const h = parseFloat(q.get('h') ?? '');
+      if (view === 'top') {
+        camera.position.set(mid[0], hi[1] + (h || Math.max(span[0], span[2]) * 0.8), mid[2] + 1);
+      } else if (view === 'along') {
+        // Down the long axis (x-dominant for our corridor assets).
+        camera.position.set(lo[0] - span[0] * 0.25, mid[1] + (h || span[1] * 2), mid[2]);
+      } else {
+        // Side-on: from +z, at modest height — the roll/tilt judgement view.
+        camera.position.set(mid[0], mid[1] + (h || span[1] * 1.2), hi[2] + Math.max(span[2] * 1.6, 40));
+      }
+      camera.lookAt(target);
+
+      // Headless pages throttle rAF, so readiness is wall-clock based: enough
+      // frames to have kicked the sort, plus time for it to settle.
+      let frames = 0;
+      const started = performance.now();
+      renderer.setAnimationLoop(() => {
+        renderer.render(scene, camera);
+        frames += 1;
+        if (frames >= 10 && performance.now() - started > 6000) window.lab.ready = true;
+      });
+    </script>
+  </body>
+</html>
