@@ -1,4 +1,4 @@
-// Core configuration. Everything is env-driven so `skylens_demo` can bring the
+// Core configuration. Everything is env-driven so `demo` can bring the
 // component up without editing files.
 //
 // Naming note: SKYLENS_CORE_ENDPOINTS belongs to the proxy (it lists the core

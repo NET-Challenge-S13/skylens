@@ -82,7 +82,7 @@ res/docs/DATASETS.md   ──→  src/skylens_model/README.md  ──→  datase
 res/static/          # 정적 html 셸(진입점): index / control / status .html → /src 모듈을 절대경로로 로드
                      # demo/ — 딜레이 패턴용 구간×수준 PLY (생성물, 커밋하지 않음)
 src/
-├─ shared/   # 컴포넌트 공통 계약. 순수층(geo·protocol·types: DOM·Three 없음)
+├─ shared/           # 컴포넌트 공통 계약. 순수층(geo·protocol·types: DOM·Three 없음)
 │                    #  + viewer/(두 웹 UI 공용 브라우저 층) + net/(WebRTC 트랜스포트)
 ├─ skylens_drone/    # Tauri 드론 클라이언트 (현장)
 ├─ skylens_gateway/  # KOREN 외부망 진입점 (relay | webrtc 2모드)
@@ -90,7 +90,7 @@ src/
 ├─ skylens_core/     # KOREN 내부망: 관제탑 UI(control.ts·controlview/·ui/) + server/(오케스트레이터·스토어·배포)
 ├─ skylens_model/    # KOREN 내부망: FastAPI 연산 서버(app.py) + 모델·3DGS 복원 파이프라인
 ├─ skylens_client/   # KOREN 외부망: 현황판 UI(status.ts·statusview/·ui/) + server/(웹서버·WebRTC 중계)
-└─ skylens_demo/     # 데모 런처 (컴포넌트 조립 + 모킹)
+└─ demo/            # 데모 런처 (컴포넌트 조립 + 모킹)
 src/test/smoke.spec.ts  # Playwright E2E
 res/docs/            # COMPONENTS · IDEA · ARCHITECTURE · DATASETS
 ```

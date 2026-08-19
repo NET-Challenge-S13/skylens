@@ -70,7 +70,7 @@ npm run demo         # 파이프라인 전체를 데모 모드로 기동
 | 현황판 | `http://localhost:8090/res/static/status.html` |
 | 드론 패널 | `http://localhost:5173/src/skylens_drone/index.html` |
 
-관제탑에서 경로를 지정하면 **태스크 지정 완료 → 드론 연결 대기(약 10초) → 주행 시작**으로 이어지고, 드론이 구간을 지날 때마다 현황판이 딜레이 패턴으로 갱신됩니다. 자세한 시나리오는 [skylens_demo/README.md](src/skylens_demo/README.md).
+관제탑에서 경로를 지정하면 **태스크 지정 완료 → 드론 연결 대기(약 10초) → 주행 시작**으로 이어지고, 드론이 구간을 지날 때마다 현황판이 딜레이 패턴으로 갱신됩니다. 자세한 시나리오는 [demo/README.md](src/demo/README.md).
 
 | 명령어 | 설명 |
 |---|---|
@@ -108,7 +108,7 @@ npm run demo         # 파이프라인 전체를 데모 모드로 기동
 **데모 자산 만들기** — `res/static/demo/`에 학습 스텝별 경량 PLY(`step00250_light.ply` …)를 두고 구간으로 자릅니다. 자산은 커밋하지 않으며, 없으면 현황판은 단일 장면 스트림으로 자동 폴백합니다.
 
 ```bash
-uv run python -m skylens_model.models.skylens.split_segments     res/static/demo/step*_light.ply --segments 4
+uv run python -m skylens_model.models.skylens.split_segments res/static/demo/step*_light.ply --segments 4
 ```
 
 구간 경계는 장면의 주축(복도 촬영이면 드론 진행 방향)을 기준 파일의 분위수로 잘라 모든 수준에 동일하게 적용하므로, 같은 구간 번호는 항상 같은 공간 조각을 가리킵니다. 타이밍은 `CONFIG.delayPattern`(구간 주기·수준별 지연)에서 조정합니다.
@@ -162,7 +162,7 @@ src/
 ├─ skylens_core/      # 관제탑 UI + server/(오케스트레이터 · 인메모리 스토어 · 배포)
 ├─ skylens_model/     # FastAPI 연산 API + 모델 · 3DGS 복원 파이프라인
 ├─ skylens_client/    # 현황판 UI + server/(웹서버 · WebRTC 중계)
-└─ skylens_demo/      # 데모 런처
+└─ demo/             # 데모 런처
 src/test/             # 모든 테스트와 검증 하네스가 여기 모입니다
 ```
 

@@ -21,7 +21,7 @@ links: "[[ARCHITECTURE]] · [[NETWORK_ARCHITECTURE]] · [[PROJECT]]"
 | `skylens_model` | KOREN **내부망** | 연산 API 서버. 3DGS 복원 + UNet 추론 | Python · FastAPI |
 | `skylens_client` | KOREN **외부망** | 현황판 클라이언트 웹서버 + WebRTC 연결 중계 | Node + TS / Vite |
 | `shared` | — | 컴포넌트 공통 계약(프로토콜·좌표계·타입). DOM/Three 의존 없음 | TS 라이브러리 |
-| `skylens_demo` | — | 데모 런처. 각 컴포넌트를 조립해 모킹 모드로 실행 | Node + TS |
+| `demo` | — | 데모 런처. 각 컴포넌트를 조립해 모킹 모드로 실행 | Node + TS |
 
 > `shared`는 지시된 8개 컴포넌트에는 없지만, 프로토콜과 좌표 변환이 **6개 컴포넌트에 동시에** 필요해 별도 라이브러리로 분리했다. 배포 단위가 아니라 의존 라이브러리다.
 
@@ -118,7 +118,7 @@ WebRTC 클라이언트끼리 **복원 결과를 P2P로 재분배**하여 코어�
 
 ---
 
-## 5. 데모 구성 (`skylens_demo`)
+## 5. 데모 구성 (`demo`)
 
 각 컴포넌트를 조립해 **모킹 모드**로 실행하는 런처. 리소스는 `res/static/demo`를 사용한다.
 
@@ -149,7 +149,7 @@ WebRTC 클라이언트끼리 **복원 결과를 P2P로 재분배**하여 코어�
 
 ```
 src/
-├─ shared/    # 프로토콜 · 좌표계(geo) · 공통 타입 — DOM/Three 없음
+├─ shared/            # 프로토콜 · 좌표계(geo) · 공통 타입 — DOM/Three 없음
 ├─ skylens_drone/     # Tauri 앱 (Rust 셸 + TS UI)
 ├─ skylens_gateway/   # 외부망 진입점 (relay | webrtc 2모드)
 ├─ skylens_proxy/     # 내부망 다중 경로
@@ -158,7 +158,7 @@ src/
 ├─ skylens_model/     # FastAPI (app.py) + 모델 · 복원 파이프라인
 ├─ skylens_client/    # 현황판 UI가 컴포넌트 루트에 그대로 (status.ts · statusview/ · ui/ · sources/)
 │  └─ server/         # 현황판 웹서버 + WebRTC 중계
-└─ skylens_demo/      # 데모 런처 (컴포넌트 조립 + 모킹)
+└─ demo/             # 데모 런처 (컴포넌트 조립 + 모킹)
 ```
 
 브라우저 코드는 `web/` 같은 층을 두지 않고 컴포넌트 루트에 그대로 둔다. 패널 위젯은 `ui/`, 3D 뷰는 `controlview/`·`statusview/`에 모인다. 서버 코드만 `server/`로 묶는다.

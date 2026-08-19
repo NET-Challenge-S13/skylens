@@ -1,6 +1,6 @@
 /// <reference types="node" />
 // Client-server runtime configuration. Everything is env-overridable so the
-// demo launcher (skylens_demo) can start the component on other ports without
+// demo launcher (demo) can start the component on other ports without
 // editing code.
 
 import { RELAY_DEFAULT_PORT, RELAY_PEER_PATH, RELAY_STREAM_PATH } from '../relayProtocol.ts';

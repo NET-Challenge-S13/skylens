@@ -2,7 +2,7 @@
 //
 //   npx tsx src/skylens_drone/node/run.ts --demo --gateway=ws://127.0.0.1:8081/drone
 //
-// This is the entry point skylens_demo launches: it is the exact same DroneApp
+// This is the entry point demo launches: it is the exact same DroneApp
 // the Tauri window runs, with the browser's WebSocket swapped for `ws` and the
 // operator panel replaced by stdout. No Rust build required.
 
