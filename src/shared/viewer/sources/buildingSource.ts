@@ -364,9 +364,16 @@ export async function loadBuildings(
     bounds.expandByPoint(v);
   };
 
-  // Cartographic minimum size: on wide scenes (uljin preset = ~14 km across) a
-  // 6 m house is sub-pixel at true scale, so buildings get scaled UP to stay
-  // readable as landmarks. Narrow scenes (uljinup) pass the threshold untouched.
+  // Cartographic minimum HEIGHT: on wide scenes (uljin preset = ~14 km across)
+  // a 6 m house is sub-pixel at true scale, so short buildings are raised to
+  // stay readable as landmarks. Narrow scenes pass the threshold untouched.
+  //
+  // Height only. The footprint used to be grown with it, by up to 3x around the
+  // centroid — which moved real edges by tens of metres and put the 3D world out
+  // of register with the map the operator plans on. A building drawn wider than
+  // it is answers "will the drone clear it" with a shape that does not exist.
+  // Vertical exaggeration is a convention the terrain already applies; moving
+  // ground positions is not.
   const MIN_HEIGHT_WORLD = 0.25;
   const MAX_INFLATE = 8;
 
@@ -399,16 +406,9 @@ export async function loadBuildings(
     const baseY = (baseE - ctx.minE) * ctx.s * ctx.exaggeration + (opts?.yOffset ?? 0);
 
     let hWorld = b.heightM * ctx.s * ctx.exaggeration;
-    let outer = outerRaw;
+    const outer = outerRaw;
     if (hWorld < MIN_HEIGHT_WORLD && hWorld > 0) {
-      const inflate = Math.min(MAX_INFLATE, MIN_HEIGHT_WORLD / hWorld);
-      hWorld *= inflate;
-      // Footprint grows gently (sqrt) so dense villages don't fuse into blobs.
-      const fp = Math.min(3, Math.sqrt(inflate));
-      outer = outerRaw.map(
-        ([lon, lat]) =>
-          [cLon + (lon - cLon) * fp, cLat + (lat - cLat) * fp] as LonLat,
-      );
+      hWorld *= Math.min(MAX_INFLATE, MIN_HEIGHT_WORLD / hWorld);
     }
 
     if (!opts?.prismsOnly) {

@@ -151,6 +151,11 @@ export class TowerViewer {
   private fog: THREE.Fog;
   /** The assigned route, drawn over the terrain. Null until one is assigned. */
   private routeGroup: THREE.Group | null = null;
+  /** Set by debugTopDown: the camera is being aimed from outside and NO
+   *  automatic camera may move it — not the overview spin, and not the chase
+   *  rig, which runs every frame once a drone is connected and silently undid
+   *  every top-down a check tried to take. */
+  private cameraFrozen = false;
 
   private mode: DisplayMode;
 
@@ -627,6 +632,27 @@ export class TowerViewer {
     this.scene.add(group);
   }
 
+  /**
+   * Park the camera straight above a scene point and hold it there. Only the
+   * checks use it: comparing the planner's map against the 3D view means
+   * looking at the same ground from the same angle, and the overview camera
+   * orbits.
+   */
+  debugTopDown(at: THREE.Vector3, height: number): void {
+    this.camInitialized = true;
+    this.camPos.set(at.x, at.y + height, at.z + 0.001);
+    this.camTarget.copy(at);
+    this.camera.position.copy(this.camPos);
+    this.camera.lookAt(this.camTarget);
+    this.cameraFrozen = true;
+  }
+
+  /** The scene graph, so a check can measure what is actually in it rather
+   *  than judge a screenshot. */
+  debugScene(): THREE.Scene {
+    return this.scene;
+  }
+
   /** Vertices of the drawn route, for the checks that close the loop between
    *  what was planned and what the operator is looking at. */
   debugRoute(): THREE.Vector3[] | null {
@@ -705,11 +731,12 @@ export class TowerViewer {
       this.updateRig(this.ensureRig(drone), drone, drone.id === state.activeDroneId);
     }
     const active = drones.find((d) => d.id === state.activeDroneId) ?? drones[0];
-    this.updateChaseCamera(active);
+    if (!this.cameraFrozen) this.updateChaseCamera(active);
     this.renderer.render(this.scene, this.camera);
   }
 
   private updateOverviewCamera(dt: number): void {
+    if (this.cameraFrozen) return;
     this.overviewAngle += dt * OVERVIEW_SPIN * (Math.PI / 180);
     const r = this.overviewRadius;
     this.camera.position.set(
