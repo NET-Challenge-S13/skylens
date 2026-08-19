@@ -79,7 +79,25 @@ const mapMoved =
   afterDrag !== null &&
   Math.hypot(afterDrag.lat - atCentre.lat, afterDrag.lon - atCentre.lon) > 1e-4;
 
-// 3. The pan is remembered for next time.
+// 3. The dialog must not move while points are being placed. The list sits
+//    under the map and grows with every waypoint; when the dialog was centred
+//    that growth slid the map upward between one click and the next, so an
+//    operator aiming at a building placed the point ~26 m away from it.
+const geom = () =>
+  page.evaluate(() => {
+    const r = document.querySelector('.route-modal__canvas').getBoundingClientRect();
+    return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) };
+  });
+const boxBefore = await geom();
+// Place points at distinct spots so none of them lands on an existing marker.
+for (const [fx, fy] of [[0.35, 0.35], [0.6, 0.4], [0.45, 0.7]]) {
+  await page.mouse.click(box.x + box.width * fx, box.y + box.height * fy);
+  await sleep(250);
+}
+const boxAfter = await geom();
+log('canvas box before/after placing:', JSON.stringify(boxBefore), JSON.stringify(boxAfter));
+
+// 4. The pan is remembered for next time.
 const stored = await page.evaluate(() => localStorage.getItem('skylens.control.mapCenter.v1'));
 log('stored centre:', stored);
 
@@ -90,6 +108,13 @@ const checks = [
   ['dragging moves the map', mapMoved],
   ['dragging does not drop a waypoint', draggedSilently],
   ['the pan is remembered', stored !== null && /lat/.test(stored)],
+  [
+    'the map holds still while waypoints are placed',
+    boxBefore.x === boxAfter.x &&
+      boxBefore.y === boxAfter.y &&
+      boxBefore.w === boxAfter.w &&
+      boxBefore.h === boxAfter.h,
+  ],
   ['no page errors', errors.length === 0],
 ];
 for (const [name, ok] of checks) console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}`);

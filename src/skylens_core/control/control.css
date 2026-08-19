@@ -45,8 +45,15 @@
   background: rgba(2, 4, 8, 0.68);
   backdrop-filter: blur(2px);
   display: flex;
-  align-items: center;
+  /* Pinned to the top, NOT centred. The waypoint list sits under the map and
+     grows as points are placed; centring the dialog turned that growth into the
+     map sliding upward — about 20 px, some 26 m of ground, between one click and
+     the next. An operator aiming at a building would place the next point
+     somewhere else entirely. Growing downward leaves the map where it was. */
+  align-items: flex-start;
   justify-content: center;
+  padding: 4vh 0;
+  overflow: auto;
 }
 
 .route-modal-overlay.is-hidden {
@@ -128,6 +135,9 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
+  /* Reserve one row so the first waypoint does not resize the dialog either.
+     Beyond that the list scrolls rather than pushing the buttons off-screen. */
+  min-height: 34px;
   max-height: 220px;
   overflow: auto;
 }
