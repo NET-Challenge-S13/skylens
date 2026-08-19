@@ -74,15 +74,22 @@ export class Mission {
   }
 
   /** awaiting-drone → active. Ignored while idle: a drone without a task does
-   *  not start a mission. */
+   *  not start a mission. Status is re-broadcast even when the phase holds:
+   *  it carries dronesOnline, and a phase-change-only broadcast froze the
+   *  count at whatever it was when the FIRST drone flipped the mission to
+   *  active — the panel then said 1대 with three aircraft flying. */
   droneConnected(): void {
     if (this.currentPhase === 'awaiting-drone') this.to('active');
+    else this.opts.onChange(this.status());
   }
 
-  /** Last drone dropped mid-mission: back to waiting, eta restarts. */
+  /** Last drone dropped mid-mission: back to waiting, eta restarts. The
+   *  count re-broadcast matters here too — 3대 → 2대 is information. */
   droneGone(): void {
     if (this.currentPhase === 'active' && this.opts.dronesOnline() === 0) {
       this.to('awaiting-drone');
+    } else {
+      this.opts.onChange(this.status());
     }
   }
 
