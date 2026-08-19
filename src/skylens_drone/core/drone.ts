@@ -215,6 +215,7 @@ export class DroneApp {
     const hello: DroneHello = {
       kind: 'drone-hello',
       droneId: this.cfg.droneId,
+      station: this.cfg.station,
       model: this.cfg.model,
       mode: this.cfg.mode,
     };
@@ -240,7 +241,7 @@ export class DroneApp {
   private addressedToMe(msg: ControlMessage): boolean {
     if (msg.droneId < 0) return true;
     if (msg.droneId === this.cfg.droneId) return true;
-    return msg.kind === 'assign-route' && this.cfg.formationSlot > 0;
+    return msg.kind === 'assign-route' && this.cfg.station !== 'center';
   }
 
   // -------------------------------------------------------------------------
@@ -376,7 +377,7 @@ export class DroneApp {
   /** Route pose for THIS aircraft: the leader's track, shifted into its slot. */
   private onRoute(plan: RoutePlan, s: number, direction: FlightDirection): Pose {
     const pose = sampleRoute(plan, s, direction);
-    const slot = FORMATION_SLOTS[this.cfg.formationSlot % FORMATION_SLOTS.length];
+    const slot = FORMATION_SLOTS[this.cfg.station];
     return applyFormation(pose, slot, plan.anchor);
   }
 
@@ -436,7 +437,14 @@ export class DroneApp {
 
     this.cutting = true;
     void this.capture
-      .cutSlice({ index, fraction, direction: at.direction, startedAt, durationMs })
+      .cutSlice({
+        index,
+        fraction,
+        station: this.cfg.station,
+        direction: at.direction,
+        startedAt,
+        durationMs,
+      })
       .then((result) => {
         const segment: VideoSegment = {
           kind: 'video-segment',
@@ -474,6 +482,7 @@ export class DroneApp {
     return {
       kind: 'telemetry',
       droneId: this.cfg.droneId,
+      station: this.cfg.station,
       gps: pose.gps,
       headingDeg: Math.round(pose.headingDeg * 10) / 10,
       speed: Math.round(this.speed * 100) / 100,

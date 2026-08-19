@@ -16,7 +16,7 @@ import * as THREE from 'three';
 import { state } from '../../shared/viewer/store.ts';
 import { CONFIG, DRONE_TINTS } from '../../shared/viewer/config.ts';
 import { dampFactor } from '../../shared/viewer/math.ts';
-import type { DroneTelemetry } from '../../shared/protocol.ts';
+import type { DroneStation, DroneTelemetry } from '../../shared/protocol.ts';
 import type { Gps } from '../../shared/geo.ts';
 import type { DroneRuntime } from '../../shared/viewer/types.ts';
 import type { GeoFrame } from '../geoFrame.ts';
@@ -29,6 +29,8 @@ const HEADING_DAMP = 6;
 
 export interface FleetDrone {
   id: number;
+  /** Formation station — this is the aircraft's NAME on screen. */
+  station: DroneStation;
   /** Last reported GPS — the tower's own idea of "where it is". */
   gps: Gps;
   headingDeg: number;
@@ -101,6 +103,7 @@ export function createTelemetryFleet(frame: GeoFrame): TelemetryFleet {
     track = {
       info: {
         id: t.droneId,
+        station: t.station ?? 'center',
         gps: { ...t.gps },
         headingDeg: t.headingDeg,
         speed: t.speed,
@@ -126,6 +129,7 @@ export function createTelemetryFleet(frame: GeoFrame): TelemetryFleet {
   return {
     ingest(t: DroneTelemetry): void {
       const track = ensure(t);
+      if (t.station) track.info.station = t.station;
       track.info.gps = { ...t.gps };
       track.info.headingDeg = t.headingDeg;
       track.info.speed = t.speed;

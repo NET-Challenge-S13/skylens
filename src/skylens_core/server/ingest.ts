@@ -297,6 +297,7 @@ export class Ingest {
     this.events.onCameraFeed({
       kind: 'camera-feed',
       droneId: msg.droneId,
+      station: this.store.drones.get(msg.droneId)?.station ?? 'center',
       uri: msg.uri,
       previewUri: msg.previewUri ?? null,
       codec: msg.codec,

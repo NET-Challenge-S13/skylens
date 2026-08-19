@@ -6,6 +6,7 @@
 // delay-pattern segmentation (COMPONENTS.md §5.2).
 
 import { enuToGps, gpsToEnu, type Enu, type Gps } from '../../shared/geo.ts';
+import type { DroneStation } from '../../shared/protocol.ts';
 
 export type FlightDirection = 'forward' | 'backward';
 
@@ -99,11 +100,16 @@ export interface FormationSlot {
   forward: number;
 }
 
-export const FORMATION_SLOTS: readonly FormationSlot[] = [
-  { right: 0, up: 0, forward: 0 },
-  { right: -16, up: 4, forward: -12 },
-  { right: 16, up: -4, forward: -12 },
-];
+/**
+ * A V with the centre aircraft at the apex: left and right hold station abeam
+ * and slightly behind it, so on screen the formation reads left · centre · right
+ * in that order from the operator's point of view.
+ */
+export const FORMATION_SLOTS: Record<DroneStation, FormationSlot> = {
+  left: { right: -18, up: 3, forward: -10 },
+  center: { right: 0, up: 0, forward: 0 },
+  right: { right: 18, up: -3, forward: -10 },
+};
 
 /** Offset a leader pose into a formation slot. Heading is unchanged: wingmen
  *  hold the leader's attitude, which is what makes the group read as one. */

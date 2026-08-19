@@ -6,6 +6,7 @@
 // waypoint would be compared against.
 
 import { state, emit } from '../../shared/viewer/store.ts';
+import { stationLabel } from './stationLabel.ts';
 import { droneTint } from '../drones/telemetryFleet.ts';
 import type { FleetDrone } from '../drones/telemetryFleet.ts';
 
@@ -36,9 +37,14 @@ export function createTelemetryPanel(mount: HTMLElement): TelemetryPanel {
 
   /** Rows are rebuilt only when the drone SET changes; values update in place
    *  so a click target never moves under the operator's cursor. */
-  const rows = new Map<number, { li: HTMLLIElement; vals: HTMLElement }>();
+  interface Row {
+    li: HTMLLIElement;
+    name: HTMLElement;
+    vals: HTMLElement;
+  }
+  const rows = new Map<number, Row>();
 
-  const ensureRow = (d: FleetDrone): { li: HTMLLIElement; vals: HTMLElement } => {
+  const ensureRow = (d: FleetDrone): Row => {
     const existing = rows.get(d.id);
     if (existing) return existing;
 
@@ -53,7 +59,7 @@ export function createTelemetryPanel(mount: HTMLElement): TelemetryPanel {
     dot.style.background = hex(droneTint(d.id));
     const name = document.createElement('span');
     name.className = 'telemetry-row__name';
-    name.textContent = `DRONE ${d.id}`;
+    name.textContent = stationLabel(d.station);
     const stale = document.createElement('span');
     stale.className = 'telemetry-row__stale';
     stale.textContent = '수신 끊김';
@@ -78,7 +84,7 @@ export function createTelemetryPanel(mount: HTMLElement): TelemetryPanel {
     });
 
     listEl.appendChild(li);
-    const row = { li, vals };
+    const row: Row = { li, name, vals };
     rows.set(d.id, row);
     return row;
   };
@@ -96,6 +102,9 @@ export function createTelemetryPanel(mount: HTMLElement): TelemetryPanel {
 
       for (const d of drones) {
         const row = ensureRow(d);
+        // The station can only change if the aircraft is reconfigured, but the
+        // row is built once and the name would otherwise go stale.
+        row.name.textContent = stationLabel(d.station);
         row.li.classList.toggle('is-active', d.id === state.activeDroneId);
         row.li.classList.toggle('is-stale', d.stale);
         row.vals.textContent =

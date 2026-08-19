@@ -3,6 +3,7 @@
 // and what it still owes the model API.
 
 import type {
+  DroneStation,
   DroneTelemetry,
   Envelope,
   LinkMode,
@@ -80,6 +81,8 @@ export interface QueuedJob {
 
 export interface DroneRecord {
   droneId: number;
+  /** Formation station — the aircraft's name on the operator's screens. */
+  station: DroneStation;
   model: string;
   mode: LinkMode;
   connectedAt: number;

@@ -54,8 +54,43 @@ log('board booted');
 // time to spread and the first slices time to reach the core.
 await sleep(30_000);
 
+// Switch the camera to each station in turn and record what the panel shows.
+// The tower has to be the FRONT tab first: its update loop runs on rAF, which a
+// background tab barely gets, so a switch made here would not be applied before
+// the assertion reads it back.
+await tower.bringToFront();
+await sleep(500);
+const cams = [];
+for (const station of ['left', 'center', 'right']) {
+  // Select the way the operator does — through the fleet list — so the event
+  // path the UI actually depends on is what gets exercised.
+  const picked = await tower.evaluate(async (want) => {
+    const { emit, state } = await import('/src/shared/viewer/store.ts');
+    const d = window.skylens.fleet.drones().find((x) => x.station === want);
+    if (!d) return null;
+    state.activeDroneId = d.id;
+    emit({ type: 'active-drone', id: d.id });
+    return d.id;
+  }, station);
+  if (picked === null) {
+    cams.push({ station, ok: false, why: 'no drone at this station' });
+    continue;
+  }
+  await sleep(1500);
+  const shown = await tower.evaluate(() => ({
+    active: window.skylens.state.activeDroneId,
+    label: document.querySelector('.video-panel__label')?.textContent ?? '',
+    src: (document.querySelector('.video-panel__video')?.getAttribute('src') ?? '').split('/').pop(),
+    playing: !document.querySelector('.video-panel__video')?.classList.contains('is-hidden'),
+    overlay: document.querySelector('.video-panel__overlay')?.textContent ?? '',
+  }));
+  cams.push({ station, ...shown, ok: shown.label === `${station.toUpperCase()} CAM` && shown.playing });
+  log('cam', station, JSON.stringify(shown));
+}
+
 const fleet = await tower.evaluate(() => ({
   drones: window.skylens.state.drones.map((d) => d.id),
+  stations: window.skylens.fleet.drones().map((d) => d.station).sort(),
   video: (() => {
     const v = document.querySelector('.video-panel__video');
     return v
@@ -82,6 +117,8 @@ const fleet = await tower.evaluate(() => ({
 }));
 log('tower:', JSON.stringify(fleet));
 
+await board.bringToFront();
+await sleep(500);
 const boardState = await board.evaluate(() => {
   const mm = document.getElementById('minimap')?.getBoundingClientRect();
   const card = document.querySelector('.detect-card')?.getBoundingClientRect();
@@ -100,6 +137,8 @@ const boardState = await board.evaluate(() => {
 });
 log('board:', JSON.stringify(boardState));
 
+await tower.bringToFront();
+await sleep(800);
 await tower.screenshot({ path: `${OUT}/ui-tower.png` });
 await board.screenshot({ path: `${OUT}/ui-board.png` });
 
@@ -107,7 +146,13 @@ console.log('');
 console.log('===== RESULT =====');
 const checks = [
   ['formation is 3 aircraft', fleet.drones.length === 3],
-  ['MAIN CAM is playing footage', !!fleet.video && !fleet.video.hidden && fleet.video.time > 0],
+  ['stations are left/center/right', fleet.stations.join(',') === 'center,left,right'],
+  ['each station has its own camera', cams.length === 3 && cams.every((c) => c.ok)],
+  [
+    'the three cameras show different footage',
+    new Set(cams.map((c) => c.src)).size === 3,
+  ],
+  ['the selected camera is playing', cams.every((c) => c.playing)],
   ['minimap clear of the detection card', !boardState.overlaps],
   ['board received geometry', boardState.chunks > 0],
   ['no page errors', errors.length === 0],

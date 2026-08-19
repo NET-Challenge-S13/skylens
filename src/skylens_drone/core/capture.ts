@@ -21,6 +21,7 @@ import {
   DEMO_SOURCE_DIR,
   pickClip,
   wireCodecOf,
+  type ClipPosition,
   type FlightDirection,
 } from './demoAssets.ts';
 
@@ -29,6 +30,8 @@ export interface SliceRequest {
   index: number;
   /** Where the slice sat along the route, 0..1 (midpoint). */
   fraction: number;
+  /** Which pass this aircraft is flying — selects the demo footage. */
+  station: ClipPosition;
   direction: FlightDirection;
   startedAt: number;
   durationMs: number;
@@ -71,7 +74,7 @@ export class DemoCapture implements CaptureSource {
   stop(): void {}
 
   async cutSlice(req: SliceRequest): Promise<SliceResult> {
-    const clip = pickClip(req.fraction, req.direction);
+    const clip = pickClip(req.station, req.direction);
     // Throws rather than mislabels if the footage was never transcoded.
     const codec = wireCodecOf(clip);
     return {

@@ -77,6 +77,7 @@ export class Store {
     const now = Date.now();
     const existing = this.drones.get(msg.droneId);
     if (existing) {
+      existing.station = msg.station ?? existing.station;
       existing.model = msg.model;
       existing.mode = msg.mode;
       existing.lastSeenAt = now;
@@ -86,6 +87,7 @@ export class Store {
     }
     const rec: DroneRecord = {
       droneId: msg.droneId,
+      station: msg.station ?? 'center',
       model: msg.model,
       mode: msg.mode,
       connectedAt: now,
@@ -115,6 +117,9 @@ export class Store {
         {
           kind: 'drone-hello',
           droneId: msg.droneId,
+          // Telemetry says which station it holds, so even an adopted record
+          // gets a name rather than a number.
+          station: msg.station ?? 'center',
           model: 'unknown (adopted from telemetry)',
           mode: 'relay',
         },

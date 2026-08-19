@@ -24,6 +24,13 @@ export type ComponentId = 'drone' | 'gateway' | 'proxy' | 'core' | 'client' | 'm
  */
 export type LinkMode = 'relay' | 'webrtc';
 
+/**
+ * Where an aircraft sits in the formation. Drones are identified to the operator
+ * by their station, not by a number: "왼쪽 드론" is something you can point at on
+ * the map, "드론 2" is not. The numeric id stays as the routing address.
+ */
+export type DroneStation = 'left' | 'center' | 'right';
+
 export interface Envelope<T = unknown> {
   /** Monotonic per-sender sequence, so a receiver can spot gaps. */
   seq: number;
@@ -42,6 +49,7 @@ export interface Envelope<T = unknown> {
 export interface DroneHello {
   kind: 'drone-hello';
   droneId: number;
+  station: DroneStation;
   /** Free-form model/firmware string for the operator panel. */
   model: string;
   mode: LinkMode;
@@ -51,6 +59,9 @@ export interface DroneHello {
 export interface DroneTelemetry {
   kind: 'telemetry';
   droneId: number;
+  /** Carried on every fix so a viewer that joined late still knows the fleet
+   *  layout without waiting for a hello it already missed. */
+  station: DroneStation;
   gps: Gps;
   headingDeg: number;
   /** Ground speed, m/s. */
@@ -177,6 +188,7 @@ export interface SplatChunk {
 export interface CameraFeed {
   kind: 'camera-feed';
   droneId: number;
+  station: DroneStation;
   /** The uplinked artifact (HEVC on the wire). */
   uri: string;
   /** Browser-playable rendition of the same footage, when one exists. */

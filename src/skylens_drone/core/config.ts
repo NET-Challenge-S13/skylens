@@ -7,7 +7,7 @@
 //
 // No DOM, no node: imports here — this module is imported by the pure core.
 
-import type { LinkMode } from '../../shared/protocol.ts';
+import type { DroneStation, LinkMode } from '../../shared/protocol.ts';
 import type { Gps } from '../../shared/geo.ts';
 
 export interface DroneConfig {
@@ -33,16 +33,17 @@ export interface DroneConfig {
    */
   arrivalMs: number;
   /**
-   * Which formation slot this aircraft holds (see FORMATION_SLOTS): 0 is the
-   * leader, the rest trail it. Every drone flies the same assigned route and
-   * offsets itself, so a wingman needs nothing from the leader.
+   * Which station this aircraft holds. It is also its NAME on the operator's
+   * screens (LEFT / CENTER / RIGHT) and, in demo mode, which of the recorded
+   * passes it plays — the footage was flown as a left, centre and right pass,
+   * so the station maps onto real material.
+   *
+   * Every drone flies the same assigned route and offsets itself into its
+   * station, so no aircraft depends on another.
    */
-  formationSlot: number;
-  /**
-   * Whether this aircraft transmits video. In the demo only the leader does:
-   * three drones filming one route would triple the reconstruction jobs for a
-   * scene that was captured once. Wingmen still stream telemetry.
-   */
+  station: DroneStation;
+  /** Whether this aircraft transmits video. All three do by default: the
+   *  operator can switch the camera panel between them. */
   capture: boolean;
   /** Slices the route is cut into per one-way traverse. One VideoSegment each. */
   slicesPerLeg: number;
@@ -97,7 +98,7 @@ export const DEFAULT_CONFIG: DroneConfig = {
   cruiseSpeed: 12,
   transitSpeed: 25,
   arrivalMs: 10_000,
-  formationSlot: 0,
+  station: 'center',
   capture: true,
   slicesPerLeg: 4,
   batteryDrainPerMin: 3.5,
@@ -119,6 +120,13 @@ export const DEMO_ROUTE: Gps[] = [
   { lat: 36.3692, lon: 127.3476, alt: 68 },
   { lat: 36.3695, lon: 127.3487, alt: 60 },
 ];
+
+/** Parse a station name, or null when the value is absent or not one of ours. */
+function stationOf(v: string | undefined): DroneStation | null {
+  if (v === 'left' || v === 'center' || v === 'right') return v;
+  if (v !== undefined) console.warn(`[drone] unknown station "${v}", falling back`);
+  return null;
+}
 
 function truthy(v: string | undefined): boolean {
   if (v === undefined) return false;
@@ -146,7 +154,7 @@ export function envFromArgv(argv: readonly string[]): Record<string, string> {
     model: 'SKYLENS_DRONE_MODEL',
     hz: 'SKYLENS_DRONE_TELEMETRY_HZ',
     speed: 'SKYLENS_DRONE_SPEED',
-    formation: 'SKYLENS_DRONE_FORMATION',
+    station: 'SKYLENS_DRONE_STATION',
     capture: 'SKYLENS_DRONE_CAPTURE',
     slices: 'SKYLENS_DRONE_SLICES',
     arrival: 'SKYLENS_DRONE_ARRIVAL_MS',
@@ -206,7 +214,7 @@ export function resolveConfig(...sources: Array<Record<string, string | undefine
     cruiseSpeed: num(env.SKYLENS_DRONE_SPEED, DEFAULT_CONFIG.cruiseSpeed),
     transitSpeed: num(env.SKYLENS_DRONE_TRANSIT_SPEED, DEFAULT_CONFIG.transitSpeed),
     arrivalMs: num(env.SKYLENS_DRONE_ARRIVAL_MS, DEFAULT_CONFIG.arrivalMs),
-    formationSlot: Math.max(0, Math.round(num(env.SKYLENS_DRONE_FORMATION, DEFAULT_CONFIG.formationSlot))),
+    station: stationOf(env.SKYLENS_DRONE_STATION) ?? DEFAULT_CONFIG.station,
     // Wingmen opt OUT explicitly; a lone drone films by default.
     capture: env.SKYLENS_DRONE_CAPTURE === undefined ? DEFAULT_CONFIG.capture : truthy(env.SKYLENS_DRONE_CAPTURE),
     slicesPerLeg: Math.max(1, Math.round(num(env.SKYLENS_DRONE_SLICES, DEFAULT_CONFIG.slicesPerLeg))),

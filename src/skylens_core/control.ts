@@ -20,7 +20,7 @@
 import '../shared/viewer/style.css';
 import './control/control.css';
 import './ui/panels.css';
-import { state } from '../shared/viewer/store.ts';
+import { state, subscribe } from '../shared/viewer/store.ts';
 import { CONFIG } from '../shared/viewer/config.ts';
 import { loadControlScene } from '../shared/viewer/sources/sceneSource.ts';
 import { startWorldStream } from '../shared/viewer/sources/streamSource.ts';
@@ -87,8 +87,22 @@ async function main(): Promise<void> {
     : null;
   const videoMount = mount('video-panel-mount');
   const videoPanel = videoMount ? createVideoPanel(videoMount) : null;
-  /** Which aircraft the MAIN CAM is currently showing; null before the first feed. */
-  let cameraDroneId: number | null = null;
+  /** Aircraft the camera panel is currently pointed at. */
+  let camDroneId: number | null = null;
+
+  /** Point the camera panel at whichever aircraft is selected. Driven by the
+   *  selection EVENT rather than the render loop: a click has to be answered
+   *  immediately, and the loop runs on requestAnimationFrame, which stalls
+   *  whenever the window is not the foreground one. */
+  const syncCamera = (): void => {
+    const active = fleet.drones().find((d) => d.id === state.activeDroneId);
+    if (!active || active.id === camDroneId) return;
+    camDroneId = active.id;
+    videoPanel?.select(active.id, active.station);
+  };
+  subscribe((e) => {
+    if (e.type === 'active-drone') syncCamera();
+  });
   /** Last logged state per hop, so only changes reach the console. */
   const linkSeen = new Map<string, string>();
 
@@ -108,15 +122,10 @@ async function main(): Promise<void> {
     },
     onTelemetry: (t) => {
       fleet.ingest(t);
-      // The readout tracks the aircraft whose camera is on screen — the one
-      // that sent the current feed — not whichever drone the operator has
-      // selected in the fleet list.
-      if (t.droneId === (cameraDroneId ?? state.activeDroneId)) videoPanel?.setTelemetry(t);
+      // The panel itself decides whether this drone is the one on screen.
+      videoPanel?.setTelemetry(t);
     },
-    onCameraFeed: (f) => {
-      cameraDroneId = f.droneId;
-      videoPanel?.setFeed(f);
-    },
+    onCameraFeed: (f) => videoPanel?.setFeed(f),
     onMission: (m) => missionPanel?.setMission(m),
     onLinkStatus: (l) => {
       // The core repeats every hop's status on a timer; only transitions are
@@ -134,7 +143,12 @@ async function main(): Promise<void> {
     // Centered on the loaded operating area, NOT on a hardcoded anchor — the
     // planner and the 3D scene must describe the same piece of ground.
     anchor: frame.anchor,
-    getLeaderId: () => state.activeDroneId,
+    // A route is assigned to the FORMATION, and the centre aircraft is the one
+    // that carries it: the wingmen take the same track and offset themselves,
+    // and segmentation follows the centre. Selecting a wingman to look at its
+    // camera must not change who the route belongs to.
+    getLeaderId: () =>
+      fleet.drones().find((d) => d.station === 'center')?.id ?? state.activeDroneId,
     onAssign: ({ droneId, waypoints, loop }) => {
       const sent = core.send({ kind: 'assign-route', droneId, waypoints, loop });
       showToast(
@@ -205,6 +219,9 @@ async function main(): Promise<void> {
     if (panelAcc >= PANEL_INTERVAL) {
       panelAcc = 0;
       telemetryPanel?.render(fleet.drones());
+      // Covers the first aircraft to report, which becomes active without a
+      // click and therefore without an event.
+      syncCamera();
     }
 
     viewer.update(dt);

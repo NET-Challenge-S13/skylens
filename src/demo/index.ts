@@ -103,13 +103,20 @@ const COMPONENTS: Component[] = [
     health: 'http://127.0.0.1:5173/res/static/index.html',
     readyTimeoutMs: 60_000,
   },
-  // The formation: a leader and two wingmen (중간보고서 Ⅲ-1-나). Each is its
-  // own drone process, because that is what a drone is — three aircraft, not
-  // one process pretending to be three. They fly the same assigned route and
-  // hold their slot offsets; only the leader films (see DroneConfig.capture).
-  ...[0, 1, 2].map((slot) => ({
-    name: `skylens_drone#${slot + 1}`,
-    tag: `drone${slot + 1}`,
+  // The formation: three aircraft abeam, named for where they fly (중간보고서
+  // Ⅲ-1-나). Each is its own drone process — that is what a drone is — and all
+  // three fly the same assigned route, offsetting into their station. All three
+  // film, so the operator can switch the camera panel between them.
+  //
+  // Ids are the routing addresses; the operator never sees them. The centre
+  // aircraft is id 1 because a route is assigned to the formation through it.
+  ...([
+    { station: 'center', id: 1 },
+    { station: 'left', id: 2 },
+    { station: 'right', id: 3 },
+  ] as const).map(({ station, id }) => ({
+    name: `skylens_drone(${station})`,
+    tag: station.padEnd(6).slice(0, 6),
     command: NODE,
     args: [...tsx('src/skylens_drone/node/run.ts'), '--demo'],
     // The drone processes are up from the start, but must not announce
@@ -120,10 +127,9 @@ const COMPONENTS: Component[] = [
     env: {
       ...DEMO_ENV,
       SKYLENS_DRONE_HELLO_ON_ARRIVAL: '1',
-      SKYLENS_DRONE_ID: String(slot + 1),
-      SKYLENS_DRONE_FORMATION: String(slot),
-      SKYLENS_DRONE_CAPTURE: slot === 0 ? '1' : '0',
-      SKYLENS_DRONE_MODEL: slot === 0 ? 'SkyLens D1 · 리더' : `SkyLens D${slot + 1} · 군집`,
+      SKYLENS_DRONE_ID: String(id),
+      SKYLENS_DRONE_STATION: station,
+      SKYLENS_DRONE_MODEL: `SkyLens D-${station.toUpperCase()}`,
     },
     health: null,
     readyTimeoutMs: 0,

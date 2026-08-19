@@ -54,20 +54,14 @@ export const DEMO_CLIPS: DemoClip[] = [
   { file: 'demo_left_backward.mp4',  uri: `${BASE}/demo_left_backward.mp4`,  position: 'left',   direction: 'backward', codec: 'h265', bytes: 17_538_093, durationMs: 11_678, width: 3840, height: 2160, fps: 59.94 },
 ];
 
-/** Split the route into thirds and name each third by where it sits. */
-export function positionForFraction(fraction: number): ClipPosition {
-  if (fraction < 1 / 3) return 'left';
-  if (fraction < 2 / 3) return 'center';
-  return 'right';
-}
-
 /**
- * Pick the clip that matches where along the route the slice was flown and
- * which way the drone was pointing. There is no backward take of the centre
- * pass, so the forward one is reused for it.
+ * Pick the clip for an aircraft's station and heading. The footage was flown as
+ * a left, a centre and a right pass, so the drone holding the left station plays
+ * the left pass — three cameras that genuinely saw three different things, which
+ * is the point of switching between them. There is no backward take of the
+ * centre pass, so the forward one is reused for it.
  */
-export function pickClip(fraction: number, direction: FlightDirection): DemoClip {
-  const position = positionForFraction(fraction);
+export function pickClip(position: ClipPosition, direction: FlightDirection): DemoClip {
   const exact = DEMO_CLIPS.find((c) => c.position === position && c.direction === direction);
   if (exact) return exact;
   const byPosition = DEMO_CLIPS.find((c) => c.position === position);
