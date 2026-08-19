@@ -1,33 +1,42 @@
-// CONTROL page bootstrap — the "drone simulation" computer (컴퓨터 A).
+// 관제탑 (control tower) bootstrap — COMPONENTS.md §3.4-1, §4.
 //
-// Access URL:  http://<서버IP>:5173/res/static/control.html?room=<방이름>
-// Pair with STATUS at the SAME room: /res/static/status.html?room=<방이름>
+// Access:  http://<서버IP>:5173/res/static/control.html
 //
-// Owns the simulation: runs the drone controller + the low-fi viewer, advances
-// the shared clock, and streams state snapshots to the STATUS computer over the
-// WebRTC DataChannel. Keyboard control (fly / switch drone / pause) lives here.
+// What this screen is, after the VWorld unification:
 //
-// The scene is the SAME splat STATUS renders — here it's shown as a low-fi point
-// cloud derived from the splat's own points (PROJECT.md §1: one source, two views).
+//   ONE SCENE       VWorld real terrain + real building footprints. There is no
+//                   longer a splat-derived point cloud world here; "점" is one
+//                   of three ways to draw the buildings of this same scene.
+//   GPS COORDS      Routes, telemetry and drone placement are lat/lon/alt end to
+//                   end. geoFrame.ts converts, and only at the render boundary.
+//   ONE UPSTREAM    The tower talks to the CORE and to nothing else. It does not
+//                   stream state to the situation board (the old peer.ts path is
+//                   gone — see COMPONENTS.md §8) and it does not simulate the
+//                   fleet: drone positions arrive as DroneTelemetry.
+//
+// When the core is unreachable the tower shows the operating area and says it is
+// disconnected. It does NOT invent drones.
 
-import './style.css';
+import '../shared/viewer/style.css';
 import './control/control.css';
-import { state } from './store.ts';
-import { CONFIG } from './config.ts';
-import { isDemo } from './mode.ts';
-import { loadScene, resolveSplatUrl } from './sources/sceneSource.ts';
-import { startWorldStream } from './sources/streamSource.ts';
-import { buildDronePaths } from './sources/paths.ts';
-import { buildIdlePaths, buildRouteFromGps } from './sources/routes.ts';
-import { createDroneController } from './drones/pathFollower.ts';
-import { LowfiViewer } from './controlview/lowfiViewer.ts';
-import { createTransport } from './net/peer.ts';
-import { encodeState } from './protocol.ts';
-import { roomFromQuery, mountNetBadge } from './net/statusUi.ts';
-import { createLoadingScreen } from './ui/loadingScreen.ts';
-import { createServerSource } from './server/serverSource.ts';
+import './ui/panels.css';
+import { state } from '../shared/viewer/store.ts';
+import { CONFIG } from '../shared/viewer/config.ts';
+import { loadControlScene } from '../shared/viewer/sources/sceneSource.ts';
+import { startWorldStream } from '../shared/viewer/sources/streamSource.ts';
+import { createLoadingScreen } from '../shared/viewer/ui/loadingScreen.ts';
+import { showToast } from '../shared/viewer/ui/toast.ts';
+import { createGeoFrame } from './geoFrame.ts';
+import { createSettings } from './settings.ts';
+import { createCoreLink } from './coreLink.ts';
+import { TowerViewer } from './controlview/towerViewer.ts';
+import { createTelemetryFleet } from './drones/telemetryFleet.ts';
+import { createManualLink } from './drones/manualLink.ts';
 import { createRouteModal } from './control/routeModal.ts';
 import { createVideoPanel } from './control/videoPanel.ts';
+import { createSettingsPanel } from './ui/settingsPanel.ts';
+import { createMissionPanel } from './ui/missionPanel.ts';
+import { createTelemetryPanel } from './ui/telemetryPanel.ts';
 
 function getCanvas(id: string): HTMLCanvasElement {
   const el = document.getElementById(id);
@@ -35,132 +44,167 @@ function getCanvas(id: string): HTMLCanvasElement {
   return el;
 }
 
+function mount(id: string): HTMLElement | null {
+  return document.getElementById(id);
+}
+
+function toolbarButton(label: string, onClick: () => void): HTMLButtonElement {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'control-toolbar__btn';
+  btn.textContent = label;
+  btn.addEventListener('click', onClick);
+  return btn;
+}
+
 async function main(): Promise<void> {
-  const loading = createLoadingScreen('관제탑 · 장면 로딩');
-  const loaded = await loadScene({
-    url: resolveSplatUrl(),
-    onProgress: (p) => loading.progress(p),
-  });
+  const settings = createSettings();
+
+  const loading = createLoadingScreen('관제탑 · 실지형 장면 로딩');
+  const scene = await loadControlScene((p) => loading.progress(p));
   loading.done();
 
-  const demo = isDemo();
-  // Demo: auto full-scene sweep, leader flies automatically. Real (default):
-  // drones idle-hover until the operator assigns a route via the modal.
-  const paths = demo ? buildDronePaths(loaded.data.bounds) : buildIdlePaths();
-  const drones = createDroneController(paths);
-  const lowfi = new LowfiViewer(
-    getCanvas('control-view'),
-    loaded.data,
-    loaded.terrainVisual,
-    loaded.terrainPointCount,
-    loaded.buildingVisual,
-    loaded.surroundVisual,
-  );
-  // World streamer: terrain + building cells load around the ACTIVE drone as
-  // it travels (auto sweep or manual flight) — display-only, CONTROL-only.
-  if (loaded.streamSeed) {
-    const seed = loaded.streamSeed;
-    startWorldStream(seed.coreBbox, seed.ctx, lowfi, () => {
-      const d = state.drones.find((x) => x.id === state.activeDroneId) ?? state.drones[0];
-      return d ? { x: d.pos.x, z: d.pos.z } : null;
-    });
-  }
+  // The tower's coordinate boundary. Everything above this line is GPS.
+  const frame = createGeoFrame(scene.ctx);
 
-  const transport = createTransport('control', roomFromQuery());
-  mountNetBadge(transport, 'control');
+  const viewer = new TowerViewer(getCanvas('control-view'), {
+    sceneData: scene.data,
+    terrainVisual: scene.terrainVisual,
+    surroundVisual: scene.surroundVisual,
+    buildingVisual: scene.buildingVisual,
+    display: settings.value.display,
+  });
 
-  // --- Server connection (route commands out; status shown in the toolbar) ---
-  const server = createServerSource({ demo, splatUrl: resolveSplatUrl() });
-  server.start();
+  // --- Fleet: telemetry in, rigs out. No local motion model. ---
+  const fleet = createTelemetryFleet(frame);
 
-  // --- Route planning modal (control-tower route assignment) ---
-  const modal = createRouteModal({
-    anchor: CONFIG.geo.anchor,
+  // --- Panels ---
+  const missionPanel = mount('mission-panel-mount')
+    ? createMissionPanel(mount('mission-panel-mount') as HTMLElement)
+    : null;
+  const telemetryPanel = mount('telemetry-panel-mount')
+    ? createTelemetryPanel(mount('telemetry-panel-mount') as HTMLElement)
+    : null;
+  const videoMount = mount('video-panel-mount');
+  const videoPanel = videoMount ? createVideoPanel(videoMount) : null;
+
+  // --- Core link: the ONE upstream. ---
+  const core = createCoreLink({
+    onState: (linkState, detail) => {
+      missionPanel?.setLink(linkState, detail);
+      if (linkState === 'disconnected') {
+        // Telemetry stops meaning anything once the link drops; drop the rigs
+        // rather than leave ghosts frozen over the map.
+        fleet.clear();
+        telemetryPanel?.render([]);
+      }
+    },
+    onTelemetry: (t) => fleet.ingest(t),
+    onMission: (m) => missionPanel?.setMission(m),
+    onLinkStatus: (l) => {
+      console.info(`[control] link ${l.hop}: ${l.connected ? 'up' : 'down'} (${l.mode})`);
+    },
+  });
+  core.start();
+
+  // --- Route planning (GPS in, GPS out) ---
+  const routeModal = createRouteModal({
+    // Centered on the loaded operating area, NOT on a hardcoded anchor — the
+    // planner and the 3D scene must describe the same piece of ground.
+    anchor: frame.anchor,
     getLeaderId: () => state.activeDroneId,
-    onAssign: ({ droneId, waypoints }) => {
-      const route = buildRouteFromGps(waypoints, undefined, droneId);
-      drones.setLeaderRoute(route);
-      server.assignRoute({ kind: 'assign-route', droneId, waypoints });
+    onAssign: ({ droneId, waypoints, loop }) => {
+      const sent = core.send({ kind: 'assign-route', droneId, waypoints, loop });
+      showToast(
+        sent
+          ? `경로 전송됨 · 웨이포인트 ${waypoints.length}개${loop ? ' · 왕복' : ''}`
+          : '코어에 연결되어 있지 않아 경로를 전송하지 못했습니다',
+        sent ? 'info' : 'danger',
+      );
     },
   });
 
-  const toolbar = document.getElementById('control-toolbar');
+  // --- Manual control: keyboard → wire, never → local position ---
+  const manual = createManualLink({
+    send: (msg) => core.send(msg),
+    onActiveChange: (active) => {
+      document.body.classList.toggle('is-manual', active);
+    },
+  });
+
+  // --- Settings panel (the three display options) ---
+  const settingsPanel = createSettingsPanel({
+    settings,
+    onDisplayChange: (mode) => viewer.setDisplay(mode),
+    aerialAvailable: scene.imageryAvailable,
+    buildingSource: scene.buildingSource,
+    footprints: scene.footprints,
+    areaLabel: `${CONFIG.control.defaultMap} (${scene.bbox[1].toFixed(3)}, ${scene.bbox[0].toFixed(3)})`,
+  });
+
+  const toolbar = mount('control-toolbar');
   if (toolbar) {
-    const routeBtn = document.createElement('button');
-    routeBtn.type = 'button';
-    routeBtn.className = 'control-toolbar__btn';
-    routeBtn.textContent = '경로 계획 · Route';
-    routeBtn.addEventListener('click', () => modal.open());
-    toolbar.appendChild(routeBtn);
+    toolbar.append(
+      toolbarButton('경로 계획 · Route', () => routeModal.open()),
+      toolbarButton('설정 · Display', () => settingsPanel.toggle()),
+    );
   }
 
-  // --- Main drone camera placeholder (bottom-right) ---
-  const videoMount = document.getElementById('video-panel-mount');
-  const videoPanel = videoMount ? createVideoPanel(videoMount) : null;
+  // The world streamer loads surrounding cells as the ACTIVE drone travels.
+  // Display-only, and only meaningful once a drone actually exists.
+  startWorldStream(scene.streamSeed.coreBbox, scene.streamSeed.ctx, viewer, () => {
+    const d = state.drones.find((x) => x.id === state.activeDroneId) ?? state.drones[0];
+    return d ? { x: d.pos.x, z: d.pos.z } : null;
+  });
 
-  const resize = (): void => lowfi.resize();
+  const resize = (): void => viewer.resize();
   window.addEventListener('resize', resize);
   resize();
 
-  // --- Snapshot streaming (throttled) ---
-  const SEND_INTERVAL = 1 / 30; // 30 Hz
-  let sendAcc = 0;
-  let sentVisited = 0;
-
-  const stream = (): void => {
-    if (transport.status !== 'connected') return;
-    const snap = encodeState(state, sentVisited);
-    transport.send(snap);
-    sentVisited = snap.visitedTotal;
-  };
-
   // --- Main loop ---
   const MAX_DT = 1 / 20;
-  // Seed from the first rAF timestamp (its epoch differs from performance.now()).
+  /** Telemetry rows re-render at 5 Hz; 60 Hz would be churn for no gain. */
+  const PANEL_INTERVAL = 0.2;
+  let panelAcc = PANEL_INTERVAL;
+  // Seeded from the first rAF timestamp (its epoch differs from performance.now()).
   let last = -1;
 
-  const frame = (now: number): void => {
+  const step = (now: number): void => {
     if (last < 0) last = now;
     const real = (now - last) / 1000;
     last = now;
-    // Clamp to [0, MAX_DT]: never negative (guards damping from exploding).
-    const dt = Math.max(0, Math.min(real, MAX_DT)) * CONFIG.clock.speed;
+    // Clamp to [0, MAX_DT] — never negative, so smoothing can't explode.
+    const dt = Math.max(0, Math.min(real, MAX_DT));
 
-    if (state.running) {
-      state.time += dt;
-      drones.update(dt);
-      sendAcc += real;
-      if (sendAcc >= SEND_INTERVAL) {
-        sendAcc = 0;
-        stream();
-      }
+    state.time += dt;
+    fleet.update(dt);
+
+    panelAcc += dt;
+    if (panelAcc >= PANEL_INTERVAL) {
+      panelAcc = 0;
+      telemetryPanel?.render(fleet.drones());
     }
 
-    lowfi.update(dt);
-    requestAnimationFrame(frame);
+    viewer.update(dt);
+    requestAnimationFrame(step);
   };
-  requestAnimationFrame(frame);
-
-  // --- Pause toggle (space) ---
-  window.addEventListener('keydown', (e) => {
-    if (e.code === 'Space') {
-      e.preventDefault();
-      state.running = !state.running;
-    }
-  });
+  requestAnimationFrame(step);
 
   // Debug/e2e handle.
   (window as unknown as { skylens?: unknown }).skylens = {
     role: 'control',
     state,
-    scene: loaded.data,
-    CONFIG,
-    transport,
-    server,
+    scene,
+    frame,
+    settings,
+    viewer,
+    core,
+    fleet,
+    manual,
+    routeModal,
+    settingsPanel,
     videoPanel,
-    routeModal: modal,
-    lowfi,
-    terrainVisual: loaded.terrainVisual,
+    CONFIG,
   };
 }
 

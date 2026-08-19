@@ -57,6 +57,7 @@ export default defineConfig({
         main: 'res/static/index.html',
         control: 'res/static/control.html',
         status: 'res/static/status.html',
+        drone: 'src/skylens_drone/index.html',
       },
     },
   },

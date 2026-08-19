@@ -7,6 +7,8 @@ SkyLens의 AI·복원 모델 코드를 담는 Python 패키지.
    2D 탐지를 3D 세계좌표에 투영한다. → `models/skylensnet/`
 2. **Reconstruction** — 3DGS 실시간 3D 복원 (GLOMAP 포즈추정 → gsplat 학습 →
    Open3D ICP 멀티드론 융합). → `models/skylens/` — 구현됨, 해당 README 참조
+3. **Serving** — 위 둘을 코어에 노출하는 FastAPI 연산 API. 진입점 `app.py`,
+   구현은 `serving/`. → 엔드포인트·데모 모드·실행법은 [`API.md`](API.md)
 
 학습은 루트의 `train.ipynb` 에서 돌린다.
 

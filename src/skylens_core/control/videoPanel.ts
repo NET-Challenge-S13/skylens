@@ -2,9 +2,9 @@
 // (animated gradient + scanlines + crosshair + a small telemetry overlay) on
 // a canvas until a real feed is wired up via setSource().
 
-import { state } from '../store.ts';
-import { CONFIG } from '../config.ts';
-import { sceneToGps } from '../geo.ts';
+import { state } from '../../shared/viewer/store.ts';
+import { CONFIG } from '../../shared/viewer/config.ts';
+import { sceneToGps } from '../../shared/geo.ts';
 
 export interface VideoPanel {
   /** Seam for a real feed later: a MediaStream, a video URL, or null to fall

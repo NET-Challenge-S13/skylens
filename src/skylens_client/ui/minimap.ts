@@ -4,9 +4,9 @@
 // same real-world frame as the server's GPS detections/telemetry.
 
 import * as THREE from 'three';
-import { state } from '../../skylens_core/store.ts';
-import { sceneToEnu } from '../../skylens_core/geo.ts';
-import type { Vec3 } from '../../skylens_core/types.ts';
+import { state } from '../../shared/viewer/store.ts';
+import { sceneToEnu } from '../../shared/geo.ts';
+import type { Vec3 } from '../../shared/viewer/types.ts';
 
 export interface Minimap {
   update(): void;

@@ -1,0 +1,112 @@
+// Per-drone telemetry readout — in GPS, because that is what the tower thinks in.
+//
+// COMPONENTS.md §8: "관제탑의 좌표는 GPS다". These numbers are printed straight
+// off `DroneTelemetry.gps` with no scene coordinate anywhere in the path, so
+// what the operator reads is exactly what the drone reported and what a route
+// waypoint would be compared against.
+
+import { state, emit } from '../../shared/viewer/store.ts';
+import { droneTint } from '../drones/telemetryFleet.ts';
+import type { FleetDrone } from '../drones/telemetryFleet.ts';
+
+export interface TelemetryPanel {
+  /** Re-render from the current fleet snapshot. */
+  render(drones: FleetDrone[]): void;
+  dispose(): void;
+}
+
+const hex = (n: number): string => `#${n.toString(16).padStart(6, '0')}`;
+
+/** Signed decimal degrees at ~1 m resolution (5 dp ≈ 1.1 m at this latitude). */
+const deg = (v: number): string => v.toFixed(5);
+
+export function createTelemetryPanel(mount: HTMLElement): TelemetryPanel {
+  const root = document.createElement('div');
+  root.className = 'telemetry-panel';
+
+  const empty = document.createElement('div');
+  empty.className = 'telemetry-panel__empty';
+  empty.textContent = '연결된 드론이 없습니다';
+
+  const listEl = document.createElement('ul');
+  listEl.className = 'telemetry-panel__list';
+
+  root.append(empty, listEl);
+  mount.appendChild(root);
+
+  /** Rows are rebuilt only when the drone SET changes; values update in place
+   *  so a click target never moves under the operator's cursor. */
+  const rows = new Map<number, { li: HTMLLIElement; vals: HTMLElement }>();
+
+  const ensureRow = (d: FleetDrone): { li: HTMLLIElement; vals: HTMLElement } => {
+    const existing = rows.get(d.id);
+    if (existing) return existing;
+
+    const li = document.createElement('li');
+    li.className = 'telemetry-row';
+    li.tabIndex = 0;
+
+    const head = document.createElement('div');
+    head.className = 'telemetry-row__head';
+    const dot = document.createElement('span');
+    dot.className = 'telemetry-row__dot';
+    dot.style.background = hex(droneTint(d.id));
+    const name = document.createElement('span');
+    name.className = 'telemetry-row__name';
+    name.textContent = `DRONE ${d.id}`;
+    const stale = document.createElement('span');
+    stale.className = 'telemetry-row__stale';
+    stale.textContent = '수신 끊김';
+    head.append(dot, name, stale);
+
+    const vals = document.createElement('div');
+    vals.className = 'telemetry-row__vals';
+
+    li.append(head, vals);
+    // Selecting a drone is what the chase camera and manual control follow.
+    const select = (): void => {
+      if (state.activeDroneId === d.id) return;
+      state.activeDroneId = d.id;
+      emit({ type: 'active-drone', id: d.id });
+    };
+    li.addEventListener('click', select);
+    li.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        select();
+      }
+    });
+
+    listEl.appendChild(li);
+    const row = { li, vals };
+    rows.set(d.id, row);
+    return row;
+  };
+
+  return {
+    render(drones: FleetDrone[]): void {
+      empty.classList.toggle('is-hidden', drones.length > 0);
+
+      const live = new Set(drones.map((d) => d.id));
+      for (const [id, row] of rows) {
+        if (live.has(id)) continue;
+        row.li.remove();
+        rows.delete(id);
+      }
+
+      for (const d of drones) {
+        const row = ensureRow(d);
+        row.li.classList.toggle('is-active', d.id === state.activeDroneId);
+        row.li.classList.toggle('is-stale', d.stale);
+        row.vals.textContent =
+          `${deg(d.gps.lat)}, ${deg(d.gps.lon)} · ${d.gps.alt.toFixed(0)}m · ` +
+          `${d.headingDeg.toFixed(0)}° · ${d.speed.toFixed(1)}m/s · ${d.batteryPct.toFixed(0)}%`;
+      }
+    },
+
+    dispose(): void {
+      rows.clear();
+      root.remove();
+    },
+  };
+}

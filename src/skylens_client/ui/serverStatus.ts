@@ -1,10 +1,15 @@
-// Server-status panel — shows the board's server data source: connection state
-// (waiting / receiving), chunk + detection counts, latency, and the DELAY-PATTERN
-// ladder (which capture segment sits at which refinement level right now).
-// Pure DOM, subscribes to serverSource.onStatus.
+// Server-status panel — the board's honest account of where its data is coming
+// from: the two link states (browser→중계 서버, 중계 서버→코어), the mission line
+// the core is broadcasting, chunk/detection counters, and the DELAY-PATTERN
+// ladder.
+//
+// The ladder is rendered from `SegmentStatus[]` EXACTLY as received. Level count,
+// step count, and label are the core's (skylens_core/server/ladder.ts); this file
+// draws pips and nothing else. When the core has sent no ladder yet, the panel
+// says so rather than inventing rows — an empty ladder is information.
 
-import type { ServerSource } from '../../skylens_core/server/serverSource.ts';
-import type { SegmentStatus, ServerStatus } from '../../skylens_core/protocol.ts';
+import type { SegmentStatus } from '../../shared/protocol.ts';
+import type { FeedStatus, RelayClient } from '../sources/relayClient.ts';
 
 export interface ServerStatusPanel {
   dispose(): void;
@@ -23,7 +28,7 @@ const STATE_LABEL: Record<PanelState, string> = {
 };
 
 /** Mount into `#server-status` (see status.html). */
-export function mountServerStatus(source: ServerSource): ServerStatusPanel {
+export function mountServerStatus(source: RelayClient): ServerStatusPanel {
   const host = document.getElementById('server-status');
   if (!host) return noop();
 
@@ -41,7 +46,10 @@ export function mountServerStatus(source: ServerSource): ServerStatusPanel {
   const detail = document.createElement('span');
   detail.className = 'server-status__detail';
 
-  body.append(text, detail);
+  const link = document.createElement('span');
+  link.className = 'server-status__detail';
+
+  body.append(text, detail, link);
   host.append(dot, body);
 
   // Delay-pattern ladder: one row per capture segment, filled pips for the
@@ -51,14 +59,16 @@ export function mountServerStatus(source: ServerSource): ServerStatusPanel {
   ladder.className = 'server-status__ladder';
   host.append(ladder);
 
-  const rows = new Map<number, { pips: HTMLSpanElement[]; note: HTMLSpanElement }>();
+  const rows = new Map<number, { row: HTMLElement; pips: HTMLSpanElement[]; note: HTMLSpanElement }>();
 
+  /** Rebuild a row's pips when the core revises the ladder height. */
   function segmentRow(seg: SegmentStatus): { pips: HTMLSpanElement[]; note: HTMLSpanElement } {
     const existing = rows.get(seg.index);
-    if (existing) return existing;
+    if (existing && existing.pips.length === seg.levels) return existing;
 
-    const row = document.createElement('div');
+    const row = existing?.row ?? document.createElement('div');
     row.className = 'segment-row';
+    row.replaceChildren();
 
     const name = document.createElement('span');
     name.className = 'segment-row__name';
@@ -78,23 +88,36 @@ export function mountServerStatus(source: ServerSource): ServerStatusPanel {
     note.className = 'segment-row__note';
 
     row.append(name, bar, note);
-    ladder.append(row);
+    if (!existing) ladder.append(row);
 
-    const made = { pips, note };
+    const made = { row, pips, note };
     rows.set(seg.index, made);
     return made;
   }
 
-  function render(s: ServerStatus): void {
-    const panelState: PanelState = s.receiving ? 'receiving' : s.connected ? 'connected' : 'waiting';
+  function render(s: FeedStatus): void {
+    const server = s.server;
+    const panelState: PanelState = server.receiving
+      ? 'receiving'
+      : server.connected
+        ? 'connected'
+        : 'waiting';
     dot.dataset.state = panelState;
     text.textContent = STATE_LABEL[panelState];
 
-    const bits: string[] = [`청크 ${s.chunks}`, `탐지 ${s.detections}`];
-    if (s.latencyMs != null) bits.push(`${s.latencyMs}ms`);
+    const bits: string[] = [`청크 ${server.chunks}`, `탐지 ${server.detections}`];
+    if (server.latencyMs != null) bits.push(`${Math.round(server.latencyMs)}ms`);
     detail.textContent = bits.join(' · ');
 
-    for (const seg of s.segments) {
+    // The waiting state has to name WHICH hop is down, and the mission line the
+    // core broadcasts takes precedence once the stream is healthy.
+    const mission = s.mission;
+    link.textContent =
+      panelState === 'receiving' && mission
+        ? `${mission.message} · 드론 ${mission.dronesOnline}대`
+        : s.detail;
+
+    for (const seg of server.segments) {
       const row = segmentRow(seg);
       row.pips.forEach((pip, i) => {
         pip.dataset.on = i < seg.level ? '1' : '0';

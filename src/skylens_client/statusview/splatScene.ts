@@ -12,24 +12,37 @@
 
 import type * as THREE from 'three';
 import { DropInViewer } from '@mkkellogg/gaussian-splats-3d';
-import type { SplatAlign } from '../../skylens_core/protocol.ts';
 
 export type SplatStatus = 'idle' | 'loading' | 'ready' | 'error';
+
+/** Placement of one chunk, in scene units. Structurally a protocol SplatAlign
+ *  minus the GPS anchor, which the caller has already resolved. */
+export interface ChunkPlacement {
+  position: [number, number, number];
+  rotation: [number, number, number, number];
+  scale: [number, number, number];
+}
 
 /** What the viewer needs to place one delivered chunk. */
 export interface SplatChunkInput {
   url: string;
-  align: SplatAlign;
+  align: ChunkPlacement;
   segment: number;
   level: number;
 }
 
 type StatusCb = (status: SplatStatus, detail?: string) => void;
 
-/** One loaded scene, in the order the underlying viewer holds it. */
-interface Loaded {
+/** One loaded scene, in the order the underlying viewer holds it. The splat
+ *  shader reads this array positionally: viewer scene i is order[i], which is
+ *  what lets the reveal fade a SEGMENT rather than the whole mesh. */
+export interface LoadedScene {
   segment: number;
   level: number;
+  /** performance.now() when this segment FIRST became visible. A refinement of
+   *  an already-visible segment inherits it, so replacing level 1 with level 2
+   *  does not restart the fade (which would read as a flicker). */
+  arrivedAt: number;
 }
 
 export class SplatScene {
@@ -41,9 +54,12 @@ export class SplatScene {
   private readonly cbs: StatusCb[] = [];
   private readonly parent: THREE.Scene;
   private _skipped = 0;
+  private _removeFailed = 0;
   /** Loaded scenes in viewer scene-index order (index i = viewer scene i). */
-  private readonly order: Loaded[] = [];
-  private readonly bySegment = new Map<number, Loaded>();
+  private readonly order: LoadedScene[] = [];
+  private readonly bySegment = new Map<number, LoadedScene>();
+  /** First-arrival time per segment, so refinements keep the original fade. */
+  private readonly segmentArrival = new Map<number, number>();
   /** Highest level queued OR loaded per segment, so a level that has already
    *  been overtaken never gets loaded just to be replaced a moment later. */
   private readonly desired = new Map<number, number>();
@@ -96,6 +112,17 @@ export class SplatScene {
   /** Levels dropped from the queue because a better one had already arrived. */
   get skipped(): number {
     return this._skipped;
+  }
+
+  /** Superseded levels the renderer refused to unload (see addChunk). */
+  get removeFailed(): number {
+    return this._removeFailed;
+  }
+
+  /** Loaded scenes in viewer scene-index order — the reveal maps a splat's
+   *  sceneIndex to its segment's arrival time through this. */
+  get scenes(): readonly LoadedScene[] {
+    return this.order;
   }
 
   /** Highest level currently rendering per segment. */
@@ -160,7 +187,9 @@ export class SplatScene {
           if (typeof percent === 'number') this._progress = percent;
         },
       });
-      const entry: Loaded = { segment: chunk.segment, level: chunk.level };
+      const arrivedAt = this.segmentArrival.get(chunk.segment) ?? performance.now();
+      this.segmentArrival.set(chunk.segment, arrivedAt);
+      const entry: LoadedScene = { segment: chunk.segment, level: chunk.level, arrivedAt };
       this.order.push(entry);
       this.bySegment.set(chunk.segment, entry);
       this._chunks += 1;
@@ -169,9 +198,18 @@ export class SplatScene {
         const idx = this.order.indexOf(prev);
         if (idx >= 0) {
           await this.idle();
-          await this.viewer.removeSplatScene(idx, false);
-          this.order.splice(idx, 1);
-          this._replaced += 1;
+          try {
+            await this.viewer.removeSplatScene(idx, false);
+            this.order.splice(idx, 1);
+            this._replaced += 1;
+          } catch (e: unknown) {
+            // The library rebuilds its splat tree asynchronously, so a removal
+            // can race a sort still referencing the old mesh. The refinement is
+            // already rendering at this point; failing to drop the superseded
+            // level costs memory, not correctness, and must not break the queue.
+            this._removeFailed += 1;
+            console.warn('[splat] superseded level not removed', e);
+          }
         }
       }
       this.set('ready');

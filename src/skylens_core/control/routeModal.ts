@@ -1,7 +1,11 @@
 // Control-tower route planner. A DOM modal with a small top-down MAP: the
 // operator clicks points on the map to drop GPS waypoints for the leader drone
-// and assigns the route — the leader then flies it (see pathFollower.ts
-// setLeaderRoute) and the swarm clusters around it.
+// and assigns the route.
+//
+// The route leaves here as GPS and goes straight onto the wire as `assign-route`
+// (coreLink.ts). The tower does NOT fly the drone itself — the core owns the
+// flight, and the result comes back as telemetry. This modal therefore produces
+// coordinates, not motion.
 //
 // The map shows a VWorld satellite backdrop when the dev proxy has a key
 // (/vworld/wmts/{z}/{y}/{x}.jpeg, same source as the ?map terrain scene); with
@@ -9,11 +13,15 @@
 // linear lon/lat frame centered on the anchor, so waypoint coordinates are
 // exact regardless of whether the satellite layer loaded.
 
-import type { Gps } from '../geo.ts';
+import type { Gps } from '../../shared/geo.ts';
 
 export interface AssignedRoute {
   droneId: number;
   waypoints: Gps[];
+  /** Fly the route back and forth (데모 시나리오 §5.2 "지정 경로 왕복 반복").
+   *  Sent EXPLICITLY on the wire: the core defaults a missing `loop` to true,
+   *  but it should never have to guess what the operator meant. */
+  loop: boolean;
 }
 
 export interface RouteModalOptions {
@@ -51,6 +59,8 @@ const tileYToLat = (y: number, z: number): number => {
   return (180 / Math.PI) * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)));
 };
 const SAT_MAX_ZOOM = 17;
+/** VWorld serves tilematrix 6..19 only (see terrainSource.ts). */
+const SAT_MIN_ZOOM = 6;
 
 interface Bounds {
   west: number;
@@ -69,6 +79,7 @@ export function createRouteModal(opts: RouteModalOptions): RouteModal {
   const anchor = opts.anchor;
   const cosLat = Math.cos((anchor.lat * Math.PI) / 180) || 1;
   let waypoints: Waypoint[] = [];
+  let loop = true;
   let spanM = SPANS[1];
   let altitude = Math.round(anchor.alt + 20);
   let satTiles: LoadedTile[] = [];
@@ -157,7 +168,20 @@ export function createRouteModal(opts: RouteModalOptions): RouteModal {
     syncAltText();
   });
   altWrap.append(altText, altInput);
-  toolbar.append(spanGroup, altWrap);
+
+  const loopWrap = document.createElement('label');
+  loopWrap.className = 'route-modal__loop';
+  const loopInput = document.createElement('input');
+  loopInput.type = 'checkbox';
+  loopInput.checked = loop;
+  const loopText = document.createElement('span');
+  loopText.textContent = '왕복 반복';
+  loopInput.addEventListener('change', () => {
+    loop = loopInput.checked;
+  });
+  loopWrap.append(loopInput, loopText);
+
+  toolbar.append(spanGroup, altWrap, loopWrap);
 
   // map canvas
   const mapWrap = document.createElement('div');
@@ -195,12 +219,12 @@ export function createRouteModal(opts: RouteModalOptions): RouteModal {
 
   // ---------- satellite backdrop ----------
   function pickZoom(b: Bounds): number {
-    for (let z = SAT_MAX_ZOOM; z > 0; z--) {
+    for (let z = SAT_MAX_ZOOM; z > SAT_MIN_ZOOM; z--) {
       const cols = Math.floor(lonToTileX(b.east, z)) - Math.floor(lonToTileX(b.west, z)) + 1;
       const rows = Math.floor(latToTileY(b.south, z)) - Math.floor(latToTileY(b.north, z)) + 1;
       if (cols * rows <= 12) return z;
     }
-    return 1;
+    return SAT_MIN_ZOOM;
   }
   function loadSatellite(): void {
     const token = ++satToken;
@@ -401,12 +425,15 @@ export function createRouteModal(opts: RouteModalOptions): RouteModal {
   }
 
   assignBtn.addEventListener('click', () => {
+    // The core refuses a route with fewer than 2 waypoints and answers with a
+    // MissionStatus. Catching it here means the operator gets the reason
+    // immediately instead of watching the modal close on a rejected task.
     if (waypoints.length < 2) {
       hint.textContent = '경로에는 최소 2개의 웨이포인트가 필요합니다';
       hint.classList.add('is-warn');
       return;
     }
-    opts.onAssign({ droneId: opts.getLeaderId(), waypoints: [...waypoints] });
+    opts.onAssign({ droneId: opts.getLeaderId(), waypoints: [...waypoints], loop });
     close();
   });
 

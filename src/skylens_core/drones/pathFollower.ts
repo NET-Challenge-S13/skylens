@@ -1,11 +1,11 @@
 // Drone path-following + mode state machine. PROJECT.md §4.2.
 // Owns state.drones and advances them each frame: AUTO -> MANUAL -> RETURNING -> AUTO.
 import * as THREE from 'three';
-import { state } from '../store.ts';
-import { CONFIG, droneViewScale } from '../config.ts';
-import { samplePath, pathDuration, dampFactor, easeInOut, clamp } from '../math.ts';
+import { state } from '../../shared/viewer/store.ts';
+import { CONFIG, droneViewScale } from '../../shared/viewer/config.ts';
+import { samplePath, pathDuration, dampFactor, easeInOut, clamp } from '../../shared/viewer/math.ts';
 import { createManualInput } from './manualControl.ts';
-import type { DroneRuntime, DronePath } from '../types';
+import type { DroneRuntime, DronePath } from '../../shared/viewer/types';
 
 export interface DroneController {
   update(dt: number): void;

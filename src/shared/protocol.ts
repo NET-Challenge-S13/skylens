@@ -1,0 +1,293 @@
+// Cross-component wire contract for SkyLens (see res/docs/COMPONENTS.md).
+//
+//   드론 → 게이트웨이 → 프록시 → 코어 → (모델 API | 관제탑 화면 | 현황판 WebRTC)
+//
+// Every hop carries these same message shapes: the gateway and the proxy are
+// transports, not translators. Only the model API speaks a different dialect
+// (REST, see §4) because it is a request/response compute service.
+//
+// This module is pure data — no DOM, no Three.js, no Node built-ins — so every
+// component can import it.
+
+import type { Gps } from './geo.ts';
+
+// ---------------------------------------------------------------------------
+// §1 Identity and transport
+// ---------------------------------------------------------------------------
+
+export type ComponentId = 'drone' | 'gateway' | 'proxy' | 'core' | 'client' | 'model';
+
+/**
+ * How a drone reaches the KOREN interior.
+ *   relay  — gateway forwards the media to the proxy (기본)
+ *   webrtc — gateway only brokers hole punching; media goes drone ↔ proxy direct
+ */
+export type LinkMode = 'relay' | 'webrtc';
+
+export interface Envelope<T = unknown> {
+  /** Monotonic per-sender sequence, so a receiver can spot gaps. */
+  seq: number;
+  /** Unix ms at the ORIGIN (the drone for capture messages). Propagated
+   *  unchanged through every hop — this is what makes end-to-end latency
+   *  measurable per segment. */
+  originTs: number;
+  from: ComponentId;
+  payload: T;
+}
+
+// ---------------------------------------------------------------------------
+// §2 Uplink — drone → gateway → proxy → core
+// ---------------------------------------------------------------------------
+
+export interface DroneHello {
+  kind: 'drone-hello';
+  droneId: number;
+  /** Free-form model/firmware string for the operator panel. */
+  model: string;
+  mode: LinkMode;
+}
+
+/** One drone's live state. Drives the control tower's map and the board's camera. */
+export interface DroneTelemetry {
+  kind: 'telemetry';
+  droneId: number;
+  gps: Gps;
+  headingDeg: number;
+  /** Ground speed, m/s. */
+  speed: number;
+  batteryPct: number;
+  /** Unix ms at the drone. */
+  t: number;
+}
+
+/**
+ * A slice of captured video. The drone cuts its stream into fixed slices and
+ * ships each one with the poses covering it — the pose is what lets the
+ * reconstruction skip re-deriving camera positions from scratch.
+ */
+export interface VideoSegment {
+  kind: 'video-segment';
+  droneId: number;
+  /** Per-drone increasing slice number. */
+  seq: number;
+  codec: 'h265';
+  startedAt: number;
+  durationMs: number;
+  /** Where the bytes live. In demo mode this is a file under res/static/demo. */
+  uri: string;
+  bytes: number;
+  /** Poses sampled across the slice, oldest first. */
+  poses: DroneTelemetry[];
+}
+
+export type UplinkMessage = DroneHello | DroneTelemetry | VideoSegment;
+
+// ---------------------------------------------------------------------------
+// §3 Downlink — core → drone (control) / core → clients (situation)
+// ---------------------------------------------------------------------------
+
+/** Control tower assigns a GPS route. Goes core → drone. */
+export interface AssignRoute {
+  kind: 'assign-route';
+  droneId: number;
+  waypoints: Gps[];
+  /** Fly the route back and forth instead of stopping at the last waypoint. */
+  loop: boolean;
+}
+
+/** Operator's live stick input, when they take over from the route. */
+export interface ManualControl {
+  kind: 'manual-control';
+  droneId: number;
+  /** -1..1 each. */
+  forward: number;
+  yaw: number;
+  climb: number;
+}
+
+export type ControlMessage = AssignRoute | ManualControl;
+
+/**
+ * Where the mission stands. The control tower and the board both render this,
+ * and the demo scenario is expressed entirely through these phases:
+ * idle → assigned → awaiting-drone → active.
+ */
+export type MissionPhase = 'idle' | 'assigned' | 'awaiting-drone' | 'active';
+
+export interface MissionStatus {
+  kind: 'mission-status';
+  phase: MissionPhase;
+  /** Operator-facing line, already localized. */
+  message: string;
+  /** Drones currently connected to the core. */
+  dronesOnline: number;
+  /** Set while the phase is time-bound (awaiting-drone), else null. */
+  etaSeconds: number | null;
+}
+
+// ---------------------------------------------------------------------------
+// §4 Reconstruction stream — the delay pattern
+// ---------------------------------------------------------------------------
+//
+// The core cuts the flight into SEGMENTS and drives each one up a ladder of
+// LEVELS: a low training-step result is confirmed and pushed as soon as the
+// drone has passed, then refined — while the NEXT segment starts its own first
+// level. Scheduling lives in the core ONLY; clients render what arrives.
+
+/** Where a chunk lands in the shared frame. */
+export interface SplatAlign {
+  /** GPS anchor to place the chunk at; null uses the scene origin. */
+  anchor: Gps | null;
+  position: [number, number, number];
+  rotation: [number, number, number, number];
+  scale: [number, number, number];
+}
+
+export interface SplatChunk {
+  kind: 'splat-chunk';
+  id: string;
+  /** Capture segment this reconstructs — a piece of the scene, not a copy. */
+  segment: number;
+  /** Refinement level; 1 lands first, a higher one REPLACES it. */
+  level: number;
+  /** Training steps behind this level. */
+  steps: number;
+  /** What the commander can make out at this level (report 표 8). */
+  label: string;
+  /** No further level will arrive for this segment. */
+  final: boolean;
+  url: string;
+  bytes: number;
+  align: SplatAlign;
+}
+
+/** Segment-level view of the same stream, for progress UI. */
+export interface SegmentStatus {
+  index: number;
+  /** Highest level delivered; 0 = queued/processing. */
+  level: number;
+  levels: number;
+  steps: number;
+  label: string;
+}
+
+// ---------------------------------------------------------------------------
+// §5 Detection
+// ---------------------------------------------------------------------------
+
+export interface DetectionResult {
+  kind: 'detection';
+  id: string;
+  category: 'person' | 'danger';
+  gps: Gps;
+  confidence: number;
+  label: string;
+  /** Segment the detection was found in, so the board can gate it on arrival. */
+  segment: number;
+}
+
+// ---------------------------------------------------------------------------
+// §6 Link health — what the badges show
+// ---------------------------------------------------------------------------
+
+export interface LinkStatus {
+  kind: 'link-status';
+  /** Which hop this describes, e.g. 'drone→gateway'. */
+  hop: string;
+  connected: boolean;
+  mode: LinkMode;
+  /** Round-trip ms, null when never measured. */
+  latencyMs: number | null;
+  /** Uplink bitrate estimate, Mbps. */
+  mbps: number | null;
+}
+
+export interface ServerStatus {
+  kind: 'server-status';
+  connected: boolean;
+  receiving: boolean;
+  chunks: number;
+  detections: number;
+  lastSeq: number;
+  latencyMs: number | null;
+  segments: SegmentStatus[];
+}
+
+// ---------------------------------------------------------------------------
+// §7 Model API (REST) — core → skylens_model
+// ---------------------------------------------------------------------------
+//
+// The only request/response surface in the system. Everything else is push.
+
+/** POST /recon/jobs */
+export interface ReconJobRequest {
+  segment: number;
+  /** Video slices making up this segment. */
+  sources: Array<{ uri: string; poses: DroneTelemetry[] }>;
+  /** Training steps to run for this level. */
+  steps: number;
+  /** Frame of the FIRST segment, forced onto every later one so segments line
+   *  up in one space (see 중간보고서 Ⅲ-1-바). Null for the first job. */
+  anchorFrame: string | null;
+}
+
+/** POST /detect/jobs */
+export interface DetectJobRequest {
+  segment: number;
+  sources: Array<{ uri: string; poses: DroneTelemetry[] }>;
+}
+
+export interface JobAccepted {
+  jobId: string;
+  /** Server-side queue position at accept time. */
+  queued: number;
+}
+
+export type JobState = 'queued' | 'running' | 'done' | 'failed';
+
+/** GET /jobs/{id} */
+export interface JobStatus {
+  jobId: string;
+  state: JobState;
+  progress: number;
+  /** Present when state === 'done'. */
+  result: ReconJobResult | DetectJobResult | null;
+  error: string | null;
+}
+
+export interface ReconJobResult {
+  kind: 'recon-result';
+  segment: number;
+  steps: number;
+  url: string;
+  bytes: number;
+  align: SplatAlign;
+  /** Frame this job established; later jobs must be given it as anchorFrame. */
+  anchorFrame: string;
+}
+
+export interface DetectJobResult {
+  kind: 'detect-result';
+  segment: number;
+  detections: DetectionResult[];
+}
+
+// ---------------------------------------------------------------------------
+// §8 Unions
+// ---------------------------------------------------------------------------
+
+/** Anything the core pushes to a viewer (control tower or situation board). */
+export type ViewerMessage =
+  | SplatChunk
+  | DetectionResult
+  | DroneTelemetry
+  | MissionStatus
+  | ServerStatus
+  | LinkStatus;
+
+export const IDENTITY_ALIGN: SplatAlign = {
+  anchor: null,
+  position: [0, 0, 0],
+  rotation: [0, 0, 0, 1],
+  scale: [1, 1, 1],
+};

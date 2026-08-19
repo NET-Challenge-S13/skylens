@@ -1,20 +1,25 @@
 // Viewer 2 — the "real" 3D reconstruction situation board (PROJECT.md §5, §8).
-// Renders the FULL point cloud with a progressive, lagged bloom-reveal driven
-// by the drone module's `state.visited` trail, places detection markers that
-// appear once their area is revealed, and drives the camera through the
-// SYNCED/FOCUSING/LOCKED/RETURNING state machine (§8.3).
 //
-// A placeholder point cloud stands in for a future Gaussian splat; the
-// reveal/camera choreography and coordinate frame are real and swappable.
+// Everything it shows arrives from the pipeline (skylens_client/sources/
+// relayClient.ts). It renders the splat chunks the core delivers, places the
+// detection markers the core reports, follows the drone by its telemetry, and
+// drives the camera through the SYNCED/FOCUSING/LOCKED/RETURNING state machine
+// (§8.3).
+//
+// Visibility has exactly one rule: a segment is visible once its chunk has
+// landed (COMPONENTS.md §8). There is no trail-driven mask any more — the splat
+// mesh only ever holds arrived geometry, and SplatReveal just fades each segment
+// in. Until the first chunk lands, the locally-loaded point cloud is drawn as a
+// dim scaffold so the board reads as WAITING rather than broken; it is removed
+// the moment real geometry arrives.
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
-import type { SceneData } from '../../skylens_core/sources/sceneData';
-import type { DetectionRuntime } from '../../skylens_core/types';
-import { state, emit } from '../../skylens_core/store';
-import { CONFIG } from '../../skylens_core/config';
+import type { SceneData } from '../../shared/viewer/sources/sceneData';
+import type { DetectionRuntime } from '../../shared/viewer/types';
+import { state, emit } from '../../shared/viewer/store';
+import { CONFIG } from '../../shared/viewer/config';
 import type { SplatChunkInput } from './splatScene.ts';
-import { RevealField } from './reveal.ts';
 import { SplatReveal } from './splatReveal.ts';
 import { CameraSync } from './cameraSync.ts';
 import { SplatScene } from './splatScene.ts';
@@ -50,9 +55,17 @@ const POINT_FRAG = /* glsl */ `
 
 const STATUS_UP = new THREE.Vector3(0, 1, 0);
 
-/** One marker's live visuals (pin + pulsing ring), kept in sync with a DetectionRuntime. */
+/** Opacity of the "not reconstructed yet" scaffold point cloud. */
+const SCAFFOLD_ALPHA = 0.2;
+
+/** One marker's live visuals (pin + pulsing ring), kept in sync with a
+ *  DetectionRuntime. `segment` is the capture segment the core found it in, so
+ *  the marker can be gated on the SAME arrival the geometry is gated on: a pin
+ *  floating over a piece of scene that has not been reconstructed yet would be
+ *  claiming more than the board knows. */
 interface MarkerVisual {
   det: DetectionRuntime;
+  segment: number;
   group: THREE.Group;
   ring: THREE.Mesh;
   visible: boolean;
@@ -67,9 +80,7 @@ export class StatusViewer {
   private readonly points: THREE.Points;
   private readonly pointGeom: THREE.BufferGeometry;
   private readonly revealAttr: THREE.BufferAttribute;
-  // Reveal is driven on the point cloud (fallback + "waiting for server") OR on
-  // the splat itself (photorealistic mode, once a chunk has actually arrived).
-  private reveal: RevealField | null;
+  /** Built on the first arrived chunk; fades each segment in from then on. */
   private splatReveal: SplatReveal | null;
   private readonly splatCapable: boolean;
   private readonly sceneBounds: THREE.Box3;
@@ -81,6 +92,8 @@ export class StatusViewer {
   private readonly camSync: CameraSync;
   private readonly markers: MarkerVisual[] = [];
   private splat: SplatScene | null = null;
+  /** True once real geometry has arrived (the scaffold has been dropped). */
+  private geometryArrived = false;
 
   // Free-orbit navigation of the reconstructed space.
   private readonly controls: OrbitControls;
@@ -88,7 +101,7 @@ export class StatusViewer {
   private followDist = 40;
   private followHeight = 30;
   private floorY = 0;
-  // Lagged pose history of the active drone, so STATUS trails the CONTROL view.
+  // Recent poses of the active drone, from telemetry, for a damped chase view.
   private readonly history: Array<{ t: number; pos: THREE.Vector3; forward: THREE.Vector3 }> = [];
   private userDragging = false;
   private dragGraceUntil = 0;
@@ -158,7 +171,10 @@ export class StatusViewer {
     this.pointGeom = new THREE.BufferGeometry();
     this.pointGeom.setAttribute('position', new THREE.BufferAttribute(sceneData.positions, 3));
     this.pointGeom.setAttribute('color', new THREE.BufferAttribute(sceneData.colors, 3));
-    const revealArray = new Float32Array(sceneData.count); // starts at 0 — fully hidden
+    // The scaffold is drawn dim from the start (the point shader uses aReveal as
+    // its alpha). Nothing "reveals" it: it is a placeholder for geometry that has
+    // not arrived, and it disappears wholesale when the first chunk lands.
+    const revealArray = new Float32Array(sceneData.count).fill(SCAFFOLD_ALPHA);
     this.revealAttr = new THREE.BufferAttribute(revealArray, 1);
     this.revealAttr.setUsage(THREE.DynamicDrawUsage);
     this.pointGeom.setAttribute('aReveal', this.revealAttr);
@@ -172,13 +188,10 @@ export class StatusViewer {
     });
     this.points = new THREE.Points(this.pointGeom, material);
 
-    // Start in point-cloud reveal mode regardless: the splat only arrives
-    // progressively from the server (ingestSplatChunk), so until the first
-    // chunk lands the point cloud IS the reconstruction ("waiting for
-    // server"). If splat rendering is disabled/unavailable (useSplat=false —
-    // e.g. ?render=points), stay in point-cloud mode permanently.
+    // The point cloud stands in until the stream delivers real geometry. If
+    // splat rendering is disabled (useSplat=false — e.g. ?render=points), it
+    // stays for good and is shown at full opacity instead.
     this.scene.add(this.points);
-    this.reveal = new RevealField(sceneData.positions, sceneData.count);
     this.splatReveal = null;
     this.splatCapable = useSplat;
     this.sceneBounds = sceneData.bounds.clone();
@@ -187,18 +200,17 @@ export class StatusViewer {
   }
 
   /**
-   * Add a detection received from the server. Detections now arrive
-   * progressively (serverSource.onDetection) instead of being pre-derived
-   * from the cloud, so StatusViewer owns adding them to the store + building
-   * their marker on demand. Idempotent per id.
+   * Add a detection the core reported. `segment` is the capture segment it was
+   * found in; the marker stays hidden until that segment's geometry has landed.
+   * Idempotent per id (the relay replays its cache on reconnect).
    */
-  addDetection(det: DetectionRuntime): void {
+  addDetection(det: DetectionRuntime, segment: number): void {
     if (state.detections.some((d) => d.id === det.id)) return;
     state.detections.push(det);
-    this.markers.push(this.buildMarker(det));
+    this.markers.push(this.buildMarker(det, segment));
   }
 
-  private buildMarker(det: DetectionRuntime): MarkerVisual {
+  private buildMarker(det: DetectionRuntime, segment: number): MarkerVisual {
     const color = det.kind === 'person' ? CONFIG.color.markerPerson : CONFIG.color.markerDanger;
     const group = new THREE.Group();
 
@@ -225,15 +237,22 @@ export class StatusViewer {
     group.visible = false;
     this.scene.add(group);
 
-    return { det, group, ring, visible: false };
+    return { det, segment, group, ring, visible: false };
+  }
+
+  /** The board's one visibility rule, asked per segment. Before any chunk has
+   *  arrived nothing is revealed; with the splat renderer off (?render=points)
+   *  the scaffold IS the scene, so everything is. */
+  private isSegmentArrived(segment: number): boolean {
+    if (!this.splatCapable) return true;
+    const scenes = this.splat?.scenes;
+    if (!scenes) return false;
+    for (const s of scenes) if (s.segment === segment) return true;
+    return false;
   }
 
   update(dt: number): void {
     const now = state.time;
-
-    // Lag the visited trail before feeding the reveal (§5.2).
-    const cutoff = now - CONFIG.clock.revealLagSeconds;
-    const lagged = state.visited.filter((v) => v.t <= cutoff);
 
     // Patch the splat shader whenever its material appears OR is replaced: the
     // library rebuilds the mesh (and material) each time a superseded level is
@@ -247,23 +266,17 @@ export class StatusViewer {
       }
     }
 
-    if (this.splatReveal) {
-      this.splatReveal.update(lagged, dt);
-    } else if (this.reveal) {
-      const dirty = this.reveal.update(lagged, now, dt);
-      if (dirty) {
-        (this.revealAttr.array as Float32Array).set(this.reveal.progress);
-        this.revealAttr.needsUpdate = true;
-      }
+    // Per-segment fade-in. Timed on the real clock (performance.now()), not the
+    // stream clock: it is an animation, not a piece of mission state.
+    if (this.splatReveal && this.splat) {
+      this.splatReveal.update(this.splat.scenes, performance.now());
     }
 
-    const isRevealed = (pos: [number, number, number]): boolean =>
-      this.splatReveal ? this.splatReveal.isAreaRevealed(pos) : !!this.reveal?.isAreaRevealed(pos);
-
-    // Detection reveal + marker visibility.
+    // Marker visibility — gated on the arrival of the segment the detection was
+    // found in, the same rule the geometry follows.
     for (const m of this.markers) {
       if (!m.det.revealed) {
-        if (isRevealed(m.det.pos)) {
+        if (this.isSegmentArrived(m.segment)) {
           m.det.revealed = true;
           m.det.revealedAt = now;
           emit({ type: 'detection-revealed', id: m.det.id });
@@ -284,7 +297,7 @@ export class StatusViewer {
     // Detection state machine (focus card / confirm / reveal triggers).
     this.camSync.step(dt, state.detections);
 
-    // Record the active drone's pose for the lagged follow.
+    // Record the active drone's pose (fed from DroneTelemetry) for the follow.
     const active = state.drones.find((d) => d.id === state.activeDroneId) ?? state.drones[0];
     if (active) {
       this.history.push({ t: now, pos: active.pos.clone(), forward: active.forward.clone() });
@@ -296,7 +309,7 @@ export class StatusViewer {
       state.cameraSync === 'FOCUSING' || state.cameraSync === 'LOCKED'
         ? this.markers.find((m) => m.det.id === state.focusedDetectionId)
         : undefined;
-    const desired = focused ? this.focusPose(focused) : this.followPose(now);
+    const desired = focused ? this.focusPose(focused) : this.followPose();
 
     // Follow (or ease to focus) unless the operator is dragging to look around.
     const dragging = this.userDragging || performance.now() < this.dragGraceUntil;
@@ -319,28 +332,40 @@ export class StatusViewer {
   ingestSplatChunk(chunk: SplatChunkInput): Promise<void> {
     if (!this.splat) {
       this.splat = new SplatScene(this.scene);
-      if (this.splatCapable && this.reveal) {
-        // First real chunk arrived — switch from the placeholder point-cloud
-        // reveal to the photorealistic splat reveal.
+      if (this.splatCapable) {
+        // Real geometry is on its way in — drop the scaffold and hand visibility
+        // over to arrival.
         this.scene.remove(this.points);
-        this.reveal = null;
+        this.geometryArrived = true;
         this.splatReveal = new SplatReveal(this.sceneBounds);
       }
     }
     return this.splat.addChunk(chunk);
   }
 
-  /** Toggle the splat reveal mask. When off, the full splat renders regardless. */
+  /** True once the first chunk has landed — the board's waiting state ends here. */
+  get hasGeometry(): boolean {
+    return this.geometryArrived;
+  }
+
+  /** Toggle the per-segment fade. When off, arrived chunks render at full
+   *  opacity immediately (?reveal=off). Arrival still decides what exists. */
   setSplatMask(enabled: boolean): void {
     this.splatMaskEnabled = enabled;
     this.splatReveal?.setRevealEnabled(enabled);
   }
 
-  /** Debug: reveal the whole point cloud immediately (for ?render=points). */
+  /** Debug: show the scaffold point cloud at full opacity (for ?render=points). */
   revealAll(): void {
     const arr = this.revealAttr.array as Float32Array;
     arr.fill(1);
     this.revealAttr.needsUpdate = true;
+  }
+
+  /** Marker gating state, for the e2e check: which detections are showing and
+   *  which segment each is waiting on. */
+  get markerStates(): Array<{ id: string; segment: number; visible: boolean }> {
+    return this.markers.map((m) => ({ id: m.det.id, segment: m.segment, visible: m.visible }));
   }
 
   get debugInfo(): Record<string, unknown> {
@@ -351,6 +376,8 @@ export class StatusViewer {
       camDist: Math.round(this.camera.position.distanceTo(this.sceneCenter) * 10) / 10,
       splatAttached: this.attachedMaterial !== null,
       segmentLevels: this.splat?.segmentLevels ?? {},
+      scenes: (this.splat?.scenes ?? []).map((s) => `seg${s.segment}/lv${s.level}`),
+      geometryArrived: this.geometryArrived,
     };
   }
 
@@ -376,16 +403,13 @@ export class StatusViewer {
     return this.splat?.segmentLevels ?? {};
   }
 
-  /** Lagged follow of the active drone: look at the ground it's scanning, from
-   *  behind + above its heading, so steering the drone rotates the STATUS view. */
-  private followPose(now: number): { pos: THREE.Vector3; target: THREE.Vector3 } | null {
+  /** Follow the active drone: look at the ground it is scanning, from behind and
+   *  above its heading, so the board tracks where the capture is happening.
+   *  Uses the LATEST telemetry — the old lag existed to trail a simulation the
+   *  board no longer receives, and the camera lerp already damps the motion. */
+  private followPose(): { pos: THREE.Vector3; target: THREE.Vector3 } | null {
     if (this.history.length === 0) return null;
-    const targetT = now - CONFIG.clock.revealLagSeconds;
-    let s = this.history[0];
-    for (const h of this.history) {
-      if (h.t <= targetT) s = h;
-      else break;
-    }
+    const s = this.history[this.history.length - 1];
     const P = s.pos;
     const F = s.forward;
     const headingXZ = new THREE.Vector3(F.x, 0, F.z);

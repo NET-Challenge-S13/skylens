@@ -3,10 +3,10 @@
 // store (core/store.ts) and styled by the classes already in style.css.
 // PROJECT.md §5.3 (detection reveal/confirm flow), §8.3 (camera sync).
 
-import type { AppEvent } from '../../skylens_core/store.ts';
-import { state, emit, subscribe } from '../../skylens_core/store.ts';
-import { DRONE_TINTS } from '../../skylens_core/config.ts';
-import { showToast } from '../../skylens_core/ui/toast.ts';
+import type { AppEvent } from '../../shared/viewer/store.ts';
+import { state, emit, subscribe } from '../../shared/viewer/store.ts';
+import { DRONE_TINTS } from '../../shared/viewer/config.ts';
+import { showToast } from '../../shared/viewer/ui/toast.ts';
 
 export interface UI {
   update(): void;
