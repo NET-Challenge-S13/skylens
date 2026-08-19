@@ -59,7 +59,10 @@ const distributor = new WsDistributor();
 const mission = new Mission({
   assignedHoldMs: cfg.assignedHoldMs,
   droneEtaSeconds: cfg.droneEtaSeconds,
-  dronesOnline: () => store.drones.size,
+  // Only drones that ANNOUNCED themselves count as on station; one still
+  // flying to the site is in the store (so the tower can draw it) but has
+  // not arrived. See DroneRecord.announced.
+  dronesOnline: () => [...store.drones.values()].filter((d) => d.announced).length,
   onChange: (status) => distributor.broadcast(status),
 });
 

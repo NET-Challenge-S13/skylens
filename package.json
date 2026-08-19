@@ -8,6 +8,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "demo": "tsx src/skylens_demo/index.ts",
     "core": "tsx src/skylens_core/server/index.ts",
     "client": "tsx src/skylens_client/server/index.ts",
     "gateway": "tsx src/skylens_gateway/index.ts",

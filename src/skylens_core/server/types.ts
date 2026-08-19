@@ -93,4 +93,11 @@ export interface DroneRecord {
   /** Video slices received from this drone. */
   slices: number;
   bytes: number;
+  /**
+   * True once the drone sent `drone-hello`. Telemetry alone does NOT set it:
+   * a drone in transit streams its position while it flies to the site, and
+   * counting that as "arrived" would collapse the drone-connection wait the
+   * mission is built around (COMPONENTS.md §5.2 steps 3-4).
+   */
+  announced: boolean;
 }

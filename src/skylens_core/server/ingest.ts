@@ -226,7 +226,9 @@ export class Ingest {
     const isNew = known === undefined;
 
     const rec = this.store.telemetry(msg);
-    if (isNew) this.events.onDroneUp(rec);
+    // Deliberately NOT onDroneUp: telemetry from a drone still flying to the
+    // site must not end the drone-connection wait. The hello does that.
+    if (isNew) console.log(`[core] drone ${rec.droneId} overheard (telemetry, no hello yet)`);
 
     const arcM = this.advance(rec, previous, msg.gps);
     const index = segmentIndexFor(arcM, this.segmentMeters);

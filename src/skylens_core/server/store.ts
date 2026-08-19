@@ -70,13 +70,15 @@ export class Store {
   // Drones
   // -------------------------------------------------------------------------
 
-  hello(msg: DroneHello): DroneRecord {
+  hello(msg: DroneHello, announced = true): DroneRecord {
     const now = Date.now();
     const existing = this.drones.get(msg.droneId);
     if (existing) {
       existing.model = msg.model;
       existing.mode = msg.mode;
       existing.lastSeenAt = now;
+      // A real hello promotes a record that was adopted from telemetry.
+      if (announced) existing.announced = true;
       return existing;
     }
     const rec: DroneRecord = {
@@ -91,6 +93,7 @@ export class Store {
       currentSegment: null,
       slices: 0,
       bytes: 0,
+      announced,
     };
     this.drones.set(msg.droneId, rec);
     return rec;
@@ -105,12 +108,16 @@ export class Store {
   telemetry(msg: DroneTelemetry): DroneRecord {
     let rec = this.drones.get(msg.droneId);
     if (!rec) {
-      rec = this.hello({
-        kind: 'drone-hello',
-        droneId: msg.droneId,
-        model: 'unknown (adopted from telemetry)',
-        mode: 'relay',
-      });
+      rec = this.hello(
+        {
+          kind: 'drone-hello',
+          droneId: msg.droneId,
+          model: 'unknown (adopted from telemetry)',
+          mode: 'relay',
+        },
+        // Overheard, not announced — see DroneRecord.announced.
+        false,
+      );
     }
     rec.last = msg;
     rec.lastSeenAt = Date.now();
