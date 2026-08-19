@@ -114,6 +114,21 @@ export function createTelemetryPanel(mount: HTMLElement): TelemetryPanel {
           `${deg(d.gps.lat)}, ${deg(d.gps.lon)} · ${d.gps.alt.toFixed(0)}m · ` +
           `${d.headingDeg.toFixed(0)}° · ${d.speed.toFixed(1)}m/s · ${d.batteryPct.toFixed(0)}%`;
       }
+
+      // Keep the list in the fleet's order — left, centre, right. Rows are
+      // created when an aircraft FIRST reports, so on their own they read in
+      // announcement order, and the wingmen usually announce before the centre:
+      // 중앙 드론 ended up at the bottom of a list whose whole point is to read
+      // like the formation looks.
+      //
+      // Only when it actually differs. Re-appending a row moves the node, which
+      // drops keyboard focus and restarts transitions, and this runs every
+      // frame.
+      const desired = drones.map((d) => rows.get(d.id)?.li).filter((li) => li !== undefined);
+      const current = [...listEl.children];
+      const inOrder =
+        desired.length === current.length && desired.every((li, i) => li === current[i]);
+      if (!inOrder) for (const li of desired) listEl.appendChild(li);
     },
 
     dispose(): void {
