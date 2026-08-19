@@ -85,4 +85,12 @@ export interface AppState {
   cameraSync: CameraSyncState;
   /** Detection currently focused/locked by viewer 2, if any. */
   focusedDetectionId: string | null;
+  /**
+   * The assigned track, in scene units. Both viewers draw it; on the situation
+   * board it is the only fixed reference on screen, so without it the aircraft,
+   * the detections and the reconstruction float with nothing to read them
+   * against — and a reconstruction that legitimately trails the flight by a
+   * segment is indistinguishable from one in the wrong place.
+   */
+  route: [number, number, number][] | null;
 }

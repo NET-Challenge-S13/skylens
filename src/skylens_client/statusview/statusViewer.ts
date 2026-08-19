@@ -403,6 +403,12 @@ export class StatusViewer {
     return this.splat?.segmentLevels ?? {};
   }
 
+  /** Every loaded chunk with the place it was put — the minimap draws them,
+   *  and the checks measure them against the flight that produced them. */
+  loadedChunks(): Array<{ segment: number; level: number; position: [number, number, number] }> {
+    return this.splat?.loadedChunks() ?? [];
+  }
+
   /** Follow the active drone: look at the ground it is scanning, from behind and
    *  above its heading, so the board tracks where the capture is happening.
    *  Uses the LATEST telemetry — the old lag existed to trail a simulation the

@@ -11,6 +11,7 @@
 
 import WebSocket from 'ws';
 import type { Envelope, ViewerMessage } from '../../shared/protocol.ts';
+import { isViewerMessageKind } from '../../shared/protocol.ts';
 import type { UpstreamState } from '../relayProtocol.ts';
 
 export interface UpstreamEvents {
@@ -33,15 +34,6 @@ export interface Upstream {
   readonly malformed: number;
 }
 
-const VIEWER_KINDS = new Set([
-  'splat-chunk',
-  'detection',
-  'telemetry',
-  'mission-status',
-  'server-status',
-  'link-status',
-]);
-
 /**
  * The core may push a bare ViewerMessage or one wrapped in an Envelope (the
  * uplink hops all use envelopes). Accept both so neither side has to guess.
@@ -49,7 +41,7 @@ const VIEWER_KINDS = new Set([
 function unwrap(raw: unknown): ViewerMessage | null {
   if (typeof raw !== 'object' || raw === null) return null;
   const obj = raw as Record<string, unknown>;
-  if (typeof obj.kind === 'string' && VIEWER_KINDS.has(obj.kind)) return obj as unknown as ViewerMessage;
+  if (isViewerMessageKind(obj.kind)) return obj as unknown as ViewerMessage;
   const env = obj as Partial<Envelope<unknown>>;
   if (env.payload && typeof env.payload === 'object') return unwrap(env.payload);
   return null;

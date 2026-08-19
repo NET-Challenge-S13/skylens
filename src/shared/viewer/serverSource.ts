@@ -17,6 +17,7 @@
 // are passed to onOther untouched — this layer does not know that protocol.
 
 import type { ViewerMessage } from '../protocol.ts';
+import { isViewerMessageKind } from '../protocol.ts';
 
 /** State of one browser→server socket. */
 export type StreamState = 'connecting' | 'online' | 'offline';
@@ -46,15 +47,6 @@ export interface ViewerStream {
   /** Frames received since the page loaded. */
   readonly received: number;
 }
-
-const VIEWER_KINDS = new Set([
-  'splat-chunk',
-  'detection',
-  'telemetry',
-  'mission-status',
-  'server-status',
-  'link-status',
-]);
 
 /**
  * The core may push a bare ViewerMessage or one wrapped in an Envelope (every
@@ -104,7 +96,7 @@ export function createViewerStream(opts: ViewerStreamOptions): ViewerStream {
     const frame = unwrap(raw) as Record<string, unknown> | null;
     if (!frame) return;
     received += 1;
-    if (VIEWER_KINDS.has(String(frame.kind))) {
+    if (isViewerMessageKind(frame.kind)) {
       const msg = frame as unknown as ViewerMessage;
       for (const cb of msgCbs) cb(msg);
     } else {

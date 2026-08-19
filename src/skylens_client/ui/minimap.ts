@@ -18,18 +18,22 @@ export interface Minimap {
   dispose(): void;
 }
 
-/** Shape of an optional assigned-route field, if the store ever carries one. */
-interface RouteLike {
-  droneId?: number;
-  waypoints?: Vec3[];
-}
-
 function noop(): Minimap {
   return { update() {}, dispose() {} };
 }
 
-/** Mount into `#minimap` (see status.html). Bounds come from the scene's own box3. */
-export function mountMinimap(bounds: THREE.Box3): Minimap {
+/** Where each reconstructed chunk was placed, in scene units. */
+export type ChunkSource = () => Array<{ segment: number; position: [number, number, number] }>;
+
+/**
+ * Mount into `#minimap` (see status.html). Bounds come from the scene's own box3.
+ *
+ * `chunks` is what makes this map answer the question the board exists for —
+ * how far the reconstruction has got, and whether it is under the flight. The
+ * reconstruction legitimately trails the aircraft by a segment or two; with
+ * nothing drawn, that lag is indistinguishable from geometry in the wrong place.
+ */
+export function mountMinimap(bounds: THREE.Box3, chunks?: ChunkSource): Minimap {
   const hostEl = document.getElementById('minimap');
   if (!hostEl) return noop();
   const host: HTMLElement = hostEl;
@@ -141,10 +145,13 @@ export function mountMinimap(bounds: THREE.Box3): Minimap {
     const w = cssW, h = cssH;
     ctx.clearRect(0, 0, w, h);
 
-    // Fit to what is actually on the map: drones first, detections too.
+    // Fit to what is actually on the map: the plan, the aircraft, the findings.
+    // The route belongs in the fit — it is the frame of reference, and leaving
+    // it out let the map zoom into the drones while the track ran off the edge.
     const live: Array<{ e: number; n: number }> = [];
     for (const d of state.drones) live.push(sceneToEnu([d.pos.x, d.pos.y, d.pos.z]));
     for (const det of state.detections) live.push(sceneToEnu(det.pos));
+    if (state.route) for (const p of state.route) live.push(sceneToEnu(p));
     ease(targetExtent(live));
 
     // Frame + scale bar, so the operator can read distance off the map.
@@ -153,9 +160,22 @@ export function mountMinimap(bounds: THREE.Box3): Minimap {
     ctx.strokeRect(0.5, 0.5, w - 1, h - 1);
     drawScale(w, h);
 
-    // Assigned route polyline, if the store carries one (optional field).
-    const route = (state as unknown as { route?: RouteLike | Vec3[] }).route;
-    const pts = route ? (Array.isArray(route) ? route : route.waypoints) : undefined;
+    // Reconstructed ground, under everything else: it is the backdrop the
+    // markers are read against, not a marker itself.
+    for (const c of chunks?.() ?? []) {
+      const enu = sceneToEnu(c.position);
+      const [x, y] = project(enu.e, enu.n, w, h);
+      ctx.fillStyle = 'rgba(120, 200, 255, 0.20)';
+      ctx.strokeStyle = 'rgba(120, 200, 255, 0.55)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(x, y, 7, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+
+    // Assigned route polyline.
+    const pts = state.route;
     if (pts && pts.length > 1) {
       ctx.strokeStyle = 'rgba(255, 210, 127, 0.85)';
       ctx.lineWidth = 1.5;

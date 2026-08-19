@@ -20,6 +20,7 @@
 
 import type { WebSocket } from 'ws';
 import type {
+  AssignRoute,
   DetectionResult,
   DroneTelemetry,
   LinkStatus,
@@ -88,6 +89,10 @@ export function createBoardHub(peerPath: string): BoardHub {
   const links = new Map<string, LinkStatus>();
   let mission: MissionStatus | null = null;
   let serverStatus: ServerStatus | null = null;
+  /** The assigned track. Cached like the mission: a board that opens mid-flight
+   *  has to be given the plan, or it draws the aircraft and the reconstruction
+   *  with no reference and they look like they are on different ground. */
+  let route: AssignRoute | null = null;
 
   let upstream: UpstreamState = 'connecting';
   let upstreamDetail = '코어 연결 시도 중';
@@ -122,6 +127,7 @@ export function createBoardHub(peerPath: string): BoardHub {
   function replayFrames(): ViewerMessage[] {
     const out: ViewerMessage[] = [];
     if (mission) out.push(mission);
+    if (route) out.push(route);
     for (const l of links.values()) out.push(l);
     for (const t of telemetry.values()) out.push(t);
     // Segments ascending, so the board's ingest queue sees the same order the
@@ -157,6 +163,9 @@ export function createBoardHub(peerPath: string): BoardHub {
         break;
       case 'server-status':
         serverStatus = msg;
+        break;
+      case 'assign-route':
+        route = msg;
         break;
     }
   }

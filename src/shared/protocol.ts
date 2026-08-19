@@ -337,6 +337,41 @@ export type ViewerMessage =
   | ServerStatus
   | LinkStatus;
 
+/**
+ * Every kind a viewer may be handed — the single source for the hops that
+ * filter by kind.
+ *
+ * Three components each kept their own copy of this list: the browser stream,
+ * the client relay's upstream, and the relay's replay cache. Each one silently
+ * dropped anything missing from it, so adding `assign-route` to the union left
+ * the situation board without the planned track while every component reported
+ * healthy. The `satisfies` below plus the exhaustiveness check underneath make
+ * a forgotten kind a compile error instead.
+ */
+export const VIEWER_MESSAGE_KINDS = [
+  'assign-route',
+  'splat-chunk',
+  'detection',
+  'telemetry',
+  'camera-feed',
+  'mission-status',
+  'server-status',
+  'link-status',
+] as const satisfies readonly ViewerMessage['kind'][];
+
+/** Compile error when a ViewerMessage kind is missing from the list above. */
+type MissingViewerKind = Exclude<ViewerMessage['kind'], (typeof VIEWER_MESSAGE_KINDS)[number]>;
+const _viewerKindsAreComplete: MissingViewerKind extends never ? true : never = true;
+void _viewerKindsAreComplete;
+
+/** Is this a kind a viewer understands? */
+export function isViewerMessageKind(kind: unknown): kind is ViewerMessage['kind'] {
+  return (
+    typeof kind === 'string' &&
+    (VIEWER_MESSAGE_KINDS as readonly string[]).includes(kind)
+  );
+}
+
 export const IDENTITY_ALIGN: SplatAlign = {
   anchor: null,
   position: [0, 0, 0],

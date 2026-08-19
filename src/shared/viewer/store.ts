@@ -25,6 +25,7 @@ export const state: AppState = {
   activeDroneId: 1,
   cameraSync: 'SYNCED',
   focusedDetectionId: null,
+  route: null,
 };
 
 const listeners = new Set<Listener>();

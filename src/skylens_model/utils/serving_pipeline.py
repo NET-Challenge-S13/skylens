@@ -255,13 +255,24 @@ async def _recon_live(req: ReconJobRequest, frame: Frame, report: Report) -> Rec
 # Detection
 # ---------------------------------------------------------------------------
 
-#: Fixed demo detections, as ENU meters from the configured anchor. Two per
-#: segment so the board always has one person and one danger marker to gate on
-#: that segment's arrival.
+#: Demo detections, as ENU meters from the AIRCRAFT that filmed the segment.
+#: Two per segment so the board always has one person and one danger marker to
+#: gate on that segment's arrival.
+#:
+#: Offsets are small and lateral because that is where a detection can come
+#: from: a camera sees the ground it is over. Anchoring these to the configured
+#: site instead put every marker in a neat row hundreds of metres from the
+#: flight, so the board showed the drones in one corner and the findings in the
+#: other — the reconstruction and the track appeared to be in different places.
 _DEMO_DETECTIONS: tuple[tuple[str, str, float, float, float, float], ...] = (
-    ("person", "구조 대상자 추정", -18.0, 6.0, 1.5, 0.82),
-    ("danger", "붕괴 위험 구조물", -6.0, 14.0, 0.0, 0.74),
+    ("person", "구조 대상자 추정", -14.0, 6.0, 1.5, 0.82),
+    ("danger", "붕괴 위험 구조물", 9.0, -8.0, 0.0, 0.74),
 )
+
+
+def _segment_fixes(req: DetectJobRequest) -> list[GpsModel]:
+    """Every pose the segment was filmed from, in order."""
+    return [pose.gps for source in req.sources for pose in source.poses]
 
 
 async def run_detect(req: DetectJobRequest, report: Report) -> DetectJobResult:
@@ -272,11 +283,25 @@ async def run_detect(req: DetectJobRequest, report: Report) -> DetectJobResult:
 
 
 async def _detect_demo(req: DetectJobRequest, report: Report) -> DetectJobResult:
-    anchor = settings().anchor
+    fixes = _segment_fixes(req)
     detections: list[DetectionResult] = []
     for i, (category, label, e, n, u, confidence) in enumerate(_DEMO_DETECTIONS):
-        # Spread segments along East so markers do not stack on one spot.
-        gps: Gps = enu_to_gps(Enu(e=e + req.segment * 12.0, n=n, u=u), anchor)
+        # Where the aircraft was when this part of the segment was filmed. Two
+        # detections, so read a third and two thirds of the way along its track
+        # — the markers then spread themselves along the flight instead of
+        # needing a per-segment fudge. With no poses (a hand-made request) fall
+        # back to the configured site, which is all there is to go on.
+        anchor = settings().anchor
+        if fixes:
+            fix = fixes[min(len(fixes) - 1, (len(fixes) * (i + 1)) // 3)]
+            # Horizontal position from the flight; height from the site datum.
+            # A detection is on the ground, not at the aircraft's altitude, and
+            # nothing here knows the terrain — ARCHITECTURE.md §3-A puts that in
+            # the projection layer, which raycasts the depth map onto the DEM.
+            origin = Gps(lat=fix.lat, lon=fix.lon, alt=anchor.alt)
+        else:
+            origin = anchor
+        gps: Gps = enu_to_gps(Enu(e=e, n=n, u=u), origin)
         detections.append(
             DetectionResult(
                 id=f"det-s{req.segment}-{i}",

@@ -18,6 +18,7 @@
 // a second opinion about a thing that has exactly one owner.
 
 import type {
+  AssignRoute,
   DetectionResult,
   DroneTelemetry,
   LinkStatus,
@@ -55,6 +56,10 @@ type Cb<T> = (v: T) => void;
 export interface RelayClient {
   onSplatChunk(cb: Cb<SplatChunk>): void;
   onDetection(cb: Cb<DetectionResult>): void;
+  /** The track the formation was given. The board draws it so the aircraft,
+   *  the findings and the reconstruction can be read against the plan instead
+   *  of floating in an empty frame. */
+  onRoute(cb: Cb<AssignRoute>): void;
   onTelemetry(cb: Cb<DroneTelemetry>): void;
   onMission(cb: Cb<MissionStatus>): void;
   onStatus(cb: Cb<FeedStatus>): void;
@@ -106,6 +111,7 @@ export function createRelayClient(url = resolveRelayUrl()): RelayClient {
   const chunkCbs: Cb<SplatChunk>[] = [];
   const detCbs: Cb<DetectionResult>[] = [];
   const teleCbs: Cb<DroneTelemetry>[] = [];
+  const routeCbs: Cb<AssignRoute>[] = [];
   const missionCbs: Cb<MissionStatus>[] = [];
   const statusCbs: Cb<FeedStatus>[] = [];
 
@@ -178,6 +184,9 @@ export function createRelayClient(url = resolveRelayUrl()): RelayClient {
         status.receiving = true;
         for (const cb of teleCbs) cb(msg);
         break;
+      case 'assign-route':
+        for (const cb of routeCbs) cb(msg);
+        break;
       case 'mission-status':
         status.mission = msg;
         for (const cb of missionCbs) cb(msg);
@@ -227,6 +236,7 @@ export function createRelayClient(url = resolveRelayUrl()): RelayClient {
   return {
     onSplatChunk: (cb) => void chunkCbs.push(cb),
     onDetection: (cb) => void detCbs.push(cb),
+    onRoute: (cb) => void routeCbs.push(cb),
     onTelemetry: (cb) => void teleCbs.push(cb),
     onMission: (cb) => void missionCbs.push(cb),
     onStatus: (cb) => {

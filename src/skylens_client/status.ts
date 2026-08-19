@@ -133,6 +133,14 @@ async function main(): Promise<void> {
     });
   }
 
+  // The plan, so the board has a fixed reference to read everything else
+  // against. The core replays it to any viewer that joins (index.ts onJoin), so
+  // a board opened mid-mission gets it too.
+  relay.onRoute((r) => {
+    state.route =
+      r.waypoints.length >= 2 ? r.waypoints.map((wp) => gpsToScene(wp, CONFIG.geo.anchor)) : null;
+  });
+
   relay.onDetection((d) => {
     const det: DetectionRuntime = {
       id: d.id,
@@ -180,7 +188,11 @@ async function main(): Promise<void> {
 
   mountServerStatus(relay);
   mountRelayBadge(relay);
-  const minimap = mountMinimap(loaded.data.bounds);
+  // The minimap shows the reconstruction too, so the operator can see how far
+  // it has got along the track rather than guessing from the 3D view.
+  const minimap = mountMinimap(loaded.data.bounds, () =>
+    status.loadedChunks().map((c) => ({ segment: c.segment, position: c.position })),
+  );
   mountWaitingBanner(status, relay);
   relay.start();
 
@@ -231,6 +243,9 @@ async function main(): Promise<void> {
       },
       get hasGeometry() {
         return status.hasGeometry;
+      },
+      loadedChunks() {
+        return status.loadedChunks();
       },
     },
     get server() {

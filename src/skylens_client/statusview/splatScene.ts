@@ -39,6 +39,10 @@ type StatusCb = (status: SplatStatus, detail?: string) => void;
 export interface LoadedScene {
   segment: number;
   level: number;
+  /** Where this chunk was placed, in scene units — the board's own frame, the
+   *  same one the aircraft and the detection pins live in. Kept so a check can
+   *  ask whether the reconstruction landed on the flight. */
+  position: [number, number, number];
   /** performance.now() when this segment FIRST became visible. A refinement of
    *  an already-visible segment inherits it, so replacing level 1 with level 2
    *  does not restart the fade (which would read as a flicker). */
@@ -102,6 +106,16 @@ export class SplatScene {
   /** Number of splat chunks successfully added (levels included). */
   get chunks(): number {
     return this._chunks;
+  }
+
+  /** What is on screen and where. The minimap draws these so the operator can
+   *  see how far the reconstruction has got along the track. */
+  loadedChunks(): Array<{ segment: number; level: number; position: [number, number, number] }> {
+    return this.order.map((e) => ({
+      segment: e.segment,
+      level: e.level,
+      position: [...e.position],
+    }));
   }
 
   /** Lower-level scenes dropped because a refinement replaced them. */
@@ -189,7 +203,12 @@ export class SplatScene {
       });
       const arrivedAt = this.segmentArrival.get(chunk.segment) ?? performance.now();
       this.segmentArrival.set(chunk.segment, arrivedAt);
-      const entry: LoadedScene = { segment: chunk.segment, level: chunk.level, arrivedAt };
+      const entry: LoadedScene = {
+        segment: chunk.segment,
+        level: chunk.level,
+        arrivedAt,
+        position: [...chunk.align.position],
+      };
       this.order.push(entry);
       this.bySegment.set(chunk.segment, entry);
       this._chunks += 1;
