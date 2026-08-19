@@ -156,6 +156,10 @@
 }
 
 .segment-row__note {
+  /* A flex item refuses to shrink below its content without min-width: 0,
+     so a long level label walked straight out of the panel box. */
+  flex: 1 1 auto;
+  min-width: 0;
   color: var(--text-secondary);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
