@@ -36,6 +36,7 @@ import { Mission } from './mission.ts';
 import { ModelClient } from './modelClient.ts';
 import { Orchestrator } from './orchestrator.ts';
 import { Store } from './store.ts';
+import { resolveSite, type Site } from './site.ts';
 import { mountWeb } from './web.ts';
 
 const cfg = loadConfig();
@@ -184,6 +185,30 @@ function assignRoute(msg: AssignRoute, send: ViewerSend): void {
 
 const app = express();
 
+/**
+ * Where this core sits. The control tower opens its route planner here, so it
+ * lands on the operating area instead of a constant compiled into the client.
+ * Resolved once at startup; see site.ts for the order of trust.
+ */
+let site: Site = { gps: cfg.siteFallback, source: 'fallback', label: null };
+void resolveSite({
+  configured: cfg.site,
+  fallback: cfg.siteFallback,
+  lookup: cfg.siteLookup,
+  lookupUrl: cfg.siteLookupUrl,
+  timeoutMs: cfg.siteLookupTimeoutMs,
+}).then((resolved) => {
+  site = resolved;
+  console.log(
+    `[core] site ${resolved.gps.lat.toFixed(4)}, ${resolved.gps.lon.toFixed(4)}` +
+      ` (${resolved.source}${resolved.label ? ` · ${resolved.label}` : ''})`,
+  );
+});
+
+app.get('/site', (_req, res) => {
+  res.json(site);
+});
+
 app.get('/health', (_req, res) => {
   res.json({
     component: 'skylens_core',
@@ -199,6 +224,7 @@ app.get('/health', (_req, res) => {
       reconConcurrency: cfg.reconConcurrency,
       detectConcurrency: cfg.detectConcurrency,
     },
+    site,
     route: {
       droneId: store.routeDroneId,
       waypoints: store.routeWaypoints.length,

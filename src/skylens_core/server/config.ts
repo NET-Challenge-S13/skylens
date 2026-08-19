@@ -51,6 +51,15 @@ export interface CoreConfig {
 
   /** Route arc-length that makes one reconstruction segment, in meters. */
   segmentMeters: number;
+  /** Where this core is, `lat,lon[,alt]`. Empty means "look it up". */
+  site: string | undefined;
+  /** Whether to ask a geo-IP service when `site` is unset. Off for a closed
+   *  network, where the request can only time out. */
+  siteLookup: boolean;
+  siteLookupUrl: string;
+  siteLookupTimeoutMs: number;
+  /** Used when neither the config nor a lookup answers. */
+  siteFallback: { lat: number; lon: number; alt: number };
   /** Recon jobs the core keeps in flight at once. >= 2 is what makes the
    *  refinement of segment k overlap the first level of segment k+1. */
   reconConcurrency: number;
@@ -106,6 +115,20 @@ export function loadConfig(): CoreConfig {
     demo: bool('SKYLENS_DEMO', false),
 
     segmentMeters: num('SKYLENS_CORE_SEGMENT_METERS', 40),
+    site: process.env.SKYLENS_CORE_SITE,
+    siteLookup: bool('SKYLENS_CORE_SITE_LOOKUP', true),
+    siteLookupUrl: str(
+      'SKYLENS_CORE_SITE_LOOKUP_URL',
+      'http://ip-api.com/json/?fields=status,lat,lon,city,regionName,country',
+    ),
+    siteLookupTimeoutMs: num('SKYLENS_CORE_SITE_LOOKUP_MS', 2500),
+    // Daejeon — the demo operating area (src/test/geography.spec.ts pins the
+    // anchor, the tower's default map and the drone waypoints together).
+    siteFallback: {
+      lat: num('SKYLENS_CORE_SITE_LAT', 36.3685),
+      lon: num('SKYLENS_CORE_SITE_LON', 127.3475),
+      alt: num('SKYLENS_CORE_SITE_ALT', 30),
+    },
     reconConcurrency: Math.max(1, num('SKYLENS_CORE_RECON_CONCURRENCY', 2)),
     detectConcurrency: Math.max(1, num('SKYLENS_CORE_DETECT_CONCURRENCY', 1)),
     levelSteps: levels.length > 0 ? levels : [1000, 7000, 30000],

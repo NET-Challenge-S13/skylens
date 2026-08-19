@@ -35,6 +35,13 @@ export interface RouteModalOptions {
 export interface RouteModal {
   open(): void;
   close(): void;
+  /**
+   * Where the map should look when this browser has no memory of its own. The
+   * core answers this (it knows where the operations centre is), and the answer
+   * arrives after the modal is built — so it is handed over rather than passed
+   * in, and it never overrides a stored centre or one the operator has dragged.
+   */
+  suggestCenter(gps: Gps): void;
   dispose(): void;
 }
 
@@ -75,9 +82,36 @@ interface LoadedTile {
   ty: number;
 }
 
+/** Where the operator last left the planner, in this browser. */
+const CENTER_KEY = 'skylens.control.mapCenter.v1';
+
+function restoreCenter(): Gps | null {
+  try {
+    const raw = localStorage.getItem(CENTER_KEY);
+    if (!raw) return null;
+    const v = JSON.parse(raw) as Partial<Gps>;
+    if (typeof v.lat !== 'number' || typeof v.lon !== 'number') return null;
+    if (Math.abs(v.lat) > 85 || Math.abs(v.lon) > 180) return null;
+    return { lat: v.lat, lon: v.lon, alt: typeof v.alt === 'number' ? v.alt : 0 };
+  } catch {
+    // Private mode, quota, a corrupted value — none of it is worth failing over.
+    return null;
+  }
+}
+
 export function createRouteModal(opts: RouteModalOptions): RouteModal {
   const anchor = opts.anchor;
-  const cosLat = Math.cos((anchor.lat * Math.PI) / 180) || 1;
+  /**
+   * Where the map is looking. Starts at the core's own location (the operations
+   * centre knows where it is better than a constant in the client does), unless
+   * this browser has been here before — a planner that forgets where you left
+   * it is a planner you have to re-aim every time.
+   */
+  let center: Gps = restoreCenter() ?? { ...anchor };
+  /** True once the operator has moved the map or a stored centre was restored;
+   *  the core's answer must not yank the view out from under them. */
+  let centerPinned = restoreCenter() !== null;
+  const cosLatAt = (lat: number): number => Math.cos((lat * Math.PI) / 180) || 1;
   let waypoints: Waypoint[] = [];
   let loop = true;
   let spanM = SPANS[1];
@@ -86,14 +120,22 @@ export function createRouteModal(opts: RouteModalOptions): RouteModal {
   let satToken = 0; // invalidates stale tile loads on span change / close.
 
   // --- geo <-> pixel mapping (linear lon/lat frame around the anchor) ---
+  function saveCenter(): void {
+    try {
+      localStorage.setItem(CENTER_KEY, JSON.stringify(center));
+    } catch {
+      /* storage unavailable — the map still works, it just forgets */
+    }
+  }
+
   function bounds(): Bounds {
     const dLat = spanM / 111320;
-    const dLon = spanM / (111320 * cosLat);
+    const dLon = spanM / (111320 * cosLatAt(center.lat));
     return {
-      west: anchor.lon - dLon / 2,
-      east: anchor.lon + dLon / 2,
-      south: anchor.lat - dLat / 2,
-      north: anchor.lat + dLat / 2,
+      west: center.lon - dLon / 2,
+      east: center.lon + dLon / 2,
+      south: center.lat - dLat / 2,
+      north: center.lat + dLat / 2,
     };
   }
   function gpsToPx(lat: number, lon: number): [number, number] {
@@ -393,10 +435,78 @@ export function createRouteModal(opts: RouteModalOptions): RouteModal {
   }
 
   // ---------- interaction ----------
-  canvas.addEventListener('click', (e) => {
+  // Panning and placing share one gesture, so they are told apart by distance:
+  // anything under DRAG_SLOP is a click on a point, anything over is a drag of
+  // the map. Without that an operator nudges the mouse while clicking and gets
+  // a waypoint somewhere they did not mean.
+  const DRAG_SLOP = 4;
+  let dragging: { x: number; y: number; moved: number; pointerId: number } | null = null;
+  /** A pan ends with a click event the browser fires anyway; it is not a place. */
+  let panSuppressesClick = false;
+
+  const mapPx = (e: PointerEvent | MouseEvent): [number, number] => {
     const rect = canvas.getBoundingClientRect();
-    const x = ((e.clientX - rect.left) / rect.width) * MAP_PX;
-    const y = ((e.clientY - rect.top) / rect.height) * MAP_PX;
+    return [
+      ((e.clientX - rect.left) / rect.width) * MAP_PX,
+      ((e.clientY - rect.top) / rect.height) * MAP_PX,
+    ];
+  };
+
+  canvas.addEventListener('pointerdown', (e) => {
+    canvas.setPointerCapture(e.pointerId);
+    dragging = { x: e.clientX, y: e.clientY, moved: 0, pointerId: e.pointerId };
+  });
+
+  canvas.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    const dx = e.clientX - dragging.x;
+    const dy = e.clientY - dragging.y;
+    dragging.moved += Math.hypot(dx, dy);
+    if (dragging.moved <= DRAG_SLOP) return;
+    dragging.x = e.clientX;
+    dragging.y = e.clientY;
+
+    // Drag distance in screen pixels → degrees, through the same linear frame
+    // the map is drawn in, so the ground under the cursor stays under it.
+    const rect = canvas.getBoundingClientRect();
+    const b = bounds();
+    const lonPerPx = (b.east - b.west) / rect.width;
+    const latPerPx = (b.north - b.south) / rect.height;
+    center = {
+      lat: Math.max(-85, Math.min(85, center.lat + dy * latPerPx)),
+      lon: center.lon - dx * lonPerPx,
+      alt: center.alt,
+    };
+    centerPinned = true;
+    canvas.classList.add('is-panning');
+    draw();
+  });
+
+  const endDrag = (e: PointerEvent): void => {
+    if (!dragging) return;
+    const panned = dragging.moved > DRAG_SLOP;
+    dragging = null;
+    canvas.classList.remove('is-panning');
+    if (!panned) return;
+    // The browser fires a click after the release; that click ended a pan,
+    // it did not place anything.
+    panSuppressesClick = true;
+    // Tiles are fetched for the visible box, so a new box needs new tiles.
+    // Only on release: refetching mid-drag would queue a request per frame.
+    saveCenter();
+    loadSatellite();
+    e.preventDefault();
+  };
+  canvas.addEventListener('pointerup', endDrag);
+  canvas.addEventListener('pointercancel', endDrag);
+
+  canvas.addEventListener('click', (e) => {
+    // The click that ends a drag is not a placement.
+    if (panSuppressesClick) {
+      panSuppressesClick = false;
+      return;
+    }
+    const [x, y] = mapPx(e);
     // click on an existing marker → remove it
     for (let i = 0; i < waypoints.length; i++) {
       const [wx, wy] = gpsToPx(waypoints[i].lat, waypoints[i].lon);
@@ -447,6 +557,13 @@ export function createRouteModal(opts: RouteModalOptions): RouteModal {
   renderList();
 
   return {
+    suggestCenter(gps: Gps): void {
+      if (centerPinned) return;
+      center = { ...gps };
+      loadSatellite();
+      draw();
+    },
+
     open(): void {
       hint.textContent = '지도를 클릭해 웨이포인트를 추가하세요 · 마커를 클릭하면 삭제됩니다';
       hint.classList.remove('is-warn');

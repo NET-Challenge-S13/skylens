@@ -356,4 +356,11 @@
   width: 100%;
   height: 100%;
   cursor: crosshair;
+  /* The map pans by dragging; without this the browser hijacks the gesture for
+     scroll on a touch screen and the map never moves. */
+  touch-action: none;
+}
+
+.route-modal__canvas.is-panning {
+  cursor: grabbing;
 }

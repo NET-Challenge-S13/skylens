@@ -20,6 +20,7 @@
 import '../shared/viewer/style.css';
 import './control/control.css';
 import './ui/panels.css';
+import type { Gps } from '../shared/geo.ts';
 import { state, subscribe } from '../shared/viewer/store.ts';
 import { CONFIG } from '../shared/viewer/config.ts';
 import { loadControlScene } from '../shared/viewer/sources/sceneSource.ts';
@@ -163,6 +164,23 @@ async function main(): Promise<void> {
       );
     },
   });
+
+  // Where the planner should open. The core knows where the operations centre
+  // is; this browser's memory of where the operator left the map wins over it,
+  // and routeModal is what decides between them.
+  void fetch(new URL('/site', core.url.replace(/^ws/, 'http')).toString(), {
+    signal: AbortSignal.timeout(4000),
+  })
+    .then((res) => (res.ok ? (res.json() as Promise<{ gps: Gps; source: string }>) : null))
+    .then((site) => {
+      if (!site?.gps) return;
+      routeModal.suggestCenter(site.gps);
+      console.info(`[control] planner centred on the core site (${site.source})`);
+    })
+    .catch(() => {
+      // Core unreachable, or an older core with no /site: the planner keeps the
+      // operating-area anchor it was built with. Not worth telling the operator.
+    });
 
   // --- Manual control: keyboard → wire, never → local position ---
   const manual = createManualLink({
