@@ -94,6 +94,13 @@ export interface VideoSegment {
    * silently black player.
    */
   previewUri: string | null;
+  /**
+   * The footage runs opposite to the leg being flown and must be played
+   * backwards. Demo material: the centre pass was only ever flown outbound, so
+   * the return leg reuses it in reverse rather than showing the drone flying
+   * away while it comes home.
+   */
+  reverse: boolean;
   bytes: number;
   /** Poses sampled across the slice, oldest first. */
   poses: DroneTelemetry[];
@@ -193,6 +200,8 @@ export interface CameraFeed {
   uri: string;
   /** Browser-playable rendition of the same footage, when one exists. */
   previewUri: string | null;
+  /** Play it backwards — see VideoSegment.reverse. */
+  reverse: boolean;
   codec: 'h265';
   /** Unix ms at the drone when this slice started. */
   startedAt: number;

@@ -300,6 +300,7 @@ export class Ingest {
       station: this.store.drones.get(msg.droneId)?.station ?? 'center',
       uri: msg.uri,
       previewUri: msg.previewUri ?? null,
+      reverse: msg.reverse ?? false,
       codec: msg.codec,
       startedAt: msg.startedAt,
       durationMs: msg.durationMs,

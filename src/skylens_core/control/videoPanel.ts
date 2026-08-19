@@ -22,6 +22,10 @@ export interface VideoPanel {
   setTelemetry(t: DroneTelemetry | null): void;
   /** Escape hatch for a live MediaStream or an arbitrary URL. */
   setSource(src: MediaStream | string | null): void;
+  /** What the panel believes it is showing. For the demo checks, so a playback
+   *  assertion can be made against the feed's own direction rather than a guess
+   *  about which leg the drone is flying. */
+  debugFeed(): CameraFeed | null;
   dispose(): void;
 }
 
@@ -65,6 +69,7 @@ export function createVideoPanel(container: HTMLElement): VideoPanel {
 
   function draw(): void {
     raf = requestAnimationFrame(draw);
+    keepPlaying();
     if (usingRealSource || !ctx) {
       updateOverlay();
       return;
@@ -147,11 +152,89 @@ export function createVideoPanel(container: HTMLElement): VideoPanel {
   }
 
   function show(next: CameraFeed): void {
+    const changed = feed?.reverse !== next.reverse;
     feed = next;
     const url = next.previewUri ?? next.uri;
     // Re-issuing the same URL would restart the clip on every slice; the
-    // footage is already looping.
+    // footage is already looping. A leg change still has to be applied: same
+    // file, opposite direction.
     if (video.getAttribute('src') !== url) showVideo(url);
+    else if (changed) setDirection(next.reverse);
+  }
+
+  /**
+   * Forward playback stops for reasons that are not failures: switching sources
+   * rejects the in-flight play(), and leaving reverse mode leaves the element
+   * paused. Rather than thread a resume through every one of those paths, the
+   * panel checks each frame that a feed which should be running is running.
+   * Throttled, because a genuinely undecodable source would otherwise be
+   * retried sixty times a second.
+   */
+  let resumeAfter = 0;
+  function keepPlaying(): void {
+    if (!feed || feed.reverse || playbackError) return;
+    if (!video.paused || video.readyState === 0) return;
+    const now = performance.now();
+    if (now < resumeAfter) return;
+    resumeAfter = now + 500;
+    void video.play().catch(() => {
+      /* named by the play()/error handlers; nothing to add here */
+    });
+  }
+
+  // --- reverse playback ----------------------------------------------------
+  // A drone flying the return leg sees the outbound view backwards. Where no
+  // take of that leg exists the feed is flagged `reverse`, and the panel has to
+  // run the footage the other way. `playbackRate` cannot do it — negative rates
+  // are not supported in Chromium — so the clip is paused and its currentTime
+  // is walked backwards a frame at a time, wrapping at the start.
+  let reverseRaf = 0;
+  let reverseAt = 0;
+
+  function setDirection(reverse: boolean): void {
+    if (!reverse) {
+      stopReverse();
+      lastReverseFrame = 0;
+      video.loop = true;
+      void video.play().catch(() => {
+        /* handled by the play() path in showVideo */
+      });
+      return;
+    }
+    video.loop = false;
+    video.pause();
+    // Start from wherever it is; on a fresh load that is the end (set in the
+    // loadedmetadata handler below).
+    reverseAt = video.currentTime > 0 ? video.currentTime : video.duration || 0;
+    if (reverseRaf === 0) reverseRaf = requestAnimationFrame(stepReverse);
+  }
+
+  function stopReverse(): void {
+    if (reverseRaf !== 0) cancelAnimationFrame(reverseRaf);
+    reverseRaf = 0;
+  }
+
+  let lastReverseFrame = 0;
+  function stepReverse(now: number): void {
+    // The loop owns the element's clock while it runs, so it has to stop the
+    // instant the panel is no longer showing reversed footage — a frame that
+    // slips through after a switch would seek the new clip back to where the
+    // old one was and hold it there.
+    if (!feed?.reverse) {
+      stopReverse();
+      lastReverseFrame = 0;
+      return;
+    }
+    reverseRaf = requestAnimationFrame(stepReverse);
+    const dt = lastReverseFrame === 0 ? 0 : (now - lastReverseFrame) / 1000;
+    lastReverseFrame = now;
+    const duration = video.duration;
+    if (!Number.isFinite(duration) || duration <= 0) return;
+    reverseAt -= dt;
+    if (reverseAt <= 0) reverseAt = duration;
+    // Seeking every frame is what reverse playback costs; the clips are local
+    // files and the panel is 320 px wide, so it is affordable here.
+    video.currentTime = reverseAt;
   }
 
   function standby(): void {
@@ -165,6 +248,8 @@ export function createVideoPanel(container: HTMLElement): VideoPanel {
   }
 
   function showVideo(url: string): void {
+    stopReverse();
+    lastReverseFrame = 0;
     video.srcObject = null;
     video.src = url;
     video.loop = true;
@@ -197,6 +282,14 @@ export function createVideoPanel(container: HTMLElement): VideoPanel {
     fail(code === 4 ? '영상 재생 불가 — 코덱 미지원' : '영상 재생 불가 — 소스 오류');
   });
 
+  // A reversed clip starts at its end, and duration is only known once the
+  // metadata is in.
+  video.addEventListener('loadedmetadata', () => {
+    if (!feed?.reverse) return;
+    reverseAt = video.duration || 0;
+    setDirection(true);
+  });
+
   // A source that recovers should clear the banner rather than leave the panel
   // claiming a failure that is no longer true.
   video.addEventListener('playing', () => {
@@ -207,6 +300,13 @@ export function createVideoPanel(container: HTMLElement): VideoPanel {
   });
 
   return {
+    /** What the panel believes it is showing. Read by the demo checks so a
+     *  playback assertion can be made against the feed's own direction
+     *  rather than against a guess about which leg the drone is flying. */
+    debugFeed(): CameraFeed | null {
+      return feed;
+    },
+
     setFeed(next: CameraFeed | null): void {
       if (!next) {
         // The whole link dropped: forget every feed, not just the visible one.
@@ -254,6 +354,7 @@ export function createVideoPanel(container: HTMLElement): VideoPanel {
       }
     },
     dispose(): void {
+      stopReverse();
       cancelAnimationFrame(raf);
       root.remove();
     },

@@ -54,18 +54,33 @@ export const DEMO_CLIPS: DemoClip[] = [
   { file: 'demo_left_backward.mp4',  uri: `${BASE}/demo_left_backward.mp4`,  position: 'left',   direction: 'backward', codec: 'h265', bytes: 17_538_093, durationMs: 11_678, width: 3840, height: 2160, fps: 59.94 },
 ];
 
+/** A chosen clip and how it has to be played to match the flight. */
+export interface ClipChoice {
+  clip: DemoClip;
+  /**
+   * True when no take exists for the direction being flown and the opposite one
+   * was substituted. The view out of the aircraft on the way back is the way
+   * out, seen in reverse — so the substitute has to be played backwards. Simply
+   * restarting it would show the drone flying away while it is flying home.
+   */
+  reverse: boolean;
+}
+
 /**
  * Pick the clip for an aircraft's station and heading. The footage was flown as
  * a left, a centre and a right pass, so the drone holding the left station plays
  * the left pass — three cameras that genuinely saw three different things, which
- * is the point of switching between them. There is no backward take of the
- * centre pass, so the forward one is reused for it.
+ * is the point of switching between them.
+ *
+ * Left and right were flown in both directions. The centre pass has only a
+ * forward take, so on the return leg it is played in reverse.
  */
-export function pickClip(position: ClipPosition, direction: FlightDirection): DemoClip {
+export function pickClip(position: ClipPosition, direction: FlightDirection): ClipChoice {
   const exact = DEMO_CLIPS.find((c) => c.position === position && c.direction === direction);
-  if (exact) return exact;
+  if (exact) return { clip: exact, reverse: false };
   const byPosition = DEMO_CLIPS.find((c) => c.position === position);
-  return byPosition ?? DEMO_CLIPS[0];
+  if (byPosition) return { clip: byPosition, reverse: byPosition.direction !== direction };
+  return { clip: DEMO_CLIPS[0], reverse: DEMO_CLIPS[0].direction !== direction };
 }
 
 /**

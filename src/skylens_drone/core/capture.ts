@@ -42,6 +42,8 @@ export interface SliceResult {
   /** Same footage in a browser-decodable rendition, when one exists. The demo
    *  ships HEVC, which the operator's video panel cannot play directly. */
   previewUri: string | null;
+  /** Play it backwards: the footage was flown the other way (see ClipChoice). */
+  reverse: boolean;
   bytes: number;
   /**
    * Codec of the bytes THIS slice actually consists of, established per slice
@@ -74,7 +76,7 @@ export class DemoCapture implements CaptureSource {
   stop(): void {}
 
   async cutSlice(req: SliceRequest): Promise<SliceResult> {
-    const clip = pickClip(req.station, req.direction);
+    const { clip, reverse } = pickClip(req.station, req.direction);
     // Throws rather than mislabels if the footage was never transcoded.
     const codec = wireCodecOf(clip);
     return {
@@ -82,11 +84,13 @@ export class DemoCapture implements CaptureSource {
       // The H.264 original the HEVC was transcoded from — same footage, same
       // frames, addressable by a browser video element.
       previewUri: `${DEMO_SOURCE_DIR}/${clip.file}`,
+      reverse,
       bytes: clip.bytes,
       codec,
       note:
         `demo footage ${clip.file} (${clip.width}x${clip.height} ${codec}, ` +
-        `${(clip.bytes / 1e6).toFixed(1)} MB, pre-encoded)`,
+        `${(clip.bytes / 1e6).toFixed(1)} MB, pre-encoded` +
+        `${reverse ? ', played in reverse — no take of this leg' : ''})`,
     };
   }
 }
@@ -235,6 +239,8 @@ export class LiveCapture implements CaptureSource {
       // Live capture publishes one artifact. A viewer-side rendition would need
       // a second encode, which is a deployment decision, not this class's.
       previewUri: null,
+      // Live footage is always the direction it was just shot in.
+      reverse: false,
       bytes: total,
       codec: 'h265',
       note: `live H.265 ${chunks.length} chunks / ${(total / 1e6).toFixed(2)} MB`,

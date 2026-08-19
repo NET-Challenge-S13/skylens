@@ -456,6 +456,7 @@ export class DroneApp {
           durationMs,
           uri: result.uri,
           previewUri: result.previewUri,
+          reverse: result.reverse,
           bytes: result.bytes,
           poses,
         };
