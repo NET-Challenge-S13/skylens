@@ -109,15 +109,16 @@ function buildCorridorPath(samples: Array<[number, number, number]>): {
     xs.length >= 40 ? [median(xs), median(binsZ[i])] : null,
   );
   if (raw.filter(Boolean).length < 2) return null;
-  // Moving average over ±2 bins: per-bin medians zigzag with whatever stands
-  // in each slice (side rooms, plants), and a camera riding the raw polyline
-  // sways wall to wall.
+  // Moving average over ±4 bins (~54 m): per-bin medians zigzag with whatever
+  // stands in each slice (side rooms, plants), and a camera riding the raw
+  // polyline sways wall to wall. The corridor is near-straight, so the wide
+  // window costs little corner-cutting and buys a steady ride.
   const pts = raw.map((p, i): [number, number] | null => {
     if (!p) return null;
     let ax = 0;
     let az = 0;
     let n0 = 0;
-    for (let k = Math.max(0, i - 2); k <= Math.min(raw.length - 1, i + 2); k++) {
+    for (let k = Math.max(0, i - 4); k <= Math.min(raw.length - 1, i + 4); k++) {
       const q = raw[k];
       if (!q) continue;
       ax += q[0];
@@ -784,7 +785,7 @@ export class StatusViewer {
         // Ease the along-position and latch the travel direction (flip only
         // on a decisive heading, not while the dot wobbles through zero).
         if (this.followU === null) this.followU = uHit;
-        this.followU += (uHit - this.followU) * (1 - Math.exp(-1.5 * this.lastDt));
+        this.followU += (uHit - this.followU) * (1 - Math.exp(-1.0 * this.lastDt));
         const dot = headingXZ.x * path.dir.x + headingXZ.z * path.dir.y;
         if (Math.abs(dot) > 0.35) this.travelSign = Math.sign(dot);
         const t2 = corridorPointAt(path, this.followU);
