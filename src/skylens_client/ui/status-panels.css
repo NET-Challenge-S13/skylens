@@ -1,0 +1,173 @@
+/* STATUS-only panels: minimap + server-status. Kept separate from style.css
+   (owned by a different pass) — imported directly from status.ts. Uses the
+   token system defined in style.css (--surface-*, --border-*, --font-*). */
+
+/* --- Minimap (top-right) ---
+   Bottom-right belongs to the detection card, which slides in over whatever is
+   there; the two used to overlap. */
+#minimap {
+  right: 16px;
+  top: 16px;
+  width: 200px;
+  height: 200px;
+  pointer-events: none;
+}
+
+#minimap::before {
+  content: 'MINIMAP · TOP-DOWN';
+  position: absolute;
+  top: 7px;
+  left: 9px;
+  z-index: 1;
+  font-family: var(--font-display);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  color: var(--text-tertiary);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+}
+
+#minimap::after {
+  /* Instrument-readout corner frame, matching the video panel on CONTROL. */
+  content: '';
+  position: absolute;
+  inset: 5px;
+  border: 1px solid rgba(159, 232, 255, 0.1);
+  border-radius: 3px;
+}
+
+.minimap__canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* --- Server-status panel (top-left, below the pane label) --- */
+#server-status.server-status {
+  top: 54px;
+  left: 16px;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  max-width: 340px;
+  gap: 10px;
+  padding: 8px 12px;
+  pointer-events: none;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.server-status__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  background: var(--neutral-dot);
+  box-shadow: 0 0 6px currentColor;
+}
+.server-status__dot[data-state='waiting'] {
+  background: var(--warn);
+  animation: dot-pulse 1.8s ease-in-out infinite;
+}
+.server-status__dot[data-state='connected'] {
+  background: var(--info);
+}
+.server-status__dot[data-state='receiving'] {
+  background: var(--person);
+  animation: dot-pulse 1.8s ease-in-out infinite;
+}
+
+.server-status__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.server-status__text {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: var(--text-xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-primary);
+}
+
+.server-status__detail {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-tertiary);
+  letter-spacing: 0.02em;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .server-status__dot {
+    animation: none;
+  }
+}
+
+
+/* --- Delay-pattern ladder: one row per capture segment ---
+   Each segment lands at a low training-step level first and is refined while the
+   NEXT segment delivers its own first level, so rows sit at different levels at
+   the same time. That staggering is the point (interim report Ⅱ-3-다). */
+.server-status__ladder {
+  /* Forces its own line inside the wrapping panel, under dot + body. */
+  flex: 1 0 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.server-status__ladder:empty {
+  display: none;
+}
+
+.segment-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--text-xs);
+}
+
+.segment-row__name {
+  flex: 0 0 auto;
+  min-width: 44px;
+  color: var(--text-tertiary);
+  letter-spacing: 0.04em;
+}
+
+.segment-row__bar {
+  display: inline-flex;
+  flex: 0 0 auto;
+  gap: 3px;
+}
+
+.segment-row__pip {
+  width: 12px;
+  height: 4px;
+  border-radius: 1px;
+  background: rgba(255, 255, 255, 0.12);
+  transition: background 260ms ease, box-shadow 260ms ease;
+}
+
+.segment-row__pip[data-on='1'] {
+  background: var(--person);
+  box-shadow: 0 0 6px color-mix(in srgb, var(--person) 55%, transparent);
+}
+
+.segment-row__note {
+  /* A flex item refuses to shrink below its content without min-width: 0,
+     so a long level label walked straight out of the panel box. */
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.segment-row__note[data-refining='1']::after {
+  content: ' · 정제 중';
+  color: var(--text-tertiary);
+}

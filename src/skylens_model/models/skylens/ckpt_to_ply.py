@@ -14,7 +14,7 @@ properties, against the 6 (xyz + rgb) a point cloud would have::
 rather than a dot, which is how flat surfaces form. Generic point-cloud viewers
 (CloudCompare, MeshLab) read only the first three and silently drop the rest,
 so the model appears as loose dots -- the file is fine, the viewer is not.
-Use SuperSplat, the gsplat viewer, or the RECON viewer in this repo instead.
+Use SuperSplat, the gsplat viewer, or the status-board viewer in this repo instead.
 
 Values are written as the raw optimised parameters: opacity is a logit, scale is
 logarithmic. That is what the INRIA reference format stores, and what every 3DGS

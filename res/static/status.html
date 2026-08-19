@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SkyLens · 현황판 - 실시간 3D 복원</title>
+  </head>
+  <body>
+    <section class="pane pane--status pane--full">
+      <canvas id="status-view"></canvas>
+      <div id="overlay-status" class="overlay"></div>
+      <div id="net-status" class="net-badge"></div>
+      <div id="server-status"></div>
+      <div id="minimap"></div>
+    </section>
+    <div id="toast-root"></div>
+    <script type="module" src="/src/skylens_client/status.ts"></script>
+  </body>
+</html>

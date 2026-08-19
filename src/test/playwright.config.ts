@@ -3,9 +3,9 @@ import { defineConfig, devices } from '@playwright/test';
 // E2E smoke config. Boots the Vite dev server and drives it in headless Chromium
 // with a GPU-enabled flag set so WebGL actually initializes (SwiftShader fallback).
 export default defineConfig({
-  // This config lives in tests/, so the test dir is the config's own directory.
+  // This config lives in src/test/, so the test dir is the config's own directory.
   testDir: '.',
-  // Nested html entries (res/static/sim.html …) make Vite's first cold
+  // Nested html entries (res/static/control.html …) make Vite's first cold
   // transform heavy (~25s); give the first navigation room before the server warms.
   timeout: 45_000,
   expect: { timeout: 10_000 },

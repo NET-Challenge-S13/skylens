@@ -1,0 +1,23 @@
+[package]
+name = "skylens-drone"
+version = "1.0.0"
+description = "SkyLens 드론 클라이언트 셸"
+edition = "2021"
+rust-version = "1.77"
+publish = false
+
+# Deliberately NOT a workspace member of anything: this crate is optional. The
+# demo launcher runs the same UI in a browser tab, so nothing in the repo's
+# critical path needs cargo.
+[workspace]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+strip = true

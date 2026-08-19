@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SkyLens · 관제탑</title>
+  </head>
+  <body>
+    <section class="pane pane--control pane--full">
+      <canvas id="control-view"></canvas>
+      <div id="mission-panel-mount"></div>
+      <div id="telemetry-panel-mount"></div>
+      <div id="control-toolbar" class="control-toolbar"></div>
+      <div id="video-panel-mount"></div>
+      <div id="toast-root" class="toast-root"></div>
+    </section>
+    <script type="module" src="/src/skylens_core/control.ts"></script>
+  </body>
+</html>

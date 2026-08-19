@@ -24,7 +24,7 @@ function loadVworld(): { key: string; domain: string } | null {
 const vworld = loadVworld();
 
 // Multi-page build: a landing page plus the two role pages that each run on a
-// separate computer (SIM and RECON).
+// separate computer (CONTROL and STATUS).
 export default defineConfig({
   publicDir: 'res/public',
   server: {
@@ -55,8 +55,9 @@ export default defineConfig({
     rollupOptions: {
       input: {
         main: 'res/static/index.html',
-        sim: 'res/static/sim.html',
-        recon: 'res/static/recon.html',
+        control: 'res/static/control.html',
+        status: 'res/static/status.html',
+        drone: 'src/skylens_drone/index.html',
       },
     },
   },

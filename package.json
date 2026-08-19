@@ -8,6 +8,14 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "demo": "tsx src/demo/index.ts",
+    "demo:clean": "tsx src/demo/stop.ts",
+    "core": "tsx src/skylens_core/server/index.ts",
+    "client": "tsx src/skylens_client/server/index.ts",
+    "gateway": "tsx src/skylens_gateway/index.ts",
+    "proxy": "tsx src/skylens_proxy/index.ts",
+    "drone": "tsx src/skylens_drone/node/run.ts",
+    "model": "uv run uvicorn skylens_model.app:app --port 8100",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "test": "playwright test --config src/test/playwright.config.ts",
@@ -15,13 +23,20 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1",
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.2.0",
     "@types/three": "^0.185.1",
+    "@types/ws": "^8.18.1",
+    "tsx": "^4.23.12",
     "typescript": "~6.0.2",
     "vite": "^8.1.1"
   },
   "dependencies": {
     "@mkkellogg/gaussian-splats-3d": "^0.4.7",
+    "express": "^5.2.1",
+    "peer": "^1.0.2",
     "peerjs": "^1.5.5",
-    "three": "^0.185.1"
+    "three": "^0.185.1",
+    "ws": "^8.21.3"
   }
 }
