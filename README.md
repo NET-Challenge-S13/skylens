@@ -23,27 +23,27 @@
 
 SkyLens는 여러 대의 드론이 재난 현장을 분할 탐색하며 보낸 영상을 고속망으로 모아 **현장을 실시간 3D(Gaussian Splatting)로 복원**하고, 같은 영상에 **AI를 돌려 위험구역·사람을 감지**해 3D 현장 위에 마커로 얹는 재난 대응 시스템입니다.
 
-이 저장소는 **두 대의 분리된 컴퓨터**에서 각각 한 화면씩 띄우는 운영 프로토타입입니다:
+이 저장소는 파이프라인 전체를 컴포넌트로 나눠 담고 있습니다 — 드론 → 게이트웨이 → 프록시 → 코어 → (모델 API · 관제탑 · 현황판). 구성과 각 컴포넌트의 책임은 **[COMPONENTS.md](res/docs/COMPONENTS.md)가 단일 출처**입니다.
 
-- **관제탑** — 오퍼레이터가 **실제 GPS로 드론 경로를 지정**하는 컨트롤타워. 지정된 경로를 리더 드론이 비행하고 군집 드론이 동행하며, 메인 드론의 촬영 영상을 확인합니다.
+운영자가 보는 화면은 둘이고, **서로 직접 연결되지 않습니다.** 둘 사이에는 파이프라인 전체가 놓입니다:
+
+- **관제탑** — 오퍼레이터가 **실제 GPS로 드론 경로를 지정**하는 화면. VWorld 실지형 위에 드론의 실제 텔레메트리를 그리며, 건물 표시를 점·검정 텍스처·실사 항공뷰 중에서 고를 수 있습니다. 코어가 서빙합니다.
 - **현황판** — 드론이 지나간 **구간부터** 서버가 복원 결과를 보내옵니다. 한 구간을 최종 품질까지 한 번에 처리하지 않고 **낮은 수준을 먼저 확정해 띄운 뒤 정제**하며, 앞 구간이 정제되는 동안 다음 구간의 낮은 수준이 도착합니다(**딜레이 패턴**). **서버의 인간 탐지 모델 결과(GPS)**가 도착하면 3D 위에 마커로 표시됩니다.
 
 > 📄 기획·설계: [IDEA.md](res/docs/IDEA.md) · [ARCHITECTURE.md](res/docs/ARCHITECTURE.md) · [PROJECT.md](PROJECT.md)
 
 ---
 
-## 데모 모드 vs 실서버 모드
+## 데모 모드 vs 실운영
 
-기본값은 **실제 서버 데이터로 동작**합니다. 자체 완결형 자동 데모는 **명시적 옵션**으로만 켜집니다.
+데모에서도 **컴포넌트는 전부 실제 코드**입니다. 한 대의 머신에서 재현할 수 없는 두 가지만 바뀝니다.
 
-| | 기본 (실모드) | 데모 (`?demo`) |
+| | 실운영 | 데모 |
 |---|---|---|
-| 드론 | 경로 지정 전까지 **대기** | 자동 스윕 경로 비행 |
-| 스플랫 | 서버 청크 수신 시 표시 (없으면 **대기**) | mock이 청크 스트리밍 → 즉시 복원 |
-| 탐지 | 서버 탐지 결과 도착 시 | mock이 순차 전송 |
-| 용도 | 실제 파이프라인 연결용 | 전체 흐름 시연 |
+| 드론 촬영 | 기체 카메라 → H.265 실시간 인코딩 | `res/static/video/h265`의 사전 인코딩 영상 |
+| 3D 복원 | Core HPC에서 gsplat 학습 | 미리 만들어 둔 구간×수준 자산 |
 
-서버는 아직 실 백엔드가 없어 **인터페이스 + mock provider**로 구현돼 있습니다([serverSource.ts](src/skylens_core/server/serverSource.ts)). 실 백엔드는 `connect(url)` 지점에 연결하면 됩니다.
+나머지는 전부 실제 경로입니다 — 드론이 게이트웨이에 붙고, 프록시가 코어로 중계하고, 코어가 모델 API에 잡을 발행하고, 현황판이 릴레이를 통해 받습니다. 화면은 도착한 것만 그리며, 파이프라인이 없으면 **없다고 표시**합니다(시뮬레이션으로 메우지 않습니다).
 
 ---
 
@@ -61,21 +61,22 @@ SkyLens는 여러 대의 드론이 재난 현장을 분할 탐색하며 보낸 �
 
 ```bash
 npm install
-npm run dev          # LAN 노출 (다른 컴퓨터에서도 접속)
+npm run demo         # 파이프라인 전체를 데모 모드로 기동
 ```
 
-| 컴퓨터 | 접속 주소 |
+| 화면 | 접속 주소 |
 |---|---|
-| A (관제탑) | `http://<서버IP>:5173/res/static/control.html?room=demo` |
-| B (현황판) | `http://<서버IP>:5173/res/static/status.html?room=demo` |
+| 관제탑 | `http://localhost:8080/res/static/control.html` |
+| 현황판 | `http://localhost:8090/res/static/status.html` |
+| 드론 패널 | `http://localhost:5173/src/skylens_drone/index.html` |
 
-> 랜딩 페이지 `http://<서버IP>:5173/res/static/` 에서 두 화면 링크를 눌러 들어가도 됩니다.
-
-같은 `?room=` 값이면 WebRTC(PeerJS 공개 브로커 + 구글 STUN)로 자동 연결. 전체 흐름을 바로 보려면 뒤에 **`&demo`** 를 붙이세요.
+관제탑에서 경로를 지정하면 **태스크 지정 완료 → 드론 연결 대기(약 10초) → 주행 시작**으로 이어지고, 드론이 구간을 지날 때마다 현황판이 딜레이 패턴으로 갱신됩니다. 자세한 시나리오는 [skylens_demo/README.md](src/skylens_demo/README.md).
 
 | 명령어 | 설명 |
 |---|---|
-| `npm run dev` | 개발 서버 (HMR, LAN) |
+| `npm run demo` | 데모 런처 (전 컴포넌트 조립) |
+| `npm run dev` | Vite 개발 서버만 |
+| `npm run core` / `client` / `gateway` / `proxy` / `drone` / `model` | 컴포넌트 개별 기동 |
 | `npm run build` | 타입체크 + 멀티페이지 빌드 |
 | `npm test` | Playwright E2E |
 
@@ -147,55 +148,51 @@ EOF
 
 ## 프로젝트 구조
 
-```
-res/static/             # 정적 html 셸 (진입점) — /src 모듈을 로드
-│  └─ index.html · control.html · status.html
-src/
-├─ skylens_core/        # 관제탑 + 공유 토대 — client가 단방향 의존
-│  ├─ config · types · store · math
-│  ├─ geo.ts            # GPS↔ENU↔씬
-│  ├─ mode.ts           # isDemo() (?demo)
-│  ├─ protocol.ts       # p2p 스냅샷 + 서버 메시지 스키마
-│  ├─ control.ts  style.css                   # 관제탑 진입점 + 공유 베이스 스타일
-│  ├─ server/serverSource.ts   # 서버 인터페이스 + mock
-│  ├─ net/     peer.ts (WebRTC) · statusUi.ts
-│  ├─ sources/ sceneSource.ts · routes.ts(GPS경로) · paths.ts(데모) · sceneData.ts
-│  ├─ drones/  pathFollower.ts (리더 경로 + 군집) · manualControl.ts
-│  ├─ control/     routeModal.ts · videoPanel.ts · control.css
-│  ├─ controlview/ lowfiViewer.ts             # 관제탑 관제 3D 뷰
-│  └─ ui/      loadingScreen · toast      # 공유 UI
-├─ skylens_client/      # 현황판 — 서버 구동 3D 복원 상황판
-│  ├─ status.ts
-│  ├─ statusview/ statusViewer · splatScene(구간×수준 스트림) · splatReveal · reveal · cameraSync
-│  ├─ ui/      overlay · minimap · serverStatus · status-panels.css
-│  └─ sources/ detections.ts
-└─ skylens_model/       # AI 모델 (Python 스캐폴드)
-   ├─ models/   skylens/   # transformers 표준 모델 (config·modeling)
-   ├─ datasets/                            # 데이터셋 자리
-   └─ utils/geo.py                         # ENU 수식 미러 (TS와 동기)
+컴포넌트 경계와 책임은 [COMPONENTS.md](res/docs/COMPONENTS.md)가 단일 출처입니다.
 
-src/test/smoke.spec.ts     # Playwright E2E
 ```
+res/static/           # 정적 html 셸 — index · control · status
+src/
+├─ shared/            # 컴포넌트 공통 계약: protocol · geo · types (DOM·Three 없음)
+│  ├─ viewer/         # 두 화면이 함께 쓰는 브라우저 층 (씬 소스 · 스토어 · 설정)
+│  └─ net/            # WebRTC 트랜스포트
+├─ skylens_drone/     # Tauri 드론 클라이언트 — 비행 · H.265 슬라이스 전송
+├─ skylens_gateway/   # KOREN 진입점 (relay | webrtc 홀펀칭)
+├─ skylens_proxy/     # KOREN 내부 다중 경로 + 페일오버
+├─ skylens_core/      # 관제탑 UI + server/(오케스트레이터 · 인메모리 스토어 · 배포)
+├─ skylens_model/     # FastAPI 연산 API + 모델 · 3DGS 복원 파이프라인
+├─ skylens_client/    # 현황판 UI + server/(웹서버 · WebRTC 중계)
+└─ skylens_demo/      # 데모 런처
+src/test/             # 모든 테스트와 검증 하네스가 여기 모입니다
+```
+
+| 포트 | 컴포넌트 |
+|---:|---|
+| 8080 | 코어 (`ws /uplink`, `ws /viewer`, 관제탑 서빙) |
+| 8081 · 8082 | 게이트웨이 · 프록시 |
+| 8090 | 현황판 웹서버 + WebRTC 중계 |
+| 8100 | 모델 API |
+| 5173 | Vite (두 화면의 개발 모드 원본) |
 
 ---
 
 ## 현재 상태 & 로드맵
 
-**구현됨**
-- ✅ 두 컴퓨터 분리 구성 + WebRTC P2P 동기화, 연결/서버 수신 상태 표기
-- ✅ **관제탑**: GPS 경로 계획 모달 · 리더 경로 비행 · 군집 동행 · 드론 카메라 패널
-- ✅ **서버 구동 현황판**: 딜레이 패턴 스트림(구간×수준) · GPS 탐지 마커 · 미니맵 · 대기 상태
-- ✅ GPS/ENU 좌표계 + 명시적 스플랫 정렬
-- ✅ 실사 Gaussian Splatting(정원 씬, 자동 레벨·프레이밍·floater clip) + 드론 스캔 progressive reveal
-- ✅ 데모 옵트인(`?demo`) — 기본은 실서버 데이터
-- ✅ 전문 컨트롤룸 UI 디자인 시스템
-- ✅ Python 모델 스캐폴드(detection/splat 인터페이스 + geo 미러)
-- ✅ E2E 9종 통과
+**동작 확인됨** (전부 실제 실행으로 검증)
+- ✅ **파이프라인 전 구간**: 드론 → 게이트웨이 → 프록시 → 코어 → 모델 API → 현황판
+- ✅ **딜레이 패턴**: 구간이 드론의 **이동량**으로 닫히고, 앞 구간이 정제되는 동안 다음 구간의 수준 1이 도착
+- ✅ **미션 단계**: 대기 → 태스크 지정 완료 → 드론 연결 대기(10초) → 주행
+- ✅ **경로 이중화**: 프록시가 코어 장애 시 대기 경로로 전환, 복구 시 복귀
+- ✅ **관제탑**: VWorld 실지형 + 점·검정 텍스처·실사 항공뷰 3옵션, GPS 좌표계
+- ✅ **현황판**: 구간이 도착해야 보이고, 마커도 해당 구간이 복원돼야 표시
+- ✅ 모델 API 부재 시 잡 재제출로 복구, 코어 부재 시 마지막 상태 유지
 
 **다음 단계**
-- ⏳ 실 백엔드 연결(`serverSource.connect`) — 실드론 텔레메트리 · 탐지 모델 · 스플랫 재구성
-- ⏳ `skylens_model` 실제 추론(UNet 4채널 탐지 + gsplat) 통합
-- ⏳ 자체 촬영 스플랫으로 교체 · KOREN/Core HPC 파이프라인
+- ⏳ 실제 복원·추론 연결 (현재 데모 자산으로 대체, 연결 지점은 `PipelineUnavailable`로 명시)
+- ⏳ 2D 탐지 → 3D 좌표 변환(Depth 레이캐스팅) 모듈
+- ⏳ 증분 복원의 좌표계 고정
+- ⏳ `.spz` 전환 (전송량 약 10배 감소)
+- ⏳ KOREN 회선 위 실배치 · 클라이언트 간 P2P 재분배
 
 ---
 
