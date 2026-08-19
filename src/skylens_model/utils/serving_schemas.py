@@ -36,6 +36,10 @@ class Gps(Strict):
 class DroneTelemetry(Strict):
     kind: Literal["telemetry"] = "telemetry"
     droneId: int
+    #: Formation station the aircraft holds ("left" | "center" | "right").
+    #: Mirrors DroneStation in shared/protocol.ts. Optional here so a fix from an
+    #: older drone build still validates; the compute side does not use it.
+    station: str | None = None
     gps: Gps
     headingDeg: float
     speed: float
