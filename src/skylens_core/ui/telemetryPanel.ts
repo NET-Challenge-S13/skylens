@@ -7,7 +7,7 @@
 
 import { state, emit } from '../../shared/viewer/store.ts';
 import { stationLabel } from './stationLabel.ts';
-import { droneTint } from '../drones/telemetryFleet.ts';
+import { droneTint, markOperatorSelection } from '../drones/telemetryFleet.ts';
 import type { FleetDrone } from '../drones/telemetryFleet.ts';
 
 export interface TelemetryPanel {
@@ -71,6 +71,9 @@ export function createTelemetryPanel(mount: HTMLElement): TelemetryPanel {
     li.append(head, vals);
     // Selecting a drone is what the chase camera and manual control follow.
     const select = (): void => {
+      // Even re-picking the same aircraft counts as a choice: it tells the
+      // fleet to stop steering the selection back to the centre.
+      markOperatorSelection();
       if (state.activeDroneId === d.id) return;
       state.activeDroneId = d.id;
       emit({ type: 'active-drone', id: d.id });

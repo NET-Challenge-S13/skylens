@@ -54,6 +54,20 @@ log('board booted');
 // time to spread and the first slices time to reach the core.
 await sleep(30_000);
 
+// Before touching anything: the fleet list must read left · centre · right and
+// the centre aircraft must be the one already selected.
+await tower.bringToFront();
+await sleep(800);
+const initial = await tower.evaluate(() => ({
+  order: window.skylens.fleet.drones().map((d) => d.station),
+  rows: [...document.querySelectorAll('.telemetry-row__name')].map((n) => n.textContent),
+  activeStation: window.skylens.fleet
+    .drones()
+    .find((d) => d.id === window.skylens.state.activeDroneId)?.station,
+  camLabel: document.querySelector('.video-panel__label')?.textContent ?? '',
+}));
+log('initial:', JSON.stringify(initial));
+
 // Switch the camera to each station in turn and record what the panel shows.
 // The tower has to be the FRONT tab first: its update loop runs on rAF, which a
 // background tab barely gets, so a switch made here would not be applied before
@@ -146,6 +160,9 @@ console.log('');
 console.log('===== RESULT =====');
 const checks = [
   ['formation is 3 aircraft', fleet.drones.length === 3],
+  ['fleet list reads left, centre, right', initial.order.join(',') === 'left,center,right'],
+  ['centre is selected by default', initial.activeStation === 'center'],
+  ['the panel opens on CENTER CAM', initial.camLabel === 'CENTER CAM'],
   ['stations are left/center/right', fleet.stations.join(',') === 'center,left,right'],
   ['each station has its own camera', cams.length === 3 && cams.every((c) => c.ok)],
   [

@@ -13,7 +13,7 @@
 // panel says why. It never keeps flying on its own.
 
 import * as THREE from 'three';
-import { state } from '../../shared/viewer/store.ts';
+import { state, emit } from '../../shared/viewer/store.ts';
 import { CONFIG, DRONE_TINTS } from '../../shared/viewer/config.ts';
 import { dampFactor } from '../../shared/viewer/math.ts';
 import type { DroneStation, DroneTelemetry } from '../../shared/protocol.ts';
@@ -55,6 +55,28 @@ export interface TelemetryFleet {
   readonly empty: boolean;
   /** Forget everything (core link lost for good / operator reset). */
   clear(): void;
+}
+
+/** Screen order of the formation, left to right. */
+const STATION_RANK: Record<DroneStation, number> = { left: 0, center: 1, right: 2 };
+
+/**
+ * True once the operator has picked an aircraft themselves. Until then the
+ * fleet keeps steering the selection to the centre drone as aircraft report in
+ * — the wingmen usually announce first, and the operator should not have to
+ * click back to the centre every time one does. After a real choice the fleet
+ * never overrides it.
+ */
+let operatorPicked = false;
+
+/** Called by the fleet list when the operator selects an aircraft. */
+export function markOperatorSelection(): void {
+  operatorPicked = true;
+}
+
+/** Rank of a track, or last when the station is not known yet. */
+function stationOrder(track: { info: { station: DroneStation } } | undefined): number {
+  return track ? STATION_RANK[track.info.station] : Number.MAX_SAFE_INTEGER;
 }
 
 interface Track {
@@ -119,9 +141,19 @@ export function createTelemetryFleet(frame: GeoFrame): TelemetryFleet {
     };
     tracks.set(t.droneId, track);
 
-    state.drones = [...state.drones, runtime].sort((a, b) => a.id - b.id);
-    if (!state.drones.some((d) => d.id === state.activeDroneId)) {
-      state.activeDroneId = state.drones[0]?.id ?? 1;
+    state.drones = [...state.drones, runtime].sort(
+      (a, b) => stationOrder(tracks.get(a.id)) - stationOrder(tracks.get(b.id)),
+    );
+    // Default to the centre aircraft: it carries the task, its camera looks
+    // down the middle of the track, and it is the one an operator means by
+    // "the drone".
+    const centre = [...tracks.values()].find((x) => x.info.station === 'center');
+    const missing = !state.drones.some((d) => d.id === state.activeDroneId);
+    const shouldTakeCentre =
+      !operatorPicked && centre !== undefined && state.activeDroneId !== centre.info.id;
+    if (missing || shouldTakeCentre) {
+      state.activeDroneId = centre?.info.id ?? state.drones[0]?.id ?? 1;
+      emit({ type: 'active-drone', id: state.activeDroneId });
     }
     return track;
   }
@@ -182,7 +214,11 @@ export function createTelemetryFleet(frame: GeoFrame): TelemetryFleet {
     },
 
     drones(): FleetDrone[] {
-      return [...tracks.values()].map((t) => ({ ...t.info })).sort((a, b) => a.id - b.id);
+      // Left, centre, right — the order they fly in, so the list reads like the
+      // formation looks rather than like the id sequence.
+      return [...tracks.values()]
+        .map((t) => ({ ...t.info }))
+        .sort((a, b) => STATION_RANK[a.station] - STATION_RANK[b.station]);
     },
 
     get(id: number): FleetDrone | undefined {
