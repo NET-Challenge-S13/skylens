@@ -404,6 +404,10 @@ export class TowerViewer {
       this.bldAerialMat = aerialBuildingMaterial(this.mosaic);
     }
     this.bldMesh = new THREE.Mesh(geom, this.bldPrismMat);
+    // Named so a check can tell buildings from everything else above the
+    // ground — drone rigs, the route line and the danger arcs are meshes too,
+    // and counting their corners as building corners hides a real answer.
+    this.bldMesh.name = 'buildings';
     this.scene.add(this.bldMesh);
 
     if (visual.edges && visual.edges.length > 0) {
@@ -463,6 +467,7 @@ export class TowerViewer {
       aerial = aerialBuildingMaterial(cellTex);
     }
     const mesh = new THREE.Mesh(geom, this.mode === 'aerial' && aerial ? aerial : prism);
+    mesh.name = 'buildings-streamed';
     mesh.visible = style.buildingPrisms;
     this.scene.add(mesh);
 
@@ -638,8 +643,19 @@ export class TowerViewer {
    * looking at the same ground from the same angle, and the overview camera
    * orbits.
    */
-  debugTopDown(at: THREE.Vector3, height: number): void {
+  /**
+   * Look straight down from `height` above `at`. `fovDeg` narrows the lens: at
+   * the default 55 deg a tall roof is much nearer the camera than the street
+   * beside it and swells to hide half the block, which is honest perspective
+   * but useless for comparing shapes against a map. A narrow lens from far up
+   * is nearly orthographic.
+   */
+  debugTopDown(at: THREE.Vector3, height: number, fovDeg?: number): void {
     this.camInitialized = true;
+    if (fovDeg !== undefined) {
+      this.camera.fov = fovDeg;
+      this.camera.updateProjectionMatrix();
+    }
     this.camPos.set(at.x, at.y + height, at.z + 0.001);
     this.camTarget.copy(at);
     this.camera.position.copy(this.camPos);

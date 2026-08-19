@@ -120,8 +120,9 @@ function parseFeatures(json: unknown, out: Map<string, Building>): number {
     const props = f?.properties ?? {};
     const h = Number(props.height);
     const floors = Number(props.grnd_flr);
-    // Rural rows often carry null height AND null floors — fall back to 6 m.
-    const heightM = h > 2 ? h : floors > 0 ? floors * 3 : 6;
+    // Most Korean rows carry a null height and only a floor count; 3.3 m is a
+    // storey including its slab. Rural rows often have neither — fall back to 6 m.
+    const heightM = h > 2 ? h : floors > 0 ? floors * 3.3 : 6;
     out.set(id, { id, rings, heightM });
   }
   return feats.length;
@@ -366,16 +367,31 @@ export async function loadBuildings(
 
   // Cartographic minimum HEIGHT: on wide scenes (uljin preset = ~14 km across)
   // a 6 m house is sub-pixel at true scale, so short buildings are raised to
-  // stay readable as landmarks. Narrow scenes pass the threshold untouched.
+  // stay readable as landmarks.
   //
+  // The threshold has to be a REAL height, not a fixed count of world units.
+  // The terrain normalises any bbox to the same span, so a units-based minimum
+  // means the same fraction of the screen whatever the scene covers — and on
+  // the 3 km city scene it flattened the campus into one storey height: a
+  // one-storey store, a boiler room and a four-storey hall all drawn 11.9 m
+  // tall (measured; src/test/control/buildingHeightCheck.mjs). With no skyline
+  // left, an operator cannot tell which block the aircraft is over, which reads
+  // as the drone flying somewhere other than the route.
+  //
+  // Tie it to the ground the scene covers instead: ~1/1200 of the span is the
+  // size at which a building stops being legible. That reproduces the old
+  // behaviour on the wide presets and leaves city scenes at true scale.
+  const spanM = Math.max(
+    (bbox[2] - bbox[0]) * ctx.mPerDegLon,
+    (bbox[3] - bbox[1]) * ctx.mPerDegLat,
+  );
+  const minHeightM = Math.min(12, spanM / 1200);
+  const MIN_HEIGHT_WORLD = minHeightM * ctx.s * ctx.exaggeration;
+  const MAX_INFLATE = 8;
   // Height only. The footprint used to be grown with it, by up to 3x around the
   // centroid — which moved real edges by tens of metres and put the 3D world out
   // of register with the map the operator plans on. A building drawn wider than
   // it is answers "will the drone clear it" with a shape that does not exist.
-  // Vertical exaggeration is a convention the terrain already applies; moving
-  // ground positions is not.
-  const MIN_HEIGHT_WORLD = 0.25;
-  const MAX_INFLATE = 8;
 
   for (const { b, weight } of items) {
     const outerRaw = b.rings[0];
