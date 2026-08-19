@@ -36,7 +36,7 @@ export interface MissionPanel {
 
 export function createMissionPanel(mount: HTMLElement): MissionPanel {
   const root = document.createElement('div');
-  root.className = 'mission-panel';
+  root.className = 'sl-surface sl-surface--panel mission-panel';
 
   // --- core link row ---
   const link = document.createElement('div');

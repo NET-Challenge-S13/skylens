@@ -111,6 +111,84 @@ html {
   background-color: var(--bg-void);
 }
 
+/* ==========================================================================
+   Surface — the ONE definition of a floating UI panel.
+
+   Every piece of chrome in both screens (labels, badges, readouts, the video
+   frame, the minimap, modals) is the same object: a translucent panel over the
+   3D view with a hairline border. It used to be re-declared in four
+   stylesheets, which is why a chip could end up with a different radius or
+   shadow from the panel beside it. Position and size stay with each component;
+   everything that makes it look like SkyLens lives here.
+
+   Built through shared/viewer/ui/surface.ts so the markup is identical too.
+   ========================================================================== */
+
+.sl-surface {
+  position: absolute;
+  z-index: 20;
+  background: var(--surface-glass);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-panel);
+  color: var(--text-primary);
+  font-family: var(--font-body);
+}
+
+/* A one-line marker: pane titles, connection badges. */
+.sl-surface--chip {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 6px 12px;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-display);
+  font-size: var(--text-sm);
+  letter-spacing: 0.08em;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+/* A readout with contents. */
+.sl-surface--panel {
+  padding: 12px 14px;
+}
+
+/* Something that frames pixels of its own — video, minimap. The border is the
+   only chrome; nothing may pad the content away from it. */
+.sl-surface--frame {
+  padding: 0;
+  overflow: hidden;
+  background: var(--bg-void);
+}
+
+/* Centred over everything, dismissible. */
+.sl-surface--modal {
+  position: relative;
+  z-index: auto;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-modal);
+}
+
+/* Section heading inside a surface. */
+.sl-surface__title {
+  font-family: var(--font-display);
+  font-size: var(--text-xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+/* Status dot shared by chips and panel headers. */
+.sl-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+  background: var(--neutral-dot);
+  box-shadow: 0 0 8px currentColor;
+}
+
 .pane {
   position: relative;
   overflow: hidden;
@@ -179,51 +257,29 @@ html {
   }
 }
 
-.pane__label {
-  position: absolute;
+/* The screen's own name. Everything that makes it look like a SkyLens surface
+   comes from .sl-surface--chip; only placement and behaviour live here. */
+.pane-label {
   top: 14px;
   left: 16px;
   z-index: 5;
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  font-family: var(--font-display);
-  font-size: var(--text-sm);
-  /* Matches the panel headers (0.08em). The wider tracking this had was tuned
-     for all-caps Latin and pulled Korean syllables apart. */
-  letter-spacing: 0.08em;
-  font-weight: 600;
-  text-transform: uppercase;
-  padding: 6px 12px;
-  background: var(--surface-1);
-  border: 1px solid var(--border-hairline);
-  border-radius: var(--radius-sm);
-  box-shadow: var(--shadow-panel);
   pointer-events: none;
   user-select: none;
 }
 
-.pane__label::before {
-  content: '';
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  flex: 0 0 auto;
-}
-
-.pane--control .pane__label {
+.pane-label--control {
   color: var(--control-ink);
 }
-.pane--control .pane__label::before {
+.pane-label--control .sl-dot {
   background: var(--control-ink);
-  box-shadow: 0 0 8px var(--control-ink);
+  color: var(--control-ink);
 }
-.pane--status .pane__label {
+.pane-label--status {
   color: var(--status-ink);
 }
-.pane--status .pane__label::before {
+.pane-label--status .sl-dot {
   background: var(--person);
-  box-shadow: 0 0 8px var(--person);
+  color: var(--person);
 }
 
 /* --- HUD (viewer 1) --- */

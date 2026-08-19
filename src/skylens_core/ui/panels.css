@@ -20,16 +20,10 @@
 }
 
 .settings-panel {
-  position: relative;
   width: min(460px, 94vw);
   max-height: 88vh;
   overflow: auto;
   padding: 20px 22px 18px;
-  border-radius: var(--radius-lg);
-  background: var(--surface-glass);
-  border: 1px solid var(--border-hairline);
-  box-shadow: var(--shadow-modal);
-  color: var(--text-primary);
 }
 
 .settings-panel__title {
@@ -183,19 +177,12 @@
 
 /* --- Mission panel (phases + core link) --- */
 
+/* Placement only — the look comes from .sl-surface--panel. Clears the pane
+   label, which sits at the same corner. */
 .mission-panel {
-  position: absolute;
-  /* Clears .pane__label, which is absolutely positioned at the same corner. */
   top: 52px;
   left: 16px;
-  z-index: 20;
   width: 290px;
-  padding: 12px 14px;
-  border-radius: var(--radius-md);
-  background: var(--surface-glass);
-  border: 1px solid var(--border-hairline);
-  box-shadow: var(--shadow-panel);
-  color: var(--text-primary);
 }
 
 .mission-panel.is-stale {
@@ -307,16 +294,10 @@
 /* --- Telemetry panel (GPS readouts) --- */
 
 .telemetry-panel {
-  position: absolute;
   bottom: 16px;
   left: 16px;
-  z-index: 20;
   width: 290px;
   padding: 10px 12px;
-  border-radius: var(--radius-md);
-  background: var(--surface-glass);
-  border: 1px solid var(--border-hairline);
-  box-shadow: var(--shadow-panel);
 }
 
 .telemetry-panel__empty {

@@ -23,7 +23,7 @@ const deg = (v: number): string => v.toFixed(5);
 
 export function createTelemetryPanel(mount: HTMLElement): TelemetryPanel {
   const root = document.createElement('div');
-  root.className = 'telemetry-panel';
+  root.className = 'sl-surface sl-surface--panel telemetry-panel';
 
   const empty = document.createElement('div');
   empty.className = 'telemetry-panel__empty';

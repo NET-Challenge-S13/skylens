@@ -6,17 +6,10 @@
    Bottom-right belongs to the detection card, which slides in over whatever is
    there; the two used to overlap. */
 #minimap {
-  position: absolute;
   right: 16px;
   top: 16px;
-  z-index: 10;
   width: 200px;
   height: 200px;
-  border-radius: var(--radius-md);
-  overflow: hidden;
-  background: var(--surface-1);
-  border: 1px solid var(--border-hairline);
-  box-shadow: var(--shadow-panel);
   pointer-events: none;
 }
 
@@ -51,20 +44,14 @@
 
 /* --- Server-status panel (top-left, below the pane label) --- */
 #server-status.server-status {
-  position: absolute;
   top: 54px;
   left: 16px;
-  z-index: 5;
   display: flex;
   align-items: center;
   flex-wrap: wrap;
   max-width: 340px;
   gap: 10px;
   padding: 8px 12px;
-  border-radius: var(--radius-sm);
-  background: var(--surface-1);
-  border: 1px solid var(--border-hairline);
-  box-shadow: var(--shadow-panel);
   pointer-events: none;
   font-family: var(--font-mono);
   font-size: var(--text-sm);

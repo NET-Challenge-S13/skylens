@@ -33,6 +33,8 @@ export function mountMinimap(bounds: THREE.Box3): Minimap {
   const hostEl = document.getElementById('minimap');
   if (!hostEl) return noop();
   const host: HTMLElement = hostEl;
+  // Same surface as every other panel; #minimap only says where it sits.
+  host.classList.add('sl-surface', 'sl-surface--frame');
 
   const canvas = document.createElement('canvas');
   canvas.className = 'minimap__canvas';

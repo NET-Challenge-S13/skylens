@@ -32,7 +32,7 @@ export function mountServerStatus(source: RelayClient): ServerStatusPanel {
   const host = document.getElementById('server-status');
   if (!host) return noop();
 
-  host.classList.add('server-status');
+  host.classList.add('sl-surface', 'sl-surface--panel', 'server-status');
 
   const dot = document.createElement('span');
   dot.className = 'server-status__dot';
@@ -136,7 +136,7 @@ export function mountServerStatus(source: RelayClient): ServerStatusPanel {
 
   return {
     dispose(): void {
-      host.classList.remove('server-status');
+      host.classList.remove('sl-surface', 'sl-surface--panel', 'server-status');
       host.replaceChildren();
       rows.clear();
     },

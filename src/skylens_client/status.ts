@@ -40,6 +40,7 @@ import { loadScene, resolveSplatUrl } from '../shared/viewer/sources/sceneSource
 import { StatusViewer } from './statusview/statusViewer.ts';
 import { initUI } from './ui/overlay.ts';
 import { createLoadingScreen } from '../shared/viewer/ui/loadingScreen.ts';
+import { mountPaneLabel } from '../shared/viewer/ui/surface.ts';
 import { createRelayClient } from './sources/relayClient.ts';
 import type { RelayClient } from './sources/relayClient.ts';
 import { mountMinimap } from './ui/minimap.ts';
@@ -173,6 +174,9 @@ async function main(): Promise<void> {
     drone.forward.set(Math.sin(rad), -0.35, -Math.cos(rad)).normalize();
     drone.quat.setFromAxisAngle(new THREE.Vector3(0, 1, 0), -rad);
   });
+
+  const pane = document.querySelector('.pane');
+  if (pane instanceof HTMLElement) mountPaneLabel(pane, '현황판 · 실시간 3D 복원', 'status');
 
   mountServerStatus(relay);
   mountRelayBadge(relay);

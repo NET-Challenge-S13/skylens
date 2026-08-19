@@ -44,7 +44,7 @@ export function createSettingsPanel(opts: SettingsPanelOptions): SettingsPanel {
   overlay.className = 'settings-overlay is-hidden';
 
   const panel = document.createElement('div');
-  panel.className = 'settings-panel';
+  panel.className = 'sl-surface sl-surface--modal settings-panel';
 
   const title = document.createElement('div');
   title.className = 'settings-panel__title';

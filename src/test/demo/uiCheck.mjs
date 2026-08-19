@@ -118,16 +118,18 @@ const fleet = await tower.evaluate(() => ({
       : null;
   })(),
   overlay: document.querySelector('.video-panel__overlay')?.textContent ?? '',
-  label: (() => {
-    const el = document.querySelector('.pane__label');
-    const s = el ? getComputedStyle(el) : null;
-    return s ? { font: s.fontFamily, tracking: s.letterSpacing, weight: s.fontWeight } : null;
-  })(),
-  panelFont: (() => {
-    const el = document.querySelector('.mission-panel__message, .mission-panel');
-    const s = el ? getComputedStyle(el) : null;
-    return s ? { font: s.fontFamily } : null;
-  })(),
+  // Every floating surface should agree on the things that make it one: the
+  // same border, radius and shadow, from one definition.
+  surfaces: [...document.querySelectorAll('.sl-surface')].map((el) => {
+    const s = getComputedStyle(el);
+    return {
+      cls: el.className.replace(/sl-surface--?\w*\s*/g, '').trim() || el.id,
+      border: s.borderTopColor + ' ' + s.borderTopWidth,
+      radius: s.borderTopLeftRadius,
+      shadow: s.boxShadow.slice(0, 24),
+      font: s.fontFamily.split(',')[0],
+    };
+  }),
 }));
 log('tower:', JSON.stringify(fleet));
 
@@ -172,6 +174,19 @@ const checks = [
   ['the selected camera is playing', cams.every((c) => c.playing)],
   ['minimap clear of the detection card', !boardState.overlaps],
   ['board received geometry', boardState.chunks > 0],
+  // Variants differ on purpose — a chip is tighter than a panel, a modal casts
+  // a deeper shadow — but they must all be cut from the same definition. The
+  // invariant is the border every surface shares, and a shadow drawn from the
+  // token set rather than invented per component.
+  [
+    'every panel draws the same border',
+    fleet.surfaces.length >= 4 && new Set(fleet.surfaces.map((s) => s.border)).size === 1,
+  ],
+  [
+    'shadows and radii come from the tokens',
+    new Set(fleet.surfaces.map((s) => s.shadow)).size <= 2 &&
+      fleet.surfaces.every((s) => ['3px', '6px', '10px'].includes(s.radius)),
+  ],
   ['no page errors', errors.length === 0],
 ];
 for (const [name, ok] of checks) console.log(`${ok ? 'PASS' : 'FAIL'}  ${name}`);

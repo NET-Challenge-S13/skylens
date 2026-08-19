@@ -25,6 +25,7 @@ import { CONFIG } from '../shared/viewer/config.ts';
 import { loadControlScene } from '../shared/viewer/sources/sceneSource.ts';
 import { startWorldStream } from '../shared/viewer/sources/streamSource.ts';
 import { createLoadingScreen } from '../shared/viewer/ui/loadingScreen.ts';
+import { mountPaneLabel } from '../shared/viewer/ui/surface.ts';
 import { showToast } from '../shared/viewer/ui/toast.ts';
 import { createGeoFrame } from './geoFrame.ts';
 import { createSettings } from './settings.ts';
@@ -86,6 +87,9 @@ async function main(): Promise<void> {
     ? createTelemetryPanel(mount('telemetry-panel-mount') as HTMLElement)
     : null;
   const videoMount = mount('video-panel-mount');
+  const pane = document.querySelector('.pane');
+  if (pane instanceof HTMLElement) mountPaneLabel(pane, '관제탑 · 실지형 상황도', 'control');
+
   const videoPanel = videoMount ? createVideoPanel(videoMount) : null;
   /** Aircraft the camera panel is currently pointed at. */
   let camDroneId: number | null = null;

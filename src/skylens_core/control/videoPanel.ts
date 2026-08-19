@@ -27,7 +27,7 @@ export interface VideoPanel {
 
 export function createVideoPanel(container: HTMLElement): VideoPanel {
   const root = document.createElement('div');
-  root.className = 'video-panel';
+  root.className = 'sl-surface sl-surface--frame video-panel';
 
   const canvas = document.createElement('canvas');
   canvas.className = 'video-panel__canvas';
