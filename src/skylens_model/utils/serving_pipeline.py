@@ -281,9 +281,15 @@ def _demo_align(req: DetectJobRequest | ReconJobRequest, manifest: dict, index: 
     # Scene axes are x=East, y=Up, z=-North (shared/geo.ts). The asset's
     # principal axis is horizontal for a corridor sweep, so a yaw about Up is
     # the whole rotation: from the asset axis to the flown heading.
+    #
+    # Sign: a +Y rotation by θ takes a direction of compass heading h to
+    # heading h - θ (x' = x·cosθ + z·sinθ, z' = -x·sinθ + z·cosθ). So the yaw
+    # that turns the asset axis onto the flown heading is asset MINUS flight.
+    # The other order mirrors the scene across the east axis — the anchors
+    # still sit on the route, but the geometry extends to the wrong side.
     axis = manifest.get("axis") or [1.0, 0.0, 0.0]
     asset_yaw = math.atan2(float(axis[0]), -float(axis[2]) if len(axis) > 2 else 0.0)
-    yaw = heading - asset_yaw
+    yaw = asset_yaw - heading
     half = yaw / 2.0
     rotation = (0.0, math.sin(half), 0.0, math.cos(half))
 
@@ -322,6 +328,13 @@ async def _recon_demo(req: ReconJobRequest, frame: Frame, report: Report) -> Rec
     await _simulate(_demo_seconds(req.steps), report)
     manifest = load_manifest()
     index = req.segment % len(manifest.get("segments") or [1])
+    align = _demo_align(req, manifest, index)
+    # The board places the WHOLE final scene by the first chunk's align — the
+    # one this flight's origin segment computes. Detections reuse it so a
+    # marker lands on the drawn person, not on a per-segment re-derivation.
+    if req.segment == frame.origin_segment and align.anchor is not None:
+        global _FLIGHT_ALIGN
+        _FLIGHT_ALIGN = align
     return ReconJobResult(
         segment=req.segment,
         steps=asset.steps,
@@ -330,7 +343,7 @@ async def _recon_demo(req: ReconJobRequest, frame: Frame, report: Report) -> Rec
         # frame.align is identity for the demo assets — they were cut from one
         # already-aligned scene — so what matters is putting the piece on the
         # ground the segment was flown over.
-        align=_demo_align(req, manifest, index),
+        align=align,
         anchorFrame=frame.id,
     )
 
@@ -366,19 +379,27 @@ async def _recon_live(req: ReconJobRequest, frame: Frame, report: Report) -> Rec
 # Detection
 # ---------------------------------------------------------------------------
 
-#: Demo detections, as ENU meters from the AIRCRAFT that filmed the segment.
-#: Two per segment so the board always has one person and one danger marker to
-#: gate on that segment's arrival.
-#:
-#: Offsets are small and lateral because that is where a detection can come
-#: from: a camera sees the ground it is over. Anchoring these to the configured
-#: site instead put every marker in a neat row hundreds of metres from the
-#: flight, so the board showed the drones in one corner and the findings in the
-#: other — the reconstruction and the track appeared to be in different places.
-_DEMO_DETECTIONS: tuple[tuple[str, str, float, float, float, float], ...] = (
-    ("person", "구조 대상자 추정", -14.0, 6.0, 1.5, 0.82),
-    ("danger", "붕괴 위험 구조물", 9.0, -8.0, 0.0, 0.74),
-)
+#: Placement of the CURRENT flight's scene, kept from the first reconstruction
+#: job so detections land on the geometry the board actually draws. The board
+#: places the whole final scene by the FIRST chunk's align; a marker computed
+#: with any other transform can sit metres away from the person it points at.
+_FLIGHT_ALIGN: SplatAlign | None = None
+
+
+def load_people() -> list[dict]:
+    """The people that are REALLY in the capture (res/static/demo/people.json).
+
+    Demo detections used to be fixed lateral offsets from the aircraft — two
+    invented markers per segment, so the board filled up with '구조 대상자' pins
+    on empty ground. The capture contains exactly the people it contains;
+    their positions were measured in the asset frame and recorded, and a
+    marker is only emitted where one of them stands.
+    """
+    path = settings().demo_root() / "people.json"
+    if not path.exists():
+        return []
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return list(data.get("people") or [])
 
 
 def _segment_fixes(req: DetectJobRequest | ReconJobRequest) -> list[GpsModel]:
@@ -398,35 +419,54 @@ async def run_detect(req: DetectJobRequest, report: Report) -> DetectJobResult:
 
 
 async def _detect_demo(req: DetectJobRequest, report: Report) -> DetectJobResult:
-    fixes = _segment_fixes(req)
+    """Markers for the people that really stand in this segment's slab.
+
+    A person's position is recorded in the ASSET frame (people.json); it goes
+    through the same placement the scene itself goes through — the flight
+    align — so the pin lands on the reconstructed person. Segments beyond the
+    asset count wrap exactly like the recon assets do; the board dedupes the
+    replayed id. No danger markers: the capture has no collapsed structure,
+    and an invented one on the board is indistinguishable from a real one.
+    """
+    manifest = load_manifest()
+    nseg = max(1, len(manifest.get("segments") or []))
+    index = req.segment % nseg
+
+    align = _FLIGHT_ALIGN or _demo_align(req, manifest, index)
     detections: list[DetectionResult] = []
-    for i, (category, label, e, n, u, confidence) in enumerate(_DEMO_DETECTIONS):
-        # Where the aircraft was when this part of the segment was filmed. Two
-        # detections, so read a third and two thirds of the way along its track
-        # — the markers then spread themselves along the flight instead of
-        # needing a per-segment fudge. With no poses (a hand-made request) fall
-        # back to the configured site, which is all there is to go on.
-        anchor = settings().anchor
-        if fixes:
-            fix = fixes[min(len(fixes) - 1, (len(fixes) * (i + 1)) // 3)]
-            # Horizontal position from the flight; height from the site datum.
-            # A detection is on the ground, not at the aircraft's altitude, and
-            # nothing here knows the terrain — ARCHITECTURE.md §3-A puts that in
-            # the projection layer, which raycasts the depth map onto the DEM.
-            origin = Gps(lat=fix.lat, lon=fix.lon, alt=anchor.alt)
-        else:
-            origin = anchor
-        gps: Gps = enu_to_gps(Enu(e=e, n=n, u=u), origin)
-        detections.append(
-            DetectionResult(
-                id=f"det-s{req.segment}-{i}",
-                category=category,  # type: ignore[arg-type]
-                gps=GpsModel(lat=gps.lat, lon=gps.lon, alt=gps.alt),
-                confidence=confidence,
-                label=label,
-                segment=req.segment,
+    if align.anchor is not None:
+        axis = [float(v) for v in (manifest.get("axis") or [1.0, 0.0, 0.0])]
+        origin = [float(v) for v in (manifest.get("origin") or [0.0, 0.0, 0.0])]
+        boundaries = [float(b) for b in (manifest.get("boundaries") or [])]
+        _, qy, _, qw = align.rotation
+        yaw = 2.0 * math.atan2(qy, qw)
+        cos_y, sin_y = math.cos(yaw), math.sin(yaw)
+        scale = float(align.scale[0])
+        for person in load_people():
+            px, py, pz = (float(v) for v in person["pos"])
+            proj = sum((p - o) * a for p, o, a in zip((px, py, pz), origin, axis, strict=True))
+            slab = sum(1 for b in boundaries if proj > b)
+            if slab != index:
+                continue
+            sx, sy, sz = px * scale, py * scale, pz * scale
+            # world = R_yaw * (s * p) + align.position, in scene axes
+            # (x=East, y=Up, z=-North), then to GPS off the align's anchor —
+            # the exact transform the board draws the scene with.
+            wx = cos_y * sx + sin_y * sz + align.position[0]
+            wy = sy + align.position[1]
+            wz = -sin_y * sx + cos_y * sz + align.position[2]
+            anchor = Gps(lat=align.anchor.lat, lon=align.anchor.lon, alt=align.anchor.alt)
+            gps: Gps = enu_to_gps(Enu(e=wx, n=-wz, u=wy), anchor)
+            detections.append(
+                DetectionResult(
+                    id=str(person.get("id") or f"person-{slab}"),
+                    category="person",
+                    gps=GpsModel(lat=gps.lat, lon=gps.lon, alt=gps.alt),
+                    confidence=float(person.get("confidence") or 0.9),
+                    label=str(person.get("label") or "구조 대상자 추정"),
+                    segment=req.segment,
+                )
             )
-        )
     await _simulate(max(0.2, settings().min_seconds), report, ticks=4)
     return DetectJobResult(segment=req.segment, detections=detections)
 
