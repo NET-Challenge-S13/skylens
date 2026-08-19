@@ -19,8 +19,9 @@
 // The drone comes last and stays idle: the scenario starts when an operator
 // assigns a route in the control tower (COMPONENTS.md §5.2).
 
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
+import net from 'node:net';
 import process from 'node:process';
 import readline from 'node:readline';
 
@@ -146,6 +147,81 @@ const COMPONENTS: Component[] = [
 const running: Array<{ name: string; child: ChildProcess }> = [];
 let shuttingDown = false;
 
+/** The port a component's health URL names, or null when it is not gated. */
+function healthPort(component: Component): number | null {
+  if (!component.health) return null;
+  const port = Number(new URL(component.health).port);
+  return Number.isFinite(port) && port > 0 ? port : null;
+}
+
+/** Is something already listening here? */
+function portTaken(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const probe = net.connect({ host: '127.0.0.1', port });
+    const done = (taken: boolean): void => {
+      probe.destroy();
+      resolve(taken);
+    };
+    probe.setTimeout(700);
+    probe.on('connect', () => done(true));
+    probe.on('timeout', () => done(false));
+    probe.on('error', () => done(false));
+  });
+}
+
+/**
+ * Refuse to start on top of a previous run.
+ *
+ * waitFor() only asks whether SOMETHING answers the health URL, and a survivor
+ * from an earlier run answers it perfectly — so the launcher would report the
+ * component ready while the demo quietly ran against the old code. That looks
+ * exactly like a caching bug and costs an afternoon to see through. Check the
+ * ports first and say who is holding them.
+ */
+async function preflight(): Promise<void> {
+  const taken: number[] = [];
+  for (const component of COMPONENTS) {
+    const port = healthPort(component);
+    if (port !== null && (await portTaken(port))) taken.push(port);
+  }
+  if (taken.length === 0) return;
+  console.error('');
+  console.error(`  포트 ${taken.join(', ')} 를 이미 다른 프로세스가 쓰고 있습니다.`);
+  console.error('  이전 데모가 완전히 종료되지 않았을 가능성이 큽니다 — 그대로 두면');
+  console.error('  런처가 그 프로세스를 자기 컴포넌트로 오인해 옛 코드로 데모가 돕니다.');
+  console.error('');
+  console.error('  정리 후 다시 실행하십시오:');
+  console.error('    Windows  npm run demo:clean');
+  console.error("    그 외     lsof -ti:" + taken.join(',') + ' | xargs kill -9');
+  console.error('');
+  process.exit(1);
+}
+
+/**
+ * Kill a child and everything it spawned.
+ *
+ * `uv run uvicorn` is a launcher of launchers: killing the child leaves the
+ * python server alive, still holding its port, ready to be mistaken for the
+ * next run's component. Take the whole tree down.
+ */
+function killTree(child: ChildProcess): void {
+  if (child.exitCode !== null || child.pid === undefined) return;
+  try {
+    if (process.platform === 'win32') {
+      spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+    } else {
+      process.kill(-child.pid, 'SIGTERM');
+    }
+  } catch {
+    /* already gone */
+  }
+  try {
+    child.kill();
+  } catch {
+    /* already gone */
+  }
+}
+
 function stamp(): string {
   const d = new Date();
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
@@ -194,6 +270,9 @@ function start(component: Component): void {
     // an absolute path and must NOT go through the shell (its args would be
     // re-parsed).
     shell: component.command === 'uv',
+    // A process group of its own, so shutdown can signal the whole tree.
+    // Windows has no groups; killTree uses taskkill /T there instead.
+    detached: process.platform !== 'win32',
   });
   running.push({ name: component.name, child });
   pipe(component.tag, child);
@@ -211,15 +290,7 @@ async function shutdown(code: number): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
   console.log(`${stamp()} launch | stopping ${running.length} component(s)`);
-  for (const { child } of [...running].reverse()) {
-    if (child.exitCode === null && child.pid !== undefined) {
-      try {
-        child.kill();
-      } catch {
-        /* already gone */
-      }
-    }
-  }
+  for (const { child } of [...running].reverse()) killTree(child);
   // Give them a moment to close their sockets before the process image goes.
   await new Promise((r) => setTimeout(r, 700));
   process.exit(code);
@@ -247,6 +318,8 @@ function banner(): void {
 async function main(): Promise<void> {
   process.on('SIGINT', () => void shutdown(0));
   process.on('SIGTERM', () => void shutdown(0));
+
+  await preflight();
 
   for (const component of COMPONENTS) {
     console.log(`${stamp()} launch | starting ${component.name}`);

@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "vite",
     "demo": "tsx src/demo/index.ts",
+    "demo:clean": "tsx src/demo/stop.ts",
     "core": "tsx src/skylens_core/server/index.ts",
     "client": "tsx src/skylens_client/server/index.ts",
     "gateway": "tsx src/skylens_gateway/index.ts",
