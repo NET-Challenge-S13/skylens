@@ -61,7 +61,14 @@ const COMPONENTS: Component[] = [
     tag: 'core  ',
     command: NODE,
     args: tsx('src/skylens_core/server/index.ts'),
-    env: { ...DEMO_ENV, SKYLENS_CORE_WEB_MODE: 'dev' },
+    env: {
+      ...DEMO_ENV,
+      SKYLENS_CORE_WEB_MODE: 'dev',
+      // The demo flies in Daejeon (src/test/geography.spec.ts pins the anchor,
+      // the tower's map and the drone waypoints together), so the planner opens
+      // there rather than wherever this machine's ISP is registered.
+      SKYLENS_CORE_SITE: '36.3685,127.3475,30',
+    },
     health: 'http://127.0.0.1:8080/health',
     readyTimeoutMs: 30_000,
   },

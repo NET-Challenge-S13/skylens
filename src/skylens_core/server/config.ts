@@ -51,10 +51,10 @@ export interface CoreConfig {
 
   /** Route arc-length that makes one reconstruction segment, in meters. */
   segmentMeters: number;
-  /** Where this core is, `lat,lon[,alt]`. Empty means "look it up". */
+  /** Where this core is, `lat,lon[,alt]`. Empty falls back to siteFallback. */
   site: string | undefined;
-  /** Whether to ask a geo-IP service when `site` is unset. Off for a closed
-   *  network, where the request can only time out. */
+  /** Ask a geo-IP service when `site` is unset. OFF by default: it locates the
+   *  ISP's public IP, not the machine — see site.ts. */
   siteLookup: boolean;
   siteLookupUrl: string;
   siteLookupTimeoutMs: number;
@@ -116,7 +116,7 @@ export function loadConfig(): CoreConfig {
 
     segmentMeters: num('SKYLENS_CORE_SEGMENT_METERS', 40),
     site: process.env.SKYLENS_CORE_SITE,
-    siteLookup: bool('SKYLENS_CORE_SITE_LOOKUP', true),
+    siteLookup: bool('SKYLENS_CORE_SITE_LOOKUP', false),
     siteLookupUrl: str(
       'SKYLENS_CORE_SITE_LOOKUP_URL',
       'http://ip-api.com/json/?fields=status,lat,lon,city,regionName,country',

@@ -10,12 +10,20 @@
 // Three ways to answer, in order of trust:
 //
 //   config   SKYLENS_CORE_SITE="36.3685,127.3475"  — an operator said so
-//   geoip    public IP lookup                       — a guess, city-accurate
-//   fallback the configured anchor                  — nothing else worked
+//   fallback the configured operating area          — a documented default
+//   geoip    public IP lookup, OPT-IN               — see the warning below
 //
-// The lookup is best-effort by design: a closed network (which is the real
-// deployment) has no route to a geo-IP service, and the core must not spend its
-// startup waiting for one to time out.
+// GEO-IP IS OFF BY DEFAULT, and the reason is worth stating: it locates the
+// PUBLIC IP, which is the ISP's egress or registration address, not the
+// machine. Measured on this project — a core running in Daejeon resolved to
+// Goyang-si, 150 km away, because the line's address is registered there. A
+// planner that opens in the wrong city is worse than one that opens at a
+// default the operator can read off the config, so the guess has to be asked
+// for: SKYLENS_CORE_SITE_LOOKUP=1.
+//
+// The lookup is also best-effort when enabled: the real deployment is a closed
+// network with no route to such a service, and the core must not spend its
+// startup waiting to find that out.
 
 import type { Gps } from '../../shared/geo.ts';
 
@@ -71,6 +79,7 @@ export async function resolveSite(opts: {
     return { gps: configured, source: 'config', label: null };
   }
 
+  // Order matters: the fallback is a stated position, the lookup is a guess.
   if (opts.lookup) {
     try {
       const res = await fetch(opts.lookupUrl, {
