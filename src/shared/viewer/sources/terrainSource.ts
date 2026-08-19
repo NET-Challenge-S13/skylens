@@ -308,13 +308,9 @@ export function imageryReachable(bbox: Bbox): Promise<boolean> {
   return probe;
 }
 
-/** `?tex=cyber`: same satellite drape, graded into CONTROL's cold tactical
- *  palette. The map deliberately stays dim so drones and mission overlays own
- *  the brightest cyan values. */
-export function cyberOn(): boolean {
-  if (typeof window === 'undefined') return false;
-  return new URLSearchParams(window.location.search).get('tex') === 'cyber';
-}
+/** The cold grade is no longer a query-string mode: the display option owns it
+ *  (COMPONENTS.md §4), and both drapes are built up front so switching is a
+ *  material swap. See applyCyberGrade below for the palette itself. */
 
 // Luminance → restrained navy/teal ramp. This is a BACKGROUND palette: even
 // the brightest satellite pixels remain below the UI/drone highlight range.
@@ -400,8 +396,12 @@ interface ImageryGrid {
   originX: number;
   originY: number;
   zoom: number;
-  /** Merged tile mosaic — used as the terrain mesh texture. */
+  /** Merged tile mosaic, as photographed — what 실사 항공뷰 shows. */
   bitmap: ImageBitmap;
+  /** Same mosaic graded into the control tower's cold palette. The tactical
+   *  modes (점 / 검정 텍스처 건물) drape THIS, which is what the original
+   *  screen looked like (res/docs/figures/sim_map_view.jpg). */
+  bitmapGraded: ImageBitmap;
 }
 
 /** Fetch satellite tiles over the bbox at the deepest zoom within budget. */
@@ -516,24 +516,23 @@ async function buildImageryGrid(
   // snapshot rather than from the canvas, for a reason: see toBitmap below.
   const snapshot = ctx.getImageData(0, 0, width, height);
   const rgba = new Uint8ClampedArray(snapshot.data);
-  // Cyber grade applies AFTER the rgba read: point colors stay real (contract),
-  // only the mesh texture is restyled.
-  if (cyberOn()) {
-    applyCyberGrade(
-      ctx,
-      width,
-      height,
-      tx0 * 256,
-      ty0 * 256,
-      zoom,
-      (bbox[1] + bbox[3]) / 2,
-    );
-  }
-  // Post-grade pixels for the texture; ungraded `rgba` above still feeds point
-  // colors, so the data contract is unaffected by the look.
-  const textureData = cyberOn() ? ctx.getImageData(0, 0, width, height) : snapshot;
-  const bitmap = await createImageBitmap(textureData);
-  return { rgba, width, height, originX: tx0 * 256, originY: ty0 * 256, zoom, bitmap };
+  // BOTH looks are produced here, because the display option switches live and
+  // re-fetching or re-grading on every switch would stall the operator. The
+  // grade runs after the rgba read, so point colors stay the real imagery
+  // (data contract) no matter which texture is on screen.
+  const bitmap = await createImageBitmap(snapshot);
+  applyCyberGrade(ctx, width, height, tx0 * 256, ty0 * 256, zoom, (bbox[1] + bbox[3]) / 2);
+  const bitmapGraded = await createImageBitmap(ctx.getImageData(0, 0, width, height));
+  return {
+    rgba,
+    width,
+    height,
+    originX: tx0 * 256,
+    originY: ty0 * 256,
+    zoom,
+    bitmap,
+    bitmapGraded,
+  };
 }
 
 /**
@@ -564,7 +563,10 @@ export interface TerrainVisual {
   positions: Float32Array;
   uvs: Float32Array;
   indices: Uint32Array;
+  /** The aerial photograph itself (실사 항공뷰). */
   texture: ImageBitmap;
+  /** The same drape graded cold, for the tactical modes. */
+  textureGraded: ImageBitmap;
 }
 
 /**
@@ -758,7 +760,13 @@ function buildTerrainMesh(
       vIndices[ii++] = d;
     }
   }
-  return { positions: vPositions, uvs: vUvs, indices: vIndices, texture: imagery.bitmap };
+  return {
+    positions: vPositions,
+    uvs: vUvs,
+    indices: vIndices,
+    texture: imagery.bitmap,
+    textureGraded: imagery.bitmapGraded,
+  };
 }
 
 /**

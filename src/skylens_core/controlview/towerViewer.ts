@@ -38,9 +38,17 @@ interface ModeStyle {
   background: number;
   fogNear: number;
   fogFar: number;
-  /** Multiplied onto the terrain drape. */
-  terrainTint: number;
-  ringTint: number;
+  /** Which drape this mode shows: the cold grade, or the photograph itself. */
+  gradedDrape: boolean;
+  /** Ambient/sun pair. The tactical modes are lit cold so the prisms read as
+   *  part of the map instead of a daylight render dropped onto it. */
+  lightSky: number;
+  lightGround: number;
+  lightIntensity: number;
+  sunColor: number;
+  sunIntensity: number;
+  /** Lifts shadow-side faces so a dark building stays a volume, not a hole. */
+  buildingEmissive: number;
   buildingPoints: boolean;
   buildingPrisms: boolean;
   buildingEdges: boolean;
@@ -52,20 +60,32 @@ const STYLES: Record<DisplayMode, ModeStyle> = {
     background: CONFIG.color.controlBg,
     fogNear: 40,
     fogFar: 220,
-    terrainTint: 0x3d4757,
-    ringTint: 0x2a323d,
+    gradedDrape: true,
+    lightSky: 0x80b9cc,
+    lightGround: 0x071019,
+    lightIntensity: 1.35,
+    sunColor: 0xa4d9e8,
+    sunIntensity: 0.85,
+    buildingEmissive: 0x152a33,
     buildingPoints: true,
     buildingPrisms: false,
     buildingEdges: false,
   },
-  // Default. Black volumes over a legible-but-quiet map; the linework is what
-  // keeps a block of black prisms readable as separate buildings.
+  // Default (COMPONENTS.md §4). The map is graded cold and stays dim so the
+  // drones and mission overlays own the brightest values; the prisms carry
+  // their own baked wall/roof colours, lit, with linework on top. This is the
+  // look the interim report figure shows (res/docs/figures/sim_map_view.jpg).
   black: {
-    background: 0x1b222c,
+    background: CONFIG.color.controlBg,
     fogNear: 70,
     fogFar: 320,
-    terrainTint: 0xaab2bc,
-    ringTint: 0x818992,
+    gradedDrape: true,
+    lightSky: 0x80b9cc,
+    lightGround: 0x071019,
+    lightIntensity: 1.35,
+    sunColor: 0xa4d9e8,
+    sunIntensity: 0.85,
+    buildingEmissive: 0x152a33,
     buildingPoints: false,
     buildingPrisms: true,
     buildingEdges: true,
@@ -75,8 +95,13 @@ const STYLES: Record<DisplayMode, ModeStyle> = {
     background: 0x4a515c,
     fogNear: 95,
     fogFar: 360,
-    terrainTint: 0xffffff,
-    ringTint: 0xdbe0e6,
+    gradedDrape: false,
+    lightSky: 0xe8eef5,
+    lightGround: 0x5f676f,
+    lightIntensity: 2.4,
+    sunColor: 0xffffff,
+    sunIntensity: 1.7,
+    buildingEmissive: 0x000000,
     buildingPoints: false,
     buildingPrisms: true,
     buildingEdges: false,
@@ -98,7 +123,7 @@ interface DroneRig {
 interface CellBuildings {
   mesh: THREE.Mesh;
   edges: THREE.LineSegments | null;
-  black: THREE.Material;
+  prism: THREE.MeshLambertMaterial;
   aerial: THREE.Material | null;
 }
 
@@ -123,15 +148,27 @@ export class TowerViewer {
   // --- Terrain ---
   private terrainMat: THREE.MeshBasicMaterial | null = null;
   private ringMat: THREE.MeshBasicMaterial | null = null;
+  /** [photograph, cold grade] per draped surface, so a mode change swaps the
+   *  map instead of re-grading pixels while the operator waits. */
+  private terrainTex: [THREE.Texture, THREE.Texture] | null = null;
+  private ringTex: [THREE.Texture, THREE.Texture] | null = null;
+  private readonly streamedDrapes = new Map<
+    THREE.MeshBasicMaterial,
+    [THREE.Texture, THREE.Texture]
+  >();
+  private readonly hemi: THREE.HemisphereLight;
+  private readonly sun: THREE.DirectionalLight;
   /** The aerial mosaic, shared by the terrain drape and the building drape. */
   private mosaic: THREE.Texture | null = null;
-  private streamedTerrain = new Set<THREE.MeshBasicMaterial>();
+  /** Every prism material on screen, so a mode change reaches the streamed
+   *  cells too and the whole city keeps one look. */
+  private readonly prismMats = new Set<THREE.MeshLambertMaterial>();
 
   // --- Buildings (core scene) ---
   private bldPoints: THREE.Points | null = null;
   private bldMesh: THREE.Mesh | null = null;
   private bldEdges: THREE.LineSegments | null = null;
-  private bldBlackMat: THREE.Material | null = null;
+  private bldPrismMat: THREE.MeshLambertMaterial | null = null;
   private bldAerialMat: THREE.Material | null = null;
 
   // --- Buildings (streamed cells) ---
@@ -168,16 +205,21 @@ export class TowerViewer {
 
     if (input.terrainVisual) {
       this.mosaic = makeTexture(input.terrainVisual.texture);
+      this.terrainTex = [this.mosaic, makeTexture(input.terrainVisual.textureGraded)];
       this.terrainMat = new THREE.MeshBasicMaterial({
-        map: this.mosaic,
+        map: this.terrainTex[style.gradedDrape ? 1 : 0],
         side: THREE.DoubleSide,
       });
       this.scene.add(new THREE.Mesh(meshGeometry(input.terrainVisual), this.terrainMat));
     }
 
     if (input.surroundVisual) {
+      this.ringTex = [
+        makeTexture(input.surroundVisual.texture),
+        makeTexture(input.surroundVisual.textureGraded),
+      ];
       this.ringMat = new THREE.MeshBasicMaterial({
-        map: makeTexture(input.surroundVisual.texture),
+        map: this.ringTex[style.gradedDrape ? 1 : 0],
         side: THREE.DoubleSide,
       });
       this.scene.add(new THREE.Mesh(meshGeometry(input.surroundVisual), this.ringMat));
@@ -185,12 +227,14 @@ export class TowerViewer {
 
     this.buildBuildings(input);
 
-    // Lambert (the black prisms) needs light; Basic materials ignore it. The
+    // Lambert prisms need light; Basic materials (drape, points) ignore it. The
     // values look high because three's physical units render legacy ones dark.
-    this.scene.add(new THREE.HemisphereLight(0xe8eef5, 0x5f676f, 2.4));
-    const sun = new THREE.DirectionalLight(0xffffff, 1.7);
-    sun.position.set(40, 70, -30);
-    this.scene.add(sun);
+    // Colour and intensity are per-mode: the tactical look is lit cold.
+    this.hemi = new THREE.HemisphereLight(style.lightSky, style.lightGround, style.lightIntensity);
+    this.scene.add(this.hemi);
+    this.sun = new THREE.DirectionalLight(style.sunColor, style.sunIntensity);
+    this.sun.position.set(40, 70, -30);
+    this.scene.add(this.sun);
 
     // Reference grid — only meaningful when there is no terrain under it.
     this.grid = new THREE.GridHelper(80, 32, 0x2a4a8a, 0x16294f);
@@ -254,9 +298,29 @@ export class TowerViewer {
     this.fog.near = style.fogNear;
     this.fog.far = style.fogFar;
 
-    this.terrainMat?.color.setHex(style.terrainTint);
-    this.ringMat?.color.setHex(style.ringTint);
-    for (const mat of this.streamedTerrain) mat.color.setHex(style.terrainTint);
+    // The drape is exchanged, not darkened. Multiplying a tint onto the aerial
+    // photograph was what made the tactical modes look like a dimmed satellite
+    // view instead of the graded map they are supposed to be.
+    const drape = style.gradedDrape ? 1 : 0;
+    if (this.terrainMat && this.terrainTex) {
+      this.terrainMat.map = this.terrainTex[drape];
+      this.terrainMat.needsUpdate = true;
+    }
+    if (this.ringMat && this.ringTex) {
+      this.ringMat.map = this.ringTex[drape];
+      this.ringMat.needsUpdate = true;
+    }
+    for (const [mat, tex] of this.streamedDrapes) {
+      mat.map = tex[drape];
+      mat.needsUpdate = true;
+    }
+
+    this.hemi.color.setHex(style.lightSky);
+    this.hemi.groundColor.setHex(style.lightGround);
+    this.hemi.intensity = style.lightIntensity;
+    this.sun.color.setHex(style.sunColor);
+    this.sun.intensity = style.sunIntensity;
+    for (const mat of this.prismMats) mat.emissive.setHex(style.buildingEmissive);
 
     // Aerial falls back to the black look when no mosaic loaded, rather than
     // rendering untextured white slabs the operator cannot read.
@@ -265,14 +329,14 @@ export class TowerViewer {
     if (this.bldPoints) this.bldPoints.visible = style.buildingPoints;
     if (this.bldMesh) {
       this.bldMesh.visible = style.buildingPrisms;
-      const mat = wantAerial ? this.bldAerialMat : this.bldBlackMat;
+      const mat = wantAerial ? this.bldAerialMat : this.bldPrismMat;
       if (mat) this.bldMesh.material = mat;
     }
     if (this.bldEdges) this.bldEdges.visible = style.buildingEdges;
 
     for (const cell of this.cells) {
       cell.mesh.visible = style.buildingPrisms;
-      cell.mesh.material = mode === 'aerial' && cell.aerial ? cell.aerial : cell.black;
+      cell.mesh.material = mode === 'aerial' && cell.aerial ? cell.aerial : cell.prism;
       if (cell.edges) cell.edges.visible = style.buildingEdges;
     }
   }
@@ -313,15 +377,19 @@ export class TowerViewer {
 
     const geom = new THREE.BufferGeometry();
     geom.setAttribute('position', new THREE.BufferAttribute(visual.positions, 3));
+    // The wall/roof colours buildingSource bakes per vertex. Dropping them is
+    // what turned the city into one flat silhouette.
+    geom.setAttribute('color', new THREE.BufferAttribute(visual.colors, 3));
     const uvs = matchingUvs(visual);
     if (uvs) geom.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
     geom.computeVertexNormals();
 
-    this.bldBlackMat = blackBuildingMaterial();
+    this.bldPrismMat = prismMaterial(STYLES[this.mode].buildingEmissive);
+    this.prismMats.add(this.bldPrismMat);
     if (this.mosaic && uvs) {
       this.bldAerialMat = aerialBuildingMaterial(this.mosaic);
     }
-    this.bldMesh = new THREE.Mesh(geom, this.bldBlackMat);
+    this.bldMesh = new THREE.Mesh(geom, this.bldPrismMat);
     this.scene.add(this.bldMesh);
 
     if (visual.edges && visual.edges.length > 0) {
@@ -333,21 +401,24 @@ export class TowerViewer {
   /** Streamed terrain cell (world streamer). Returns a disposer. */
   addStreamedTerrain(visual: TerrainVisual): () => void {
     const geom = meshGeometry(visual);
-    const tex = makeTexture(visual.texture);
+    const tex: [THREE.Texture, THREE.Texture] = [
+      makeTexture(visual.texture),
+      makeTexture(visual.textureGraded),
+    ];
     const mat = new THREE.MeshBasicMaterial({
-      map: tex,
+      map: tex[STYLES[this.mode].gradedDrape ? 1 : 0],
       side: THREE.DoubleSide,
-      color: STYLES[this.mode].terrainTint,
     });
     const mesh = new THREE.Mesh(geom, mat);
     this.scene.add(mesh);
-    this.streamedTerrain.add(mat);
+    this.streamedDrapes.set(mat, tex);
     return () => {
-      this.streamedTerrain.delete(mat);
+      this.streamedDrapes.delete(mat);
       this.scene.remove(mesh);
       geom.dispose();
       mat.dispose();
-      tex.dispose();
+      tex[0].dispose();
+      tex[1].dispose();
     };
   }
 
@@ -362,18 +433,22 @@ export class TowerViewer {
 
     const geom = new THREE.BufferGeometry();
     geom.setAttribute('position', new THREE.BufferAttribute(visual.positions, 3));
+    // The wall/roof colours buildingSource bakes per vertex. Dropping them is
+    // what turned the city into one flat silhouette.
+    geom.setAttribute('color', new THREE.BufferAttribute(visual.colors, 3));
     const uvs = matchingUvs(visual);
     if (uvs) geom.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
     geom.computeVertexNormals();
 
-    const black = blackBuildingMaterial();
+    const prism = prismMaterial(STYLES[this.mode].buildingEmissive);
+    this.prismMats.add(prism);
     let aerial: THREE.Material | null = null;
     let cellTex: THREE.Texture | null = null;
     if (cellTexture && uvs) {
       cellTex = makeTexture(cellTexture);
       aerial = aerialBuildingMaterial(cellTex);
     }
-    const mesh = new THREE.Mesh(geom, this.mode === 'aerial' && aerial ? aerial : black);
+    const mesh = new THREE.Mesh(geom, this.mode === 'aerial' && aerial ? aerial : prism);
     mesh.visible = style.buildingPrisms;
     this.scene.add(mesh);
 
@@ -384,14 +459,15 @@ export class TowerViewer {
       this.scene.add(edges);
     }
 
-    const cell: CellBuildings = { mesh, edges, black, aerial };
+    const cell: CellBuildings = { mesh, edges, prism, aerial };
     this.cells.add(cell);
 
     return () => {
       this.cells.delete(cell);
       this.scene.remove(mesh);
       geom.dispose();
-      black.dispose();
+      this.prismMats.delete(prism);
+      prism.dispose();
       aerial?.dispose();
       cellTex?.dispose();
       if (edges) {
@@ -590,7 +666,7 @@ export class TowerViewer {
     this.bldPoints?.geometry.dispose();
     (this.bldPoints?.material as THREE.Material | undefined)?.dispose();
     this.bldMesh?.geometry.dispose();
-    this.bldBlackMat?.dispose();
+    this.bldPrismMat?.dispose();
     this.bldAerialMat?.dispose();
     this.bldEdges?.geometry.dispose();
     (this.bldEdges?.material as THREE.Material | undefined)?.dispose();
@@ -630,12 +706,20 @@ function makeTexture(bitmap: ImageBitmap): THREE.Texture {
   return tex;
 }
 
-/** 검정 텍스처 건물: near-black, but LIT, so faces separate by shading. */
-function blackBuildingMaterial(): THREE.Material {
+/**
+ * 검정 텍스처 건물: the prisms carry per-vertex wall/roof colours from
+ * buildingSource, lit so faces separate by shading. A flat near-black colour
+ * was tried instead and it flattened every block into one silhouette — only
+ * the linework carried volume, and the baked colours went unused.
+ *
+ * `emissive` is set per mode (STYLES.buildingEmissive): the cold floor keeps
+ * shadow-side faces readable against an equally dark map.
+ */
+function prismMaterial(emissive: number): THREE.MeshLambertMaterial {
   return new THREE.MeshLambertMaterial({
-    color: 0x0b0e13,
-    emissive: 0x05070b,
+    vertexColors: true,
     side: THREE.DoubleSide,
+    emissive,
   });
 }
 
