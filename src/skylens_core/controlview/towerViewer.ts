@@ -119,6 +119,13 @@ interface DroneRig {
   trailCount: number;
 }
 
+/** A planned waypoint in scene space: where the aircraft flies, and the ground
+ *  under it. */
+export interface RouteLeg {
+  air: THREE.Vector3;
+  ground: THREE.Vector3;
+}
+
 /** One streamed cell's building geometry, kept so mode changes reach it too. */
 interface CellBuildings {
   mesh: THREE.Mesh;
@@ -142,6 +149,8 @@ export class TowerViewer {
   private camera: THREE.PerspectiveCamera;
   private canvas: HTMLCanvasElement;
   private fog: THREE.Fog;
+  /** The assigned route, drawn over the terrain. Null until one is assigned. */
+  private routeGroup: THREE.Group | null = null;
 
   private mode: DisplayMode;
 
@@ -552,6 +561,86 @@ export class TowerViewer {
       (rig.trailLine.material as THREE.Material).dispose();
       this.rigs.delete(id);
     }
+  }
+
+  /**
+   * Draw the route the fleet was given. Without it the operator plans a line in
+   * one window and then watches aircraft move over terrain in another with
+   * nothing to check them against — which is indistinguishable from the drones
+   * ignoring the plan.
+   *
+   * Positions arrive already in scene space: the tower converts GPS in exactly
+   * one place (geoFrame.ts), and the viewer is downstream of it like the drone
+   * rigs are.
+   */
+  setRoute(legs: RouteLeg[] | null, loop: boolean): void {
+    if (this.routeGroup) {
+      this.scene.remove(this.routeGroup);
+      this.routeGroup.traverse((o) => {
+        if (o instanceof THREE.Line || o instanceof THREE.Mesh) {
+          o.geometry.dispose();
+          (o.material as THREE.Material).dispose();
+        }
+      });
+      this.routeGroup = null;
+    }
+    if (!legs || legs.length < 2) return;
+
+    const group = new THREE.Group();
+
+    // The flown line, at the altitudes the operator set.
+    const air = legs.map((l) => l.air);
+    const path = loop ? [...air, ...[...air].reverse().slice(1)] : air;
+    const lineGeom = new THREE.BufferGeometry().setFromPoints(path);
+    group.add(
+      new THREE.Line(
+        lineGeom,
+        new THREE.LineBasicMaterial({ color: 0xffd27f, transparent: true, opacity: 0.9 }),
+      ),
+    );
+
+    // A dropped line and a pad per waypoint: altitude is part of the plan, and a
+    // line hanging in space cannot be read against the ground without them.
+    for (const leg of legs) {
+      const drop = new THREE.BufferGeometry().setFromPoints([leg.air, leg.ground]);
+      group.add(
+        new THREE.Line(
+          drop,
+          new THREE.LineBasicMaterial({ color: 0xffd27f, transparent: true, opacity: 0.35 }),
+        ),
+      );
+      const pad = new THREE.Mesh(
+        new THREE.RingGeometry(0.25, 0.42, 20),
+        new THREE.MeshBasicMaterial({
+          color: 0xffd27f,
+          transparent: true,
+          opacity: 0.75,
+          side: THREE.DoubleSide,
+        }),
+      );
+      pad.position.copy(leg.ground);
+      pad.rotation.x = -Math.PI / 2;
+      group.add(pad);
+    }
+
+    this.routeGroup = group;
+    this.scene.add(group);
+  }
+
+  /** Vertices of the drawn route, for the checks that close the loop between
+   *  what was planned and what the operator is looking at. */
+  debugRoute(): THREE.Vector3[] | null {
+    if (!this.routeGroup) return null;
+    const line = this.routeGroup.children.find((c) => c instanceof THREE.Line) as
+      | THREE.Line
+      | undefined;
+    if (!line) return null;
+    const pos = line.geometry.getAttribute('position');
+    const out: THREE.Vector3[] = [];
+    for (let i = 0; i < pos.count; i++) {
+      out.push(new THREE.Vector3(pos.getX(i), pos.getY(i), pos.getZ(i)));
+    }
+    return out;
   }
 
   private updateRig(rig: DroneRig, drone: DroneRuntime, isActive: boolean): void {

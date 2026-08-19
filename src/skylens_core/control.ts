@@ -131,6 +131,9 @@ async function main(): Promise<void> {
       videoPanel?.setTelemetry(t);
     },
     onCameraFeed: (f) => videoPanel?.setFeed(f),
+    // The core echoes the route in force — on assignment and to any viewer that
+    // joins later — so a reloaded tower still shows the line the fleet is on.
+    onRoute: (r) => showRoute(r.waypoints, r.loop),
     onMission: (m) => missionPanel?.setMission(m),
     onLinkStatus: (l) => {
       // The core repeats every hop's status on a timer; only transitions are
@@ -142,6 +145,25 @@ async function main(): Promise<void> {
     },
   });
   core.start();
+
+  /**
+   * Put the planned line on the 3D map. GPS in, scene out — the conversion
+   * happens here, at the boundary, exactly as it does for drone positions.
+   */
+  const showRoute = (waypoints: Gps[], loop: boolean): void => {
+    if (waypoints.length < 2) {
+      viewer.setRoute(null, false);
+      return;
+    }
+    viewer.setRoute(
+      waypoints.map((wp) => ({
+        air: frame.toScene(wp),
+        // The pad sits on the terrain under the waypoint, not at sea level.
+        ground: frame.toScene({ ...wp, alt: frame.groundAltAt(wp) }),
+      })),
+      loop,
+    );
+  };
 
   // --- Route planning (GPS in, GPS out) ---
   const routeModal = createRouteModal({

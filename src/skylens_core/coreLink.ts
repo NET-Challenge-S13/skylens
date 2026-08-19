@@ -17,6 +17,7 @@
 
 import { CONFIG } from '../shared/viewer/config.ts';
 import type {
+  AssignRoute,
   CameraFeed,
   ControlMessage,
   DetectionResult,
@@ -40,6 +41,7 @@ export interface CoreLinkHandlers {
   onDetection?(d: DetectionResult): void;
   onSplatChunk?(c: SplatChunk): void;
   onCameraFeed?(f: CameraFeed): void;
+  onRoute?(r: AssignRoute): void;
 }
 
 export interface CoreLink {
@@ -121,6 +123,9 @@ export function createCoreLink(handlers: CoreLinkHandlers): CoreLink {
         break;
       case 'camera-feed':
         handlers.onCameraFeed?.(msg);
+        break;
+      case 'assign-route':
+        handlers.onRoute?.(msg);
         break;
     }
   };

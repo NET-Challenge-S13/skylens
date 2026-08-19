@@ -133,6 +133,14 @@ function serverStatus(): ServerStatus {
 distributor.onJoin((send: ViewerSend) => {
   send(mission.status());
   for (const drone of store.drones.values()) if (drone.last) send(drone.last);
+  if (store.routeWaypoints.length >= 2 && store.routeDroneId !== null) {
+    send({
+      kind: 'assign-route',
+      droneId: store.routeDroneId,
+      waypoints: store.routeWaypoints,
+      loop: store.routeLoop,
+    });
+  }
   for (const chunk of store.chunks()) send(chunk);
   for (const det of store.detections) send(det);
   if (store.cameraFeed) send(store.cameraFeed);
@@ -170,6 +178,9 @@ function assignRoute(msg: AssignRoute, send: ViewerSend): void {
       `${store.route.lengthM.toFixed(0)} m → ` +
       `${Math.ceil(store.route.lengthM / cfg.segmentMeters)} segment(s), loop=${loop}`,
   );
+
+  // Viewers draw the line so the operator can see what the fleet was given.
+  distributor.broadcast({ kind: 'assign-route', droneId, waypoints, loop });
 
   const forwarded = ingest.sendControl({ ...msg, loop, droneId });
   if (forwarded === 0) {

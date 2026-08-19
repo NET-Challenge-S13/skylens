@@ -325,6 +325,10 @@ export interface DetectJobResult {
 
 /** Anything the core pushes to a viewer (control tower or situation board). */
 export type ViewerMessage =
+  // The route in force. It travels to viewers as well as to the drone: an
+  // operator who cannot see the line they planned has no way to tell whether
+  // the aircraft is following it.
+  | AssignRoute
   | SplatChunk
   | DetectionResult
   | DroneTelemetry
