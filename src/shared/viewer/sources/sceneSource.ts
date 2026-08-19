@@ -339,9 +339,11 @@ function deriveFromSplat(
     samples.push(c.clone());
   }
 
-  // Orientation. Clean dataset splats are already gravity-aligned, so default to
-  // NO rotation. ?up=<preset|euler> overrides manually; ?level=on opts into the
-  // automatic PCA leveling (only useful for arbitrarily-tilted SfM/photo splats).
+  // Orientation. Internet sample splats follow the antimatter15 convention and
+  // need the 180° X flip; our OWN demo capture is baked upright (y-up, ground
+  // level) by level_scene.py, so it loads with NO rotation. ?up=<preset|euler>
+  // overrides manually; ?level=on opts into the automatic PCA leveling (only
+  // useful for arbitrarily-tilted SfM/photo splats).
   const wantLevel =
     typeof window !== 'undefined' &&
     new URLSearchParams(window.location.search).get('level') === 'on';
@@ -349,7 +351,9 @@ function deriveFromSplat(
     manualUpQuat() ??
     (wantLevel
       ? autoLevelQuat(samples)
-      : new THREE.Quaternion().setFromEuler(UP_PRESETS.x180));
+      : new THREE.Quaternion().setFromEuler(
+          url === CONFIG.splat.demoPreview ? UP_PRESETS.none : UP_PRESETS.x180,
+        ));
 
   // --- ROBUST bounds (leveled frame) ---
   // Photo/SfM splats carry lots of outlier "floater" gaussians far from the real

@@ -1,17 +1,21 @@
 // Viewer 2 — the "real" 3D reconstruction situation board (PROJECT.md §5, §8).
 //
 // Everything it shows arrives from the pipeline (skylens_client/sources/
-// relayClient.ts). It renders the splat chunks the core delivers, places the
-// detection markers the core reports, follows the drone by its telemetry, and
-// drives the camera through the SYNCED/FOCUSING/LOCKED/RETURNING state machine
-// (§8.3).
+// relayClient.ts). It places the detection markers the core reports, follows
+// the drone by its telemetry, and drives the camera through the
+// SYNCED/FOCUSING/LOCKED/RETURNING state machine (§8.3).
+//
+// GEOMETRY. The board renders ONE static splat scene — the final-quality
+// export of the capture — loaded when the stream's first chunk arrives and
+// placed by that chunk's alignment. The delay-pattern stream then only drives
+// VISIBILITY: each arriving segment fades its slab of the scene in
+// (splatReveal.ts), refinement levels firm it up. The stream's own PLYs are
+// cuts of the same file, so nothing shown is more than what has arrived.
 //
 // Visibility has exactly one rule: a segment is visible once its chunk has
-// landed (COMPONENTS.md §8). There is no trail-driven mask any more — the splat
-// mesh only ever holds arrived geometry, and SplatReveal just fades each segment
-// in. Until the first chunk lands, the locally-loaded point cloud is drawn as a
-// dim scaffold so the board reads as WAITING rather than broken; it is removed
-// the moment real geometry arrives.
+// landed (COMPONENTS.md §8). Until the first chunk lands, the locally-loaded
+// point cloud is drawn as a dim scaffold so the board reads as WAITING rather
+// than broken; it is removed the moment real geometry arrives.
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
@@ -19,7 +23,7 @@ import type { SceneData } from '../../shared/viewer/sources/sceneData';
 import type { DetectionRuntime } from '../../shared/viewer/types';
 import { state, emit } from '../../shared/viewer/store';
 import { CONFIG } from '../../shared/viewer/config';
-import type { SplatChunkInput } from './splatScene.ts';
+import type { ChunkPlacement, SplatChunkInput } from './splatScene.ts';
 import { SplatReveal } from './splatReveal.ts';
 import { CameraSync } from './cameraSync.ts';
 import { SplatScene } from './splatScene.ts';
@@ -55,6 +59,94 @@ const POINT_FRAG = /* glsl */ `
 
 const STATUS_UP = new THREE.Vector3(0, 1, 0);
 
+/** See StatusViewer.corridorPath. Median x/z per 6 m along-axis bin. */
+function buildCorridorPath(samples: Array<[number, number, number]>): {
+  dir: THREE.Vector2;
+  mean: THREE.Vector2;
+  u0: number;
+  du: number;
+  pts: Array<[number, number] | null>;
+} | null {
+  if (samples.length < 500) return null;
+  let mx = 0;
+  let mz = 0;
+  for (const p of samples) {
+    mx += p[0];
+    mz += p[2];
+  }
+  mx /= samples.length;
+  mz /= samples.length;
+  let sxx = 0;
+  let sxz = 0;
+  let szz = 0;
+  for (const p of samples) {
+    const dx = p[0] - mx;
+    const dz = p[2] - mz;
+    sxx += dx * dx;
+    sxz += dx * dz;
+    szz += dz * dz;
+  }
+  const theta = 0.5 * Math.atan2(2 * sxz, sxx - szz);
+  const dir = new THREE.Vector2(Math.cos(theta), Math.sin(theta));
+
+  const us = samples.map((p) => (p[0] - mx) * dir.x + (p[2] - mz) * dir.y).sort((a, b) => a - b);
+  const u0 = us[Math.floor(us.length * 0.01)];
+  const u1 = us[Math.floor(us.length * 0.99)];
+  const du = 6;
+  const n = Math.max(2, Math.ceil((u1 - u0) / du) + 1);
+  const binsX: number[][] = Array.from({ length: n }, () => []);
+  const binsZ: number[][] = Array.from({ length: n }, () => []);
+  for (const p of samples) {
+    const u = (p[0] - mx) * dir.x + (p[2] - mz) * dir.y;
+    const i = Math.round((u - u0) / du);
+    if (i >= 0 && i < n) {
+      binsX[i].push(p[0]);
+      binsZ[i].push(p[2]);
+    }
+  }
+  const median = (a: number[]): number => a.sort((x, y) => x - y)[Math.floor(a.length / 2)];
+  const raw = binsX.map((xs, i): [number, number] | null =>
+    xs.length >= 40 ? [median(xs), median(binsZ[i])] : null,
+  );
+  if (raw.filter(Boolean).length < 2) return null;
+  // Moving average over ±2 bins: per-bin medians zigzag with whatever stands
+  // in each slice (side rooms, plants), and a camera riding the raw polyline
+  // sways wall to wall.
+  const pts = raw.map((p, i): [number, number] | null => {
+    if (!p) return null;
+    let ax = 0;
+    let az = 0;
+    let n0 = 0;
+    for (let k = Math.max(0, i - 2); k <= Math.min(raw.length - 1, i + 2); k++) {
+      const q = raw[k];
+      if (!q) continue;
+      ax += q[0];
+      az += q[1];
+      n0++;
+    }
+    return [ax / n0, az / n0];
+  });
+  return { dir, mean: new THREE.Vector2(mx, mz), u0, du, pts };
+}
+
+/** Centerline point at along-position u, lerped between the nearest bins. */
+function corridorPointAt(
+  path: NonNullable<ReturnType<typeof buildCorridorPath>>,
+  u: number,
+): THREE.Vector2 {
+  const f = (u - path.u0) / path.du;
+  let lo = Math.min(path.pts.length - 1, Math.max(0, Math.floor(f)));
+  let hi = Math.min(path.pts.length - 1, lo + 1);
+  while (lo > 0 && path.pts[lo] === null) lo--;
+  while (hi < path.pts.length - 1 && path.pts[hi] === null) hi++;
+  const a = path.pts[lo] ?? path.pts[hi];
+  const b = path.pts[hi] ?? path.pts[lo];
+  if (!a || !b) return path.mean.clone();
+  if (lo === hi) return new THREE.Vector2(a[0], a[1]);
+  const t = Math.min(1, Math.max(0, (f - lo) / (hi - lo)));
+  return new THREE.Vector2(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t);
+}
+
 /** Opacity of the "not reconstructed yet" scaffold point cloud. */
 const SCAFFOLD_ALPHA = 0.2;
 
@@ -71,9 +163,15 @@ interface MarkerVisual {
   visible: boolean;
 }
 
-/** Smallest padding around the placed chunks for the floater clip, in metres.
- *  One chunk on its own still needs room for the ground it covers. */
-const CLIP_MIN_PAD = 40;
+/** The final reconstruction asset + the manifest geometry that cut it into
+ *  segments. axis/origin are in the ASSET's own frame; boundaries are cut
+ *  positions along the axis relative to the origin (split_segments.py). */
+export interface ReconSource {
+  url: string;
+  axis: [number, number, number];
+  origin: [number, number, number];
+  boundaries: number[];
+}
 
 export class StatusViewer {
   private readonly renderer: THREE.WebGLRenderer;
@@ -84,13 +182,14 @@ export class StatusViewer {
   private readonly points: THREE.Points;
   private readonly pointGeom: THREE.BufferGeometry;
   private readonly revealAttr: THREE.BufferAttribute;
-  /** Built on the first arrived chunk; fades each segment in from then on. */
+  /** Built on the first arrived chunk; fades each segment's slab in. */
   private splatReveal: SplatReveal | null;
   private readonly splatCapable: boolean;
-  private readonly sceneBounds: THREE.Box3;
-  /** Material the reveal shader is patched into. The library REBUILDS the splat
-   *  mesh whenever a superseded level is removed, so this is re-checked every
-   *  frame and re-patched when the material identity changes. */
+  /** Where the final scene comes from — null until the manifest resolves
+   *  (a board on a non-demo scene has no final asset and keeps the scaffold). */
+  private recon: ReconSource | null = null;
+  /** Material the reveal shader is patched into, re-checked every frame in
+   *  case the library rebuilds the mesh. */
   private attachedMaterial: THREE.ShaderMaterial | null = null;
   private splatMaskEnabled: boolean = CONFIG.reveal.splatMask;
   private readonly camSync: CameraSync;
@@ -101,6 +200,8 @@ export class StatusViewer {
 
   // Free-orbit navigation of the reconstructed space.
   private readonly controls: OrbitControls;
+  /** True disables the follow entirely — the operator owns the camera. */
+  private cameraHeld = false;
   private readonly sceneCenter = new THREE.Vector3();
   private followDist = 40;
   private followHeight = 30;
@@ -110,8 +211,31 @@ export class StatusViewer {
   private baseFollowDist = 1;
   /** Far plane the placeholder cloud implies. */
   private baseFar = 100;
-  /** Whether the floater clip is in force (?clip=on). */
-  private splatClipEnabled = false;
+  /** Camera eye height once the reconstruction turns out to be an INTERIOR
+   *  (roof over a walkway). Null until the scene has loaded. The demo capture
+   *  is the inside of a building, and a chase camera hovering over the roof
+   *  shows the operator nothing but roof — the board has to go inside. */
+  private interiorEyeY: number | null = null;
+  /** The corridor's CENTERLINE, measured from the splats: median (x,z) per
+   *  along-axis bin. The flight line hugs one wall, so a camera following the
+   *  route stares into plaster; the corridor's own middle is where a view
+   *  down it exists. `dir` is the along axis, `mean` its origin, pts[i] the
+   *  centre at u0 + i*du (NaN pairs where the strip has a gap). */
+  private corridorPath: {
+    dir: THREE.Vector2;
+    mean: THREE.Vector2;
+    u0: number;
+    du: number;
+    pts: Array<[number, number] | null>;
+  } | null = null;
+  /** Smoothed along-corridor camera position and latched travel direction:
+   *  the raw scan point jitters with the drone's gaze and the travel dot
+   *  product wobbles through zero at turns — chased raw, the camera slaloms. */
+  private followU: number | null = null;
+  private travelSign = 1;
+  private lastDt = 1 / 60;
+  /** Placement the final scene was loaded with, for ?pick=on measuring. */
+  private finalPlacement: ChunkPlacement | null = null;
   // Recent poses of the active drone, from telemetry, for a damped chase view.
   private readonly history: Array<{ t: number; pos: THREE.Vector3; forward: THREE.Vector3 }> = [];
   private userDragging = false;
@@ -210,9 +334,14 @@ export class StatusViewer {
     this.scene.add(this.points);
     this.splatReveal = null;
     this.splatCapable = useSplat;
-    this.sceneBounds = sceneData.bounds.clone();
 
     this.resize();
+  }
+
+  /** Tell the board where the final reconstruction lives. Without this the
+   *  stream is bookkeeping only and the scaffold stays up. */
+  configureRecon(source: ReconSource): void {
+    this.recon = source;
   }
 
   /**
@@ -233,7 +362,10 @@ export class StatusViewer {
     const pinGeom = new THREE.ConeGeometry(0.5, 1.6, 12);
     const pinMat = new THREE.MeshStandardMaterial({ color, emissive: color, emissiveIntensity: 0.6 });
     const pin = new THREE.Mesh(pinGeom, pinMat);
-    pin.position.y = 0.8;
+    // Marker position is at the FEET; the pin floats well above a standing
+    // person's head (a cone at body height reads as stabbing them, not
+    // marking them — and the reconstruction smears people taller than life).
+    pin.position.y = 8.5;
     pin.rotation.x = Math.PI;
     group.add(pin);
 
@@ -256,37 +388,73 @@ export class StatusViewer {
     return { det, segment, group, ring, visible: false };
   }
 
-  /** The board's one visibility rule, asked per segment. Before any chunk has
-   *  arrived nothing is revealed; with the splat renderer off (?render=points)
-   *  the scaffold IS the scene, so everything is. */
+  /** Gate for DETECTIONS, asked per segment: not first arrival but the LAST
+   *  refinement level — a '구조 대상자' card popping up seconds after the drone
+   *  passes, while the segment is still a rough shell, reads as fake. The
+   *  finding surfaces when the segment finishes processing. (?render=points
+   *  has no stream, so everything counts as done.) */
   private isSegmentArrived(segment: number): boolean {
     if (!this.splatCapable) return true;
     const scenes = this.splat?.scenes;
     if (!scenes) return false;
-    for (const s of scenes) if (s.segment === segment) return true;
+    for (const s of scenes) if (s.segment === segment && s.final) return true;
     return false;
   }
 
   update(dt: number): void {
     const now = state.time;
+    this.lastDt = dt;
 
-    // Patch the splat shader whenever its material appears OR is replaced: the
-    // library rebuilds the mesh (and material) each time a superseded level is
-    // dropped, which would otherwise lose the floater clip + reveal mask.
+    // Patch the splat shader whenever its material appears OR is replaced (the
+    // library can rebuild the mesh), so the reveal mask is never lost.
     if (this.splatReveal && this.splat) {
       const mat = this.splat.material;
       if (mat && mat !== this.attachedMaterial) {
         this.splatReveal.attachTo(mat);
         this.splatReveal.setRevealEnabled(this.splatMaskEnabled);
-        this.splatReveal.setClipEnabled(this.splatClipEnabled);
         this.attachedMaterial = mat;
       }
     }
 
-    // Per-segment fade-in. Timed on the real clock (performance.now()), not the
-    // stream clock: it is an animation, not a piece of mission state.
-    if (this.splatReveal && this.splat) {
-      this.splatReveal.update(this.splat.scenes, performance.now());
+    // Per-segment fade-in. Timed on the render clock: it is an animation, not
+    // a piece of mission state.
+    this.splatReveal?.update(dt);
+
+    // Once the final scene is up, read its floor/roof off the splats. A roofed
+    // scene flips the follow camera into interior mode (see followPose).
+    if (this.interiorEyeY === null && this.splat?.status === 'ready') {
+      const samples = this.splat.sampleCenters(9000);
+      const ys = samples.map((p) => p[1]).sort((a, b) => a - b);
+      if (ys.length > 200) {
+        // Floor and roof are the two DENSEST horizontal sheets, not the low
+        // and high percentiles: the glossy floor reconstructs its own mirror
+        // image metres BELOW itself, and a percentile floor dives into that
+        // reflection world — the camera then walks on the real floor's level.
+        const lo = ys[Math.floor(ys.length * 0.02)];
+        const hi = ys[Math.floor(ys.length * 0.98)];
+        const bin = 0.4;
+        const n = Math.max(4, Math.ceil((hi - lo) / bin));
+        const counts = new Array<number>(n).fill(0);
+        for (const y of ys) {
+          const i = Math.floor((y - lo) / bin);
+          if (i >= 0 && i < n) counts[i]++;
+        }
+        const mid = ys[Math.floor(ys.length / 2)];
+        let floorBin = 0;
+        let roofBin = n - 1;
+        for (let i = 0; i < n; i++) {
+          const c = lo + (i + 0.5) * bin;
+          if (c < mid && counts[i] > counts[floorBin]) floorBin = i;
+          if (c >= mid && counts[i] > (counts[roofBin] ?? -1)) roofBin = i;
+        }
+        const floor = lo + (floorBin + 0.5) * bin;
+        const roof = lo + (roofBin + 0.5) * bin;
+        if (roof - floor < 40 && roof - floor > 2.5) {
+          this.interiorEyeY = Math.min(floor + 2.2, roof - 1.2);
+          this.floorY = floor;
+          this.corridorPath = buildCorridorPath(samples);
+        }
+      }
     }
 
     // Marker visibility — gated on the arrival of the segment the detection was
@@ -329,7 +497,8 @@ export class StatusViewer {
     const desired = focused ? this.focusPose(focused) : this.followPose();
 
     // Follow (or ease to focus) unless the operator is dragging to look around.
-    const dragging = this.userDragging || performance.now() < this.dragGraceUntil;
+    const dragging =
+      this.cameraHeld || this.userDragging || performance.now() < this.dragGraceUntil;
     if (!dragging && desired) {
       const k = 1 - Math.exp(-2.5 * dt);
       this.camera.position.lerp(desired.pos, k);
@@ -341,61 +510,45 @@ export class StatusViewer {
   }
 
   /**
-   * Progressive splat ingestion from the server: add one chunk placed by its
-   * align transform, fit into the same frame as the procedural cloud so
-   * reveal/markers/camera stay aligned. Creates the underlying SplatScene
-   * lazily on the first chunk. Callers should serialize (await) calls.
+   * One chunk of the delay-pattern stream arrived.
+   *
+   * The FIRST chunk does the heavy lifting: its alignment places the whole
+   * final scene (every chunk of one flight shares a frame — the segment PLYs
+   * are slabs of this exact file), the manifest geometry mapped through that
+   * same placement anchors the reveal regions, and the scaffold comes down.
+   * Every chunk, first included, is then bookkeeping: note the arrival, fade
+   * the slab in.
    */
-  ingestSplatChunk(chunk: SplatChunkInput): Promise<void> {
+  ingestSplatChunk(chunk: SplatChunkInput): void {
     if (!this.splat) {
       this.splat = new SplatScene(this.scene);
-      if (this.splatCapable) {
-        // Real geometry is on its way in — drop the scaffold and hand visibility
-        // over to arrival.
+      if (this.splatCapable && this.recon) {
+        // Real geometry is on its way in — drop the scaffold and hand
+        // visibility over to arrival.
         this.scene.remove(this.points);
         this.geometryArrived = true;
-        this.splatReveal = new SplatReveal(this.sceneBounds);
+        this.splatReveal = new SplatReveal();
+        this.splatReveal.setRevealEnabled(this.splatMaskEnabled);
+
+        // The reveal regions in world space: the manifest's split geometry
+        // pushed through the same placement that positions the scene
+        // (world = R * (s * asset) + t). Boundaries are along-axis distances,
+        // so only the scale touches them.
+        const q = new THREE.Quaternion(...chunk.align.rotation);
+        const s = chunk.align.scale[0];
+        const origin = new THREE.Vector3(...this.recon.origin)
+          .multiplyScalar(s)
+          .applyQuaternion(q)
+          .add(new THREE.Vector3(...chunk.align.position));
+        const axis = new THREE.Vector3(...this.recon.axis).applyQuaternion(q);
+        this.splatReveal.setFrame(origin, axis, this.recon.boundaries.map((b) => b * s));
+
+        this.finalPlacement = chunk.align;
+        void this.splat.loadFinal(this.recon.url, chunk.align);
       }
     }
-    return this.splat.addChunk(chunk).then(() => this.refitClip());
-  }
-
-  /**
-   * Refit the floater clip to the geometry that has arrived.
-   *
-   * The clip exists to throw away the far background gaussians every photo
-   * reconstruction carries. It starts from the placeholder cloud, because at
-   * boot that is all there is — but chunks are placed on the ground the
-   * aircraft flew, which can be hundreds of metres of route. A box left at the
-   * placeholder's size discards all of them: a board holding a quarter of a
-   * million splats and drawing an empty screen, which looks exactly like
-   * geometry that never arrived.
-   *
-   * Fit it to the splats themselves rather than to the chunk anchors: a chunk
-   * covers the stretch it was flown over, so its geometry reaches well past the
-   * point it is anchored at, and a box around the anchors cut three quarters of
-   * it away (measured). Percentiles, not extremes — throwing out the outliers
-   * IS the job.
-   */
-  private refitClip(): void {
-    if (!this.splatReveal || !this.splat) return;
-    const samples = this.splat.sampleCenters(4000);
-    if (samples.length < 32) return;
-
-    const axis = (i: number): [number, number] => {
-      const vs = samples.map((p) => p[i]).sort((a, b) => a - b);
-      const lo = vs[Math.floor((vs.length - 1) * 0.02)];
-      const hi = vs[Math.floor((vs.length - 1) * 0.98)];
-      const pad = Math.max(CLIP_MIN_PAD, (hi - lo) * 0.15);
-      return [lo - pad, hi + pad];
-    };
-    const [x0, x1] = axis(0);
-    const [y0, y1] = axis(1);
-    const [z0, z1] = axis(2);
-    this.splatReveal.setClip(
-      new THREE.Vector3(x0, y0, z0),
-      new THREE.Vector3(x1, y1, z1),
-    );
+    this.splat.noteChunk(chunk);
+    this.splatReveal?.noteArrival(chunk.segment, chunk.level, chunk.final);
   }
 
   /** True once the first chunk has landed — the board's waiting state ends here. */
@@ -403,17 +556,11 @@ export class StatusViewer {
     return this.geometryArrived;
   }
 
-  /** Toggle the per-segment fade. When off, arrived chunks render at full
-   *  opacity immediately (?reveal=off). Arrival still decides what exists. */
+  /** Toggle the per-segment reveal. When off (?reveal=off) the whole loaded
+   *  scene renders at full opacity — the debug view of the raw geometry. */
   setSplatMask(enabled: boolean): void {
     this.splatMaskEnabled = enabled;
     this.splatReveal?.setRevealEnabled(enabled);
-  }
-
-  /** Turn the floater clip on. Off by default — see splatReveal.ts. */
-  setSplatClip(enabled: boolean): void {
-    this.splatClipEnabled = enabled;
-    this.splatReveal?.setClipEnabled(enabled);
   }
 
   /**
@@ -427,6 +574,82 @@ export class StatusViewer {
     this.camera.lookAt(at);
     this.controls.update();
     // Hold it: the follow camera would drag it back within a frame.
+    this.userDragging = true;
+  }
+
+  /**
+   * ?pick=on measuring: which splat was clicked, in world AND asset coords.
+   * The asset coordinate is what people.json wants — this is how a person seen
+   * in the reconstruction becomes a detection anchored to them.
+   */
+  pickAt(
+    ndcX: number,
+    ndcY: number,
+  ): { world: [number, number, number]; asset: [number, number, number] | null } | null {
+    if (!this.splat) return null;
+    const dir = new THREE.Vector3(ndcX, ndcY, 0.5)
+      .unproject(this.camera)
+      .sub(this.camera.position)
+      .normalize();
+    const hit = this.splat.pick(this.camera.position, dir);
+    if (!hit) return null;
+    let asset: [number, number, number] | null = null;
+    if (this.finalPlacement) {
+      const q = new THREE.Quaternion(...this.finalPlacement.rotation);
+      const p = new THREE.Vector3(...hit.point)
+        .sub(new THREE.Vector3(...this.finalPlacement.position))
+        .applyQuaternion(q.invert())
+        .divideScalar(this.finalPlacement.scale[0] || 1);
+      asset = [p.x, p.y, p.z];
+    }
+    return { world: hit.point, asset };
+  }
+
+  /** Hand the camera fully to the operator: no follow, near-unlimited zoom.
+   *  ?pick=on uses this — you cannot click a person the camera keeps
+   *  yanking you away from. */
+  freeCamera(): void {
+    this.cameraHeld = true;
+    this.controls.minDistance = 0.3;
+    this.controls.maxDistance = 5000;
+  }
+
+  /** Drop the camera INSIDE the reconstructed corridor at eye height, at the
+   *  start of the built strip looking along it. False until the scene has
+   *  loaded far enough to know where "inside" is. */
+  parkInside(): boolean {
+    if (this.interiorEyeY === null || !this.splat) return false;
+    const path = this.corridorPath;
+    if (path) {
+      // Start of the corridor's own centerline, looking down it.
+      const a = corridorPointAt(path, path.u0 + path.du);
+      const b = corridorPointAt(path, path.u0 + path.du + 12);
+      const pos = new THREE.Vector3(a.x, this.interiorEyeY, a.y);
+      const target = new THREE.Vector3(b.x, this.interiorEyeY - 0.6, b.y);
+      this.debugCamera(pos, target);
+      return true;
+    }
+    const chunks = this.splat.loadedChunks();
+    if (chunks.length === 0) return false;
+    const a = chunks[0].center;
+    const b = chunks[Math.min(1, chunks.length - 1)].center;
+    const dir = new THREE.Vector3(b[0] - a[0], 0, b[2] - a[2]);
+    if (dir.lengthSq() < 1e-6) dir.set(1, 0, 0);
+    dir.normalize();
+    const pos = new THREE.Vector3(a[0], this.interiorEyeY, a[2]);
+    const target = pos.clone().addScaledVector(dir, 12);
+    target.y = this.interiorEyeY - 0.6;
+    this.debugCamera(pos, target);
+    return true;
+  }
+
+  /** Park the camera anywhere, looking anywhere — the checks judge the scene's
+   *  ORIENTATION from views the follow camera never takes (horizon, side-on). */
+  debugCamera(pos: THREE.Vector3, target: THREE.Vector3): void {
+    this.camera.position.copy(pos);
+    this.controls.target.copy(target);
+    this.camera.lookAt(target);
+    this.controls.update();
     this.userDragging = true;
   }
 
@@ -453,17 +676,15 @@ export class StatusViewer {
       segmentLevels: this.splat?.segmentLevels ?? {},
       scenes: (this.splat?.scenes ?? []).map((s) => `seg${s.segment}/lv${s.level}`),
       geometryArrived: this.geometryArrived,
-      // Why an empty screen is empty: the frustum, the fog and the floater clip
-      // each throw geometry away silently, and from a screenshot they look the
-      // same as geometry that never arrived.
+      // Why an empty screen is empty: the frustum, the fog and the reveal each
+      // throw geometry away silently, and from a screenshot they look the same
+      // as geometry that never arrived.
       camFar: Math.round(this.camera.far),
       fog:
         this.scene.fog instanceof THREE.Fog
           ? [Math.round(this.scene.fog.near), Math.round(this.scene.fog.far)]
           : null,
-      clip: this.splatReveal
-        ? this.splatReveal.debugClip().map((v) => v.toArray().map((n) => Math.round(n)))
-        : null,
+      reveal: this.splatReveal?.fadeState ?? null,
       chunkCenters: (this.splat?.loadedChunks() ?? []).map((c) =>
         c.center.map((n) => Math.round(n)),
       ),
@@ -546,6 +767,47 @@ export class StatusViewer {
     t = Math.min(Math.max(t, 0), this.followDist * 3);
     const groundHit = P.clone().addScaledVector(F, t);
 
+    // INTERIOR scene: walk the camera through the corridor at eye height,
+    // trailing the spot being scanned, instead of hovering over the roof —
+    // from above, an indoor reconstruction shows nothing but its roof. The
+    // camera rides the corridor's own CENTERLINE, not the flight line: the
+    // aircraft hugged a wall, and a camera on its track sees only plaster.
+    if (this.interiorEyeY !== null) {
+      const dist = 14;
+      let pos: THREE.Vector3;
+      let target: THREE.Vector3;
+      const path = this.corridorPath;
+      if (path) {
+        // Along-position from the AIRCRAFT, not its gaze ray — the gaze tilts
+        // with every telemetry frame and the jitter read as camera sway.
+        const uHit = (P.x - path.mean.x) * path.dir.x + (P.z - path.mean.y) * path.dir.y;
+        // Ease the along-position and latch the travel direction (flip only
+        // on a decisive heading, not while the dot wobbles through zero).
+        if (this.followU === null) this.followU = uHit;
+        this.followU += (uHit - this.followU) * (1 - Math.exp(-1.5 * this.lastDt));
+        const dot = headingXZ.x * path.dir.x + headingXZ.z * path.dir.y;
+        if (Math.abs(dot) > 0.35) this.travelSign = Math.sign(dot);
+        const t2 = corridorPointAt(path, this.followU);
+        const p2 = corridorPointAt(path, this.followU - this.travelSign * dist);
+        target = new THREE.Vector3(t2.x, this.interiorEyeY - 0.5, t2.y);
+        pos = new THREE.Vector3(p2.x, this.interiorEyeY, p2.y);
+      } else {
+        target = groundHit.clone();
+        target.y = this.interiorEyeY - 0.5;
+        pos = target.clone().addScaledVector(headingXZ, -dist);
+        pos.y = this.interiorEyeY;
+      }
+      if (this.scene.fog instanceof THREE.Fog) {
+        this.scene.fog.near = 40;
+        this.scene.fog.far = 260;
+      }
+      if (this.camera.far < 500) {
+        this.camera.far = 500;
+        this.camera.updateProjectionMatrix();
+      }
+      return { pos, target };
+    }
+
     // The reconstruction TRAILS the aircraft — a segment is only rebuilt once
     // it has been flown — so a camera framed on the aircraft alone sits between
     // the operator and everything that has been built, showing them unscanned
@@ -577,16 +839,61 @@ export class StatusViewer {
     return { pos, target };
   }
 
+  /** The corridor's direction where `p` is, in FLIGHT order: the segment
+   *  chunk anchors are strung along the route the capture was flown, so the
+   *  vector between the two nearest anchors IS the capture direction there. */
+  private corridorAxisAt(p: THREE.Vector3): THREE.Vector3 {
+    const chunks = this.splat?.loadedChunks() ?? [];
+    const bySeg = [...chunks].sort((a, b) => a.segment - b.segment);
+    if (bySeg.length >= 2) {
+      let k = 0;
+      let best = Infinity;
+      for (let i = 0; i < bySeg.length; i++) {
+        const c = bySeg[i].center;
+        const d = (c[0] - p.x) ** 2 + (c[2] - p.z) ** 2;
+        if (d < best) {
+          best = d;
+          k = i;
+        }
+      }
+      const a = bySeg[Math.max(0, k - 1)].center;
+      const b = bySeg[Math.min(bySeg.length - 1, k + 1)].center;
+      const dir = new THREE.Vector3(b[0] - a[0], 0, b[2] - a[2]);
+      if (dir.lengthSq() > 1e-6) return dir.normalize();
+    }
+    const h = this.history[this.history.length - 1];
+    const dir = h ? new THREE.Vector3(h.forward.x, 0, h.forward.z) : new THREE.Vector3(1, 0, 0);
+    return dir.lengthSq() > 1e-6 ? dir.normalize() : new THREE.Vector3(1, 0, 0);
+  }
+
+  /**
+   * Approach a detection at EYE level, ALONG the corridor — never crosswise
+   * and never from above. The capture was flown down the corridor, so that
+   * axis is the only direction the scene is meant to be read from; a camera
+   * stepping off it shows the unreconstructed gap between the walls.
+   */
   private focusPose(m: MarkerVisual): { pos: THREE.Vector3; target: THREE.Vector3 } {
-    const det = new THREE.Vector3(m.det.pos[0], m.det.pos[1], m.det.pos[2]);
-    const dir = det.clone().sub(this.camera.position);
-    if (dir.lengthSq() < 1e-6) dir.set(0, 0, 1);
-    dir.normalize();
-    const pos = det
-      .clone()
-      .addScaledVector(dir, -CONFIG.camera.focusDistance)
-      .addScaledVector(STATUS_UP, CONFIG.camera.focusDistance * 0.35);
-    return { pos, target: det };
+    const feet = new THREE.Vector3(m.det.pos[0], m.det.pos[1], m.det.pos[2]);
+    const eyeY = this.interiorEyeY ?? feet.y + 1.7;
+    // Look at the person's body, not the pin above them.
+    const target = feet.clone();
+    target.y = feet.y + 1.1;
+    const axis = this.corridorAxisAt(feet);
+    const back = CONFIG.camera.focusDistance * 0.7;
+    let pos: THREE.Vector3;
+    const path = this.corridorPath;
+    if (path) {
+      // Stand on the corridor CENTERLINE behind the person (in flight order):
+      // backing straight off the person can put the camera inside a wall.
+      const uFeet = (feet.x - path.mean.x) * path.dir.x + (feet.z - path.mean.y) * path.dir.y;
+      const sign = Math.sign(axis.x * path.dir.x + axis.z * path.dir.y) || 1;
+      const p2 = corridorPointAt(path, uFeet - sign * back);
+      pos = new THREE.Vector3(p2.x, eyeY, p2.y);
+    } else {
+      pos = feet.clone().addScaledVector(axis, -back);
+      pos.y = eyeY;
+    }
+    return { pos, target };
   }
 
   resize(): void {

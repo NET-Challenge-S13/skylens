@@ -36,7 +36,11 @@ import { gpsToScene } from '../shared/geo.ts';
 import { IDENTITY_ALIGN } from '../shared/protocol.ts';
 import type { DroneTelemetry } from '../shared/protocol.ts';
 import type { DetectionRuntime } from '../shared/viewer/types.ts';
-import { loadScene, resolveSplatUrl } from '../shared/viewer/sources/sceneSource.ts';
+import {
+  loadScene,
+  resolveSegmentManifest,
+  resolveSplatUrl,
+} from '../shared/viewer/sources/sceneSource.ts';
 import { StatusViewer } from './statusview/statusViewer.ts';
 import { initUI } from './ui/overlay.ts';
 import { createLoadingScreen } from '../shared/viewer/ui/loadingScreen.ts';
@@ -79,13 +83,32 @@ async function main(): Promise<void> {
   if (revealQ === 'on') status.setSplatMask(true);
   else if (revealQ === 'off') status.setSplatMask(false);
 
-  // ?clip=on re-enables the floater clip, which is off by default because it
-  // has been discarding real geometry (splatReveal.ts).
-  if (new URLSearchParams(window.location.search).get('clip') === 'on') {
-    status.setSplatClip(true);
-  }
-
   if (renderPoints) status.revealAll();
+
+  // The final reconstruction + the manifest that cut it into segments. The
+  // stream's chunks are slabs of this one file, so the board renders the file
+  // and lets arrivals reveal it slab by slab (statusViewer.ts). Without a
+  // manifest (non-demo scene) there is no final asset and the scaffold stays.
+  if (!renderPoints && loaded.splat) {
+    const manifestUrl = resolveSegmentManifest();
+    if (manifestUrl) {
+      try {
+        const mf = (await (await fetch(manifestUrl)).json()) as {
+          axis: [number, number, number];
+          origin: [number, number, number];
+          boundaries: number[];
+        };
+        status.configureRecon({
+          url: CONFIG.splat.demoFinal,
+          axis: mf.axis,
+          origin: mf.origin,
+          boundaries: mf.boundaries,
+        });
+      } catch (err) {
+        console.warn('[status] segment manifest unavailable — board stays on scaffold:', err);
+      }
+    }
+  }
 
   // --- The one data source ------------------------------------------------
   const relay = createRelayClient();
@@ -134,14 +157,14 @@ async function main(): Promise<void> {
         };
         center = [...base];
       }
-      // The viewer owns the ingest queue: it runs loads one at a time and drops
-      // levels that a later refinement has already overtaken.
-      void status.ingestSplatChunk({
-        url: chunk.url,
+      // The chunk's own PLY is not fetched: the first arrival places and loads
+      // the final scene, and every arrival advances the reveal (statusViewer).
+      status.ingestSplatChunk({
         align,
         center,
         segment: chunk.segment,
         level: chunk.level,
+        final: chunk.final,
       });
     });
   }
@@ -195,6 +218,43 @@ async function main(): Promise<void> {
     drone.forward.set(Math.sin(rad), -0.35, -Math.cos(rad)).normalize();
     drone.quat.setFromAxisAngle(new THREE.Vector3(0, 1, 0), -rad);
   });
+
+  // ?pick=on: click the reconstruction to read the ASSET coordinate under the
+  // cursor — how a person visible in the scene gets measured into people.json.
+  if (new URLSearchParams(window.location.search).get('pick') === 'on') {
+    // Measuring needs a camera the operator OWNS — the follow yanks the view
+    // back to the drone within seconds, and the default zoom floor keeps the
+    // person a speck. And it has to START inside the building: the scene is an
+    // interior, so a camera parked outside shows a roof you cannot zoom past.
+    status.freeCamera();
+    const goInside = window.setInterval(() => {
+      if (status.parkInside()) window.clearInterval(goInside);
+    }, 500);
+    const canvas = getCanvas('status-view');
+    const readout = document.createElement('div');
+    readout.style.cssText =
+      'position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:50;' +
+      'background:rgba(10,14,20,0.9);color:#9fe8ff;padding:8px 14px;border-radius:6px;' +
+      'font:12px/1.5 monospace;pointer-events:none;';
+    readout.textContent = 'pick=on · 복원 지오메트리를 클릭하면 좌표가 표시됩니다';
+    document.body.appendChild(readout);
+    canvas.addEventListener('click', (ev) => {
+      const r = canvas.getBoundingClientRect();
+      const hit = status.pickAt(
+        ((ev.clientX - r.left) / r.width) * 2 - 1,
+        -(((ev.clientY - r.top) / r.height) * 2 - 1),
+      );
+      if (!hit) {
+        readout.textContent = '히트 없음 — 지오메트리 위를 클릭하세요';
+        return;
+      }
+      const fmt = (v: number[]): string => v.map((n) => n.toFixed(2)).join(', ');
+      const line = `asset [${hit.asset ? fmt(hit.asset) : '?'}]  world [${fmt(hit.world)}]`;
+      readout.textContent = line;
+      console.log('[pick]', line);
+      void navigator.clipboard?.writeText(hit.asset ? fmt(hit.asset) : fmt(hit.world));
+    });
+  }
 
   const pane = document.querySelector('.pane');
   if (pane instanceof HTMLElement) mountPaneLabel(pane, '현황판 · 실시간 3D 복원', 'status');

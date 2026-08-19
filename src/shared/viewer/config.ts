@@ -57,6 +57,10 @@ export const CONFIG = {
     /** Apply the progressive reveal MASK to the splat so it blooms in as drones
      *  scan. Override per-page with ?reveal=on / ?reveal=off. */
     splatMask: true,
+    /** How far the slab AHEAD must have faded in (0..1) before the next slab
+     *  may start appearing — the reveal then advances down the corridor
+     *  instead of the whole strip flickering in at assorted opacities. */
+    chainGate: 0.78,
   },
 
   // Drone path following / manual control (§4.2)
@@ -101,6 +105,13 @@ export const CONFIG = {
      *  viewers derive the shared point cloud + fit transform from it while the
      *  real geometry streams in segment by segment (see delayPattern). */
     demoPreview: '/res/static/demo/step00250_light.ply',
+    /**
+     * Final-quality export of the same capture (30k steps, aligned into the
+     * segment frame by align_scene.py). The situation board renders THIS one
+     * file and uses the delay-pattern stream only to reveal it segment by
+     * segment — the streamed PLYs are cuts of it.
+     */
+    demoFinal: '/res/static/demo/step30000_final.ply',
   },
 
   // Delay-pattern reconstruction stream (interim report Ⅱ-3-다).

@@ -1,180 +1,186 @@
-// Splat shader effects for the situation board: (1) a floater CLIP that discards
-// splats outside the robust scene box — photo/SfM reconstructions carry a lot of
-// far background gaussians that otherwise fog up the view — and (2) the
-// progressive REVEAL, which is now driven by ARRIVAL.
+// Progressive REVEAL over the single final splat scene.
 //
-// WHAT CHANGED AND WHY. This used to open a top-down coverage mask from
-// `state.visited`, the control tower's simulated drone trail. That made two
-// independent things decide whether a piece of the scene was visible: the trail
-// said "the drone has been here" while the stream said "this segment has been
-// reconstructed". They could disagree in both directions — a chunk could land
-// inside a still-masked area (reconstructed geometry held back by a simulation),
-// or the mask could open over a segment that had not arrived (a promise of
-// geometry that is not there). COMPONENTS.md §8 settles it: "보인다 = 복원되어
-// 도착했다"가 하나의 진실이 된다.
+// The board renders ONE static scene — the final-quality reconstruction — and
+// the delay-pattern stream drives what of it is VISIBLE: a segment of the
+// scene fades in when the core reports that segment reconstructed, and
+// brightens as refinement levels land. The geometry itself never changes;
+// arrival messages only move opacity. (The previous design loaded each
+// segment × level PLY into a dynamic multi-scene mesh; the constant
+// add/remove churn is what kept breaking rendering, and the geometry it
+// streamed was just cuts of the very file this renders.)
 //
-// So there is no mask any more. The splat mesh only ever contains chunks that
-// HAVE arrived, which makes visibility automatic; what is left for this class is
-// the nicety of fading each segment in over CONFIG.reveal.fadeSeconds instead of
-// popping it. The fade is per SEGMENT, keyed on the splat's `sceneIndex` — the
-// library exposes it in the vertex shader for dynamic scenes, and SplatScene
-// keeps its scene order aligned with it.
+// Segments are SLABS of the scene along its principal axis — exactly how
+// split_segments.py cut the assets — so a splat's segment is recovered in the
+// vertex shader from its world position: project onto the axis, compare with
+// the cut boundaries. Axis/origin/boundaries come from the manifest, mapped
+// into world space by the same placement that positioned the scene.
 
 import * as THREE from 'three';
 import { CONFIG } from '../../shared/viewer/config';
-import type { LoadedScene } from './splatScene.ts';
 
-/** Uniform array size. The delay pattern holds one scene per segment plus at
- *  most one in-flight refinement, so this is far above anything real. */
-const MAX_SCENES = 64;
+/** Uniform array sizes. The demo cuts the scene into 4 slabs; leave headroom. */
+const MAX_REGIONS = 8;
+
+/** How solid a slab renders per refinement level — the "delay pattern feel":
+ *  a fresh segment appears translucent and firms up as levels land. */
+function alphaForLevel(level: number, final: boolean): number {
+  if (final || level >= 4) return 1.0;
+  if (level >= 3) return 0.95;
+  if (level >= 2) return 0.8;
+  return 0.62;
+}
 
 export class SplatReveal {
-  private readonly fades = new Float32Array(MAX_SCENES);
+  private readonly fades = new Float32Array(MAX_REGIONS);
+  private readonly targets = new Float32Array(MAX_REGIONS);
+  /** What each slab WANTS to show (from arrivals). A slab only gets to fade
+   *  once the slab ahead of it is substantially done — the delay pattern
+   *  reads as the reconstruction advancing down the corridor, not as the
+   *  whole strip flickering in at assorted opacities. */
+  private readonly pending = new Float32Array(MAX_REGIONS);
+  private regionCount = 1;
 
-  private readonly uniforms: {
-    uSceneFade: { value: Float32Array };
-    uRevealEnabled: { value: number };
-    uClipMin: { value: THREE.Vector3 };
-    uClipMax: { value: THREE.Vector3 };
-    uClipEnabled: { value: number };
+  private readonly uniforms = {
+    uFade: { value: this.fades },
+    uRevealEnabled: { value: 1 },
+    uAxis: { value: new THREE.Vector3(1, 0, 0) },
+    uOrigin: { value: new THREE.Vector3() },
+    uBounds: { value: new Float32Array(MAX_REGIONS - 1) },
+    uRegionCount: { value: 1 },
   };
 
-  constructor(bounds: THREE.Box3) {
-    const size = new THREE.Vector3();
-    bounds.getSize(size);
-    // Clip box: the robust building bounds with a little headroom.
-    const pad = new THREE.Vector3(size.x, size.y, size.z).multiplyScalar(0.06);
-
-    this.uniforms = {
-      uSceneFade: { value: this.fades },
-      uRevealEnabled: { value: 1 },
-      uClipMin: { value: bounds.min.clone().sub(pad) },
-      uClipMax: { value: bounds.max.clone().add(pad) },
-      // OFF by default. This filter exists to drop the far background gaussians
-      // a photo reconstruction carries, and it was written against a scene that
-      // sat near the origin. Once chunks are placed on the ground the aircraft
-      // flew, it has thrown away real geometry — an empty board is far worse
-      // than a few floaters, so it stays off until it can be shown to cut only
-      // what it is meant to. `?clip=on` turns it back on for that work.
-      uClipEnabled: { value: 0 },
-    };
-  }
-
   /**
-   * Move the floater clip to the ground the mission actually covers.
+   * Anchor the reveal regions to the placed scene.
    *
-   * The box starts from the placeholder cloud, which is all there is before any
-   * geometry arrives. Once chunks are placed along a route they can span
-   * hundreds of metres, and a box sized for the placeholder discards every one
-   * of them — the board then holds a quarter of a million splats and draws
-   * nothing, which looks exactly like geometry that never arrived.
+   * `origin`/`axis` are the manifest's split geometry brought into WORLD space
+   * by the scene placement; `boundaries` are the manifest's cut positions —
+   * projections along the axis RELATIVE to the origin, which a rigid placement
+   * leaves untouched (only a scale multiplies them, and the caller applies it).
    */
-  setClip(min: THREE.Vector3, max: THREE.Vector3): void {
-    this.uniforms.uClipMin.value.copy(min);
-    this.uniforms.uClipMax.value.copy(max);
+  setFrame(origin: THREE.Vector3, axis: THREE.Vector3, boundaries: number[]): void {
+    this.uniforms.uOrigin.value.copy(origin);
+    this.uniforms.uAxis.value.copy(axis).normalize();
+    const n = Math.min(boundaries.length, MAX_REGIONS - 1);
+    for (let i = 0; i < n; i++) this.uniforms.uBounds.value[i] = boundaries[i];
+    this.regionCount = n + 1;
+    this.uniforms.uRegionCount.value = this.regionCount;
   }
 
-  /** Turn the floater clip on (?clip=on). Off by default — see the constructor. */
-  setClipEnabled(on: boolean): void {
-    this.uniforms.uClipEnabled.value = on ? 1 : 0;
+  /** Number of slabs the scene is cut into (from the manifest). */
+  get regions(): number {
+    return this.regionCount;
   }
 
-  /** The clip box in force, for working out why a full scene draws nothing. */
-  debugClip(): [THREE.Vector3, THREE.Vector3] {
-    return [this.uniforms.uClipMin.value, this.uniforms.uClipMax.value];
+  /** A segment's chunk has landed: queue that slab's fade. Core segments
+   *  beyond the asset count wrap, mirroring the server's asset pick. */
+  noteArrival(coreSegment: number, level: number, final: boolean): void {
+    const region = coreSegment % this.regionCount;
+    const target = alphaForLevel(level, final);
+    if (target > this.pending[region]) this.pending[region] = target;
   }
 
-  /** `?reveal=off` renders every arrived chunk at full opacity immediately. */
+  /** `?reveal=off` renders the whole arrived scene at full opacity. */
   setRevealEnabled(on: boolean): void {
     this.uniforms.uRevealEnabled.value = on ? 1 : 0;
   }
 
-  /**
-   * Advance the per-segment fades. `scenes` is SplatScene's scene-index-ordered
-   * list, so entry i is the splat mesh's scene i; `now` is performance.now().
-   */
-  update(scenes: readonly LoadedScene[], now: number): void {
-    const fadeMs = Math.max(1, CONFIG.reveal.fadeSeconds * 1000);
-    const n = Math.min(scenes.length, MAX_SCENES);
-    for (let i = 0; i < n; i++) {
-      this.fades[i] = Math.min(1, Math.max(0, (now - scenes[i].arrivedAt) / fadeMs));
+  /** Ease each slab toward its target opacity. `dt` in seconds. */
+  update(dt: number): void {
+    // Chain: a slab's queued reveal is released only once the nearest slab
+    // AHEAD of it (lower index = earlier in the flight) has faded most of the
+    // way in. Arrivals are not delayed — only their appearance is ordered.
+    for (let i = 0; i < this.regionCount; i++) {
+      if (this.pending[i] <= this.targets[i]) continue;
+      let prev = i - 1;
+      while (prev >= 0 && this.pending[prev] <= 0) prev--;
+      if (prev < 0 || this.fades[prev] >= CONFIG.reveal.chainGate) {
+        this.targets[i] = this.pending[i];
+      }
     }
-    // Scenes that have been removed (a superseded level) must not leave a stale
-    // fade behind for whatever lands at that index next.
-    for (let i = n; i < MAX_SCENES; i++) this.fades[i] = 0;
+    const step = dt / Math.max(0.05, CONFIG.reveal.fadeSeconds);
+    for (let i = 0; i < MAX_REGIONS; i++) {
+      const diff = this.targets[i] - this.fades[i];
+      if (diff <= 0) continue;
+      this.fades[i] = Math.min(this.targets[i], this.fades[i] + step);
+    }
   }
 
-  /** True once `segment`'s chunk has landed — the board's single visibility
-   *  truth, reused to gate detection markers on the segment they were found in. */
-  isSegmentRevealed(scenes: readonly LoadedScene[], segment: number): boolean {
-    return scenes.some((s) => s.segment === segment);
+  /** Per-slab opacity now, for the checks. */
+  get fadeState(): { fades: number[]; targets: number[] } {
+    const n = this.regionCount;
+    return {
+      fades: Array.from(this.fades.slice(0, n)),
+      targets: Array.from(this.targets.slice(0, n)),
+    };
   }
 
-  /** Patch a splat ShaderMaterial: clip floaters (always) + per-segment fade. */
+  /**
+   * Patch the splat ShaderMaterial with the reveal.
+   *
+   * The patch is string replacement against the library's built shader, so it
+   * can silently rot when the library changes. Guard: if any anchor fails to
+   * match, DON'T patch at all — an unpatched board shows the full scene, a
+   * half-patched one links no program and shows nothing. Only the VERTEX
+   * shader is touched (the fade multiplies into vColor.a, which the fragment
+   * already applies), halving the surface that can go stale.
+   */
   attachTo(material: THREE.ShaderMaterial): void {
     const store = material as THREE.ShaderMaterial & { userData: { splatPatched?: boolean } };
     if (store.userData.splatPatched) return;
     store.userData.splatPatched = true;
 
+    const DECL_ANCHOR = 'attribute uint splatIndex;';
+    const COLOR_ANCHOR = 'vColor = uintToRGBAVec(sampledCenterColor.r);';
+
     const prev = material.onBeforeCompile;
     material.onBeforeCompile = (shader, renderer) => {
       prev?.(shader, renderer);
-      shader.uniforms.uSceneFade = this.uniforms.uSceneFade;
+      if (
+        !shader.vertexShader.includes(DECL_ANCHOR) ||
+        !shader.vertexShader.includes(COLOR_ANCHOR)
+      ) {
+        console.error(
+          '[reveal] splat shader anchors not found — rendering without the reveal',
+        );
+        return;
+      }
+      shader.uniforms.uFade = this.uniforms.uFade;
       shader.uniforms.uRevealEnabled = this.uniforms.uRevealEnabled;
-      shader.uniforms.uClipMin = this.uniforms.uClipMin;
-      shader.uniforms.uClipMax = this.uniforms.uClipMax;
-      shader.uniforms.uClipEnabled = this.uniforms.uClipEnabled;
+      shader.uniforms.uAxis = this.uniforms.uAxis;
+      shader.uniforms.uOrigin = this.uniforms.uOrigin;
+      shader.uniforms.uBounds = this.uniforms.uBounds;
+      shader.uniforms.uRegionCount = this.uniforms.uRegionCount;
 
       shader.vertexShader = shader.vertexShader
         .replace(
-          'attribute uint splatIndex;',
-          `attribute uint splatIndex;
-           uniform float uSceneFade[${MAX_SCENES}];
-           uniform vec3 uClipMin;
-           uniform vec3 uClipMax;
-           uniform float uClipEnabled;
-           varying float vReveal;`,
+          DECL_ANCHOR,
+          `${DECL_ANCHOR}
+           uniform float uFade[${MAX_REGIONS}];
+           uniform float uRevealEnabled;
+           uniform vec3 uAxis;
+           uniform vec3 uOrigin;
+           uniform float uBounds[${MAX_REGIONS - 1}];
+           uniform int uRegionCount;`,
         )
         .replace(
-          'vColor = uintToRGBAVec(sampledCenterColor.r);',
-          // `sceneIndex` is declared by the library just above this line for
-          // dynamic scenes, so the fade can be looked up per segment.
-          `vColor = uintToRGBAVec(sampledCenterColor.r);
+          COLOR_ANCHOR,
+          `${COLOR_ANCHOR}
            {
-             // Where this splat really is. NOT modelMatrix: the mesh is built
-             // with dynamicScene, so the library places each scene with its own
-             // transforms[sceneIndex] and leaves the mesh matrix at identity.
-             // Testing modelMatrix compared a splat's LOCAL coordinates against
-             // a box in world metres, which passed only while chunks happened
-             // to sit near the origin — and discarded every splat the moment
-             // they were placed on the ground the aircraft flew.
-             if (uClipEnabled > 0.5) {
-               vec4 wc = transform * vec4(splatCenter, 1.0);
-               if (wc.x < uClipMin.x || wc.x > uClipMax.x ||
-                   wc.y < uClipMin.y || wc.y > uClipMax.y ||
-                   wc.z < uClipMin.z || wc.z > uClipMax.z) {
-                 gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
-                 return;
-               }
+             // Which slab of the scene this splat is in: its world position
+             // projected on the split axis vs the manifest's cut boundaries.
+             vec3 worldPos = (modelMatrix * vec4(splatCenter, 1.0)).xyz;
+             float proj = dot(worldPos - uOrigin, uAxis);
+             int region = 0;
+             for (int i = 0; i < ${MAX_REGIONS - 1}; i++) {
+               if (i < uRegionCount - 1 && proj > uBounds[i]) region = i + 1;
              }
-             int si = int(min(sceneIndex, uint(${MAX_SCENES - 1})));
-             vReveal = uSceneFade[si];
+             float vis = uRevealEnabled > 0.5 ? uFade[region] : 1.0;
+             if (vis < 0.004) {
+               gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
+               return;
+             }
+             vColor.a *= vis;
            }`,
-        );
-
-      shader.fragmentShader = shader.fragmentShader
-        .replace(
-          'varying vec2 vPosition;',
-          `varying vec2 vPosition;
-           varying float vReveal;
-           uniform float uRevealEnabled;`,
-        )
-        .replace(
-          'gl_FragColor = vec4(color.rgb, opacity);',
-          // Not-yet-arrived geometry is absent, not ghosted: there is nothing
-          // honest to draw for a segment that has not been reconstructed.
-          `float vis = uRevealEnabled > 0.5 ? clamp(vReveal, 0.0, 1.0) : 1.0;
-           gl_FragColor = vec4(color.rgb, opacity * vis);`,
         );
     };
     material.needsUpdate = true;
