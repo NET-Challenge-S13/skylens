@@ -32,6 +32,7 @@ import type {
   SplatAlign,
   SplatChunk,
 } from '../../shared/protocol.ts';
+import type { Gps } from '../../shared/geo.ts';
 import type { QueuedJob, SegmentRecord } from './types.ts';
 import type { LadderLevel } from './ladder.ts';
 import { rung, topLevel } from './ladder.ts';
@@ -252,6 +253,23 @@ export class Orchestrator {
     }, Math.max(soonest, 250));
   }
 
+  /**
+   * The stretch of route a segment covers, sampled start to end.
+   *
+   * Empty when no route is set: then the segment index means odometer distance
+   * from wherever the drone happened to be, which places nothing.
+   */
+  private segmentTrack(segment: number, samples = 5): Gps[] {
+    const [from, to] = segmentSpan(segment, this.opts.segmentMeters);
+    const out: Gps[] = [];
+    for (let i = 0; i < samples; i++) {
+      const at = this.opts.store.route.pointAt(from + ((to - from) * i) / (samples - 1));
+      if (at === null) return [];
+      out.push(at);
+    }
+    return out;
+  }
+
   /** Give a chunk a real-world anchor when the model did not supply one. */
   private placeOnRoute(segment: number, align: SplatAlign): SplatAlign {
     if (align.anchor) return align;
@@ -295,6 +313,10 @@ export class Orchestrator {
       segment: job.segment,
       sources: seg.sources.map((s) => ({ uri: s.uri, poses: s.poses })),
       steps: job.steps,
+      // What this segment covers on the ground. The model cannot know it — a
+      // reconstruction from images has shape but no size — and the core does,
+      // because it is what closed the segment.
+      track: this.segmentTrack(job.segment),
       anchorFrame: store.anchorFrame,
     };
     const started = Date.now();

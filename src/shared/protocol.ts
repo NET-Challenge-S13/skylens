@@ -271,6 +271,21 @@ export interface ReconJobRequest {
   segment: number;
   /** Video slices making up this segment. */
   sources: Array<{ uri: string; poses: DroneTelemetry[] }>;
+  /**
+   * The stretch of route this segment covers, sampled start to end.
+   *
+   * A reconstruction built from images has shape but no SIZE — structure from
+   * motion cannot recover metric scale — so whatever comes back has to be
+   * scaled against something measured before it can be drawn on a map. This is
+   * that measurement, and only the core has it: a segment is closed by arc
+   * length along the assigned route, and the core is what does the closing.
+   *
+   * It is sent separately from `sources` because a segment closes when the
+   * aircraft LEAVES it, which is before its video has finished uploading: the
+   * first refinement level is dispatched with no slices at all, and it still
+   * has to land in the right place at the right size.
+   */
+  track?: Gps[];
   /** Training steps to run for this level. */
   steps: number;
   /** Frame of the FIRST segment, forced onto every later one so segments line

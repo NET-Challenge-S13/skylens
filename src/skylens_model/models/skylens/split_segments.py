@@ -94,6 +94,29 @@ class Ply:
         data = np.frombuffer(body, dtype=dtype, count=count)
         return cls(header, props, data)
 
+    def rescale(self, factor: float) -> None:
+        """Resize the scene in place, gaussians and all.
+
+        A 3DGS export carries no unit: the solve fixes shape, not size. Every
+        other coordinate in this system is metres, so the asset is brought into
+        metres here rather than being stretched by a transform when it is drawn
+        — a viewer-side scale moves the splat centres apart without the surface
+        following convincingly, and the board rendered a scene that measured
+        correctly and showed nothing.
+
+        Positions scale directly; ``scale_0..2`` are LOG standard deviations, so
+        they take the logarithm of the factor instead.
+        """
+        if factor <= 0.0 or factor == 1.0:
+            return
+        editable = self.data.copy()
+        for axis in ("x", "y", "z"):
+            editable[axis] = editable[axis] * factor
+        for axis in ("scale_0", "scale_1", "scale_2"):
+            if axis in self.props:
+                editable[axis] = editable[axis] + np.log(factor)
+        self.data = editable
+
     def centers(self) -> np.ndarray:
         return np.stack([self.data["x"], self.data["y"], self.data["z"]], axis=1).astype(np.float64)
 
@@ -137,6 +160,16 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("plys", nargs="+", type=Path, help="level exports, one per training step")
     ap.add_argument("--segments", type=int, default=4, help="number of capture segments (default 4)")
+    ap.add_argument(
+        "--length",
+        type=float,
+        default=None,
+        help=(
+            "ground distance in metres the scene spans along its principal axis "
+            "(the flight it was captured on). Given, the export is rewritten in "
+            "metres so it can be placed by a rigid transform."
+        ),
+    )
     ap.add_argument("--out", type=Path, default=None, help="output dir (default <input dir>/segments)")
     ap.add_argument(
         "--manifest",
@@ -160,16 +193,59 @@ def main() -> None:
     reference = Ply.read(levels[-1])
     ref_centers = reference.centers()
     axis, origin = principal_axis(ref_centers)
+
+    # Bring the whole scene into metres before anything is cut, so every level
+    # and every segment shares one unit.
+    meters_per_unit = 1.0
+    if args.length is not None:
+        ref_proj_raw = (ref_centers - origin) @ axis
+        span = float(np.diff(np.percentile(ref_proj_raw, [1, 99]))[0])
+        if span <= 0:
+            ap.error("the reference cloud has no extent along its principal axis")
+        meters_per_unit = args.length / span
+        print(f"scene spans {span:.3f} units -> {args.length} m  ({meters_per_unit:.3f} m/unit)")
+        reference.rescale(meters_per_unit)
+        ref_centers = reference.centers()
+        origin = origin * meters_per_unit
     ref_proj = (ref_centers - origin) @ axis
     qs = np.linspace(0, 100, args.segments + 1)[1:-1]
     boundaries = np.percentile(ref_proj, qs) if len(qs) else np.array([])
 
     print(f"axis {np.round(axis, 4).tolist()}  segments {args.segments}")
 
-    segments: list[dict] = [{"index": k, "levels": []} for k in range(args.segments)]
+    # A reconstruction from images has no metric scale: its units are whatever
+    # the SfM solve settled on. Whoever places it has to resolve that against
+    # something measured, and the only measured thing in this system is the
+    # flight. So record how big each piece IS, in the scene's own units, and let
+    # the serving side map that onto the ground the segment was flown over.
+    # Without it the demo drew a 4.7 m speck for every 40 m of flight.
+    ref_assign = (
+        np.searchsorted(boundaries, ref_proj) if len(boundaries) else np.zeros(len(ref_proj), int)
+    )
+    segment_shape: list[dict] = []
+    for k in range(args.segments):
+        own = ref_centers[ref_assign == k]
+        if len(own) == 0:
+            segment_shape.append({"extent": 0.0, "centroid": [0.0, 0.0, 0.0]})
+            continue
+        own_proj = (own - origin) @ axis
+        # 1-99 percentile, the same trim the axis fit uses: a handful of stray
+        # gaussians well outside the scene would otherwise set the size.
+        lo, hi = np.percentile(own_proj, [1, 99])
+        segment_shape.append(
+            {
+                "extent": float(hi - lo),
+                "centroid": np.percentile(own, 50, axis=0).tolist(),
+            }
+        )
+
+    segments: list[dict] = [
+        {"index": k, "levels": [], **segment_shape[k]} for k in range(args.segments)
+    ]
 
     for level_index, ply_path in enumerate(levels, start=1):
         ply = Ply.read(ply_path)
+        ply.rescale(meters_per_unit)
         steps = steps_from_name(ply_path)
         proj = (ply.centers() - origin) @ axis
         assign = np.searchsorted(boundaries, proj) if len(boundaries) else np.zeros(len(proj), int)
@@ -196,6 +272,12 @@ def main() -> None:
         "axis": axis.tolist(),
         "origin": origin.tolist(),
         "boundaries": boundaries.tolist(),
+        # 1.0 once the export has been rewritten in metres (--length); the
+        # serving side then places a chunk with a rigid transform.
+        "metersPerUnit": meters_per_unit,
+        # Full extent along the axis (1-99 percentile), for anyone placing the
+        # scene as one piece rather than segment by segment.
+        "extent": float(np.diff(np.percentile(ref_proj, [1, 99]))[0]),
         # Cheapest level of the whole scene: the client loads it once to derive
         # the shared fit transform + the "not yet scanned" ghost cloud.
         "preview": levels[0].name,

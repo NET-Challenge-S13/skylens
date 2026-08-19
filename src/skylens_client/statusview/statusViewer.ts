@@ -71,6 +71,10 @@ interface MarkerVisual {
   visible: boolean;
 }
 
+/** Smallest padding around the placed chunks for the floater clip, in metres.
+ *  One chunk on its own still needs room for the ground it covers. */
+const CLIP_MIN_PAD = 40;
+
 export class StatusViewer {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly scene = new THREE.Scene();
@@ -101,6 +105,13 @@ export class StatusViewer {
   private followDist = 40;
   private followHeight = 30;
   private floorY = 0;
+  /** Follow distance the placeholder cloud implies; the floor for the framing
+   *  that the reconstruction's own size drives. */
+  private baseFollowDist = 1;
+  /** Far plane the placeholder cloud implies. */
+  private baseFar = 100;
+  /** Whether the floater clip is in force (?clip=on). */
+  private splatClipEnabled = false;
   // Recent poses of the active drone, from telemetry, for a damped chase view.
   private readonly history: Array<{ t: number; pos: THREE.Vector3; forward: THREE.Vector3 }> = [];
   private userDragging = false;
@@ -139,6 +150,11 @@ export class StatusViewer {
     this.floorY = sceneData.groundY;
     this.followDist = radius * 1.6;
     this.followHeight = radius * 1.3;
+    // What the placeholder cloud is worth as a scale. Everything the mission
+    // adds is measured in metres and can run far past it, so the camera and the
+    // fog are re-derived from the reconstruction as it grows (see followPose).
+    this.baseFollowDist = this.followDist;
+    this.baseFar = radius * 40;
 
     const aspect = canvas.clientWidth / Math.max(1, canvas.clientHeight);
     this.camera = new THREE.PerspectiveCamera(50, aspect, 0.05, radius * 40);
@@ -262,6 +278,7 @@ export class StatusViewer {
       if (mat && mat !== this.attachedMaterial) {
         this.splatReveal.attachTo(mat);
         this.splatReveal.setRevealEnabled(this.splatMaskEnabled);
+        this.splatReveal.setClipEnabled(this.splatClipEnabled);
         this.attachedMaterial = mat;
       }
     }
@@ -340,7 +357,45 @@ export class StatusViewer {
         this.splatReveal = new SplatReveal(this.sceneBounds);
       }
     }
-    return this.splat.addChunk(chunk);
+    return this.splat.addChunk(chunk).then(() => this.refitClip());
+  }
+
+  /**
+   * Refit the floater clip to the geometry that has arrived.
+   *
+   * The clip exists to throw away the far background gaussians every photo
+   * reconstruction carries. It starts from the placeholder cloud, because at
+   * boot that is all there is — but chunks are placed on the ground the
+   * aircraft flew, which can be hundreds of metres of route. A box left at the
+   * placeholder's size discards all of them: a board holding a quarter of a
+   * million splats and drawing an empty screen, which looks exactly like
+   * geometry that never arrived.
+   *
+   * Fit it to the splats themselves rather than to the chunk anchors: a chunk
+   * covers the stretch it was flown over, so its geometry reaches well past the
+   * point it is anchored at, and a box around the anchors cut three quarters of
+   * it away (measured). Percentiles, not extremes — throwing out the outliers
+   * IS the job.
+   */
+  private refitClip(): void {
+    if (!this.splatReveal || !this.splat) return;
+    const samples = this.splat.sampleCenters(4000);
+    if (samples.length < 32) return;
+
+    const axis = (i: number): [number, number] => {
+      const vs = samples.map((p) => p[i]).sort((a, b) => a - b);
+      const lo = vs[Math.floor((vs.length - 1) * 0.02)];
+      const hi = vs[Math.floor((vs.length - 1) * 0.98)];
+      const pad = Math.max(CLIP_MIN_PAD, (hi - lo) * 0.15);
+      return [lo - pad, hi + pad];
+    };
+    const [x0, x1] = axis(0);
+    const [y0, y1] = axis(1);
+    const [z0, z1] = axis(2);
+    this.splatReveal.setClip(
+      new THREE.Vector3(x0, y0, z0),
+      new THREE.Vector3(x1, y1, z1),
+    );
   }
 
   /** True once the first chunk has landed — the board's waiting state ends here. */
@@ -353,6 +408,26 @@ export class StatusViewer {
   setSplatMask(enabled: boolean): void {
     this.splatMaskEnabled = enabled;
     this.splatReveal?.setRevealEnabled(enabled);
+  }
+
+  /** Turn the floater clip on. Off by default — see splatReveal.ts. */
+  setSplatClip(enabled: boolean): void {
+    this.splatClipEnabled = enabled;
+    this.splatReveal?.setClipEnabled(enabled);
+  }
+
+  /**
+   * Park the camera above a point and hold it there. Only the checks use this:
+   * an empty board looks the same whether nothing was drawn or the camera was
+   * pointed elsewhere, and this separates the two.
+   */
+  debugLookAt(at: THREE.Vector3, height: number): void {
+    this.camera.position.set(at.x, at.y + height, at.z + height * 0.15);
+    this.controls.target.copy(at);
+    this.camera.lookAt(at);
+    this.controls.update();
+    // Hold it: the follow camera would drag it back within a frame.
+    this.userDragging = true;
   }
 
   /** Debug: show the scaffold point cloud at full opacity (for ?render=points). */
@@ -378,6 +453,21 @@ export class StatusViewer {
       segmentLevels: this.splat?.segmentLevels ?? {},
       scenes: (this.splat?.scenes ?? []).map((s) => `seg${s.segment}/lv${s.level}`),
       geometryArrived: this.geometryArrived,
+      // Why an empty screen is empty: the frustum, the fog and the floater clip
+      // each throw geometry away silently, and from a screenshot they look the
+      // same as geometry that never arrived.
+      camFar: Math.round(this.camera.far),
+      fog:
+        this.scene.fog instanceof THREE.Fog
+          ? [Math.round(this.scene.fog.near), Math.round(this.scene.fog.far)]
+          : null,
+      clip: this.splatReveal
+        ? this.splatReveal.debugClip().map((v) => v.toArray().map((n) => Math.round(n)))
+        : null,
+      chunkCenters: (this.splat?.loadedChunks() ?? []).map((c) =>
+        c.center.map((n) => Math.round(n)),
+      ),
+      revealEnabled: this.splatMaskEnabled,
     };
   }
 
@@ -403,9 +493,23 @@ export class StatusViewer {
     return this.splat?.segmentLevels ?? {};
   }
 
+  /** How much ground the reconstruction covers, in scene units. */
+  splatBounds(): {
+    min: [number, number, number];
+    max: [number, number, number];
+    splats: number;
+  } | null {
+    return this.splat?.worldBounds() ?? null;
+  }
+
+  /** A sample of splat centres in world space. */
+  splatSamples(limit?: number): Array<[number, number, number]> {
+    return this.splat?.sampleCenters(limit) ?? [];
+  }
+
   /** Every loaded chunk with the place it was put — the minimap draws them,
    *  and the checks measure them against the flight that produced them. */
-  loadedChunks(): Array<{ segment: number; level: number; position: [number, number, number] }> {
+  loadedChunks(): Array<{ segment: number; level: number; center: [number, number, number] }> {
     return this.splat?.loadedChunks() ?? [];
   }
 
@@ -413,6 +517,21 @@ export class StatusViewer {
    *  above its heading, so the board tracks where the capture is happening.
    *  Uses the LATEST telemetry — the old lag existed to trail a simulation the
    *  board no longer receives, and the camera lerp already damps the motion. */
+  /** The loaded chunk furthest from a point, or null when nothing is loaded. */
+  private furthestChunkFrom(p: THREE.Vector3): THREE.Vector3 | null {
+    let best: THREE.Vector3 | null = null;
+    let bestD = 0;
+    for (const c of this.splat?.loadedChunks() ?? []) {
+      const v = new THREE.Vector3(c.center[0], c.center[1], c.center[2]);
+      const d = v.distanceTo(p);
+      if (d > bestD) {
+        bestD = d;
+        best = v;
+      }
+    }
+    return best;
+  }
+
   private followPose(): { pos: THREE.Vector3; target: THREE.Vector3 } | null {
     if (this.history.length === 0) return null;
     const s = this.history[this.history.length - 1];
@@ -427,11 +546,35 @@ export class StatusViewer {
     t = Math.min(Math.max(t, 0), this.followDist * 3);
     const groundHit = P.clone().addScaledVector(F, t);
 
-    const pos = groundHit
+    // The reconstruction TRAILS the aircraft — a segment is only rebuilt once
+    // it has been flown — so a camera framed on the aircraft alone sits between
+    // the operator and everything that has been built, showing them unscanned
+    // ground. Pull back far enough to hold the built strip in frame, and look
+    // at the middle of it rather than at the aircraft's own footprint.
+    const tail = this.furthestChunkFrom(groundHit);
+    const lag = tail ? tail.distanceTo(groundHit) : 0;
+    const dist = Math.min(Math.max(this.baseFollowDist, lag * 1.2), this.baseFollowDist * 10);
+    const height = Math.max(this.followHeight, dist * 0.55);
+    const target = tail ? groundHit.clone().lerp(tail, 0.45) : groundHit;
+
+    // The fog and the far plane were sized from the placeholder cloud, which is
+    // a fraction of what the mission covers; left alone they hide the far end of
+    // the reconstruction the moment it grows past a segment or two.
+    if (this.scene.fog instanceof THREE.Fog) {
+      this.scene.fog.near = dist * 1.4;
+      this.scene.fog.far = dist * 7;
+    }
+    const far = Math.max(this.baseFar, dist * 14);
+    if (Math.abs(this.camera.far - far) > 1) {
+      this.camera.far = far;
+      this.camera.updateProjectionMatrix();
+    }
+
+    const pos = target
       .clone()
-      .addScaledVector(headingXZ, -this.followDist)
-      .addScaledVector(STATUS_UP, this.followHeight);
-    return { pos, target: groundHit };
+      .addScaledVector(headingXZ, -dist)
+      .addScaledVector(STATUS_UP, height);
+    return { pos, target };
   }
 
   private focusPose(m: MarkerVisual): { pos: THREE.Vector3; target: THREE.Vector3 } {

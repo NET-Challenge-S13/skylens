@@ -10,7 +10,7 @@
 // class keeps at most one scene per segment — a higher level for a segment
 // replaces the lower one already rendering, while other segments stay put.
 
-import type * as THREE from 'three';
+import * as THREE from 'three';
 import { DropInViewer } from '@mkkellogg/gaussian-splats-3d';
 
 export type SplatStatus = 'idle' | 'loading' | 'ready' | 'error';
@@ -29,6 +29,16 @@ export interface SplatChunkInput {
   align: ChunkPlacement;
   segment: number;
   level: number;
+  /**
+   * Where this chunk's geometry sits, in scene units.
+   *
+   * NOT `align.position`: that is the origin of the chunk's own coordinate
+   * space, and the placement offsets it so the geometry — which is nowhere near
+   * its own origin — lands on the ground it was flown over. Anything asking
+   * "where is this piece of the reconstruction" (the minimap, the camera) means
+   * this, and reading align.position instead drew them tens of metres out.
+   */
+  center: [number, number, number];
 }
 
 type StatusCb = (status: SplatStatus, detail?: string) => void;
@@ -39,10 +49,9 @@ type StatusCb = (status: SplatStatus, detail?: string) => void;
 export interface LoadedScene {
   segment: number;
   level: number;
-  /** Where this chunk was placed, in scene units — the board's own frame, the
-   *  same one the aircraft and the detection pins live in. Kept so a check can
-   *  ask whether the reconstruction landed on the flight. */
-  position: [number, number, number];
+  /** Where this chunk's geometry sits, in scene units — the board's own frame,
+   *  the same one the aircraft and the detection pins live in. */
+  center: [number, number, number];
   /** performance.now() when this segment FIRST became visible. A refinement of
    *  an already-visible segment inherits it, so replacing level 1 with level 2
    *  does not restart the fade (which would read as a flicker). */
@@ -108,13 +117,64 @@ export class SplatScene {
     return this._chunks;
   }
 
+  /**
+   * World-space box of the splats actually on screen, in scene units.
+   *
+   * How much ground the reconstruction covers is not something the chunk list
+   * can answer — a chunk can be anchored perfectly and still be a speck. It
+   * cannot be measured off the scene graph either: this library keeps splat
+   * positions in data textures and draws them from a single instanced quad, so
+   * Box3.setFromObject returns the quad. Ask the mesh for the centres instead,
+   * sampling rather than reading millions of them.
+   */
+  worldBounds(
+    sampleLimit = 20_000,
+  ): { min: [number, number, number]; max: [number, number, number]; splats: number } | null {
+    const mesh = this.viewer.splatMesh;
+    const count = mesh?.getSplatCount?.() ?? 0;
+    if (!mesh || count === 0) return null;
+    const step = Math.max(1, Math.floor(count / sampleLimit));
+    const c = new THREE.Vector3();
+    const box = new THREE.Box3();
+    for (let i = 0; i < count; i += step) {
+      mesh.getSplatCenter(i, c, true);
+      box.expandByPoint(c);
+    }
+    if (box.isEmpty()) return null;
+    return {
+      min: [box.min.x, box.min.y, box.min.z],
+      max: [box.max.x, box.max.y, box.max.z],
+      splats: count,
+    };
+  }
+
+  /**
+   * A sample of splat centres in world space. What one chunk covers cannot be
+   * read from the total box once several are on screen — that box is just the
+   * spread of their anchors — so hand the samples out and let the caller group
+   * them.
+   */
+  sampleCenters(limit = 4000): Array<[number, number, number]> {
+    const mesh = this.viewer.splatMesh;
+    const count = mesh?.getSplatCount?.() ?? 0;
+    if (!mesh || count === 0) return [];
+    const step = Math.max(1, Math.floor(count / limit));
+    const c = new THREE.Vector3();
+    const out: Array<[number, number, number]> = [];
+    for (let i = 0; i < count; i += step) {
+      mesh.getSplatCenter(i, c, true);
+      out.push([c.x, c.y, c.z]);
+    }
+    return out;
+  }
+
   /** What is on screen and where. The minimap draws these so the operator can
    *  see how far the reconstruction has got along the track. */
-  loadedChunks(): Array<{ segment: number; level: number; position: [number, number, number] }> {
+  loadedChunks(): Array<{ segment: number; level: number; center: [number, number, number] }> {
     return this.order.map((e) => ({
       segment: e.segment,
       level: e.level,
-      position: [...e.position],
+      center: [...e.center],
     }));
   }
 
@@ -207,7 +267,7 @@ export class SplatScene {
         segment: chunk.segment,
         level: chunk.level,
         arrivedAt,
-        position: [...chunk.align.position],
+        center: [...chunk.center],
       };
       this.order.push(entry);
       this.bySegment.set(chunk.segment, entry);

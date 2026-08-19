@@ -25,6 +25,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import time
 import uuid
 from collections.abc import Callable
@@ -201,6 +202,111 @@ async def run_recon(req: ReconJobRequest, report: Report) -> ReconJobResult:
     return await _recon_live(req, frame, report)
 
 
+def _median(values: list[float]) -> float:
+    ordered = sorted(values)
+    if not ordered:
+        return 0.0
+    mid = len(ordered) // 2
+    if len(ordered) % 2:
+        return ordered[mid]
+    return (ordered[mid - 1] + ordered[mid]) / 2.0
+
+
+def _flight(fixes: list[GpsModel]) -> tuple[float, float, GpsModel] | None:
+    """Ground distance flown, heading in radians east-of-north, and the middle fix."""
+    if len(fixes) < 2:
+        return None
+    m_per_lat = 111_320.0
+    m_per_lon = 111_320.0 * math.cos(math.radians(fixes[0].lat))
+    flown = 0.0
+    for a, b in zip(fixes, fixes[1:], strict=False):
+        flown += math.hypot((b.lon - a.lon) * m_per_lon, (b.lat - a.lat) * m_per_lat)
+    east = (fixes[-1].lon - fixes[0].lon) * m_per_lon
+    north = (fixes[-1].lat - fixes[0].lat) * m_per_lat
+    if flown <= 0.0 or (east == 0.0 and north == 0.0):
+        return None
+    return flown, math.atan2(east, north), fixes[len(fixes) // 2]
+
+
+def _demo_align(req: DetectJobRequest | ReconJobRequest, manifest: dict, index: int) -> SplatAlign:
+    """
+    Put the prebuilt chunk on the ground it stands for.
+
+    A reconstruction built from images has no metric scale — SfM recovers shape,
+    not size — so the demo asset's units are whatever its solve settled on. The
+    only measured thing in this system is the flight, and this job carries it:
+    the poses the segment was filmed from. Measured on the demo asset, a chunk
+    was drawn 4.7 m wide for a 40 m stretch of flight, so the board showed a
+    scatter of specks with 35 m of empty ground between them.
+
+    So: scale the piece until it covers what was flown, turn its principal axis
+    to the heading that was flown, and put its middle where the aircraft was.
+
+    The scale is ONE number for every chunk, taken from the median piece. The
+    scene was cut into equal COUNTS of gaussians, not equal lengths, so the
+    sparse tail of the scene is a long thin piece; scaling each chunk by its own
+    extent would draw the same building at a different size in adjacent chunks.
+    A uniform scale keeps the world self-consistent and lets the tail overhang,
+    which is what a real reconstruction's tail does anyway.
+    """
+    # The route stretch the core measured, when it sent one. The poses are the
+    # fallback: they only exist once a slice has been uploaded, and the first
+    # refinement level is dispatched before that — a segment closes when the
+    # aircraft leaves it, not when its video lands.
+    track = list(getattr(req, "track", []) or [])
+    flight = _flight(track or _segment_fixes(req))
+    segments = manifest.get("segments") or []
+    if flight is None or not segments:
+        # Nothing measured to scale against (a hand-made request). Identity is
+        # what the core's own route-anchoring expects to see.
+        return SplatAlign()
+
+    flown, heading, middle = flight
+    # An asset written in metres (split_segments --length) is placed by a rigid
+    # transform: it already IS the size it claims. Scaling it at draw time is
+    # what the viewer cannot do convincingly — the splat centres move apart
+    # while the surface does not follow, and the board renders a scene that
+    # measures correctly and shows nothing.
+    if float(manifest.get("metersPerUnit") or 0.0) > 0.0:
+        scale = 1.0
+    else:
+        extents = [float(seg.get("extent") or 0.0) for seg in segments]
+        typical = _median([e for e in extents if e > 0.0])
+        if typical <= 0.0:
+            # An older manifest, from before the splitter recorded piece sizes.
+            log.warning("demo manifest has no segment extents — placing chunks unscaled")
+            return SplatAlign()
+        scale = flown / typical
+
+    # Scene axes are x=East, y=Up, z=-North (shared/geo.ts). The asset's
+    # principal axis is horizontal for a corridor sweep, so a yaw about Up is
+    # the whole rotation: from the asset axis to the flown heading.
+    axis = manifest.get("axis") or [1.0, 0.0, 0.0]
+    asset_yaw = math.atan2(float(axis[0]), -float(axis[2]) if len(axis) > 2 else 0.0)
+    yaw = heading - asset_yaw
+    half = yaw / 2.0
+    rotation = (0.0, math.sin(half), 0.0, math.cos(half))
+
+    # Where the piece's own middle sits, once scaled and turned: subtract it, so
+    # the piece straddles the anchor instead of hanging off it.
+    cx, cy, cz = (float(v) for v in (segments[index].get("centroid") or [0.0, 0.0, 0.0]))
+    sx, sy, sz = cx * scale, cy * scale, cz * scale
+    cos_y, sin_y = math.cos(yaw), math.sin(yaw)
+    rx = cos_y * sx + sin_y * sz
+    rz = -sin_y * sx + cos_y * sz
+    position = (-rx, -sy, -rz)
+
+    # Horizontal from the flight, height from the site datum. The middle fix is
+    # the AIRCRAFT's altitude — anchoring there would hang the reconstruction 60
+    # m up, at the height the camera flew rather than the ground it filmed.
+    return SplatAlign(
+        anchor=GpsModel(lat=middle.lat, lon=middle.lon, alt=settings().anchor.alt),
+        position=position,
+        rotation=rotation,
+        scale=(scale, scale, scale),
+    )
+
+
 async def _recon_demo(req: ReconJobRequest, frame: Frame, report: Report) -> ReconJobResult:
     asset = resolve_asset(req.segment, req.steps)
     log.info(
@@ -214,12 +320,17 @@ async def _recon_demo(req: ReconJobRequest, frame: Frame, report: Report) -> Rec
     # Proportional to the REQUESTED steps, not the asset's: the delay pattern is
     # about how long a level makes the operator wait.
     await _simulate(_demo_seconds(req.steps), report)
+    manifest = load_manifest()
+    index = req.segment % len(manifest.get("segments") or [1])
     return ReconJobResult(
         segment=req.segment,
         steps=asset.steps,
         url=asset.url,
         bytes=asset.bytes,
-        align=frame.align,
+        # frame.align is identity for the demo assets — they were cut from one
+        # already-aligned scene — so what matters is putting the piece on the
+        # ground the segment was flown over.
+        align=_demo_align(req, manifest, index),
         anchorFrame=frame.id,
     )
 
@@ -270,8 +381,12 @@ _DEMO_DETECTIONS: tuple[tuple[str, str, float, float, float, float], ...] = (
 )
 
 
-def _segment_fixes(req: DetectJobRequest) -> list[GpsModel]:
-    """Every pose the segment was filmed from, in order."""
+def _segment_fixes(req: DetectJobRequest | ReconJobRequest) -> list[GpsModel]:
+    """Every pose the segment was filmed from, in order.
+
+    Both job kinds carry the same sources: what the segment was filmed from is
+    what places its reconstruction AND what places what was found in it.
+    """
     return [pose.gps for source in req.sources for pose in source.poses]
 
 

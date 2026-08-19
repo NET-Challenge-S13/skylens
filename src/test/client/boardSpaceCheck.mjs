@@ -50,7 +50,7 @@ const probe = await page.evaluate(async () => {
     return { kind: d.kind, e: Math.round(enu.e), n: Math.round(enu.n) };
   });
   const chunks = (window.skylens.splat?.loadedChunks?.() ?? []).map((c) => {
-    const enu = sceneToEnu(c.position);
+    const enu = sceneToEnu(c.center);
     return { segment: c.segment, level: c.level, e: Math.round(enu.e), n: Math.round(enu.n) };
   });
   const route = (state.route ?? []).map((p) => {

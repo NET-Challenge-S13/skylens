@@ -79,6 +79,12 @@ async function main(): Promise<void> {
   if (revealQ === 'on') status.setSplatMask(true);
   else if (revealQ === 'off') status.setSplatMask(false);
 
+  // ?clip=on re-enables the floater clip, which is off by default because it
+  // has been discarding real geometry (splatReveal.ts).
+  if (new URLSearchParams(window.location.search).get('clip') === 'on') {
+    status.setSplatClip(true);
+  }
+
   if (renderPoints) status.revealAll();
 
   // --- The one data source ------------------------------------------------
@@ -100,12 +106,17 @@ async function main(): Promise<void> {
         rotation: [number, number, number, number];
         scale: [number, number, number];
       };
+      // Where the piece's geometry is meant to sit. The placement below offsets
+      // the chunk's own origin so its geometry lands here, so this — not the
+      // placement — is the answer to "where is this piece of the map".
+      let center: [number, number, number];
       if (isIdentity) {
         align = {
           position: localSplat.position,
           rotation: localSplat.rotation,
           scale: localSplat.scale,
         };
+        center = [...localSplat.position];
       } else {
         // A GPS anchor places the chunk in the shared ENU frame; the explicit
         // transform is applied on top of it.
@@ -121,12 +132,14 @@ async function main(): Promise<void> {
           rotation: chunk.align.rotation,
           scale: chunk.align.scale,
         };
+        center = [...base];
       }
       // The viewer owns the ingest queue: it runs loads one at a time and drops
       // levels that a later refinement has already overtaken.
       void status.ingestSplatChunk({
         url: chunk.url,
         align,
+        center,
         segment: chunk.segment,
         level: chunk.level,
       });
@@ -191,7 +204,7 @@ async function main(): Promise<void> {
   // The minimap shows the reconstruction too, so the operator can see how far
   // it has got along the track rather than guessing from the 3D view.
   const minimap = mountMinimap(loaded.data.bounds, () =>
-    status.loadedChunks().map((c) => ({ segment: c.segment, position: c.position })),
+    status.loadedChunks().map((c) => ({ segment: c.segment, position: c.center })),
   );
   mountWaitingBanner(status, relay);
   relay.start();
@@ -223,6 +236,7 @@ async function main(): Promise<void> {
   (window as unknown as { skylens?: unknown }).skylens = {
     role: 'status',
     state,
+    viewer: status,
     scene: loaded.data,
     relayUrl: relay.url,
     splat: {
@@ -246,6 +260,12 @@ async function main(): Promise<void> {
       },
       loadedChunks() {
         return status.loadedChunks();
+      },
+      bounds() {
+        return status.splatBounds();
+      },
+      samples(limit?: number) {
+        return status.splatSamples(limit);
       },
     },
     get server() {

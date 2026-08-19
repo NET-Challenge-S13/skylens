@@ -35,8 +35,24 @@ declare module '@mkkellogg/gaussian-splats-3d' {
     removeSplatScenes(indexes: number[], showLoadingUI?: boolean): Promise<void>;
     getSceneCount(): number;
     dispose(): Promise<void> | void;
-    /** The mesh rendering the splats (present after a scene loads). */
-    splatMesh: { material: import('three').ShaderMaterial } | null;
+    /**
+     * The mesh rendering the splats (present after a scene loads).
+     *
+     * Splat positions live in data textures, not in the geometry, so the only
+     * way to ask where the reconstruction actually IS goes through these.
+     * `applySceneTransform` returns the centre in world space.
+     */
+    splatMesh:
+      | {
+          material: import('three').ShaderMaterial;
+          getSplatCount(): number;
+          getSplatCenter(
+            index: number,
+            outCenter: import('three').Vector3,
+            applySceneTransform?: boolean,
+          ): void;
+        }
+      | null;
   }
 
   export class Viewer {

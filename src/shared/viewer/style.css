@@ -278,8 +278,10 @@ html {
   color: var(--status-ink);
 }
 .pane-label--status .sl-dot {
-  background: var(--person);
-  color: var(--person);
+  /* The screen's own name is one label: the dot takes the text's colour rather
+     than the detection green, which read as a status light for something. */
+  background: var(--status-ink);
+  color: var(--status-ink);
 }
 
 /* --- HUD (viewer 1) --- */

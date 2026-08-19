@@ -87,6 +87,11 @@ class ReconJobRequest(Strict):
     segment: int
     sources: list[JobSource] = Field(default_factory=list)
     steps: int
+    #: The stretch of route this segment covers, sampled start to end. A
+    #: reconstruction from images has no metric scale, so this is what it gets
+    #: scaled against. Sent apart from the sources because a segment is closed by
+    #: the aircraft leaving it, before its video has finished uploading.
+    track: list[Gps] = Field(default_factory=list)
     #: Frame established by the FIRST segment, forced onto every later one.
     #: Null for the first job. See run_recon() for why this exists.
     anchorFrame: str | None = None

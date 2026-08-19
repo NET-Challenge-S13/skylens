@@ -36,6 +36,7 @@ export class SplatReveal {
     uRevealEnabled: { value: number };
     uClipMin: { value: THREE.Vector3 };
     uClipMax: { value: THREE.Vector3 };
+    uClipEnabled: { value: number };
   };
 
   constructor(bounds: THREE.Box3) {
@@ -49,7 +50,38 @@ export class SplatReveal {
       uRevealEnabled: { value: 1 },
       uClipMin: { value: bounds.min.clone().sub(pad) },
       uClipMax: { value: bounds.max.clone().add(pad) },
+      // OFF by default. This filter exists to drop the far background gaussians
+      // a photo reconstruction carries, and it was written against a scene that
+      // sat near the origin. Once chunks are placed on the ground the aircraft
+      // flew, it has thrown away real geometry — an empty board is far worse
+      // than a few floaters, so it stays off until it can be shown to cut only
+      // what it is meant to. `?clip=on` turns it back on for that work.
+      uClipEnabled: { value: 0 },
     };
+  }
+
+  /**
+   * Move the floater clip to the ground the mission actually covers.
+   *
+   * The box starts from the placeholder cloud, which is all there is before any
+   * geometry arrives. Once chunks are placed along a route they can span
+   * hundreds of metres, and a box sized for the placeholder discards every one
+   * of them — the board then holds a quarter of a million splats and draws
+   * nothing, which looks exactly like geometry that never arrived.
+   */
+  setClip(min: THREE.Vector3, max: THREE.Vector3): void {
+    this.uniforms.uClipMin.value.copy(min);
+    this.uniforms.uClipMax.value.copy(max);
+  }
+
+  /** Turn the floater clip on (?clip=on). Off by default — see the constructor. */
+  setClipEnabled(on: boolean): void {
+    this.uniforms.uClipEnabled.value = on ? 1 : 0;
+  }
+
+  /** The clip box in force, for working out why a full scene draws nothing. */
+  debugClip(): [THREE.Vector3, THREE.Vector3] {
+    return [this.uniforms.uClipMin.value, this.uniforms.uClipMax.value];
   }
 
   /** `?reveal=off` renders every arrived chunk at full opacity immediately. */
@@ -91,6 +123,7 @@ export class SplatReveal {
       shader.uniforms.uRevealEnabled = this.uniforms.uRevealEnabled;
       shader.uniforms.uClipMin = this.uniforms.uClipMin;
       shader.uniforms.uClipMax = this.uniforms.uClipMax;
+      shader.uniforms.uClipEnabled = this.uniforms.uClipEnabled;
 
       shader.vertexShader = shader.vertexShader
         .replace(
@@ -99,6 +132,7 @@ export class SplatReveal {
            uniform float uSceneFade[${MAX_SCENES}];
            uniform vec3 uClipMin;
            uniform vec3 uClipMax;
+           uniform float uClipEnabled;
            varying float vReveal;`,
         )
         .replace(
@@ -107,12 +141,21 @@ export class SplatReveal {
           // dynamic scenes, so the fade can be looked up per segment.
           `vColor = uintToRGBAVec(sampledCenterColor.r);
            {
-             vec4 wc = modelMatrix * vec4(splatCenter, 1.0);
-             if (wc.x < uClipMin.x || wc.x > uClipMax.x ||
-                 wc.y < uClipMin.y || wc.y > uClipMax.y ||
-                 wc.z < uClipMin.z || wc.z > uClipMax.z) {
-               gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
-               return;
+             // Where this splat really is. NOT modelMatrix: the mesh is built
+             // with dynamicScene, so the library places each scene with its own
+             // transforms[sceneIndex] and leaves the mesh matrix at identity.
+             // Testing modelMatrix compared a splat's LOCAL coordinates against
+             // a box in world metres, which passed only while chunks happened
+             // to sit near the origin — and discarded every splat the moment
+             // they were placed on the ground the aircraft flew.
+             if (uClipEnabled > 0.5) {
+               vec4 wc = transform * vec4(splatCenter, 1.0);
+               if (wc.x < uClipMin.x || wc.x > uClipMax.x ||
+                   wc.y < uClipMin.y || wc.y > uClipMax.y ||
+                   wc.z < uClipMin.z || wc.z > uClipMax.z) {
+                 gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
+                 return;
+               }
              }
              int si = int(min(sceneIndex, uint(${MAX_SCENES - 1})));
              vReveal = uSceneFade[si];
