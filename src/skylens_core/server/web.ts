@@ -69,7 +69,17 @@ function proxy(req: Request, res: Response, target: URL): void {
   req.pipe(upstream);
 }
 
-/** Vite's HMR socket. Piped raw — the core never reads a byte of it. */
+/**
+ * Vite's HMR socket. Piped raw — the core never reads a byte of it.
+ *
+ * The two buffers handed over at the upgrade are leftovers each side had
+ * already sent, and they belong to the OTHER socket's outbound direction. They
+ * have to be written across, not unshifted: unshift() puts bytes into a
+ * socket's own READ buffer, so the pipes promptly delivered Vite's frames back
+ * to Vite. A server frame is unmasked, the ws receiver rejects it, and Vite
+ * died with WS_ERR_EXPECTED_MASK — taking every component down with it and
+ * leaving browsers on a stale page.
+ */
 function upgradeTo(
   target: URL,
   req: http.IncomingMessage,
@@ -93,9 +103,9 @@ function upgradeTo(
   upstream.on('upgrade', (upRes, upSocket, upHead) => {
     upSocket.on('error', drop);
     const lines = Object.entries(upRes.headers).map(([k, v]) => `${k}: ${String(v)}`);
-    socket.write(`HTTP/1.1 101 Switching Protocols\r\n${lines.join('\r\n')}\r\n\r\n`);
-    if (upHead.length > 0) socket.unshift(upHead);
-    if (head.length > 0) upSocket.unshift(head);
+    socket.write(`HTTP/1.1 101 Switching Protocols\r\n${lines.join(`\r\n`)}\r\n\r\n`);
+    if (upHead.length > 0) socket.write(upHead);
+    if (head.length > 0) upSocket.write(head);
     upSocket.pipe(socket);
     socket.pipe(upSocket);
   });

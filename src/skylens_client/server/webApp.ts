@@ -102,8 +102,13 @@ function mountDevProxy(app: Express, cfg: ClientServerConfig): WebApp {
           else if (v !== undefined) lines.push(`${k}: ${v}`);
         }
         socket.write(`${lines.join('\r\n')}\r\n\r\n`);
-        if (proxyHead?.length) proxySocket.unshift(proxyHead);
-        if (head?.length) proxyReq.write(head);
+        // Leftovers each side already sent, written across to the other socket.
+        // Not unshift(), which would put them back into the sender's own read
+        // buffer and pipe them straight back where they came from — that is how
+        // the core's copy of this proxy fed Vite its own unmasked frames and
+        // killed it. And not proxyReq.write(): that request is already ended.
+        if (proxyHead?.length) socket.write(proxyHead);
+        if (head?.length) proxySocket.write(head);
         proxySocket.on('error', () => socket.destroy());
         socket.on('error', () => proxySocket.destroy());
         proxySocket.pipe(socket).pipe(proxySocket);
