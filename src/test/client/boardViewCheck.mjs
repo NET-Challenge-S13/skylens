@@ -4,8 +4,8 @@
 //   node src/test/client/boardViewCheck.mjs
 //
 // Chunks can arrive, be placed correctly, and still draw nothing: the camera
-// can be pointed elsewhere, the fog can swallow them, the floater clip can
-// discard them, or the far plane can cut them off. All four look identical on a
+// can be pointed elsewhere, the fog can swallow them, the reveal can hold them
+// back, or the far plane can cut them off. All four look identical on a
 // screenshot — an empty screen — and identical to geometry that never came. So
 // print each of them against where the geometry actually is.
 
@@ -32,24 +32,13 @@ const probe = await page.evaluate(() => {
   const cam = dbg.camPos;
   const target = dbg.target;
 
-  // How the geometry sits relative to the camera: distance, and whether it is
-  // inside the clip box the shader tests against.
-  const clip = dbg.clip;
-  let inClip = 0;
+  // How the geometry sits relative to the camera.
   let nearest = Infinity;
   let furthest = 0;
   for (const [x, y, z] of samples) {
     const d = Math.hypot(x - cam[0], y - cam[1], z - cam[2]);
     nearest = Math.min(nearest, d);
     furthest = Math.max(furthest, d);
-    if (
-      clip &&
-      x >= clip[0][0] && x <= clip[1][0] &&
-      y >= clip[0][1] && y <= clip[1][1] &&
-      z >= clip[0][2] && z <= clip[1][2]
-    ) {
-      inClip += 1;
-    }
   }
 
   // Is any of it in front of the camera, within the view cone?
@@ -68,11 +57,10 @@ const probe = await page.evaluate(() => {
     target,
     fog: dbg.fog,
     camFar: dbg.camFar,
-    clip,
+    reveal: dbg.reveal,
     chunkCenters: dbg.chunkCenters,
     revealEnabled: dbg.revealEnabled,
     samples: samples.length,
-    inClip,
     inFront,
     nearest: Math.round(nearest),
     furthest: Math.round(furthest),
@@ -81,10 +69,10 @@ const probe = await page.evaluate(() => {
 
 console.log('camera at', JSON.stringify(probe.cam), 'looking at', JSON.stringify(probe.target));
 console.log('fog near/far', JSON.stringify(probe.fog), '· camera far', probe.camFar);
-console.log('floater clip', JSON.stringify(probe.clip));
+console.log('reveal fades', JSON.stringify(probe.reveal));
 console.log('chunks at', JSON.stringify(probe.chunkCenters));
 console.log(
-  `${probe.samples} splat samples: ${probe.inClip} inside the clip, ${probe.inFront} in front of ` +
+  `${probe.samples} splat samples: ${probe.inFront} in front of ` +
     `the camera, ${probe.nearest}–${probe.furthest} m away`,
 );
 
@@ -92,7 +80,10 @@ console.log('');
 console.log('===== RESULT =====');
 const checks = [
   ['geometry has arrived', probe.samples > 0],
-  [`it survives the floater clip (${probe.inClip}/${probe.samples})`, probe.inClip > probe.samples * 0.5],
+  [
+    'arrived segments are revealed',
+    probe.reveal != null && probe.reveal.fades.some((f) => f > 0.5),
+  ],
   [`the camera is pointed at it (${probe.inFront}/${probe.samples})`, probe.inFront > probe.samples * 0.2],
   [
     `it is inside the fog (nearest ${probe.nearest} m, fog ends ${probe.fog?.[1]} m)`,
