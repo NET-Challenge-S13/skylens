@@ -109,6 +109,9 @@ test.describe('situation board', () => {
     await expect(page.locator('#minimap')).toBeAttached();
 
     // Nothing has arrived, so nothing may be claimed as reconstructed.
+    // Run this with the demo STOPPED (npm run demo:clean): a live client server
+    // on 8090 feeds the board real chunks, and the failure then says the demo is
+    // running rather than anything about this page.
     expect(await page.evaluate(() => window.skylens.splat?.chunks ?? 0)).toBe(0);
 
     await page.waitForTimeout(1000);
