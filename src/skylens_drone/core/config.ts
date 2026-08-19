@@ -32,6 +32,18 @@ export interface DroneConfig {
    * COMPONENTS.md §5.2 step 4 — the 10 s "드론 연결 대기".
    */
   arrivalMs: number;
+  /**
+   * Which formation slot this aircraft holds (see FORMATION_SLOTS): 0 is the
+   * leader, the rest trail it. Every drone flies the same assigned route and
+   * offsets itself, so a wingman needs nothing from the leader.
+   */
+  formationSlot: number;
+  /**
+   * Whether this aircraft transmits video. In the demo only the leader does:
+   * three drones filming one route would triple the reconstruction jobs for a
+   * scene that was captured once. Wingmen still stream telemetry.
+   */
+  capture: boolean;
   /** Slices the route is cut into per one-way traverse. One VideoSegment each. */
   slicesPerLeg: number;
   /** Battery drain, percent per minute of flight. */
@@ -85,6 +97,8 @@ export const DEFAULT_CONFIG: DroneConfig = {
   cruiseSpeed: 12,
   transitSpeed: 25,
   arrivalMs: 10_000,
+  formationSlot: 0,
+  capture: true,
   slicesPerLeg: 4,
   batteryDrainPerMin: 3.5,
   manualIdleReturn: 2.0,
@@ -132,6 +146,8 @@ export function envFromArgv(argv: readonly string[]): Record<string, string> {
     model: 'SKYLENS_DRONE_MODEL',
     hz: 'SKYLENS_DRONE_TELEMETRY_HZ',
     speed: 'SKYLENS_DRONE_SPEED',
+    formation: 'SKYLENS_DRONE_FORMATION',
+    capture: 'SKYLENS_DRONE_CAPTURE',
     slices: 'SKYLENS_DRONE_SLICES',
     arrival: 'SKYLENS_DRONE_ARRIVAL_MS',
     battery: 'SKYLENS_DRONE_BATTERY_DRAIN',
@@ -190,6 +206,9 @@ export function resolveConfig(...sources: Array<Record<string, string | undefine
     cruiseSpeed: num(env.SKYLENS_DRONE_SPEED, DEFAULT_CONFIG.cruiseSpeed),
     transitSpeed: num(env.SKYLENS_DRONE_TRANSIT_SPEED, DEFAULT_CONFIG.transitSpeed),
     arrivalMs: num(env.SKYLENS_DRONE_ARRIVAL_MS, DEFAULT_CONFIG.arrivalMs),
+    formationSlot: Math.max(0, Math.round(num(env.SKYLENS_DRONE_FORMATION, DEFAULT_CONFIG.formationSlot))),
+    // Wingmen opt OUT explicitly; a lone drone films by default.
+    capture: env.SKYLENS_DRONE_CAPTURE === undefined ? DEFAULT_CONFIG.capture : truthy(env.SKYLENS_DRONE_CAPTURE),
     slicesPerLeg: Math.max(1, Math.round(num(env.SKYLENS_DRONE_SLICES, DEFAULT_CONFIG.slicesPerLeg))),
     batteryDrainPerMin: num(env.SKYLENS_DRONE_BATTERY_DRAIN, DEFAULT_CONFIG.batteryDrainPerMin),
     manualIdleReturn: num(env.SKYLENS_DRONE_MANUAL_IDLE, DEFAULT_CONFIG.manualIdleReturn),

@@ -87,6 +87,10 @@ async function main(): Promise<void> {
     : null;
   const videoMount = mount('video-panel-mount');
   const videoPanel = videoMount ? createVideoPanel(videoMount) : null;
+  /** Which aircraft the MAIN CAM is currently showing; null before the first feed. */
+  let cameraDroneId: number | null = null;
+  /** Last logged state per hop, so only changes reach the console. */
+  const linkSeen = new Map<string, string>();
 
   // --- Core link: the ONE upstream. ---
   const core = createCoreLink({
@@ -97,12 +101,30 @@ async function main(): Promise<void> {
         // rather than leave ghosts frozen over the map.
         fleet.clear();
         telemetryPanel?.render([]);
+        // The camera panel follows the link: no core, no feed.
+        videoPanel?.setFeed(null);
+        videoPanel?.setTelemetry(null);
       }
     },
-    onTelemetry: (t) => fleet.ingest(t),
+    onTelemetry: (t) => {
+      fleet.ingest(t);
+      // The readout tracks the aircraft whose camera is on screen — the one
+      // that sent the current feed — not whichever drone the operator has
+      // selected in the fleet list.
+      if (t.droneId === (cameraDroneId ?? state.activeDroneId)) videoPanel?.setTelemetry(t);
+    },
+    onCameraFeed: (f) => {
+      cameraDroneId = f.droneId;
+      videoPanel?.setFeed(f);
+    },
     onMission: (m) => missionPanel?.setMission(m),
     onLinkStatus: (l) => {
-      console.info(`[control] link ${l.hop}: ${l.connected ? 'up' : 'down'} (${l.mode})`);
+      // The core repeats every hop's status on a timer; only transitions are
+      // worth a line, or the console fills with the same two rows per second.
+      const now = `${l.connected ? 'up' : 'down'} (${l.mode})`;
+      if (linkSeen.get(l.hop) === now) return;
+      linkSeen.set(l.hop, now);
+      console.info(`[control] link ${l.hop}: ${now}`);
     },
   });
   core.start();

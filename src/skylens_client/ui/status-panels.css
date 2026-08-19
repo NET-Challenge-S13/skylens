@@ -2,11 +2,13 @@
    (owned by a different pass) — imported directly from status.ts. Uses the
    token system defined in style.css (--surface-*, --border-*, --font-*). */
 
-/* --- Minimap (bottom-right) --- */
+/* --- Minimap (top-right) ---
+   Bottom-right belongs to the detection card, which slides in over whatever is
+   there; the two used to overlap. */
 #minimap {
   position: absolute;
   right: 16px;
-  bottom: 16px;
+  top: 16px;
   z-index: 10;
   width: 200px;
   height: 200px;

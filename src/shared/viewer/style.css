@@ -4,7 +4,13 @@
    Tokens defined here are consumed by control.css and status-panels.css.
    ========================================================================== */
 
-@import url('https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Barlow:wght@400;500;600&display=swap');
+/* Oswald, Barlow and IBM Plex Mono carry NO Korean glyphs. Every Korean run in
+   this UI therefore fell through to whatever the OS picked, so one label could
+   mix a webfont for its Latin characters with a system font for its Korean —
+   which is exactly what made the pane label look unlike the panels beside it.
+   Noto Sans KR is loaded alongside them and sits in every stack below the Latin
+   face, so Korean is one font everywhere while Latin keeps its own voice. */
+@import url('https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Barlow:wght@400;500;600&family=Noto+Sans+KR:wght@400;500;600;700&display=swap');
 
 :root {
   color-scheme: dark;
@@ -39,9 +45,9 @@
   --neutral-dot: #5c6b85;
 
   /* --- Typography --- */
-  --font-display: 'Oswald', 'Segoe UI Semibold', sans-serif;
-  --font-mono: 'IBM Plex Mono', ui-monospace, 'Cascadia Code', monospace;
-  --font-body: 'Barlow', 'Segoe UI', sans-serif;
+  --font-display: 'Oswald', 'Noto Sans KR', 'Malgun Gothic', sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'Cascadia Code', 'Noto Sans KR', monospace;
+  --font-body: 'Barlow', 'Noto Sans KR', 'Malgun Gothic', sans-serif;
 
   --text-xs: 10.5px;
   --text-sm: 11.5px;
@@ -79,6 +85,21 @@ body {
   background: var(--bg-void);
   overflow: hidden;
   color: var(--text-primary);
+}
+
+/* One text rendering path for the whole UI. Without this the browser picks per
+   element, so a chip drawn over the canvas could be smoothed differently from
+   the panel next to it — visible as a weight difference on the same font. */
+html,
+body,
+button,
+input,
+select,
+textarea {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-synthesis: none;
 }
 
 /* Subtle instrumentation backdrop: fine grid + vignette, control-room feel. */
@@ -168,7 +189,9 @@ html {
   gap: var(--space-2);
   font-family: var(--font-display);
   font-size: var(--text-sm);
-  letter-spacing: 0.15em;
+  /* Matches the panel headers (0.08em). The wider tracking this had was tuned
+     for all-caps Latin and pulled Korean syllables apart. */
+  letter-spacing: 0.08em;
   font-weight: 600;
   text-transform: uppercase;
   padding: 6px 12px;

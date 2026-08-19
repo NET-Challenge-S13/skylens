@@ -1,14 +1,20 @@
-// Bottom-right "main drone camera" placeholder. Renders a synthetic feed
-// (animated gradient + scanlines + crosshair + a small telemetry overlay) on
-// a canvas until a real feed is wired up via setSource().
+// Bottom-right MAIN CAM. Plays what the main drone is actually uplinking: the
+// core turns each arriving video slice into a `camera-feed` message and this
+// panel plays that footage. Until one arrives — no drone, or a drone still in
+// transit — it draws a synthetic standby pattern and says so.
+//
+// Why the feed carries two addresses: the uplink artifact is HEVC because that
+// is what the radio carries, and a browser video element generally cannot
+// decode HEVC in MP4. `previewUri` is the same footage in a rendition it can.
 
-import { state } from '../../shared/viewer/store.ts';
-import { CONFIG } from '../../shared/viewer/config.ts';
-import { sceneToGps } from '../../shared/geo.ts';
+import type { CameraFeed, DroneTelemetry } from '../../shared/protocol.ts';
 
 export interface VideoPanel {
-  /** Seam for a real feed later: a MediaStream, a video URL, or null to fall
-   *  back to the synthetic placeholder. */
+  /** Show the footage the drone is transmitting; null returns to standby. */
+  setFeed(feed: CameraFeed | null): void;
+  /** Telemetry for the readout strip. */
+  setTelemetry(t: DroneTelemetry | null): void;
+  /** Escape hatch for a live MediaStream or an arbitrary URL. */
   setSource(src: MediaStream | string | null): void;
   dispose(): void;
 }
@@ -42,6 +48,10 @@ export function createVideoPanel(container: HTMLElement): VideoPanel {
   let usingRealSource = false;
   let raf = 0;
   let t = 0;
+  let feed: CameraFeed | null = null;
+  let telemetry: DroneTelemetry | null = null;
+  /** Set when the browser refuses the footage, so the panel can say WHY. */
+  let playbackError = '';
 
   function draw(): void {
     raf = requestAnimationFrame(draw);
@@ -93,25 +103,74 @@ export function createVideoPanel(container: HTMLElement): VideoPanel {
   }
 
   function updateOverlay(): void {
-    const leader = state.drones.find((d) => d.id === state.activeDroneId) ?? state.drones[0];
-    if (!leader) {
-      overlay.textContent = 'NO SIGNAL';
+    if (playbackError) {
+      overlay.textContent = playbackError;
       return;
     }
-    const p = leader.pos;
-    // Show real GPS (lat/lon/alt) instead of raw scene X/Y/Z — convert the
-    // drone's scene position through the shared ENU frame to WGS84.
-    const g = sceneToGps([p.x, p.y, p.z], CONFIG.geo.anchor);
+    if (!telemetry) {
+      // Genuinely nothing on the link — say so rather than implying a feed.
+      overlay.textContent = feed ? '수신 대기' : 'NO SIGNAL';
+      return;
+    }
+    const g = telemetry.gps;
     const ns = g.lat >= 0 ? 'N' : 'S';
     const ew = g.lon >= 0 ? 'E' : 'W';
-    overlay.textContent =
-      `DRONE #${leader.id} · ${leader.mode}  ` +
+    const where =
       `${Math.abs(g.lat).toFixed(5)}°${ns} ${Math.abs(g.lon).toFixed(5)}°${ew} · ${g.alt.toFixed(0)}m`;
+    overlay.textContent = feed
+      ? `DRONE #${telemetry.droneId} · ${where}`
+      : `DRONE #${telemetry.droneId} · ${where} · 영상 대기`;
   }
 
   raf = requestAnimationFrame(draw);
 
+  function showVideo(url: string): void {
+    video.srcObject = null;
+    video.src = url;
+    video.loop = true;
+    usingRealSource = true;
+    playbackError = '';
+    video.classList.remove('is-hidden');
+    canvas.classList.add('is-hidden');
+    void video.play().catch((err: unknown) => {
+      // Autoplay refusal or an undecodable codec: fall back to the standby
+      // pattern and name the reason instead of showing a black rectangle.
+      playbackError = '영상 재생 불가 — 코덱 미지원';
+      usingRealSource = false;
+      video.classList.add('is-hidden');
+      canvas.classList.remove('is-hidden');
+      console.warn('[video-panel] playback failed', err);
+    });
+  }
+
+  video.addEventListener('error', () => {
+    playbackError = '영상 재생 불가 — 소스 오류';
+    usingRealSource = false;
+    video.classList.add('is-hidden');
+    canvas.classList.remove('is-hidden');
+  });
+
   return {
+    setFeed(next: CameraFeed | null): void {
+      feed = next;
+      if (!next) {
+        video.pause();
+        video.removeAttribute('src');
+        usingRealSource = false;
+        video.classList.add('is-hidden');
+        canvas.classList.remove('is-hidden');
+        return;
+      }
+      const url = next.previewUri ?? next.uri;
+      // Re-issuing the same URL would restart the clip on every slice; the
+      // footage is already looping.
+      if (video.getAttribute('src') !== url) showVideo(url);
+    },
+
+    setTelemetry(t: DroneTelemetry | null): void {
+      telemetry = t;
+    },
+
     setSource(src: MediaStream | string | null): void {
       if (src instanceof MediaStream) {
         video.srcObject = src;

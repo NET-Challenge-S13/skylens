@@ -135,7 +135,10 @@ export function createMissionPanel(mount: HTMLElement): MissionPanel {
           state === 'connecting'
             ? '코어에 연결하는 중입니다'
             : '코어와 연결되어 있지 않습니다 — 표시된 임무 상태는 최신이 아닐 수 있습니다';
-        sub.textContent = '드론 위치는 코어에서만 옵니다 · 관제탑은 자체 시뮬레이션을 하지 않습니다';
+        sub.textContent =
+          state === 'connecting'
+            ? '연결되면 임무 상태와 드론 위치가 표시됩니다'
+            : '연결이 복구될 때까지 드론 위치와 임무 상태를 갱신할 수 없습니다';
       } else {
         renderSub();
       }

@@ -83,7 +83,15 @@ function upgradeTo(
     headers: { ...req.headers, host: target.host },
   });
   upstream.end();
+  // A browser closing a tab resets these sockets, and an unhandled 'error' on a
+  // raw socket takes the whole process down with it. The core has to outlive its
+  // viewers, so every socket in the pair gets a handler.
+  const drop = (): void => {
+    socket.destroy();
+  };
+  socket.on('error', drop);
   upstream.on('upgrade', (upRes, upSocket, upHead) => {
+    upSocket.on('error', drop);
     const lines = Object.entries(upRes.headers).map(([k, v]) => `${k}: ${String(v)}`);
     socket.write(`HTTP/1.1 101 Switching Protocols\r\n${lines.join('\r\n')}\r\n\r\n`);
     if (upHead.length > 0) socket.unshift(upHead);
@@ -91,6 +99,6 @@ function upgradeTo(
     upSocket.pipe(socket);
     socket.pipe(upSocket);
   });
-  upstream.on('error', () => socket.destroy());
+  upstream.on('error', drop);
   return true;
 }

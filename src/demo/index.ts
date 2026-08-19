@@ -103,20 +103,31 @@ const COMPONENTS: Component[] = [
     health: 'http://127.0.0.1:5173/res/static/index.html',
     readyTimeoutMs: 60_000,
   },
-  {
-    name: 'skylens_drone',
-    tag: 'drone ',
+  // The formation: a leader and two wingmen (중간보고서 Ⅲ-1-나). Each is its
+  // own drone process, because that is what a drone is — three aircraft, not
+  // one process pretending to be three. They fly the same assigned route and
+  // hold their slot offsets; only the leader films (see DroneConfig.capture).
+  ...[0, 1, 2].map((slot) => ({
+    name: `skylens_drone#${slot + 1}`,
+    tag: `drone${slot + 1}`,
     command: NODE,
     args: [...tsx('src/skylens_drone/node/run.ts'), '--demo'],
-    // The drone process is up from the start, but it must not announce itself
-    // until it has "reached the site" — otherwise the core sees a drone online
-    // immediately and the mission jumps straight from assigned to active,
-    // skipping the drone-connection wait the scenario is built around
+    // The drone processes are up from the start, but must not announce
+    // themselves until they have "reached the site" — otherwise the core sees a
+    // drone online immediately and the mission jumps straight from assigned to
+    // active, skipping the drone-connection wait the scenario is built around
     // (COMPONENTS.md §5.2 steps 3-4).
-    env: { ...DEMO_ENV, SKYLENS_DRONE_HELLO_ON_ARRIVAL: '1' },
+    env: {
+      ...DEMO_ENV,
+      SKYLENS_DRONE_HELLO_ON_ARRIVAL: '1',
+      SKYLENS_DRONE_ID: String(slot + 1),
+      SKYLENS_DRONE_FORMATION: String(slot),
+      SKYLENS_DRONE_CAPTURE: slot === 0 ? '1' : '0',
+      SKYLENS_DRONE_MODEL: slot === 0 ? 'SkyLens D1 · 리더' : `SkyLens D${slot + 1} · 군집`,
+    },
     health: null,
     readyTimeoutMs: 0,
-  },
+  })),
 ];
 
 const running: Array<{ name: string; child: ChildProcess }> = [];

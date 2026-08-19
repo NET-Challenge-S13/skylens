@@ -17,6 +17,7 @@
 
 import { CONFIG } from '../shared/viewer/config.ts';
 import type {
+  CameraFeed,
   ControlMessage,
   DetectionResult,
   DroneTelemetry,
@@ -38,6 +39,7 @@ export interface CoreLinkHandlers {
   onServerStatus?(s: ServerStatus): void;
   onDetection?(d: DetectionResult): void;
   onSplatChunk?(c: SplatChunk): void;
+  onCameraFeed?(f: CameraFeed): void;
 }
 
 export interface CoreLink {
@@ -116,6 +118,9 @@ export function createCoreLink(handlers: CoreLinkHandlers): CoreLink {
         break;
       case 'splat-chunk':
         handlers.onSplatChunk?.(msg);
+        break;
+      case 'camera-feed':
+        handlers.onCameraFeed?.(msg);
         break;
     }
   };

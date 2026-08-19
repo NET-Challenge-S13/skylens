@@ -6,6 +6,7 @@
 // always a clean slate.
 
 import type {
+  CameraFeed,
   DetectionResult,
   DroneHello,
   DroneTelemetry,
@@ -43,6 +44,8 @@ export class Store {
   routeLoop = false;
   /** Frame the FIRST recon job established; forced onto every later job. */
   anchorFrame: string | null = null;
+  /** Newest main-camera slice, replayed to a viewer that joins mid-flight. */
+  cameraFeed: CameraFeed | null = null;
 
   readonly counters: StoreCounters = {
     uplinkFrames: 0,

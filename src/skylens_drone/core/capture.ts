@@ -17,7 +17,12 @@
 //                 tools/transcodeDemoFootage.ts. The files really are HEVC, so
 //                 the `codec` on the wire is not a stand-in for anything.
 
-import { pickClip, wireCodecOf, type FlightDirection } from './demoAssets.ts';
+import {
+  DEMO_SOURCE_DIR,
+  pickClip,
+  wireCodecOf,
+  type FlightDirection,
+} from './demoAssets.ts';
 
 export interface SliceRequest {
   /** Slice number within the flight, 0-based. */
@@ -31,6 +36,9 @@ export interface SliceRequest {
 
 export interface SliceResult {
   uri: string;
+  /** Same footage in a browser-decodable rendition, when one exists. The demo
+   *  ships HEVC, which the operator's video panel cannot play directly. */
+  previewUri: string | null;
   bytes: number;
   /**
    * Codec of the bytes THIS slice actually consists of, established per slice
@@ -68,6 +76,9 @@ export class DemoCapture implements CaptureSource {
     const codec = wireCodecOf(clip);
     return {
       uri: clip.uri,
+      // The H.264 original the HEVC was transcoded from — same footage, same
+      // frames, addressable by a browser video element.
+      previewUri: `${DEMO_SOURCE_DIR}/${clip.file}`,
       bytes: clip.bytes,
       codec,
       note:
@@ -218,6 +229,9 @@ export class LiveCapture implements CaptureSource {
     // isConfigSupported() agreed, so these bytes are H.265 by construction.
     return {
       uri,
+      // Live capture publishes one artifact. A viewer-side rendition would need
+      // a second encode, which is a deployment decision, not this class's.
+      previewUri: null,
       bytes: total,
       codec: 'h265',
       note: `live H.265 ${chunks.length} chunks / ${(total / 1e6).toFixed(2)} MB`,

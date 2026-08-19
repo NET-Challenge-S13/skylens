@@ -73,8 +73,16 @@ export interface VideoSegment {
   codec: 'h265';
   startedAt: number;
   durationMs: number;
-  /** Where the bytes live. In demo mode this is a file under res/static/demo. */
+  /** Where the bytes live. In demo mode this is a file under res/static/video. */
   uri: string;
+  /**
+   * The same capture in a rendition a browser can decode, or null when `uri`
+   * already is one. The uplink artifact is HEVC because that is what the radio
+   * carries, and most browsers cannot play HEVC in MP4 — so the operator video
+   * panel needs a second address for the identical footage rather than a
+   * silently black player.
+   */
+  previewUri: string | null;
   bytes: number;
   /** Poses sampled across the slice, oldest first. */
   poses: DroneTelemetry[];
@@ -159,6 +167,24 @@ export interface SplatChunk {
   url: string;
   bytes: number;
   align: SplatAlign;
+}
+
+/**
+ * What the main drone camera is showing right now. Derived from the video the
+ * drone is uplinking, so the control tower's MAIN CAM panel shows the actual
+ * capture rather than a placeholder.
+ */
+export interface CameraFeed {
+  kind: 'camera-feed';
+  droneId: number;
+  /** The uplinked artifact (HEVC on the wire). */
+  uri: string;
+  /** Browser-playable rendition of the same footage, when one exists. */
+  previewUri: string | null;
+  codec: 'h265';
+  /** Unix ms at the drone when this slice started. */
+  startedAt: number;
+  durationMs: number;
 }
 
 /** Segment-level view of the same stream, for progress UI. */
@@ -281,6 +307,7 @@ export type ViewerMessage =
   | SplatChunk
   | DetectionResult
   | DroneTelemetry
+  | CameraFeed
   | MissionStatus
   | ServerStatus
   | LinkStatus;

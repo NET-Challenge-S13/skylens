@@ -29,11 +29,13 @@ import type {
   DetectJobRequest,
   DetectionResult,
   ReconJobRequest,
+  SplatAlign,
   SplatChunk,
 } from '../../shared/protocol.ts';
 import type { QueuedJob, SegmentRecord } from './types.ts';
 import type { LadderLevel } from './ladder.ts';
 import { rung, topLevel } from './ladder.ts';
+import { segmentSpan } from './segmenter.ts';
 import { JobFailed, ModelUnreachable, type ModelClient } from './modelClient.ts';
 import type { Store } from './store.ts';
 
@@ -45,6 +47,8 @@ export interface OrchestratorOptions {
   reconConcurrency: number;
   detectConcurrency: number;
   detect: boolean;
+  /** Segment width, metres — needed to place a chunk on its own stretch of route. */
+  segmentMeters: number;
   retryMs: number;
   maxAttempts: number;
   onChunk: (chunk: SplatChunk) => void;
@@ -248,6 +252,15 @@ export class Orchestrator {
     }, Math.max(soonest, 250));
   }
 
+  /** Give a chunk a real-world anchor when the model did not supply one. */
+  private placeOnRoute(segment: number, align: SplatAlign): SplatAlign {
+    if (align.anchor) return align;
+    const [from, to] = segmentSpan(segment, this.opts.segmentMeters);
+    const at = this.opts.store.route.pointAt((from + to) / 2);
+    if (at === null) return align;
+    return { ...align, anchor: at };
+  }
+
   private async run(job: QueuedJob): Promise<void> {
     this.running.set(job.id, job);
     this.dispatched += 1;
@@ -308,7 +321,14 @@ export class Orchestrator {
       final: job.level >= this.top,
       url: result.url,
       bytes: result.bytes,
-      align: result.align,
+      // Place the piece where it was captured. The model returns an identity
+      // transform for the prebuilt demo assets, which would stack every segment
+      // on the scene origin — kilometres from where the drone actually flew, so
+      // the board would render geometry the camera never looks at. Anchoring it
+      // to the middle of the segment's own stretch of route puts the
+      // reconstruction under the flight path, which is also what makes the
+      // delay pattern legible: the scene grows along the track.
+      align: this.placeOnRoute(job.segment, result.align),
     };
     store.putChunk(chunk);
     store.counters.reconJobsDone += 1;

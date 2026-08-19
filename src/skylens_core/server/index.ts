@@ -73,6 +73,7 @@ const orchestrator = new Orchestrator({
   reconConcurrency: cfg.reconConcurrency,
   detectConcurrency: cfg.detectConcurrency,
   detect: cfg.detect,
+  segmentMeters: cfg.segmentMeters,
   retryMs: cfg.modelRetryMs,
   maxAttempts: cfg.modelMaxAttempts,
   onChunk: (chunk: SplatChunk) => distributor.broadcast(chunk),
@@ -86,6 +87,10 @@ const ingest = new Ingest({
     onDroneUp: () => mission.droneConnected(),
     onDroneGone: () => mission.droneGone(),
     onTelemetry: (t) => distributor.broadcast(t),
+    onCameraFeed: (f) => {
+      store.cameraFeed = f;
+      distributor.broadcast(f);
+    },
     onSegmentClosed: (seg) => orchestrator.segmentClosed(seg),
     onLinkStatus: (s: LinkStatus) => distributor.broadcast(s),
     currentRoute: () =>
@@ -129,6 +134,7 @@ distributor.onJoin((send: ViewerSend) => {
   for (const drone of store.drones.values()) if (drone.last) send(drone.last);
   for (const chunk of store.chunks()) send(chunk);
   for (const det of store.detections) send(det);
+  if (store.cameraFeed) send(store.cameraFeed);
   send(serverStatus());
 });
 
@@ -224,6 +230,12 @@ const uplinkWss = new WebSocketServer({ noServer: true });
 const viewerWss = new WebSocketServer({ noServer: true });
 
 server.on('upgrade', (req, socket, head) => {
+  // Before anything else: a socket that resets mid-handshake must not raise an
+  // unhandled 'error' and kill the core. Viewers come and go; the core stays.
+  socket.on('error', (err) => {
+    console.warn(`[core] upgrade socket error: ${err.message}`);
+    socket.destroy();
+  });
   const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
   if (url.pathname === cfg.uplinkPath) {
     uplinkWss.handleUpgrade(req, socket, head, (ws) => uplinkWss.emit('connection', ws, req));

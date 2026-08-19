@@ -79,6 +79,54 @@ export function foldOdometer(
 }
 
 /** Position + heading at distance `s` metres along the one-way polyline. */
+/**
+ * Where a drone sits relative to the leader, in the leader's heading frame
+ * (metres). The report's demo formation is one leader plus two wingmen holding
+ * station behind and to either side (중간보고서 Ⅲ-1-나: 리더 드론 1대와 이를
+ * 추종하는 군집 드론 2대).
+ *
+ * Followers fly the SAME assigned route with this offset applied rather than
+ * chasing the leader's telemetry: each aircraft then needs nothing from the
+ * others, which is how waypoint formation flight actually works and keeps the
+ * drone component independent of the rest of the pipeline.
+ */
+export interface FormationSlot {
+  /** Right of the heading. */
+  right: number;
+  /** Above. */
+  up: number;
+  /** Ahead; negative trails the leader. */
+  forward: number;
+}
+
+export const FORMATION_SLOTS: readonly FormationSlot[] = [
+  { right: 0, up: 0, forward: 0 },
+  { right: -16, up: 4, forward: -12 },
+  { right: 16, up: -4, forward: -12 },
+];
+
+/** Offset a leader pose into a formation slot. Heading is unchanged: wingmen
+ *  hold the leader's attitude, which is what makes the group read as one. */
+export function applyFormation(pose: Pose, slot: FormationSlot, anchor: Gps): Pose {
+  if (slot.right === 0 && slot.up === 0 && slot.forward === 0) return pose;
+  const rad = (pose.headingDeg * TAU) / 360;
+  // Heading is a compass bearing: north is +n, east is +e.
+  const fwd = { e: Math.sin(rad), n: Math.cos(rad) };
+  const right = { e: fwd.n, n: -fwd.e };
+  const here = gpsToEnu(pose.gps, anchor);
+  return {
+    gps: enuToGps(
+      {
+        e: here.e + right.e * slot.right + fwd.e * slot.forward,
+        n: here.n + right.n * slot.right + fwd.n * slot.forward,
+        u: here.u + slot.up,
+      },
+      anchor,
+    ),
+    headingDeg: pose.headingDeg,
+  };
+}
+
 export function sampleRoute(plan: RoutePlan, s: number, direction: FlightDirection): Pose {
   const pts = plan.points;
   if (pts.length === 0) return { gps: plan.anchor, headingDeg: 0 };

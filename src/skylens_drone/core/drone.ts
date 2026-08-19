@@ -30,6 +30,8 @@ import {
   groundDistance,
   interpolateGps,
   planRoute,
+  applyFormation,
+  FORMATION_SLOTS,
   sampleRoute,
   stepManual,
   type FlightDirection,
@@ -223,9 +225,22 @@ export class DroneApp {
   }
 
   private onControl(msg: ControlMessage): void {
-    if (msg.droneId !== this.cfg.droneId && msg.droneId >= 0) return;
+    if (!this.addressedToMe(msg)) return;
     if (msg.kind === 'assign-route') this.assignRoute(msg);
     else if (msg.kind === 'manual-control') this.applyManual(msg);
+  }
+
+  /**
+   * A negative id is a broadcast. Otherwise control is addressed to one
+   * aircraft — EXCEPT a route, which is assigned to the formation: the operator
+   * plans one track and the leader plus its wingmen fly it, each holding its own
+   * slot. Sticks stay strictly addressed; taking manual control of the leader
+   * must not move the whole group.
+   */
+  private addressedToMe(msg: ControlMessage): boolean {
+    if (msg.droneId < 0) return true;
+    if (msg.droneId === this.cfg.droneId) return true;
+    return msg.kind === 'assign-route' && this.cfg.formationSlot > 0;
   }
 
   // -------------------------------------------------------------------------
@@ -331,7 +346,7 @@ export class DroneApp {
     this.speed = this.transitDistanceM / (this.cfg.arrivalMs / 1000);
     if (frac >= 1) {
       this.phase = 'flying';
-      this.pose = sampleRoute(plan, 0, 'forward');
+      this.pose = this.onRoute(plan, 0, 'forward');
       this.sliceStartedAt = t;
       this.poseBuffer = [];
       if (this.cfg.helloOnArrival) this.announce();
@@ -355,7 +370,14 @@ export class DroneApp {
       this.log(`turnaround — leg ${fold.lap + 1} (${fold.direction})`);
     }
     this.direction = fold.direction;
-    this.pose = sampleRoute(plan, fold.s, fold.direction);
+    this.pose = this.onRoute(plan, fold.s, fold.direction);
+  }
+
+  /** Route pose for THIS aircraft: the leader's track, shifted into its slot. */
+  private onRoute(plan: RoutePlan, s: number, direction: FlightDirection): Pose {
+    const pose = sampleRoute(plan, s, direction);
+    const slot = FORMATION_SLOTS[this.cfg.formationSlot % FORMATION_SLOTS.length];
+    return applyFormation(pose, slot, plan.anchor);
   }
 
   private stepManualPhase(t: number, dt: number): void {
@@ -395,6 +417,8 @@ export class DroneApp {
   private maybeCutSlice(t: number): void {
     const plan = this.plan;
     const sliceLen = this.sliceLengthM();
+    // A wingman flies and reports position but does not film (config.capture).
+    if (!this.cfg.capture) return;
     if (!plan || sliceLen <= 0 || this.cutting) return;
     if (this.phase !== 'flying' && this.phase !== 'manual') return;
     if (this.odometerM < (this.slicesEmitted + 1) * sliceLen) return;
@@ -423,6 +447,7 @@ export class DroneApp {
           startedAt,
           durationMs,
           uri: result.uri,
+          previewUri: result.previewUri,
           bytes: result.bytes,
           poses,
         };

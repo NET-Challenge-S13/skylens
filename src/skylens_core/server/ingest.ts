@@ -18,6 +18,7 @@
 import type { WebSocket, WebSocketServer } from 'ws';
 import type {
   AssignRoute,
+  CameraFeed,
   ControlMessage,
   DroneTelemetry,
   Envelope,
@@ -34,6 +35,8 @@ export interface IngestEvents {
   onDroneUp: (drone: DroneRecord) => void;
   onDroneGone: (droneId: number) => void;
   onTelemetry: (t: DroneTelemetry) => void;
+  /** The main camera moved on to a new slice — viewers can show it. */
+  onCameraFeed: (f: CameraFeed) => void;
   /** The drone has LEFT this segment. The only delay-pattern trigger there is. */
   onSegmentClosed: (seg: SegmentRecord) => void;
   onLinkStatus: (s: LinkStatus) => void;
@@ -233,14 +236,27 @@ export class Ingest {
     const arcM = this.advance(rec, previous, msg.gps);
     const index = segmentIndexFor(arcM, this.segmentMeters);
 
-    if (rec.currentSegment === null) {
+    // Only the aircraft the route was assigned to drives segmentation. A
+    // formation flies one track, so its wingmen cross the same boundaries
+    // seconds apart — counting each of them would close every segment three
+    // times over for one pass of one camera. Their telemetry still updates the
+    // map and the store; it just does not define progress.
+    const drivesSegments = this.store.routeDroneId === null
+      ? true
+      : msg.droneId === this.store.routeDroneId;
+
+    if (drivesSegments) {
+      if (rec.currentSegment === null) {
+        rec.currentSegment = index;
+        this.store.segment(index).passes += 1;
+      } else if (index !== rec.currentSegment) {
+        const left = this.store.segment(rec.currentSegment);
+        rec.currentSegment = index;
+        this.store.segment(index).passes += 1;
+        this.close(left, arcM);
+      }
+    } else {
       rec.currentSegment = index;
-      this.store.segment(index).passes += 1;
-    } else if (index !== rec.currentSegment) {
-      const left = this.store.segment(rec.currentSegment);
-      rec.currentSegment = index;
-      this.store.segment(index).passes += 1;
-      this.close(left, arcM);
     }
 
     this.events.onTelemetry(msg);
@@ -276,6 +292,17 @@ export class Ingest {
   private video(msg: VideoSegment): void {
     const bytes = typeof msg.bytes === 'number' ? msg.bytes : 0;
     this.store.video(msg, bytes);
+
+    // The operator's MAIN CAM shows what the drone is uplinking right now.
+    this.events.onCameraFeed({
+      kind: 'camera-feed',
+      droneId: msg.droneId,
+      uri: msg.uri,
+      previewUri: msg.previewUri ?? null,
+      codec: msg.codec,
+      startedAt: msg.startedAt,
+      durationMs: msg.durationMs,
+    });
 
     const poses = Array.isArray(msg.poses) ? msg.poses : [];
     let index: number | null = null;

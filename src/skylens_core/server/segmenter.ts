@@ -14,7 +14,7 @@
 // odometer, so the scheduler downstream cannot tell the two apart.
 
 import type { Gps } from '../../shared/geo.ts';
-import { gpsToEnu } from '../../shared/geo.ts';
+import { enuToGps, gpsToEnu } from '../../shared/geo.ts';
 
 export interface Projection {
   /** Distance along the route from waypoint 0, meters. */
@@ -93,6 +93,33 @@ export class RouteTracker {
       if (offsetM < best.offsetM) best = { arcM: leg.cum + t * leg.len, offsetM };
     }
     return best;
+  }
+
+  /**
+   * GPS at a given arc length along the route. The inverse of `project`, and the
+   * reason it exists: a reconstructed segment has to be PLACED somewhere in the
+   * world, and the honest place is the stretch of route it was captured over.
+   * Null when no route is set.
+   */
+  pointAt(arcM: number): Gps | null {
+    if (this.anchor === null || this.legs.length === 0) return null;
+    const clamped = Math.max(0, Math.min(arcM, this.totalM));
+    let leg = this.legs[this.legs.length - 1];
+    for (const candidate of this.legs) {
+      if (clamped <= candidate.cum + candidate.len) {
+        leg = candidate;
+        break;
+      }
+    }
+    const t = leg.len > 0 ? (clamped - leg.cum) / leg.len : 0;
+    return enuToGps(
+      {
+        e: leg.ax + (leg.bx - leg.ax) * t,
+        n: leg.ay + (leg.by - leg.ay) * t,
+        u: 0,
+      },
+      this.anchor,
+    );
   }
 }
 
