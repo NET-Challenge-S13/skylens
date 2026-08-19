@@ -170,6 +170,9 @@ async function main(): Promise<void> {
     // Centered on the loaded operating area, NOT on a hardcoded anchor — the
     // planner and the 3D scene must describe the same piece of ground.
     anchor: frame.anchor,
+    // The planner's altitude is a clearance over the ground; the terrain the
+    // tower already loaded is what turns it into a GPS altitude.
+    groundAltAt: (gps) => frame.groundAltAt(gps),
     // A route is assigned to the FORMATION, and the centre aircraft is the one
     // that carries it: the wingmen take the same track and offset themselves,
     // and segmentation follows the centre. Selecting a wingman to look at its

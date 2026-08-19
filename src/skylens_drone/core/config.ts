@@ -113,12 +113,20 @@ export const DEFAULT_CONFIG: DroneConfig = {
   helloOnArrival: false,
 };
 
-/** Waypoints used by --autoroute / the standalone browser page. */
+/**
+ * Waypoints used by --autoroute / the standalone browser page.
+ *
+ * `alt` is GPS altitude — above sea level, not above the ground. The ground
+ * here (대전 유성) is about 58 m, so these sit ~60 m over it. Altitudes near 60
+ * would put the aircraft ON the terrain: that is what made the fleet look like
+ * it was flying somewhere other than the planned line, because it was rendered
+ * inside the hills instead of over them.
+ */
 export const DEMO_ROUTE: Gps[] = [
-  { lat: 36.3680, lon: 127.3460, alt: 62 },
-  { lat: 36.3686, lon: 127.3468, alt: 68 },
-  { lat: 36.3692, lon: 127.3476, alt: 68 },
-  { lat: 36.3695, lon: 127.3487, alt: 60 },
+  { lat: 36.3680, lon: 127.3460, alt: 120 },
+  { lat: 36.3686, lon: 127.3468, alt: 126 },
+  { lat: 36.3692, lon: 127.3476, alt: 126 },
+  { lat: 36.3695, lon: 127.3487, alt: 118 },
 ];
 
 /** Parse a station name, or null when the value is absent or not one of ours. */

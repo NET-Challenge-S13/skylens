@@ -27,6 +27,17 @@ export interface AssignedRoute {
 export interface RouteModalOptions {
   /** Anchor used to center the map and prefill a sensible altitude. */
   anchor: Gps;
+  /**
+   * Ground elevation under a fix, in metres above sea level.
+   *
+   * The operator sets ONE altitude for the whole route and means height above
+   * the ground — that is what keeps an aircraft clear of what it is flying
+   * over. GPS altitude is absolute, so the two differ by the terrain, and in
+   * Daejeon the terrain is ~58 m: a route "at 58 m" written straight to GPS put
+   * the whole flight at ground level, with waypoints ending up UNDER the hills.
+   * The tower knows the terrain (it loaded the DEM), so it converts here.
+   */
+  groundAltAt(gps: Gps): number;
   /** Drone id the route is assigned to (the leader / active drone). */
   getLeaderId: () => number;
   onAssign(route: AssignedRoute): void;
@@ -42,6 +53,11 @@ export interface RouteModal {
    * in, and it never overrides a stored centre or one the operator has dragged.
    */
   suggestCenter(gps: Gps): void;
+  /** Aim the map at a fix with a given ground span — for the checks that
+   *  compare this map against the 3D view over the same footprint. */
+  debugView(at: Gps, groundSpanM: number): void;
+  /** What the map is looking at right now, in ground terms. */
+  debugBounds(): { center: Gps; spanM: number; bounds: Bounds };
   dispose(): void;
 }
 
@@ -115,7 +131,9 @@ export function createRouteModal(opts: RouteModalOptions): RouteModal {
   let waypoints: Waypoint[] = [];
   let loop = true;
   let spanM = SPANS[1];
-  let altitude = Math.round(anchor.alt + 20);
+  /** Height above the ground, metres. Absolute altitude is derived per
+   *  waypoint from the terrain under it. */
+  let agl = 60;
   let satTiles: LoadedTile[] = [];
   let satToken = 0; // invalidates stale tile loads on span change / close.
 
@@ -147,11 +165,10 @@ export function createRouteModal(opts: RouteModalOptions): RouteModal {
   }
   function pxToGps(x: number, y: number): Gps {
     const b = bounds();
-    return {
-      lat: b.north - (y / MAP_PX) * (b.north - b.south),
-      lon: b.west + (x / MAP_PX) * (b.east - b.west),
-      alt: altitude,
-    };
+    const lat = b.north - (y / MAP_PX) * (b.north - b.south);
+    const lon = b.west + (x / MAP_PX) * (b.east - b.west);
+    // Absolute altitude for the wire; the operator's number is the clearance.
+    return { lat, lon, alt: Math.round(opts.groundAltAt({ lat, lon, alt: 0 }) + agl) };
   }
 
   // ---------- DOM ----------
@@ -198,16 +215,22 @@ export function createRouteModal(opts: RouteModalOptions): RouteModal {
   const altText = document.createElement('span');
   const altInput = document.createElement('input');
   altInput.type = 'range';
-  altInput.min = String(Math.round(anchor.alt + 5));
-  altInput.max = String(Math.round(anchor.alt + 150));
-  altInput.step = '1';
-  altInput.value = String(altitude);
+  altInput.min = '20';
+  altInput.max = '200';
+  altInput.step = '5';
+  altInput.value = String(agl);
   function syncAltText(): void {
-    altText.textContent = `고도 ${altitude}m`;
+    altText.textContent = `고도 ${agl}m (지면 기준)`;
   }
   altInput.addEventListener('input', () => {
-    altitude = parseInt(altInput.value, 10);
+    agl = parseInt(altInput.value, 10);
     syncAltText();
+    // Points already on the map keep the clearance the operator is setting.
+    waypoints = waypoints.map((w) => ({
+      ...w,
+      alt: Math.round(opts.groundAltAt({ lat: w.lat, lon: w.lon, alt: 0 }) + agl),
+    }));
+    renderList();
   });
   altWrap.append(altText, altInput);
 
@@ -572,6 +595,23 @@ export function createRouteModal(opts: RouteModalOptions): RouteModal {
       draw();
     },
     close,
+
+    /** Point the map at a fix with a chosen ground span. Only the checks use
+     *  this: an operator pans and picks a span from the toolbar. */
+    debugView(at: Gps, groundSpanM: number): void {
+      center = { lat: at.lat, lon: at.lon, alt: center.alt };
+      centerPinned = true;
+      spanM = groundSpanM;
+      syncSpanBtns();
+      loadSatellite();
+      draw();
+    },
+
+    /** What the map is currently looking at, in ground terms. */
+    debugBounds(): { center: Gps; spanM: number; bounds: Bounds } {
+      return { center: { ...center }, spanM, bounds: bounds() };
+    },
+
     dispose(): void {
       satToken++;
       overlay.remove();
