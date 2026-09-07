@@ -59,7 +59,7 @@ COMPONENTS §2의 데이터 흐름(드론 → 게이트웨이 → 프록시 → 
 
 ```
 skylens_infra/
-├─ bridge/      175 에 올릴 것 — 폴더째 복사해 setup-bridge.sh 하나로 끝 (bridge/README.md)
+├─ bridge/      175(맥미니) 에 올릴 것 — setup-bridge-macos.sh 하나로 끝. Ubuntu 판(setup-bridge.sh)도 있음 (bridge/README.md)
 ├─ daejeon/     대전 — MediaMTX 설정 2종(로컬 테스트 / 브리지 pull) + setup + 브리지 키 등록
 ├─ scripts/     공용 — MediaMTX 설치, ffmpeg SRT 테스트 소스, aiortc WHEP 수신 프로브
 └─ worklog/     로컬 작업 로그 (gitignore)
@@ -67,7 +67,7 @@ skylens_infra/
 
 ## 배포
 
-**브리지** — `bridge/README.md`. 폴더 복사 → `bridge.env` → `sudo ./setup-bridge.sh` → 출력된 **공개키를 대전 담당자에게** → `./check-bridge.sh`.
+**브리지 (macOS 맥미니)** — `bridge/README.md`. 폴더 복사 → `bridge.env` → `sudo ./setup-bridge-macos.sh` → 출력된 **공개키를 대전 담당자에게** → `./check-bridge-macos.sh`. 리눅스면 `setup-bridge.sh`.
 
 **대전**
 ```bash
