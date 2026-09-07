@@ -1,0 +1,47 @@
+# MediaMTX — 브리지(175.126.98.44)
+#
+# 역할: 현장 게이트웨이의 SRT 영상을 받아둔다. 대전이 밖으로 나와서 당겨간다.
+#       (게이트웨이는 5G 라 IP 가 유동이어서 KOREN 에 직접 못 들어간다)
+# 이 서버는 영상을 배포하지 않는다 — WebRTC 는 대전이 한다.
+#
+# __PUBLISH_PASS__ 는 setup-bridge.sh 가 bridge.env 값으로 치환한다.
+
+logLevel: info
+logDestinations: [stdout]
+
+api: no
+metrics: no
+pprof: no
+playback: no
+rtsp: no
+rtmp: no
+hls: no
+webrtc: no
+moq: no
+
+# ---- SRT (수신) ----
+srt: yes
+srtAddress: :__SRT_PORT__
+
+# ---- 인증 ----
+# 게이트웨이는 비밀번호로 publish, 대전만 read.
+authMethod: internal
+authInternalUsers:
+  - user: drone
+    pass: __PUBLISH_PASS__
+    ips: []
+    permissions:
+      - action: publish
+        path: drone
+  - user: any
+    pass:
+    ips: ['127.0.0.1/32', '116.89.187.181/32']   # 로컬 점검 + 대전
+    permissions:
+      - action: read
+        path: drone
+
+pathDefaults:
+  source: publisher
+
+paths:
+  drone:
