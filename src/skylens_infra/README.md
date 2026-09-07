@@ -9,8 +9,8 @@
 
 | 호스트 | 망 | COMPONENTS 컴포넌트 | 이 디렉터리가 추가로 올리는 것 |
 |---|---|---|---|
-| **브리지** `175.126.98.44` | KOREN 외부망 · 등록 IP | `skylens_gateway` :8081 · `skylens_client` :8090 | nginx :80 · MediaMTX SRT 수신 :10890 · 대전 터널 수신 |
-| **대전** `116.89.187.181` | KOREN 내부망 | `skylens_proxy` :8082 · `skylens_core` :8080 | MediaMTX WHEP :10889 / ICE :10189 · 브리지로 가는 리버스 터널 |
+| **브리지** `175.126.98.44` | KOREN 외부망 · 등록 IP | `skylens_gateway` :8081 · `skylens_client` :8090 | nginx :80 · MediaMTX SRT 수신 :10890 · 대전으로 가는 SSH 터널(autossh) |
+| **대전** `116.89.187.181` | KOREN 내부망 | `skylens_proxy` :8082 · `skylens_core` :8080 | MediaMTX WHEP :10889 / ICE :10189 · 브리지 키 등록(`permitopen` 제한) |
 | **판교** `10.246.246.9` | KOREN 내부망 · V100 | `skylens_model` :8100 | — (대전과 터널로만 통신) |
 
 컴포넌트 포트(8080~8100)는 호스트 안 또는 KOREN 내부망 사이에서만 쓰이고, 밖으로 노출되는 건 브리지의 80·8081·10890 뿐이다. KOREN 안에서 인바운드로 열리는 포트는 정책(10000~15000)에 맞춘 MediaMTX 셋이다.
@@ -31,7 +31,7 @@ COMPONENTS §2의 데이터 흐름(드론 → 게이트웨이 → 프록시 → 
 
 **브리지가 필요한 이유는 WebRTC가 아니라 KOREN 정책이다.** WebRTC는 영상 중계를 없애지만 주소 교환(시그널링)은 원래 누군가 해야 하고, 보통은 영상 서버 자신이 HTTP로 받는다. KOREN은 등록 IP 외 인바운드를 막으므로 그 HTTP를 밖에서 받아줄 곳이 필요하다. 드론 게이트웨이(5G, 유동 IP)도 같은 이유로 못 들어가므로 SRT를 브리지가 받아두고 대전이 당겨간다. KOREN이 대전 10889/TCP·10890/UDP를 출발지 제한 없이 열어주면 이 우회는 걷어낼 수 있다 — 신청은 병행한다.
 
-**대전이 브리지로 리버스 터널을 건다.** 브리지→대전 인바운드는 SSH 26022 외에 막혀 있어(11000 실측 차단) nginx가 대전 10889에 직접 못 붙는다. 대전→브리지 아웃바운드는 열려 있으므로 대전이 `-R 20889:127.0.0.1:10889`로 통로를 열고 nginx는 브리지 로컬 20889로 보낸다. 브리지의 `tunnel` 계정은 셸 없이 이 포트 하나만 열 수 있다. 같은 이유로 core(대전)→client(브리지)의 `ws /viewer` 업스트림도 대전이 나가는 방향이라 그대로 된다.
+**브리지가 대전으로 SSH 터널을 건다.** 브리지→대전 인바운드는 SSH 26022 외에 막혀 있어(11000 실측 차단) nginx가 대전 10889에 직접 못 붙는다. 그런데 그 SSH 하나면 충분하다 — 브리지(등록 IP)가 `-L 127.0.0.1:20889:127.0.0.1:10889`로 이미 열려 있는 길을 통해 통로를 열고, nginx는 브리지 로컬 20889로 보낸다. 반대 방향(대전→브리지)도 가능하지만 브리지에 SSH 포트를 새로 열어야 해서 쓰지 않는다. 대전에는 브리지의 키를 `restrict,permitopen="127.0.0.1:10889"`로 등록해, 키가 새어도 그 포트 외에는 아무것도 못 하게 한다. core(대전)→client(브리지)의 `ws /viewer` 업스트림은 대전이 나가는 방향이라 터널 없이 된다.
 
 **MediaMTX를 쓴다.** SRT로 받아 WHEP로 내보내는 게 내장 기능이라 영상 서버 코드가 0줄이다. Node에는 WebRTC 미디어 구현이 없고(COMPONENTS §8), aiortc로 영상을 하면 재인코딩을 직접 해야 한다.
 
@@ -47,7 +47,8 @@ COMPONENTS §2의 데이터 흐름(드론 → 게이트웨이 → 프록시 → 
 | 라이브 WHEP (nginx `/live/` → 터널) | 브리지 | 80 | 브라우저 → 브리지 → 대전 |
 | 드론 접속 (gateway) | 브리지 | 8081 | 드론 → 브리지 |
 | SRT 수신 (MediaMTX) | 브리지 | 10890/udp | 게이트웨이 → 브리지 |
-| 터널 착지 | 브리지 | 20889 | 로컬만 |
+| 터널 입구 (autossh `-L`) | 브리지 | 20889 | 로컬만 |
+| 대전 SSH (터널 통로) | 대전 | 26022 | 브리지 → 대전, 이미 개방 |
 | WHEP 시그널링 (MediaMTX) | 대전 | 10889 | 터널 경유만 |
 | WebRTC 미디어 (MediaMTX) | 대전 | 10189/udp | 대전 → 브라우저, 대전이 개시 |
 | SRT (대전, 로컬 테스트용) | 대전 | 10890/udp | 1단계만 |
@@ -59,19 +60,20 @@ COMPONENTS §2의 데이터 흐름(드론 → 게이트웨이 → 프록시 → 
 ```
 skylens_infra/
 ├─ bridge/      175 에 올릴 것 — 폴더째 복사해 setup-bridge.sh 하나로 끝 (bridge/README.md)
-├─ daejeon/     대전 — MediaMTX 설정 2종(로컬 테스트 / 브리지 pull) + 터널 서비스 + setup
+├─ daejeon/     대전 — MediaMTX 설정 2종(로컬 테스트 / 브리지 pull) + setup + 브리지 키 등록
 ├─ scripts/     공용 — MediaMTX 설치, ffmpeg SRT 테스트 소스, aiortc WHEP 수신 프로브
 └─ worklog/     로컬 작업 로그 (gitignore)
 ```
 
 ## 배포
 
-**브리지** — `bridge/README.md`. 폴더 복사 → `bridge.env` → `sudo ./setup-bridge.sh` → `./check-bridge.sh`.
+**브리지** — `bridge/README.md`. 폴더 복사 → `bridge.env` → `sudo ./setup-bridge.sh` → 출력된 **공개키를 대전 담당자에게** → `./check-bridge.sh`.
 
 **대전**
 ```bash
-sudo ./daejeon/setup-daejeon.sh local                 # 1단계: 로컬 ffmpeg 소스로 WHEP 검증
-sudo ./daejeon/setup-daejeon.sh bridge <ssh_port>     # 2단계: 브리지에서 당겨오기 + 리버스 터널
+sudo ./daejeon/setup-daejeon.sh local        # 1단계: 로컬 ffmpeg 소스로 WHEP 검증
+./daejeon/register-bridge-key.sh '<브리지 공개키>'   # 브리지 터널 허용 (10889 만)
+sudo ./daejeon/setup-daejeon.sh bridge       # 2단계: 브리지 SRT 에서 당겨오기
 ```
 
 **검증** — 브라우저 없이 WHEP 종단을 확인한다.

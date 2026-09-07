@@ -1,18 +1,16 @@
 #!/usr/bin/env bash
-# 대전 VM 설치 — MediaMTX(배포 노드) + 브리지로 가는 SSH 리버스 터널
+# 대전 VM 설치 — MediaMTX (배포 노드)
 #
 # 사용:
-#   sudo ./setup-daejeon.sh local                          # 1단계: 로컬 테스트 소스
-#   sudo ./setup-daejeon.sh bridge <ssh_port> [user]       # 2단계: 브리지에서 당겨오기 + 터널
+#   sudo ./setup-daejeon.sh local     # 1단계: 로컬 ffmpeg 테스트 소스를 받는다 (mediamtx.yml)
+#   sudo ./setup-daejeon.sh bridge    # 2단계: 브리지 SRT 에서 당겨온다     (mediamtx-pull.yml)
 #
-# 전제: ~/.ssh/id_tunnel(.pub) 이 ubuntu 계정에 있고, 공개키가 브리지 tunnel 계정에 등록됨.
+# 브리지 → 대전 터널은 브리지 쪽(autossh)이 건다. 대전에서는 브리지 공개키만 등록한다:
+#   ./register-bridge-key.sh '<브리지 공개키>'
 set -euo pipefail
 cd "$(dirname "$(readlink -f "$0")")"
 
 MODE="${1:-local}"
-BRIDGE_HOST=175.126.98.44
-BRIDGE_PORT="${2:-22}"
-BRIDGE_USER="${3:-tunnel}"
 VER=v1.21.0
 
 [ "$(id -u)" -eq 0 ] || { echo "sudo 로 실행하세요" >&2; exit 1; }
@@ -32,25 +30,13 @@ systemctl restart mediamtx
 sleep 1
 systemctl is-active --quiet mediamtx && echo "   mediamtx 활성" || { journalctl -u mediamtx -n 20 --no-pager; exit 1; }
 
-if [ "$MODE" = bridge ]; then
-  echo "== 리버스 터널 → $BRIDGE_USER@$BRIDGE_HOST:$BRIDGE_PORT =="
-  command -v autossh >/dev/null || apt-get install -y -qq autossh >/dev/null
-  [ -f /home/ubuntu/.ssh/id_tunnel ] || { echo "/home/ubuntu/.ssh/id_tunnel 없음" >&2; exit 1; }
-  printf 'BRIDGE_HOST=%s\nBRIDGE_PORT=%s\nBRIDGE_USER=%s\n' \
-    "$BRIDGE_HOST" "$BRIDGE_PORT" "$BRIDGE_USER" > /etc/default/whep-tunnel
-  chmod 0600 /etc/default/whep-tunnel
-  install -m 0644 whep-tunnel.service /etc/systemd/system/whep-tunnel.service
-  systemctl daemon-reload
-  systemctl enable --now whep-tunnel >/dev/null 2>&1
-  systemctl restart whep-tunnel
-  sleep 3
-  if systemctl is-active --quiet whep-tunnel; then
-    echo "   whep-tunnel 활성"
-  else
-    echo "   whep-tunnel 실패:"; journalctl -u whep-tunnel -n 15 --no-pager; exit 1
-  fi
-fi
-
 echo
 echo "== 열린 포트 =="
-ss -tulnp 2>/dev/null | grep -E 'mediamtx|autossh|ssh ' | awk '{print "   "$1, $5}' | sort -u
+ss -tulnp 2>/dev/null | grep -E 'mediamtx' | awk '{print "   "$1, $5}' | sort -u
+echo
+echo "== 브리지 터널 (브리지가 걸어옴) =="
+if ss -tn 2>/dev/null | grep -qE ':26022\s+175\.126\.98\.44'; then
+  echo "   175.126.98.44 에서 SSH 세션 있음 — 터널 연결됨"
+else
+  echo "   아직 없음. 브리지 공개키를 받아 ./register-bridge-key.sh 로 등록하면 붙는다"
+fi
