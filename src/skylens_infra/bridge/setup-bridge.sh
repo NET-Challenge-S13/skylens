@@ -2,16 +2,17 @@
 # SkyLens 브리지 설치 — 175.126.98.44 (Ubuntu 20.04+, amd64)
 #
 # 이 서버가 맡는 일:
-#   1. 대전 VM 의 SSH 리버스 터널을 받아준다   (tunnel 계정, 로컬 :20889)
-#   2. nginx 가 브라우저 요청을 받아 그 터널로 넘긴다 (:HTTP_PORT → 127.0.0.1:20889)
+#   1. nginx 가 브라우저 요청을 받는다          (:HTTP_PORT → / 는 client:8090, /live/ 는 대전 WHEP)
+#   2. 대전 VM 으로 SSH 터널을 건다             (로컬 :20889 → 대전 :10889, autossh 로 상시 유지)
 #   3. MediaMTX 가 드론 게이트웨이의 SRT 영상을 받아둔다 (:SRT_PORT/udp)
 #
-# 기존 서비스(WireGuard 등)는 건드리지 않는다. 추가만 한다.
-# 여러 번 실행해도 안전하다(멱등).
+# 터널 방향: 이 서버 → 대전. 175 는 KOREN 등록 IP 라 대전 SSH(26022)에 들어갈 수 있다.
+# 반대 방향(대전 → 175)은 175 에 SSH 포트를 열어야 해서 쓰지 않는다.
+#
+# 기존 서비스(WireGuard 등)는 건드리지 않는다. 추가만 한다. 여러 번 실행해도 안전하다.
 #
 # 사용:  sudo ./setup-bridge.sh
 set -euo pipefail
-
 cd "$(dirname "$(readlink -f "$0")")"
 
 if [ "$(id -u)" -ne 0 ]; then
@@ -19,10 +20,12 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 # ---------- 설정 ----------
-SSH_PORT=22
 HTTP_PORT=80
 PUBLISH_PASS=""
 SRT_PORT=10890
+DAEJEON_HOST=116.89.187.181
+DAEJEON_PORT=26022
+DAEJEON_USER=ubuntu
 MEDIAMTX_VERSION=v1.21.0
 if [ -f bridge.env ]; then
   # shellcheck disable=SC1091
@@ -35,8 +38,10 @@ else
   GENERATED_PASS=0
 fi
 
-TUNNEL_USER=tunnel
+TUNNEL_USER=skytunnel
 TUNNEL_PORT=20889
+TUNNEL_DIR=/etc/skylens
+TUNNEL_KEY="$TUNNEL_DIR/tunnel_key"
 
 step() { printf '\n\033[1;36m== %s ==\033[0m\n' "$*"; }
 ok()   { printf '   \033[32m✓\033[0m %s\n' "$*"; }
@@ -46,62 +51,56 @@ warn() { printf '   \033[33m!\033[0m %s\n' "$*"; }
 step "패키지 설치"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-apt-get install -y -qq nginx curl ca-certificates >/dev/null
-ok "nginx, curl"
+apt-get install -y -qq nginx curl ca-certificates autossh openssh-client >/dev/null
+ok "nginx, curl, autossh"
 
-# ---------- 1. 터널 계정 ----------
-step "터널 계정 ($TUNNEL_USER)"
-if ! id "$TUNNEL_USER" >/dev/null 2>&1; then
-  useradd -r -m -d "/home/$TUNNEL_USER" -s /usr/sbin/nologin "$TUNNEL_USER"
-  ok "계정 생성"
+# ---------- 1. 대전으로 가는 터널 ----------
+step "대전 터널 ($TUNNEL_USER: 로컬 :$TUNNEL_PORT → $DAEJEON_HOST:10889)"
+id "$TUNNEL_USER" >/dev/null 2>&1 || useradd -r -M -s /usr/sbin/nologin "$TUNNEL_USER"
+install -d -m 0750 -o "$TUNNEL_USER" -g "$TUNNEL_USER" "$TUNNEL_DIR"
+if [ ! -f "$TUNNEL_KEY" ]; then
+  ssh-keygen -q -t ed25519 -N '' -C "bridge-tunnel@skylens" -f "$TUNNEL_KEY"
+  ok "터널 키 생성: $TUNNEL_KEY"
 else
-  ok "계정 있음"
+  ok "터널 키 있음"
 fi
-install -d -m 0700 -o "$TUNNEL_USER" -g "$TUNNEL_USER" "/home/$TUNNEL_USER/.ssh"
-# 키에 restrict 를 걸어 포트포워딩만 허용한다 (셸·X11·에이전트 불가)
-{
-  while read -r line; do
-    [ -z "$line" ] && continue
-    echo "restrict,port-forwarding $line"
-  done < tunnel.pub
-} > "/home/$TUNNEL_USER/.ssh/authorized_keys"
-chown "$TUNNEL_USER:$TUNNEL_USER" "/home/$TUNNEL_USER/.ssh/authorized_keys"
-chmod 0600 "/home/$TUNNEL_USER/.ssh/authorized_keys"
-ok "대전 공개키 등록 (restrict,port-forwarding)"
+chown "$TUNNEL_USER:$TUNNEL_USER" "$TUNNEL_KEY" "$TUNNEL_KEY.pub"
+chmod 0600 "$TUNNEL_KEY"
+touch "$TUNNEL_DIR/known_hosts"; chown "$TUNNEL_USER:$TUNNEL_USER" "$TUNNEL_DIR/known_hosts"
 
-# sshd: 이 계정만 127.0.0.1:20889 리스닝 허용
-SSHD_DROPIN=/etc/ssh/sshd_config.d/skylens-tunnel.conf
-SSHD_BLOCK="Match User $TUNNEL_USER
-    AllowTcpForwarding yes
-    PermitListen 127.0.0.1:$TUNNEL_PORT
-    GatewayPorts no
-    PermitTTY no
-    X11Forwarding no
-    AllowAgentForwarding no
-    PasswordAuthentication no"
-if grep -qE '^\s*Include\s+/etc/ssh/sshd_config\.d/' /etc/ssh/sshd_config; then
-  printf '%s\n' "$SSHD_BLOCK" > "$SSHD_DROPIN"
-  ok "sshd 드롭인: $SSHD_DROPIN"
-else
-  if ! grep -q "Match User $TUNNEL_USER" /etc/ssh/sshd_config; then
-    printf '\n# SkyLens tunnel\n%s\n' "$SSHD_BLOCK" >> /etc/ssh/sshd_config
-  fi
-  ok "sshd_config 에 Match 블록 추가 (Include 미지원 버전)"
-fi
-if sshd -t; then
-  systemctl reload ssh 2>/dev/null || systemctl reload sshd
-  ok "sshd 설정 검증 후 reload"
-else
-  echo "sshd 설정 오류 — reload 하지 않았습니다. 위 메시지를 확인하세요." >&2; exit 1
-fi
-ACTUAL_SSH_PORT="$(sshd -T 2>/dev/null | awk '/^port /{print $2; exit}')"
-[ -n "$ACTUAL_SSH_PORT" ] && SSH_PORT="$ACTUAL_SSH_PORT"
+cat > /etc/systemd/system/daejeon-tunnel.service <<UNIT
+[Unit]
+Description=SSH tunnel bridge -> Daejeon for WHEP signaling (SkyLens)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=$TUNNEL_USER
+Environment=AUTOSSH_GATETIME=0
+ExecStart=/usr/bin/autossh -M 0 -N \\
+  -i $TUNNEL_KEY \\
+  -o UserKnownHostsFile=$TUNNEL_DIR/known_hosts \\
+  -o StrictHostKeyChecking=accept-new \\
+  -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \\
+  -o ExitOnForwardFailure=yes \\
+  -o BatchMode=yes \\
+  -L 127.0.0.1:$TUNNEL_PORT:127.0.0.1:10889 \\
+  -p $DAEJEON_PORT $DAEJEON_USER@$DAEJEON_HOST
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload
+systemctl enable --now daejeon-tunnel >/dev/null 2>&1
+systemctl restart daejeon-tunnel
+ok "daejeon-tunnel 서비스 등록 (대전에 키가 등록될 때까지 재시도 상태로 대기)"
 
 # ---------- 2. nginx ----------
-step "nginx (:$HTTP_PORT → 127.0.0.1:$TUNNEL_PORT)"
+step "nginx (:$HTTP_PORT)"
 sed "s/__HTTP_PORT__/$HTTP_PORT/g" nginx-skylens.conf > /etc/nginx/sites-available/skylens
 ln -sf /etc/nginx/sites-available/skylens /etc/nginx/sites-enabled/skylens
-# 우분투 기본 사이트가 같은 포트를 잡고 있으면 비활성화 (기본 파일일 때만)
 if [ -L /etc/nginx/sites-enabled/default ] && \
    grep -q "Default server configuration" /etc/nginx/sites-available/default 2>/dev/null && \
    grep -qE "listen\s+$HTTP_PORT\b" /etc/nginx/sites-available/default; then
@@ -173,18 +172,18 @@ cat <<SUMMARY
  브리지 설치 완료
 ============================================================
  공인 IP           : $PUB_IP
- SSH 포트          : $SSH_PORT        ← 대전 터널이 이 포트로 붙음
- 터널 계정         : $TUNNEL_USER     (로컬 127.0.0.1:$TUNNEL_PORT 만 허용)
- 브라우저 주소     : http://$PUB_IP:$HTTP_PORT/drone
+ 브라우저 주소     : http://$PUB_IP:$HTTP_PORT/live/drone
  SRT 수신          : srt://$PUB_IP:$SRT_PORT?streamid=publish:drone:drone:<PASS>
  SRT publish 비번  : $PUBLISH_PASS$([ "$GENERATED_PASS" = 1 ] && printf '   (자동 생성 — bridge.env 에 적어두세요)')
 
- 공유기 뒤라면 포트포워딩 필요:
+ 공유기 뒤라면 포트포워딩 (두 개):
    TCP $HTTP_PORT  → 이 서버      (브라우저)
    UDP $SRT_PORT   → 이 서버      (드론 게이트웨이)
-   TCP $SSH_PORT   → 이 서버      (대전 터널)  ※ 이미 SSH 되고 있으면 되어 있는 것
 
- 다음: 이 세 값을 정준모에게 전달  →  SSH 포트 / publish 비번 / 포트포워딩 여부
-       ./check-bridge.sh 로 상태 확인
+ ★ 아래 공개키 한 줄을 정준모에게 보내세요. 대전에 등록되면 터널이 자동으로 붙습니다.
+------------------------------------------------------------
+$(cat "$TUNNEL_KEY.pub")
+------------------------------------------------------------
+ 그다음 ./check-bridge.sh 로 상태 확인
 ============================================================
 SUMMARY

@@ -3,7 +3,7 @@
 set -u
 cd "$(dirname "$(readlink -f "$0")")"
 
-HTTP_PORT=80; SRT_PORT=10890
+HTTP_PORT=80; SRT_PORT=10890; DAEJEON_HOST=116.89.187.181; DAEJEON_PORT=26022
 [ -f bridge.env ] && . ./bridge.env
 TUNNEL_PORT=20889
 
@@ -12,28 +12,35 @@ fail() { printf '  \033[31m✗\033[0m %s\n' "$*"; }
 info() { printf '  \033[33m·\033[0m %s\n' "$*"; }
 
 echo "== 서비스 =="
-systemctl is-active --quiet nginx    && pass "nginx 실행 중"    || fail "nginx 죽음  → sudo systemctl status nginx"
-systemctl is-active --quiet mediamtx && pass "mediamtx 실행 중" || fail "mediamtx 죽음  → sudo journalctl -u mediamtx -n 30"
+systemctl is-active --quiet nginx          && pass "nginx 실행 중"          || fail "nginx 죽음  → sudo systemctl status nginx"
+systemctl is-active --quiet mediamtx       && pass "mediamtx 실행 중"       || fail "mediamtx 죽음  → sudo journalctl -u mediamtx -n 30"
+systemctl is-active --quiet daejeon-tunnel && pass "daejeon-tunnel 실행 중" || fail "daejeon-tunnel 죽음  → sudo journalctl -u daejeon-tunnel -n 30"
 
 echo "== 포트 =="
 ss -tln 2>/dev/null | grep -qE ":$HTTP_PORT\b" && pass "TCP $HTTP_PORT (nginx) 리스닝" || fail "TCP $HTTP_PORT 안 열림"
 ss -uln 2>/dev/null | grep -qE ":$SRT_PORT\b"  && pass "UDP $SRT_PORT (SRT) 리스닝"    || fail "UDP $SRT_PORT 안 열림"
+
+echo "== 대전 터널 =="
 if ss -tln 2>/dev/null | grep -qE "127\.0\.0\.1:$TUNNEL_PORT\b"; then
-  pass "127.0.0.1:$TUNNEL_PORT — 대전 터널 연결됨"
+  pass "127.0.0.1:$TUNNEL_PORT 열림 — 대전과 연결됨"
   code=$(curl -s -o /dev/null -w '%{http_code}' -m 3 "http://127.0.0.1:$HTTP_PORT/healthz" || echo 000)
   case "$code" in
     2*|3*|404) pass "nginx → 터널 → 대전 MediaMTX 응답 (HTTP $code)";;
-    *)         fail "nginx 는 떠 있으나 대전 응답 없음 (HTTP $code)";;
+    *)         fail "터널은 열렸는데 대전 MediaMTX 응답 없음 (HTTP $code)";;
   esac
 else
-  info "127.0.0.1:$TUNNEL_PORT 없음 — 대전이 아직 터널을 안 걸었음 (대전 쪽에서 whep-tunnel 서비스 확인)"
+  info "127.0.0.1:$TUNNEL_PORT 없음 — 대전에 아직 키가 등록되지 않았거나 접속 실패"
+  if sudo -n journalctl -u daejeon-tunnel -n 3 --no-pager -o cat 2>/dev/null | grep -qiE 'Permission denied|publickey'; then
+    info "원인: 대전이 이 서버의 키를 아직 모름. 아래 공개키를 정준모에게 보내세요:"
+  else
+    info "최근 로그:"; sudo -n journalctl -u daejeon-tunnel -n 3 --no-pager -o cat 2>/dev/null | sed 's/^/      /'
+  fi
+  [ -r /etc/skylens/tunnel_key.pub ] && sed 's/^/      /' /etc/skylens/tunnel_key.pub \
+    || sudo -n cat /etc/skylens/tunnel_key.pub 2>/dev/null | sed 's/^/      /'
 fi
-
-echo "== 계정 =="
-id tunnel >/dev/null 2>&1 && pass "tunnel 계정 있음" || fail "tunnel 계정 없음 → setup-bridge.sh 재실행"
-[ -s /home/tunnel/.ssh/authorized_keys ] && pass "대전 공개키 등록됨" || fail "authorized_keys 비어 있음"
-sudo -n sshd -T 2>/dev/null | grep -q "permitlisten 127.0.0.1:$TUNNEL_PORT" \
-  && pass "sshd PermitListen 적용" || info "sshd 설정 확인 불가(root 필요) 또는 미적용"
+if command -v nc >/dev/null; then
+  nc -z -w 3 "$DAEJEON_HOST" "$DAEJEON_PORT" 2>/dev/null && pass "대전 SSH $DAEJEON_HOST:$DAEJEON_PORT 도달" || fail "대전 SSH 도달 불가 — 이 서버 IP 가 KOREN 에 등록돼 있는지 확인"
+fi
 
 echo "== 방화벽 =="
 if command -v ufw >/dev/null && sudo -n ufw status 2>/dev/null | grep -q '^Status: active'; then
