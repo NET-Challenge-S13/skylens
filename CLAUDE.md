@@ -1,4 +1,4 @@
-# CLAUDE.md — SkyLens 작업 가이드
+# CLAUDE.md: SkyLens 작업 가이드
 
 SkyLens는 **멀티드론 영상을 실시간 3D(Gaussian Splatting)로 복원하고 그 위에 AI가 위험구역·사람을 표시하는 재난 인텔리전스 플랫폼**이다 (NET 챌린지 캠프 시즌13).
 이 저장소에는 **TypeScript 운영 프로토타입**과 **Python AI 모델 패키지**가 함께 들어 있다.
@@ -19,7 +19,7 @@ SkyLens는 **멀티드론 영상을 실시간 3D(Gaussian Splatting)로 복원�
 >
 > - 제목·본문 모두 **한글 금지**. `feat: 경로계획 클릭 지도` (X) → `feat: click-to-plan route on map` (O)
 > - 명령형 현재시제(`add`, `fix`, `move`), 제목은 소문자로 시작하고 마침표 없이.
-> - 문서(`.md`) 본문은 계속 한국어로 쓴다 — 이 규칙은 **커밋 메시지에만** 적용된다.
+> - 문서(`.md`) 본문은 계속 한국어로 쓴다. 이 규칙은 **커밋 메시지에만** 적용된다.
 
 또한 **요청받지 않았으면 커밋하지 않는다.**
 
@@ -32,8 +32,8 @@ SkyLens는 **멀티드론 영상을 실시간 3D(Gaussian Splatting)로 복원�
 | `README.md` (루트) | 저장소 소개. 데모/실서버 모드, GPS↔ENU 좌표계, 빠른 시작(`npm run dev`), 관제탑/현황판 접속 주소와 쿼리 옵션, 조작법, 프로젝트 구조 트리, 현재 구현 상태·로드맵. **TypeScript 프로토타입(뷰어) 중심** |
 | `PROJECT.md` (루트) | **중간평가 프로토타입 구현 계획**. 무엇을 증명하고 무엇을 증명하지 않는지(§0), 데모 컨셉(§1), 사전 촬영·gsplat 준비(§2), 기술 스택(§3), **관제탑·GPS 경로 계획(§4)**, **현황판·서버 스트림 3D 축적(§5)**, 위험구역 오버레이(§6), 연출과 실제의 경계 원칙(§7), 관제탑↔현황판 동기화·카메라 협력(§8), 구현 로드맵(§9)·리스크(§10)·최종평가 확장(§11) |
 | `docs/COMPONENTS.md` | **컴포넌트 구성의 단일 출처**. 8개 컴포넌트(드론·게이트웨이·프록시·코어·모델·클라이언트·shared·데모)의 역할과 망 위치, Gateway/WebRTC 두 데이터 흐름, 관제탑 화면 통합 규칙(§4), 데모 시나리오(§5), 디렉터리 구조(§6), 포트 맵(§7), 구현상의 결정(§8) |
-| `docs/INTENT.md` | **의도(왜)** — ResearchTree 인텐트 문서. 문제 정의(소방드론 현황·홍제동 사례·각주 출처), 목표, **주장 N1~N7**(실험이 검증하는 단위), 제약, 하지 않는 것, 열린 결정, KOREN 활용 논거 |
-| `docs/SPEC.md` | **현재 설계의 단일 출처** — ResearchTree 스펙 문서. 파이프라인·컴포넌트 경계·프로토콜·좌표계·딜레이 패턴·두 화면·AI 모델·3DGS 복원·데모·KOREN 배포·포트·빌드·브랜치까지 16절. 각 절은 한 줄 요약(`>`)으로 시작한다. **지금 상태만 적고 역사는 적지 않는다** |
+| `docs/INTENT.md` | **의도(왜)**. ResearchTree 인텐트 문서. 문제 정의(소방드론 현황·홍제동 사례·각주 출처), 목표, **주장 N1~N7**(실험이 검증하는 단위), 제약, 하지 않는 것, 열린 결정, KOREN 활용 논거 |
+| `docs/SPEC.md` | **현재 설계의 단일 출처**. ResearchTree 스펙 문서. 파이프라인·컴포넌트 경계·프로토콜·좌표계·딜레이 패턴·두 화면·AI 모델·3DGS 복원·데모·KOREN 배포·포트·빌드·브랜치까지 16절. 각 절은 한 줄 요약(`>`)으로 시작한다. **지금 상태만 적고 역사는 적지 않는다** |
 | `docs/ARCHITECTURE.md` | **통합 아키텍처(무엇을)**. 3대 설계 원칙, 4-Tier 구성(캡처/전송/Core HPC/Edge·클라이언트), 데이터 플로우, **§3-A AI 모델·융합 파이프라인**(UNet 4채널, Depth Map 레이캐스팅, Hybrid Fusion, 기술 선택 배제 근거) |
 | `docs/DATASETS.md` | **학습 데이터셋 조사**. "RGB+열 페어 + 재난 + 사람 + 위험구역"을 모두 가진 공개 데이터는 없다는 결론과, A(4채널 정합)/B(위험구역 세그)/C(사람 인스턴스) 3축 조합 권장. FLAME 3, RescueNet, SARD, AIResQ, LLVIP, VisDrone 등 |
 | `src/skylens_model/README.md` | **AI 모델 설계 철학의 단일 출처(어떻게)**. 레이어 분리 원칙(탐지/투영/랜드마크 융합/소리 보정), UNet 채택·TransUNet 보류 근거, 단일 백본+이중 헤드, modality dropout, 점 검출 헤드, 헤드별 분리 학습, 배제한 대안 표. **결정과 그 근거**를 기록 |
@@ -41,7 +41,7 @@ SkyLens는 **멀티드론 영상을 실시간 3D(Gaussian Splatting)로 복원�
 | `src/skylens_model/models/skylens/RESULTS.md` | 위 결정들의 **측정 근거**. 실험 5건 · 학습 조건 28개 수치 전체. 판정이 보류된 실험은 그 이유까지 명시 |
 | `src/skylens_model/models/skylens/INSTALL.md` | COLMAP(CUDA 빌드)·gsplat 설치 절차, `recon` 의존성 그룹에서 뺀 항목과 이유, **밟았던 함정 10건** |
 | `src/skylens_model/datasets/README.md` | 데이터셋 **API 계약**(`__getitem__` 반환 dict, `None`은 정상값), 통합 클래스 스키마(0 normal / 1 fire / 2 collapse / 3 road_blocked / 255 ignore), RescueNet·VisDrone 매핑, 자동 다운로드 가능 여부 판정 |
-| `src/skylens_model/utils/README.md` | `geo.py`가 `src/skylens_core/geo.ts`의 순수 파이썬 미러라는 사실 — **두 파일은 수치적으로 동기 유지** |
+| `src/skylens_model/utils/README.md` | `geo.py`가 `src/skylens_core/geo.ts`의 순수 파이썬 미러라는 사실. **두 파일은 수치적으로 동기 유지** |
 | `train.ipynb` (루트) | 데이터셋 → 학습 → 추론 결과를 마커 좌표로 흘려보내는 학습 노트북 |
 
 ### 문서 간 관계
@@ -86,7 +86,7 @@ docs/DATASETS.md   ──→  src/skylens_model/README.md  ──→  datasets/R
 
 ```
 res/static/          # 정적 html 셸(진입점): index / control / status .html → /src 모듈을 절대경로로 로드
-                     # demo/ — 딜레이 패턴용 구간×수준 PLY (생성물, 커밋하지 않음)
+                     # demo/: 딜레이 패턴용 구간×수준 PLY (생성물, 커밋하지 않음)
 src/
 ├─ shared/           # 컴포넌트 공통 계약. 순수층(geo·protocol·types: DOM·Three 없음)
 │                    #  + viewer/(두 웹 UI 공용 브라우저 층) + net/(WebRTC 트랜스포트)
@@ -103,7 +103,7 @@ docs/            # INTENT · SPEC · COMPONENTS · ARCHITECTURE · DATASETS · N
 
 컴포넌트 경계와 각 컴포넌트의 책임은 **`docs/COMPONENTS.md`가 단일 출처**다.
 
-두 스택은 **`src/` 아래에 공존**하고, 세 진입 html은 **`res/static/`** 에 모여 있다(루트는 설정 파일만). 접속 URL은 `/res/static/{control,status}.html` — `/`는 랜딩을 자동 서빙하지 않는다. `pyproject.toml`은 자동 탐색 대신 `packages = ["src/skylens_model"]`로 파이썬 패키지를 명시한다.
+두 스택은 **`src/` 아래에 공존**하고, 세 진입 html은 **`res/static/`** 에 모여 있다(루트는 설정 파일만). 접속 URL은 `/res/static/{control,status}.html` 이고, `/`는 랜딩을 자동 서빙하지 않는다. `pyproject.toml`은 자동 탐색 대신 `packages = ["src/skylens_model"]`로 파이썬 패키지를 명시한다.
 
 ---
 
@@ -127,7 +127,7 @@ docs/            # INTENT · SPEC · COMPONENTS · ARCHITECTURE · DATASETS · N
 - 실행은 `uv run <cmd>` (예: `uv run pytest`, `uv run jupyter lab`). `.venv` 를 직접 activate 해도 된다.
 - `uv.lock` 은 **커밋한다**(재현성). 의존성을 바꾸면 `uv lock` 후 락 파일도 함께 커밋.
 - 그룹: `train` / `notebook` / `dev`(train+notebook 포함). 기본은 `dev` 가 설치된다.
-- torch·torchvision 은 PyPI 가 아니라 **CUDA 12.8 인덱스**(`download.pytorch.org/whl/cu128`)에서 받는다 — `[tool.uv.sources]` 참조.
+- torch·torchvision 은 PyPI 가 아니라 **CUDA 12.8 인덱스**(`download.pytorch.org/whl/cu128`)에서 받는다. `[tool.uv.sources]` 참조.
 - 린트: `uv run ruff check src/` (line-length 100, target py311)
 - 테스트: `uv run pytest` (`testpaths = src/skylens_model/tests`)
 
@@ -139,6 +139,7 @@ docs/            # INTENT · SPEC · COMPONENTS · ARCHITECTURE · DATASETS · N
 - `.claude/`, `.omc/`도 git 제외 대상이다.
 - `src/skylens_core/geo.ts` ↔ `src/skylens_model/utils/geo.py`는 **같은 수식의 두 구현**이다. 한쪽만 고치지 말 것.
 - 문서는 한국어로 작성한다. 코드 주석은 기존 파일의 언어(TS는 영어, Python 독스트링은 영어)를 따른다.
+- **문서에 음대시(`—`)를 쓰지 않는다.** 마침표로 문장을 끊거나, 쉼표·콜론·괄호를 쓴다. 표에서 "해당 없음"을 나타낼 때도 `—` 대신 글자로 적는다. 가이드북(`site/`)의 본문도 같다.
 - `docs/` 안 문서의 이미지는 `docs/figures/`에 있다.
 - 문서 상단 YAML frontmatter의 `[[...]]` 링크는 Obsidian 위키링크로, 파일명 기반이라 경로 이동과 무관하다.
 
@@ -153,7 +154,7 @@ docs/            # INTENT · SPEC · COMPONENTS · ARCHITECTURE · DATASETS · N
 | 항목 | 값 | 어디서 지정 |
 |---|---|---|
 | 루트 브랜치 | **`develop`** | 환경변수 `RESEARCHTREE_ROOT=develop` (파일로는 지정 불가) |
-| 실험 브랜치 접두사 | `experiment/` (기본값) | — |
+| 실험 브랜치 접두사 | `experiment/` (기본값) | 해당 없음 |
 | 스펙 문서 | `docs/SPEC.md` | `.researchtree.yml` |
 | 인텐트 문서 | `docs/INTENT.md` | `.researchtree.yml` |
 | 버전 태그 | `develop/v1`, `develop/v2` … | `researchtree release` |

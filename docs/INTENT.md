@@ -9,12 +9,12 @@ parent: '[[넷 챌린지 캠프]]'
 related: '[[SPEC.md]], [[ARCHITECTURE.md]], [[COMPONENTS.md]]'
 ---
 
-# SkyLens — 의도 (Intent)
+# SkyLens 의도 (Intent)
 
 이 문서는 **왜 이걸 하는가**와 **무엇을 주장하는가**를 적는다.
 현재 시스템이 어떻게 생겼는지는 [SPEC.md](SPEC.md)가, 각 주장을 검증한 결과는 실험 PR이 갖는다.
 
-- 과제명(안): **SkyLens — 멀티드론 영상을 KOREN 분산 AI로 실시간 3D 복원하고, 그 위에 위험구역·사람을 AI로 표시하는 재난 인텔리전스 플랫폼**
+- 과제명(안): **SkyLens: 멀티드론 영상을 KOREN 분산 AI로 실시간 3D 복원하고, 그 위에 위험구역·사람을 AI로 표시하는 재난 인텔리전스 플랫폼**
 - NET 챌린지 캠프 시즌13
 
 ![메인 figure](figures/main.png)
@@ -146,17 +146,17 @@ YAMNet으로 구조 요청·환경음을 분류해 해당 구역의 사람 confi
 
 ## 각주
 
-[^f1]: [재난현장 소방드론 출동, 3년 만에 2.7배 급증 — YTN사이언스](https://m.science.ytn.co.kr/program/view.php?s_mcd=0082&key=202502261103135052)
-[^f2]: [재난상황 대응, 드론으로 효율성 높여 — KNN](https://news.knn.co.kr/news/article/157652)
-[^f3]: [진화중 매몰 소방관 6명 사망 그후 — 오마이뉴스](https://www.ohmynews.com/NWS_Web/View/at_pg.aspx?CNTN_CD=A0000034520)
-[^f4]: [17명 사상자 낸 광주 학동참사 책임자들 유죄 확정 — 법률신문](https://www.lawtimes.co.kr/news/articleView.html?idxno=210516)
-[^f5]: [AI-Based Drone Assisted Human Rescue in Disaster Environments — Springer](https://link.springer.com/article/10.1134/S1054661824010152)
-[^f6]: [Advanced noise suppression technology for improved SAR drones — ScienceDaily](https://www.sciencedaily.com/releases/2024/03/240306145036.htm)
-[^f7]: [5년간 소방드론 출동 4배 늘어, 전문인력 양성 — 시정일보](https://www.sijung.co.kr/news/articleView.html?idxno=310033)
-[^f8]: [전문가 모여 '소방드론' 재난현장 미래전략 구축 — 소방청](https://nfa.go.kr/nfa/news/pressrelease/press/?boardId=bbs_0000000000000010&mode=view&cntId=2638)
-[^f9]: [충남도, 재난대응시스템에 드론·인공지능 접목한다 — 보안뉴스](https://m.boannews.com/html/detail.html?idx=130103)
-[^f10]: [지난 10년간 위험직무 수행 중 소방관 42명 순직 — 경향신문](https://www.khan.co.kr/article/202402021321001)
-[^f11]: [증가하는 소방공무원 순직·공상자…반복되는 비극 — 한국경제](https://www.hankyung.com/article/202402070719i)
-[^f12]: [2015년 의정부 아파트 화재 경기도 책임 다시 따져봐야 — 불교방송](https://news.bbsi.co.kr/news/articleView.html?idxno=3145453)
-[^f13]: [DroneAudioset: An Audio Dataset for Drone-based SAR — arxiv](https://arxiv.org/pdf/2510.15383)
-[^f14]: [재난/위급 상황 대처를 위한 통합 인지 드론 AI 개발 — KISTI](https://scienceon.kisti.re.kr/srch/selectPORSrchReport.do?cn=TRKO202300005246)
+[^f1]: [재난현장 소방드론 출동, 3년 만에 2.7배 급증 (YTN사이언스)](https://m.science.ytn.co.kr/program/view.php?s_mcd=0082&key=202502261103135052)
+[^f2]: [재난상황 대응, 드론으로 효율성 높여 (KNN)](https://news.knn.co.kr/news/article/157652)
+[^f3]: [진화중 매몰 소방관 6명 사망 그후 (오마이뉴스)](https://www.ohmynews.com/NWS_Web/View/at_pg.aspx?CNTN_CD=A0000034520)
+[^f4]: [17명 사상자 낸 광주 학동참사 책임자들 유죄 확정 (법률신문)](https://www.lawtimes.co.kr/news/articleView.html?idxno=210516)
+[^f5]: [AI-Based Drone Assisted Human Rescue in Disaster Environments (Springer)](https://link.springer.com/article/10.1134/S1054661824010152)
+[^f6]: [Advanced noise suppression technology for improved SAR drones (ScienceDaily)](https://www.sciencedaily.com/releases/2024/03/240306145036.htm)
+[^f7]: [5년간 소방드론 출동 4배 늘어, 전문인력 양성 (시정일보)](https://www.sijung.co.kr/news/articleView.html?idxno=310033)
+[^f8]: [전문가 모여 '소방드론' 재난현장 미래전략 구축 (소방청)](https://nfa.go.kr/nfa/news/pressrelease/press/?boardId=bbs_0000000000000010&mode=view&cntId=2638)
+[^f9]: [충남도, 재난대응시스템에 드론·인공지능 접목한다 (보안뉴스)](https://m.boannews.com/html/detail.html?idx=130103)
+[^f10]: [지난 10년간 위험직무 수행 중 소방관 42명 순직 (경향신문)](https://www.khan.co.kr/article/202402021321001)
+[^f11]: [증가하는 소방공무원 순직·공상자…반복되는 비극 (한국경제)](https://www.hankyung.com/article/202402070719i)
+[^f12]: [2015년 의정부 아파트 화재 경기도 책임 다시 따져봐야 (불교방송)](https://news.bbsi.co.kr/news/articleView.html?idxno=3145453)
+[^f13]: [DroneAudioset: An Audio Dataset for Drone-based SAR (arxiv)](https://arxiv.org/pdf/2510.15383)
+[^f14]: [재난/위급 상황 대처를 위한 통합 인지 드론 AI 개발 (KISTI)](https://scienceon.kisti.re.kr/srch/selectPORSrchReport.do?cn=TRKO202300005246)

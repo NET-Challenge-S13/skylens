@@ -3,11 +3,11 @@ tags: [skylens, spec]
 related: "[[INTENT.md]], [[COMPONENTS.md]], [[ARCHITECTURE.md]], [[NETWORK_ARCHITECTURE.md]]"
 ---
 
-# SkyLens — 설계 스펙 (Spec)
+# SkyLens 설계 스펙 (Spec)
 
 > 지금 이 시스템이 **무엇으로 되어 있고 어떻게 동작하는지**만 적는다.
 
-왜 이걸 만드는지와 무엇을 주장하는지는 [INTENT.md](INTENT.md)에 있다. 각 결정의 측정 근거와 실험 기록은 실험 PR에 있고, 여기서는 링크만 건다. "예전에는 X였다", "Y를 시도했다 버렸다"는 적지 않는다 — 그건 Git과 PR이 갖는다.
+왜 이걸 만드는지와 무엇을 주장하는지는 [INTENT.md](INTENT.md)에 있다. 각 결정의 측정 근거와 실험 기록은 실험 PR에 있고, 여기서는 링크만 건다. "예전에는 X였다", "Y를 시도했다 버렸다"는 적지 않는다. 그건 Git과 PR이 갖는다.
 
 각 절은 한 줄 요약(`>`)으로 시작한다. 제목과 요약만 이어 읽으면 전체 설계가 한 장으로 보인다.
 
@@ -38,8 +38,8 @@ related: "[[INTENT.md]], [[COMPONENTS.md]], [[ARCHITECTURE.md]], [[NETWORK_ARCHI
 | `skylens_core` | KOREN 내부망 | 관제탑 서빙 + 전체 데이터 보관 + 잡 오케스트레이션 + 배포 | Node + TS / Vite |
 | `skylens_model` | KOREN 내부망 | 연산 API. 3DGS 복원 + 탐지 추론 | Python · FastAPI |
 | `skylens_client` | KOREN 외부망 | 현황판 웹서버 + WebRTC 시그널링 중계 | Node + TS / Vite |
-| `shared` | — | 컴포넌트 공통 계약. 배포 단위가 아닌 의존 라이브러리 | TS 라이브러리 |
-| `demo` | — | 컴포넌트를 조립해 모킹 모드로 기동하는 런처 | Node + TS |
+| `shared` | 해당 없음 | 컴포넌트 공통 계약. 배포 단위가 아닌 의존 라이브러리 | TS 라이브러리 |
+| `demo` | 해당 없음 | 컴포넌트를 조립해 모킹 모드로 기동하는 런처 | Node + TS |
 
 경계와 각 책임의 자세한 내용은 [COMPONENTS.md](COMPONENTS.md)가 갖는다.
 
@@ -48,8 +48,8 @@ related: "[[INTENT.md]], [[COMPONENTS.md]], [[ARCHITECTURE.md]], [[NETWORK_ARCHI
 > 순수층은 DOM·Three 의존이 없어 Node·브라우저·Tauri 어디서나 import 되고, 브라우저 전용 코드는 그 아래 하위 디렉터리로 내린다.
 
 - 순수층: `geo.ts` · `protocol.ts` · `types.ts`
-- `viewer/` — 두 웹 UI가 함께 쓰는 브라우저 층(씬 소스·스토어·설정·공용 위젯)
-- `net/` — WebRTC 트랜스포트
+- `viewer/`: 두 웹 UI가 함께 쓰는 브라우저 층(씬 소스·스토어·설정·공용 위젯)
+- `net/`: WebRTC 트랜스포트
 
 ## 3. 통신 프로토콜
 
@@ -60,7 +60,7 @@ related: "[[INTENT.md]], [[COMPONENTS.md]], [[ARCHITECTURE.md]], [[NETWORK_ARCHI
 | 업링크 (드론→코어) | `UplinkMessage` | `drone-hello` · `telemetry` · `video-segment` |
 | 제어 (관제탑→코어) | `ControlMessage` | `assign-route` · `manual-control` |
 | 뷰어 (코어→화면) | `ViewerMessage` | `mission-status` · `splat-chunk` · `camera-feed` · `detection` · `link-status` · `server-status` |
-| 잡 (코어↔모델) | — | `ReconJobRequest` · `DetectJobRequest` → `JobStatus` → `recon-result` · `detect-result` |
+| 잡 (코어↔모델) | 해당 없음 | `ReconJobRequest` · `DetectJobRequest` → `JobStatus` → `recon-result` · `detect-result` |
 
 - 미션 단계는 `idle → assigned → awaiting-drone → active` 네 값이다.
 - 코어→클라이언트 배포는 현재 **WebSocket**이다. 코어는 `Distributor` 인터페이스 뒤에서 밀고, 브라우저를 향한 WebRTC 중계와 시그널링은 `skylens_client`가 세운다. 클라이언트 간 P2P 재분배가 붙을 자리도 이 시그널링이다.
@@ -115,8 +115,8 @@ related: "[[INTENT.md]], [[COMPONENTS.md]], [[ARCHITECTURE.md]], [[NETWORK_ARCHI
 > RGB와 열화상을 입력단에서 합친 4채널 단일 백본에 헤드 둘을 달아, 위험구역과 사람을 함께 낸다.
 
 - 백본: UNet, 입력 4채널(RGB 3 + 열 1).
-- 세그 헤드 — 위험구역(stuff). 통합 클래스 스키마는 `0 normal / 1 fire / 2 collapse / 3 road_blocked / 255 ignore`.
-- 점 검출 헤드 — 사람.
+- 세그 헤드는 위험구역(stuff). 통합 클래스 스키마는 `0 normal / 1 fire / 2 collapse / 3 road_blocked / 255 ignore`.
+- 점 검출 헤드는 사람을 맡는다.
 - modality dropout으로 열화상이 없는 입력도 견딘다.
 - 헤드별로 분리 학습한다.
 - 모달리티 융합은 latent 융합이 아니라 **Hybrid Fusion**이다. 합쳐지는 단계가 모달리티마다 다르다: 영상+열화상은 입력단, 포즈는 투영단, 소리는 결정단.
@@ -165,7 +165,7 @@ related: "[[INTENT.md]], [[COMPONENTS.md]], [[ARCHITECTURE.md]], [[NETWORK_ARCHI
 | 대전 `116.89.187.181` | KOREN 내부망 | `skylens_proxy` :8082 · `skylens_core` :8080 | MediaMTX WHEP :10889 / ICE :10189 |
 | 판교 `10.246.246.9` | KOREN 내부망 · V100 | `skylens_model` :8100 | 대전과 터널로만 통신 |
 
-- 스플랫·마커는 §1의 경로를 그대로 탄다. **라이브 영상은 대전이 현황판에 WebRTC(WHEP)로 직접 쏜다** — 영상은 캐시가 안 되고 접속자 수만큼 대역이 필요해 브리지가 나르면 브리지 회선이 상한이 된다. 대전 출구는 4스트림 2,618 Mbps 실측.
+- 스플랫·마커는 §1의 경로를 그대로 탄다. **라이브 영상은 대전이 현황판에 WebRTC(WHEP)로 직접 쏜다.** 영상은 캐시가 안 되고 접속자 수만큼 대역이 필요해 브리지가 나르면 브리지 회선이 상한이 된다. 대전 출구는 4스트림 2,618 Mbps 실측.
 - 진입은 SRT, 배포는 WebRTC. MediaMTX가 SRT 수신과 WHEP 송출을 모두 내장이라 영상 서버 코드가 0줄이다.
 - 브리지가 대전으로 SSH 터널(`-L 127.0.0.1:20889:127.0.0.1:10889`)을 건다. 대전에는 브리지 키를 `restrict,permitopen="127.0.0.1:10889"`로 등록해 키가 새도 그 포트 외에는 못 쓰게 한다.
 - 서버 측 STUN·TURN을 두지 않는다. 대전·판교는 공인 IP 직결이라 자기 주소를 알고, 단말은 구글 공개 STUN을 쓴다.
@@ -215,7 +215,7 @@ related: "[[INTENT.md]], [[COMPONENTS.md]], [[ARCHITECTURE.md]], [[NETWORK_ARCHI
 
 > `develop`이 ResearchTree 루트 브랜치이고, 실험은 `experiment/*` 브랜치와 그 PR이 기록한다.
 
-- 루트 브랜치는 `develop`이다. ResearchTree의 기본값은 `research`이므로 **`RESEARCHTREE_ROOT=develop`을 환경변수로 준다** — 이 값은 `.researchtree.yml`로 지정할 수 없다.
+- 루트 브랜치는 `develop`이다. ResearchTree의 기본값은 `research`이므로 **`RESEARCHTREE_ROOT=develop`을 환경변수로 준다.** 이 값은 `.researchtree.yml`로 지정할 수 없다.
 - 실험 브랜치 접두사는 기본값 `experiment/`를 그대로 쓴다.
 - `.researchtree.yml`이 `spec: docs/SPEC.md` · `intent: docs/INTENT.md`를 가리킨다.
 - 버전 태그는 `develop/v1`, `develop/v2` … 형태다(루트 브랜치 이름이 접두사).

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# sync-main.sh — develop 을 main 에 머지하면서 설계 문서를 걷어낸다.
+# sync-main.sh: develop 을 main 에 머지하면서 설계 문서를 걷어낸다.
 #
 # main 은 배포용 브랜치다. develop 에 쌓이는 설계·기획 문서(INTENT / SPEC / ARCHITECTURE …)는
 # 연구 기록이지 배포물이 아니므로 main 에서는 지운다. 남기는 것은 README.md 하나다.
@@ -38,7 +38,7 @@ TMP_REMOVED="$(mktemp)"
 # --- 사전 점검 -------------------------------------------------------------
 
 # 추적 중인 파일에 변경이 남아 있으면 멈춘다. 머지가 그 변경을 덮어쓸 수 있기 때문이다.
-# untracked 파일은 머지에 영향이 없으므로 막지 않는다 — 다만 대상 브랜치에 같은 이름의
+# untracked 파일은 머지에 영향이 없으므로 막지 않는다: 다만 대상 브랜치에 같은 이름의
 # 파일이 있으면 git 이 브랜치 전환 단계에서 알아서 거부한다.
 if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
   echo "error: tracked files have uncommitted changes. commit or stash first." >&2

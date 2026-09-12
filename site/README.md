@@ -1,13 +1,13 @@
-# site — GitHub Pages 가이드북
+# site: GitHub Pages 가이드북
 
-SkyLens를 처음 보는 사람에게 설명하는 **정적 가이드북**이다. `docs/`의 설계 문서와 목적이 다르다 — `docs/`는 만드는 사람이 읽고, `site/`는 보는 사람이 읽는다.
+SkyLens를 처음 보는 사람에게 설명하는 **정적 가이드북**이다. `docs/`의 설계 문서와 목적이 다르다. `docs/`는 만드는 사람이 읽고, `site/`는 보는 사람이 읽는다.
 
 ## 구성
 
 | 파일 | 내용 |
 |---|---|
-| `index.html` | 홈 — SkyLens가 뭔지, 왜 필요한지 (문제 정의·홍제동 사례) |
-| `how-it-works.html` | 3단계 흐름 — 분할 탐색 → 고속망으로 모아 3D 복원 + AI 감지 → 3D 상황판 |
+| `index.html` | 홈: SkyLens가 뭔지, 왜 필요한지 (문제 정의·홍제동 사례) |
+| `how-it-works.html` | 3단계 흐름: 분할 탐색 → 고속망으로 모아 3D 복원 + AI 감지 → 3D 상황판 |
 | `screens.html` | 관제탑·현황판 화면 소개, 딜레이 패턴(수준 1~4) |
 | `architecture.html` | 컴포넌트 8개·데이터 흐름·포트 맵 + ResearchTree 연구 기록 |
 | `run.html` | 로컬에서 돌리는 법, 쿼리 옵션, VWorld 키 |
