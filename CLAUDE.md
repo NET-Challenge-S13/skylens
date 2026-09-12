@@ -164,14 +164,11 @@ scripts/         # sync-main.sh (develop → main 동기화)
 | 버전 태그 | `develop/v1`, `develop/v2` … | `researchtree release` |
 
 ```bash
-export RESEARCHTREE_ROOT=develop      # 셸 프로필이나 .env 에 넣어 두면 편하다
 researchtree memory                   # 지금까지의 실험 트리
 researchtree spec --intent            # 의도와 주장
 researchtree spec --summary           # 현재 설계 한 장 요약
 researchtree spec --claims            # 주장별로 어떤 실험이 붙었는지
 ```
-
-Windows PowerShell 이면 `$env:RESEARCHTREE_ROOT = "develop"`.
 
 ### 작업 순서
 

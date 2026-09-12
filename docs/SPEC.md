@@ -215,7 +215,6 @@ related: "[[INTENT.md]], [[COMPONENTS.md]], [[ARCHITECTURE.md]], [[NETWORK_ARCHI
 
 > `develop`이 ResearchTree 루트 브랜치이고, 실험은 `experiment/*` 브랜치와 그 PR이 기록한다.
 
-- 루트 브랜치는 `develop`이다. ResearchTree의 기본값은 `research`이므로 **`RESEARCHTREE_ROOT=develop`을 환경변수로 준다.** 이 값은 `.researchtree.yml`로 지정할 수 없다.
 - 실험 브랜치 접두사는 기본값 `experiment/`를 그대로 쓴다.
 - `.researchtree.yml`이 `spec: docs/SPEC.md` · `intent: docs/INTENT.md`를 가리킨다.
 - 버전 태그는 `develop/v1`, `develop/v2` … 형태다(루트 브랜치 이름이 접두사).
