@@ -1,0 +1,563 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AI 모델 — SkyLens</title>
+    <meta
+      name="description"
+      content="RGB에 열화상을 붙인 4채널 UNet, 백본 하나에 헤드 둘, 그리고 2D 탐지를 3D 좌표로 바꾸는 Depth Map 레이캐스팅을 설명해요."
+    />
+    <link rel="stylesheet" href="assets/guide.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">본문으로 건너뛰기</a>
+
+    <header class="site-header">
+      <div class="site-header__inner">
+        <a class="brand" href="index.html"><span class="brand__dot"></span>SkyLens</a>
+        <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="site-nav">메뉴</button>
+        <nav class="site-nav" id="site-nav" aria-label="주요 메뉴">
+          <ul>
+            <li><a href="index.html">홈</a></li>
+            <li><a href="how-it-works.html">어떻게 동작하나요</a></li>
+            <li><a href="screens.html">화면 둘러보기</a></li>
+            <li><a href="architecture.html">시스템 구조</a></li>
+            <li><a href="run.html">직접 돌려보기</a></li>
+            <li><a href="model.html">AI 모델</a></li>
+            <li>
+              <a class="is-external" href="https://darkpyonix.github.io/researchtree/?repo=NET-Challenge-S13/skylens" rel="noreferrer">연구 기록</a>
+            </li>
+          </ul>
+        </nav>
+      </div>
+    </header>
+
+    <main id="main">
+      <div class="wrap">
+        <section class="hero">
+          <span class="kicker">MODEL</span>
+          <h1>AI 모델</h1>
+          <p class="lede">
+            모델 하나가 전부 하는 구조가 아니에요. 성격이 다른 문제를 네 개의 층이 나눠 맡고,
+            각 층은 자기 문제만 풀어요. 이 분리가 나머지 결정을 거의 다 만들어 냈어요.
+          </p>
+        </section>
+
+        <section class="section" aria-labelledby="layers">
+          <h2 id="layers">네 개의 층</h2>
+
+          <div class="table-scroll">
+            <table>
+              <caption>각 층이 아는 것과 모르는 것</caption>
+              <thead>
+                <tr>
+                  <th scope="col">층</th>
+                  <th scope="col">성격</th>
+                  <th scope="col">무엇을 아나요</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row">① 탐지 (UNet)</th>
+                  <td>학습해요</td>
+                  <td>이미지 한 장. 그게 전부예요</td>
+                </tr>
+                <tr>
+                  <th scope="row">② 투영 (레이캐스팅)</th>
+                  <td>학습 안 해요 · 기하 계산</td>
+                  <td>카메라 위치와 깊이</td>
+                </tr>
+                <tr>
+                  <th scope="row">③ 랜드마크 융합</th>
+                  <td>학습 안 해요 · 기억해요</td>
+                  <td>3D 공간 전체와 시간 누적</td>
+                </tr>
+                <tr>
+                  <th scope="row">④ 소리 보정 (YAMNet)</th>
+                  <td>이미 학습된 모델 · 확장</td>
+                  <td>환경음. 확신도를 조정해요</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="panel panel--accent">
+            <p class="panel__title">탐지기는 앞뒤를 안 봐요</p>
+            <p>
+              탐지 모델의 입력은 프레임 한 장이고 출력은 그 프레임의 2D 결과예요. 이전 프레임과의
+              연결도, 기억도 없어요. 순수 함수처럼 다뤄요.
+            </p>
+            <p>
+              <strong>시간에 걸친 일관성은 ③번 층이 이미 담당하거든요.</strong> 모델까지 시계열을
+              보면 역할이 겹쳐요. 게다가 시계열 모델은 훨씬 무겁고 데이터를 훨씬 많이 요구하는데,
+              재난 현장 데이터는 원래 부족해요. 대신 프레임을 드론 구분 없이 큐에 넣고 한꺼번에
+              추론할 수 있어서 GPU 효율이 좋아요.
+            </p>
+          </div>
+        </section>
+
+        <section class="section" aria-labelledby="unet">
+          <h2 id="unet">RGB에 열화상을 붙여서 4채널로 넣어요</h2>
+
+          <div class="prose">
+            <p>
+              밤이거나 연기가 차 있으면 일반 카메라는 아무것도 못 봐요. 열화상은 그럴 때도 사람과
+              불을 봐요. 그래서 둘을 <strong>입력 단계에서</strong> 합쳐요 — 일반 영상 3채널에
+              열화상 1채널을 붙여 4채널을 만들고, 그걸 모델 하나에 넣어요 (Early Fusion).
+            </p>
+            <p>
+              나중에 결과끼리 합치는 게 아니라 처음부터 같이 보게 하는 거예요. 그래야 모델이 "여기
+              온도가 높고 형태가 사람 같다" 같은 판단을 한 번에 할 수 있어요.
+            </p>
+          </div>
+
+          <div class="diagram">
+            <svg viewBox="0 0 900 250" role="img" aria-labelledby="model-title model-desc">
+              <title id="model-title">4채널 입력과 이중 헤드 구조</title>
+              <desc id="model-desc">
+                RGB 3채널과 열화상 1채널이 합쳐져 4채널 입력이 되고, 공유 인코더와 UNet 디코더를
+                지난 뒤 세그멘테이션 헤드와 점 검출 헤드 둘로 갈라져 각각 위험 영역 마스크와 사람
+                위치를 냅니다.
+              </desc>
+              <defs>
+                <marker id="ma" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#5ec8ff" />
+                </marker>
+                <marker id="mb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#94bdf0" />
+                </marker>
+              </defs>
+
+              <rect class="d-box" x="16" y="62" width="112" height="42" rx="4" />
+              <text class="d-sub" x="72" y="80" text-anchor="middle">일반 영상</text>
+              <text class="d-sub" x="72" y="95" text-anchor="middle">RGB · 3채널</text>
+
+              <rect class="d-box" x="16" y="140" width="112" height="42" rx="4" />
+              <text class="d-sub" x="72" y="158" text-anchor="middle">열화상</text>
+              <text class="d-sub" x="72" y="173" text-anchor="middle">1채널</text>
+
+              <path class="d-line" d="M128 83 H148 V122 H166" marker-end="url(#mb)" />
+              <path class="d-line" d="M128 161 H148 V122 H166" marker-end="url(#mb)" />
+
+              <rect class="d-box d-box--ink" x="170" y="100" width="94" height="44" rx="4" />
+              <text class="d-label" x="217" y="119" text-anchor="middle">4채널</text>
+              <text class="d-sub" x="217" y="135" text-anchor="middle">입력단 결합</text>
+
+              <path class="d-line d-line--ink" d="M264 122 H288" marker-end="url(#ma)" />
+
+              <rect class="d-box d-box--ink" x="292" y="88" width="176" height="68" rx="4" />
+              <text class="d-label" x="380" y="112" text-anchor="middle">공유 백본</text>
+              <text class="d-sub" x="380" y="129" text-anchor="middle">인코더 + UNet 디코더</text>
+              <text class="d-sub" x="380" y="144" text-anchor="middle">하나만 돌려요</text>
+
+              <path class="d-line d-line--ink" d="M468 122 H486 V82 H504" marker-end="url(#ma)" />
+              <path class="d-line d-line--ink" d="M468 122 H486 V172 H504" marker-end="url(#ma)" />
+
+              <rect class="d-box" x="508" y="58" width="186" height="48" rx="4" />
+              <text class="d-label" x="601" y="79" text-anchor="middle">세그 헤드</text>
+              <text class="d-sub" x="601" y="95" text-anchor="middle">위험구역을 영역으로</text>
+
+              <rect class="d-box d-box--person" x="508" y="148" width="186" height="48" rx="4" />
+              <text class="d-label" x="601" y="169" text-anchor="middle">점 검출 헤드</text>
+              <text class="d-sub" x="601" y="185" text-anchor="middle">사람을 점으로</text>
+
+              <path class="d-line" d="M694 82 H722" marker-end="url(#mb)" />
+              <path class="d-line" d="M694 172 H722" marker-end="url(#mb)" />
+
+              <rect class="d-zone" x="726" y="58" width="158" height="48" rx="4" />
+              <text class="d-sub" x="805" y="79" text-anchor="middle">불 · 붕괴 · 도로차단</text>
+              <text class="d-sub" x="805" y="95" text-anchor="middle">마스크</text>
+
+              <rect class="d-zone" x="726" y="148" width="158" height="48" rx="4" />
+              <text class="d-sub" x="805" y="169" text-anchor="middle">위치 + 확신도</text>
+              <text class="d-sub" x="805" y="185" text-anchor="middle">한 명이 점 하나</text>
+            </svg>
+          </div>
+
+          <h3>백본은 하나, 헤드는 둘</h3>
+          <div class="prose">
+            <p>
+              무거운 부분(백본)은 한 번만 돌리고, 그 결과를 두 갈래로 나눠 써요. 두 과제가 같은
+              특징을 보기 때문에 이게 연산상으로도 이득이에요.
+            </p>
+            <p>
+              나눈 이유는 <strong>찾으려는 것의 성질이 다르기 때문</strong>이에요. 위험구역은
+              "여기부터 저기까지"처럼 넓게 퍼진 영역이라 영역으로 나누는 게 맞고, 사람은 잔해 속
+              작은 대상이고 다음 단계에서 어차피 "위치 하나 + 확신도"로 다뤄야 해서 점으로 찍는 게
+              맞아요.
+            </p>
+          </div>
+
+          <figure class="figure--narrow">
+            <img
+              src="assets/unet.jpeg"
+              alt="UNet 구조 다이어그램. 입력이 여러 단계로 줄어들었다가 다시 커지고, 같은 단계끼리 가로로 연결되는 스킵 커넥션이 그려져 있습니다."
+              width="639"
+              height="330"
+              loading="lazy"
+            />
+            <figcaption>
+              UNet 구조. 줄였다가 다시 키우면서, 같은 크기의 단계끼리 직접 연결해 세부를 잃지
+              않아요. SkyLens는 여기에 입력을 4채널로 넓히고 출력 헤드를 둘로 늘렸어요.
+            </figcaption>
+          </figure>
+
+          <div class="table-scroll">
+            <table>
+              <caption>위험구역 클래스</caption>
+              <thead>
+                <tr>
+                  <th scope="col" class="num">값</th>
+                  <th scope="col">클래스</th>
+                  <th scope="col">뜻</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><th scope="row" class="num">0</th><td><code>normal</code></td><td>특별한 게 없는 곳</td></tr>
+                <tr><th scope="row" class="num">1</th><td><code>fire</code></td><td>불</td></tr>
+                <tr><th scope="row" class="num">2</th><td><code>collapse</code></td><td>붕괴</td></tr>
+                <tr><th scope="row" class="num">3</th><td><code>road_blocked</code></td><td>길이 막힘</td></tr>
+                <tr><th scope="row" class="num">255</th><td><code>ignore</code></td><td>라벨이 없어 학습에서 빼는 픽셀</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="section" aria-labelledby="why-unet">
+          <h2 id="why-unet">왜 최신 모델이 아니라 UNet인가요</h2>
+
+          <div class="prose">
+            <p>
+              재난 대응 시스템에서 모델을 고르는 첫 기준은 최신성이 아니라
+              <strong>신뢰성</strong>이에요. 사람 목숨이 걸린 현장에서는, 잠재력은 크지만 거동이
+              불확실한 기법보다 같은 입력에 같은 답을 주고 시간 안에 끝나는 구조가 먼저예요.
+            </p>
+            <p>
+              말로 찾고 싶은 걸 지정하는 최신 방식(VLM 기반 Open-Vocabulary 분할)도 후보로 봤어요.
+              두 가지가 걸렸어요. 연산이 무거워 준실시간 갱신을 위협하고, 출력이 프롬프트에
+              민감해서 같은 입력에도 판단이 흔들릴 수 있어요.
+            </p>
+            <p>
+              UNet 계열은 영역 분할에서 오래 검증된 표준이고, 4채널로 넓히기 쉽고, 추론이 가볍고,
+              결과가 일관돼요. 구조대원이 진입 판단에 믿고 쓸 수 있는 쪽을 골랐어요.
+            </p>
+          </div>
+
+          <div class="panel">
+            <p class="panel__title">한쪽 카메라가 없어도 돌아가요</p>
+            <p>
+              열화상 카메라가 고장 나거나, 드론 일부만 열화상을 달고 있거나, 데이터셋에 한쪽만
+              있는 상황은 드물지 않아요. <strong>결손은 예외가 아니라 정상 상태</strong>로 다뤄요.
+            </p>
+            <p>
+              학습할 때 일부러 한쪽 채널을 가려 가며 돌려서(modality dropout), 일반 영상만 있을
+              때·열화상만 있을 때·둘 다 있을 때 세 경우 모두에서 동작하게 만들어요.
+            </p>
+          </div>
+        </section>
+
+        <section class="section" aria-labelledby="projection">
+          <h2 id="projection">2D 탐지를 3D 좌표로 바꿔요</h2>
+
+          <div class="prose">
+            <p>
+              탐지 모델이 내놓는 건 "이 사진의 이 픽셀"이에요. 3D 위에 마커를 찍으려면 그게 실제
+              세계 어디인지를 알아야 해요. 별도의 3D 탐지 모델을 두지 않고
+              <strong>기하학으로 풀어요.</strong>
+            </p>
+            <p>
+              핵심은 <strong>깊이를 센서에서 얻지 않는다</strong>는 점이에요. 이미 복원해 둔 3D
+              장면을 그 프레임의 드론 위치에서 렌더하면 깊이 맵이 부산물로 나와요. 그걸 역참조해요.
+            </p>
+          </div>
+
+          <pre><code>픽셀 (u, v) 와 깊이 Z 에서 카메라 기준 좌표를 구해요
+
+  X_c = (u - c_x) · Z / f_x
+  Y_c = (v - c_y) · Z / f_y
+  Z_c = Z
+
+그다음 드론의 위치·자세 [R | t] 로 세계좌표로 옮겨요
+
+  (X_c, Y_c, Z_c)  ──[R | t]──▶  (X_w, Y_w, Z_w)</code></pre>
+
+          <div class="prose">
+            <p>
+              이 계산은 GPU 서버에서 <strong>한 번만</strong> 해요. 마커는 거기서 세계좌표로
+              고정돼서 저장되고, 화면은 받아서 표시만 해요. 보는 각도가 바뀐다고 다시 계산하지
+              않아요.
+            </p>
+            <p>
+              드론 여러 대가 같은 지점을 봤으면 시선을 교차시켜 위치를 더 정확하게 만들 수 있어요
+              (삼각측량). 마커가 공중에 붕 뜨는 걸 막기 위해 지표면으로 눌러 주는 보정도 함께
+              들어가요.
+            </p>
+          </div>
+
+          <h3>같은 사람인지 어떻게 아나요</h3>
+          <div class="prose">
+            <p>
+              같은 사람이 여러 프레임에 걸쳐 잡혀요. 그걸 <strong>생김새로 대조하지 않아요.</strong>
+              전부 3D 좌표로 바꾼 다음 좌표가 가까우면 같은 대상으로 묶어요. 드론 위치를 이미 알고
+              있으니까 기하학적으로 푸는 게 더 정확하고 단순해요.
+            </p>
+            <p>
+              프레임마다 확신도가 흔들려도(0.6 → 0.4 → 못 찾음) 괜찮아요. 같은 3D 위치에 쌓이는
+              증거로 다루면 확신도가 알아서 수렴하거든요. 이때 <strong>다른 드론이 거의 같은
+              시각에 다른 각도에서 잡은 것</strong>이, 같은 드론이 나중에 다시 지나가며 잡은 것보다
+              훨씬 강한 증거예요.
+            </p>
+          </div>
+
+          <div class="note note--info">
+            <p>
+              <b>3D 품질과 탐지는 별개예요.</b> 장면이 아직 거칠어도 탐지는 그대로 돌아가요.
+              장면 품질이 영향을 주는 건 <strong>마커 좌표의 정밀도</strong>뿐이에요. 확신도가
+              올라가는 이유는 "장면이 촘촘해져서"가 아니라 "여러 각도에서 반복해서 봤기
+              때문"이에요.
+            </p>
+          </div>
+        </section>
+
+        <section class="section" aria-labelledby="recon">
+          <h2 id="recon">3D 복원은 실제로 돌려 봤어요</h2>
+
+          <div class="prose">
+            <p>
+              실내 복도를 세 번 지나며 찍은 영상 3편을 하나의 좌표계로 통합했어요. 결과는 이래요.
+            </p>
+          </div>
+
+          <ul class="stats">
+            <li><b>540 / 540</b><span>프레임 전부가 하나의 모델에 등록됐어요</span></li>
+            <li><b>653,353</b><span>복원된 3D 덩어리(가우시안) 개수</span></li>
+            <li><b>23.62 dB</b><span>PSNR. SSIM 0.907 · LPIPS 0.301</span></li>
+          </ul>
+
+          <div class="prose">
+            <p>
+              여기까지가 "복원이 된다"의 근거예요. 그런데 한 번 돌려 본 걸로는 설계 근거가 안
+              돼요. 그래서 학습 조건을 28개 돌려서 아래 것들을 숫자로 정했어요.
+            </p>
+          </div>
+
+          <h3>특징점은 ALIKED로 바꿨어요</h3>
+          <div class="table-scroll">
+            <table>
+              <caption>기본값 SIFT와 ALIKED + LightGlue 비교</caption>
+              <thead>
+                <tr>
+                  <th scope="col"></th>
+                  <th scope="col">SIFT</th>
+                  <th scope="col">ALIKED + LightGlue</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row">검증 통과율</th>
+                  <td class="num">56%</td>
+                  <td class="num">91%</td>
+                </tr>
+                <tr>
+                  <th scope="row">등록 결과</th>
+                  <td>3개 모델로 쪼개졌어요</td>
+                  <td>540장 전부 하나로 붙었어요</td>
+                </tr>
+                <tr>
+                  <th scope="row">걸린 시간</th>
+                  <td class="num">1시간 7분</td>
+                  <td class="num">54분</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="prose">
+            <p>
+              흰 벽에 반사되는 바닥, 반복되는 구조 — 실내는 특징이 잘 안 잡혀요. SIFT는 특징점을
+              3.3배 많이 잡지만 절반이 검증에서 떨어지고, 살아남은 잘못된 짝이 카메라 보정을
+              발산시켜요. <strong>정확도와 속도 양쪽에서 ALIKED가 이겼어요.</strong>
+            </p>
+          </div>
+
+          <h3>거친 결과를 먼저 띄우는 게 실제로 성립해요</h3>
+
+          <figure>
+            <img
+              src="assets/recon-measurements.png"
+              alt="두 개의 그래프. 왼쪽은 학습 스텝에 따른 복원 품질과 형상 개수를 로그 축으로 보여주고, 오른쪽은 입력 장수에 따른 단계별 소요 시간을 막대로 보여줍니다."
+              width="2327"
+              height="885"
+              loading="lazy"
+            />
+            <figcaption>
+              (a) 품질 곡선이 로그 형태라 초반에 대부분을 벌어요. (b) 입력 장수가 1.5배가 되면
+              프레임 간 대조는 5배로 늘어나요 — 장수의 제곱에 비례해요.
+            </figcaption>
+          </figure>
+
+          <div class="table-scroll">
+            <table>
+              <caption>학습 스텝별 품질과 전송량</caption>
+              <thead>
+                <tr>
+                  <th scope="col" class="num">스텝</th>
+                  <th scope="col" class="num">PSNR</th>
+                  <th scope="col" class="num">가우시안</th>
+                  <th scope="col" class="num">경량 파일</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><th scope="row" class="num">250</th><td class="num">16.09</td><td class="num">12,708</td><td class="num">0.7 MB</td></tr>
+                <tr><th scope="row" class="num">1,000</th><td class="num">18.47</td><td class="num">19,368</td><td class="num">1.0 MB</td></tr>
+                <tr><th scope="row" class="num">7,000</th><td class="num">21.48</td><td class="num">316,057</td><td class="num">16.9 MB</td></tr>
+                <tr><th scope="row" class="num">30,000</th><td class="num">23.62</td><td class="num">653,353</td><td class="num">34.9 MB</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="prose">
+            <p>
+              250 → 1,000에서 2.38dB가 오르는 동안, 10,000 → 30,000에서는 1.60dB밖에 안 올라요.
+              <strong>전체의 3%인 1,000스텝에서 최종과의 차이가 5.15dB까지 좁혀져요.</strong>
+              낮은 스텝으로 먼저 띄우고 계속 개선하는 구조가 실제로 가능하다는 뜻이에요.
+            </p>
+            <p>
+              전송량이 0.7MB에서 34.9MB로 50배 벌어지는 것도 중요해요. 이게
+              <a href="screens.html#delay">딜레이 패턴</a>으로 나눠 보내는 설계의 근거예요.
+            </p>
+          </div>
+
+          <h3>드론 위치를 카메라 위치로 그냥 쓸 수는 없어요</h3>
+          <dl class="kv">
+            <dt>자세 오차 0.1°</dt>
+            <dd>−0.08 dB</dd>
+            <dt>자세 오차 1.0°</dt>
+            <dd>−2.70 dB</dd>
+            <dt>위치 오차 0.2%</dt>
+            <dd>−2.24 dB</dd>
+            <dt>위치 오차 0.5%</dt>
+            <dd>−3.60 dB</dd>
+          </dl>
+
+          <div class="prose">
+            <p>
+              <strong>위치 오차가 자세 오차보다 훨씬 치명적</strong>이에요. 위치 0.2%만큼의 손해를
+              자세로 내려면 0.8°가 필요해요. GPS 수평 오차가 0.5~1.5m라 이 규모를 크게 웃돌아요.
+              그래서 드론이 알려 주는 위치를 카메라 위치로 직접 쓰지 않고, 영상에서 다시 푸는
+              현재 설계가 맞다는 게 실측으로 확정됐어요.
+            </p>
+          </div>
+
+          <div class="note">
+            <p>
+              <b>아직 판정 안 한 것.</b> 드론 편대를 얼마나 벌려 놓을지 실험은 6조건을 돌렸는데,
+              조건마다 평가 세트가 달라서 숫자를 비교할 수 없었어요. 공통 평가 세트로 다시 돌려야
+              해요. 정황상 간격을 넓히는 쪽이 유력해 보이지만, 아직 결론이라고 말하지 않아요.
+            </p>
+          </div>
+        </section>
+
+        <section class="section" aria-labelledby="sound">
+          <h2 id="sound">(확장) 소리로 놓친 사람을 찾아요</h2>
+
+          <div class="prose">
+            <p>
+              열영상은 잔해가 두꺼우면 2m 깊이까지가 한계예요. 소리는 더 깊은 곳도 닿아요.
+              신음·기침·두드리는 소리·구조 요청 같은 환경음을 분류해서, 그 구역 사람 마커의
+              확신도를 올려요. 놓치는 걸 줄이는 쪽으로 쓰는 거예요.
+            </p>
+            <p>
+              마이크가 여럿이면 다수결로 판정하고, 드론이 여럿이면 소리 발생 위치를 삼각측량으로
+              좁힐 수 있어요.
+            </p>
+          </div>
+
+          <h3>왜 최고 성능 모델 대신 YAMNet인가요</h3>
+          <ul class="prose">
+            <li>
+              <strong>CPU에서 실시간으로 돌아요.</strong> MobileNet 기반 초경량이라 3D 복원이
+              쓰는 GPU를 뺏지 않아요.
+            </li>
+            <li>
+              <strong>우리가 하려는 게 음성 인식이 아니에요.</strong> 말을 알아듣는 게 아니라
+              환경음을 구분하는 거예요. YAMNet은 환경음 521종으로 학습돼 있어요.
+            </li>
+            <li>
+              <strong>필요한 클래스를 이미 갖고 있어요.</strong> 울음·비명·신음·두드림이 들어
+              있어서 추가 학습 없이 바로 시연할 수 있어요.
+            </li>
+          </ul>
+
+          <div class="note">
+            <p>
+              <b>이건 확장이에요.</b> 이번 단계의 필수 범위는 3D 복원과 영상 AI예요. 소리는 따로
+              떼어 두고 로드맵으로 둬요.
+            </p>
+          </div>
+        </section>
+
+        <section class="section" aria-labelledby="more">
+          <h2 id="more">더 자세한 건 저장소에 있어요</h2>
+
+          <ul class="prose">
+            <li>
+              <a href="https://github.com/NET-Challenge-S13/skylens/blob/develop/src/skylens_model/README.md" rel="noreferrer">모델 설계 철학</a>
+              — 왜 이렇게 설계했는지와, 채택하지 않은 대안을 기각 사유와 함께 적어 뒀어요.
+            </li>
+            <li>
+              <a href="https://github.com/NET-Challenge-S13/skylens/blob/develop/src/skylens_model/models/skylens/README.md" rel="noreferrer">3D 복원 설계</a>
+              — 파이프라인 3단계와 촬영 가이드가 있어요.
+            </li>
+            <li>
+              <a href="https://github.com/NET-Challenge-S13/skylens/blob/develop/src/skylens_model/models/skylens/RESULTS.md" rel="noreferrer">측정 원자료</a>
+              — 실험 5건, 학습 조건 28개의 수치 전체예요.
+            </li>
+            <li>
+              <a href="https://github.com/NET-Challenge-S13/skylens/blob/develop/docs/DATASETS.md" rel="noreferrer">데이터셋 조사</a>
+              — "RGB+열 페어 + 재난 + 사람 + 위험구역"을 다 가진 공개 데이터는 없다는 결론과,
+              그래서 어떻게 조합했는지가 적혀 있어요.
+            </li>
+          </ul>
+        </section>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="site-footer__inner">
+        <div>
+          <h2>가이드북</h2>
+          <ul>
+            <li><a href="index.html">홈</a></li>
+            <li><a href="how-it-works.html">어떻게 동작하나요</a></li>
+            <li><a href="screens.html">화면 둘러보기</a></li>
+            <li><a href="architecture.html">시스템 구조</a></li>
+            <li><a href="run.html">직접 돌려보기</a></li>
+          </ul>
+        </div>
+        <div>
+          <h2>연구 기록</h2>
+          <ul>
+            <li>
+              <a href="https://darkpyonix.github.io/researchtree/?repo=NET-Challenge-S13/skylens" rel="noreferrer">실험 트리 보기</a>
+            </li>
+            <li>
+              <a href="https://github.com/NET-Challenge-S13/skylens/blob/develop/docs/SPEC.md" rel="noreferrer">설계 스펙</a>
+            </li>
+            <li>
+              <a href="https://github.com/NET-Challenge-S13/skylens/blob/develop/docs/INTENT.md" rel="noreferrer">의도와 주장</a>
+            </li>
+            <li><a href="https://github.com/NET-Challenge-S13/skylens" rel="noreferrer">GitHub 저장소</a></li>
+          </ul>
+        </div>
+        <p class="site-footer__note">
+          SkyLens · NET 챌린지 캠프 시즌13.<br />
+          트리를 처음 열 때는 우측 설정에서 루트 브랜치를 <code>develop</code>으로 한 번 바꿔 주세요.
+        </p>
+      </div>
+    </footer>
+
+    <script src="assets/guide.js"></script>
+  </body>
+</html>

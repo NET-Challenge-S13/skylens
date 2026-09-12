@@ -400,7 +400,7 @@ interface ImageryGrid {
   bitmap: ImageBitmap;
   /** Same mosaic graded into the control tower's cold palette. The tactical
    *  modes (점 / 검정 텍스처 건물) drape THIS, which is what the original
-   *  screen looked like (res/docs/figures/sim_map_view.jpg). */
+   *  screen looked like (docs/figures/sim_map_view.jpg). */
   bitmapGraded: ImageBitmap;
 }
 

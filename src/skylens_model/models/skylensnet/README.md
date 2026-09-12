@@ -32,7 +32,7 @@ TransUNet은 데이터 확보 후 실험 로드맵으로 남긴다.
 - ARCHITECTURE.md §3-A가 VLM 기반 Open-Vocabulary 분할을 배제한 근거
   ("재난 대응은 최신성보다 신뢰성·실시간성")가 TransUNet에도 그대로 적용된다.
 
-> ⚠️ ARCHITECTURE.md·IDEA.md에는 아직 "UNet / TransUNet"이 병기돼 있다.
+> ⚠️ ARCHITECTURE.md·INTENT.md에는 아직 "UNet / TransUNet"이 병기돼 있다.
 > **UNet이 기본값**임을 반영하는 문서 수정이 필요하다.
 
 ### 1.2 단일 백본 + 이중 헤드
@@ -141,7 +141,7 @@ RGB(3ch) ⊕ 열화상(1ch) = 4채널 concat → 단일 백본.
 | FLAME 3, KAIST, LLVIP | RGB+열 페어 | ✅ 4채널 모드 |
 
 모델을 둘로 나누면 열화상 단독인 AIResQ는 어느 쪽에도 못 넣고 **버려진다.**
-대칭 dropout이면 [DATASETS.md](../../../../res/docs/DATASETS.md)의 모든 데이터셋을 하나의 모델에 태울 수 있다.
+대칭 dropout이면 [DATASETS.md](../../../../docs/DATASETS.md)의 모든 데이터셋을 하나의 모델에 태울 수 있다.
 
 **운용상 이점** — 열화상 카메라 고장이나 기종 혼용 시에도 graceful degradation.
 모달리티 하나가 죽어도 시스템은 계속 돈다.

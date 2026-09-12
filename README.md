@@ -23,14 +23,14 @@
 
 SkyLens는 여러 대의 드론이 재난 현장을 분할 탐색하며 보낸 영상을 고속망으로 모아 **현장을 실시간 3D(Gaussian Splatting)로 복원**하고, 같은 영상에 **AI를 돌려 위험구역·사람을 감지**해 3D 현장 위에 마커로 얹는 재난 대응 시스템입니다.
 
-이 저장소는 파이프라인 전체를 컴포넌트로 나눠 담고 있습니다 — 드론 → 게이트웨이 → 프록시 → 코어 → (모델 API · 관제탑 · 현황판). 구성과 각 컴포넌트의 책임은 **[COMPONENTS.md](res/docs/COMPONENTS.md)가 단일 출처**입니다.
+이 저장소는 파이프라인 전체를 컴포넌트로 나눠 담고 있습니다 — 드론 → 게이트웨이 → 프록시 → 코어 → (모델 API · 관제탑 · 현황판). 구성과 각 컴포넌트의 책임은 **[COMPONENTS.md](docs/COMPONENTS.md)가 단일 출처**입니다.
 
 운영자가 보는 화면은 둘이고, **서로 직접 연결되지 않습니다.** 둘 사이에는 파이프라인 전체가 놓입니다:
 
 - **관제탑** — 오퍼레이터가 **실제 GPS로 드론 경로를 지정**하는 화면. VWorld 실지형 위에 드론의 실제 텔레메트리를 그리며, 건물 표시를 점·검정 텍스처·실사 항공뷰 중에서 고를 수 있습니다. 코어가 서빙합니다.
 - **현황판** — 드론이 지나간 **구간부터** 서버가 복원 결과를 보내옵니다. 한 구간을 최종 품질까지 한 번에 처리하지 않고 **낮은 수준을 먼저 확정해 띄운 뒤 정제**하며, 앞 구간이 정제되는 동안 다음 구간의 낮은 수준이 도착합니다(**딜레이 패턴**). **서버의 인간 탐지 모델 결과(GPS)**가 도착하면 3D 위에 마커로 표시됩니다.
 
-> 📄 기획·설계: [IDEA.md](res/docs/IDEA.md) · [ARCHITECTURE.md](res/docs/ARCHITECTURE.md) · [PROJECT.md](PROJECT.md)
+> 📄 기획·설계: [INTENT.md](docs/INTENT.md) · [ARCHITECTURE.md](docs/ARCHITECTURE.md) · [PROJECT.md](PROJECT.md)
 
 ---
 
@@ -148,7 +148,7 @@ EOF
 
 ## 프로젝트 구조
 
-컴포넌트 경계와 책임은 [COMPONENTS.md](res/docs/COMPONENTS.md)가 단일 출처입니다.
+컴포넌트 경계와 책임은 [COMPONENTS.md](docs/COMPONENTS.md)가 단일 출처입니다.
 
 ```
 res/static/           # 정적 html 셸 — index · control · status
@@ -198,6 +198,10 @@ src/test/             # 모든 테스트와 검증 하네스가 여기 모입니
 
 ## 기술 스택
 **Three.js** · **@mkkellogg/gaussian-splats-3d** · **TypeScript** · **Vite** · **PeerJS/WebRTC** · **Playwright** · **Python**(모델) · **AWS Terrain Tiles** · **VWorld**(위성/건물)
+
+---
+
+📖 **가이드북**: [SkyLens가 뭔지, 어떻게 동작하는지 처음부터](https://net-challenge-s13.github.io/skylens/) — 소스는 [`site/`](site/)
 
 <div align="center">
 <sub>SkyLens — 재난 현장을 실시간 3D로, 그 위에 AI를 얹다.</sub>

@@ -1,0 +1,50 @@
+# MediaMTX — 대전 VM (배포 노드)
+#
+# 역할: 드론 영상을 받아 지휘관 브라우저에 WebRTC(WHEP)로 내보낸다.
+# 포트: KOREN 정책(10000~15000)에 맞춰 기본값에서 이동.
+#   WHEP 시그널링  8889 → 10889 (TCP)   브리지 리버스 터널로만 접근
+#   WebRTC 미디어  8189 → 10189 (UDP)   대전 → 브라우저 직결
+#   SRT 수신       8890 → 10890 (UDP)   1단계는 로컬 테스트 소스만
+#
+# 대전은 공인 IP가 ens3에 직결(NAT 없음)이므로 서버 측 STUN이 필요 없다.
+# webrtcIPsFromInterfacesList 로 ens3 주소(116.89.187.181)만 ICE 후보로 낸다.
+
+logLevel: info
+logDestinations: [stdout]
+
+# 쓰지 않는 프로토콜은 끈다 — 열리는 포트를 최소화
+api: no
+metrics: no
+pprof: no
+playback: no
+rtsp: no
+rtmp: no
+hls: no
+moq: no                         # v1.21 기본 on — 8892/8893 을 열므로 끈다
+
+# ---- SRT (수신) ----
+srt: yes
+srtAddress: :10890
+
+# ---- WebRTC (송출) ----
+webrtc: yes
+webrtcAddress: :10889
+webrtcEncryption: no            # TLS는 브리지 nginx가 담당
+webrtcAllowOrigins: ['*']
+webrtcTrustedProxies: [127.0.0.1]
+webrtcLocalUDPAddress: :10189
+webrtcLocalTCPAddress: ''       # TCP 폴백 없음 — UDP 직결만
+webrtcIPsFromInterfaces: yes
+webrtcIPsFromInterfacesList: [ens3]
+webrtcAdditionalHosts: []
+webrtcICEServers2: []           # NAT 없음 → STUN 불필요
+webrtcHandshakeTimeout: 10s
+webrtcTrackGatherTimeout: 2s
+
+# ---- 경로 ----
+pathDefaults:
+  source: publisher
+  sourceOnDemand: no
+
+paths:
+  drone:                        # 드론 영상 (1단계: ffmpeg 테스트 소스)

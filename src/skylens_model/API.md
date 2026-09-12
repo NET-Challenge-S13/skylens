@@ -6,7 +6,7 @@ links: "[[COMPONENTS]] · [[ARCHITECTURE]]"
 # skylens_model 연산 API
 
 `skylens_model` 컴포넌트의 REST 표면. **코어가 발행한 잡을 받아 처리하고 결과를 돌려주는 것**이
-전부다([COMPONENTS.md §3.5](../../res/docs/COMPONENTS.md)). 시스템에서 유일한 요청/응답 창구이며,
+전부다([COMPONENTS.md §3.5](../../docs/COMPONENTS.md)). 시스템에서 유일한 요청/응답 창구이며,
 나머지 경로는 전부 푸시다.
 
 - 진입점: `src/skylens_model/app.py` (`skylens_model.app:app`)

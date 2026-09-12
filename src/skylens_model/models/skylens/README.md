@@ -5,7 +5,7 @@
 설치와 함정은 [`INSTALL.md`](INSTALL.md)로 분리했다.
 
 상위 문서와의 관계는 [`../../CLAUDE.md`](../../CLAUDE.md)의 문서 지도를 따른다.
-이 문서는 `res/docs/ARCHITECTURE.md`의 3-Tier 중 **Core HPC의 3DGS 복원 부분**을 구현한다.
+이 문서는 `docs/ARCHITECTURE.md`의 3-Tier 중 **Core HPC의 3DGS 복원 부분**을 구현한다.
 
 ---
 
@@ -262,7 +262,7 @@ DJI Pilot 2 / FlightHub 2 뿐이다. 그래서 `--from-existing` 으로 **앱이
 
 ## 5. 증분(누적) 복원 — 가능하다
 
-`res/docs` 회의록(2026-08-07)의 3DGS 담당 액션 아이템에 대한 답이다.
+`docs` 회의록(2026-08-07)의 3DGS 담당 액션 아이템에 대한 답이다.
 회의록에는 *"누적 복원이 불가능한 것으로 판명되면 가우시안 스플래팅 자체를
 재설계해야 함"* 이라는 우려가 적혀 있었다. **그 우려는 해소됐다.**
 

@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SkyLens — 들어가기 전에, 안을 먼저 봐요</title>
+    <meta
+      name="description"
+      content="SkyLens는 드론 여러 대가 찍은 영상으로 재난 현장을 3D로 다시 그리고, 그 위에 AI가 위험한 곳과 사람을 표시하는 시스템이에요."
+    />
+    <link rel="stylesheet" href="assets/guide.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">본문으로 건너뛰기</a>
+
+    <header class="site-header">
+      <div class="site-header__inner">
+        <a class="brand" href="index.html"><span class="brand__dot"></span>SkyLens</a>
+        <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="site-nav">메뉴</button>
+        <nav class="site-nav" id="site-nav" aria-label="주요 메뉴">
+          <ul>
+            <li><a href="index.html">홈</a></li>
+            <li><a href="how-it-works.html">어떻게 동작하나요</a></li>
+            <li><a href="screens.html">화면 둘러보기</a></li>
+            <li><a href="architecture.html">시스템 구조</a></li>
+            <li><a href="run.html">직접 돌려보기</a></li>
+            <li><a href="model.html">AI 모델</a></li>
+            <li>
+              <a class="is-external" href="https://darkpyonix.github.io/researchtree/?repo=NET-Challenge-S13/skylens" rel="noreferrer">연구 기록</a>
+            </li>
+          </ul>
+        </nav>
+      </div>
+    </header>
+
+    <main id="main">
+      <div class="wrap">
+        <section class="hero">
+          <span class="kicker">NET 챌린지 캠프 시즌13</span>
+          <h1>들어가기 전에,<br />안을 먼저 봐요.</h1>
+          <p class="lede">
+            SkyLens는 드론 여러 대가 찍은 영상으로 무너진 현장을 3D로 다시 그려요 (3D Gaussian
+            Splatting). 그리고 같은 영상에 AI를 돌려서 위험한 곳과 사람이 있는 곳을 그 3D 위에
+            표시해요.
+          </p>
+          <div class="btn-row">
+            <a class="btn btn--primary" href="how-it-works.html">어떻게 동작하나요</a>
+            <a class="btn" href="run.html">직접 돌려보기</a>
+          </div>
+        </section>
+
+        <section class="section" aria-labelledby="problem">
+          <span class="kicker">문제</span>
+          <h2 id="problem">지금 소방드론이 하는 일은, 영상 중계가 전부예요</h2>
+
+          <div class="prose">
+            <p>
+              드론은 이미 재난 현장에 나가고 있어요. 소방드론 출동은 2019년 738건에서 2024년
+              4,600건으로 6배 넘게 늘었고, 전국 소방관서에 554대가 배치돼 있어요.
+            </p>
+            <p>
+              그런데 그 드론이 하는 일은 <strong>실시간 영상을 중계하는 것까지</strong>예요. 위험
+              요소를 자동으로 찾아 주지도, 소리로 생존자를 찾아 주지도 않아요. 소방청이 소방드론
+              협의회를 새로 만들고 충남도가 따로 "드론영상 AI 분석시스템"을 구축하겠다고 나선 것도,
+              그 기능이 아직 없기 때문이에요.
+            </p>
+          </div>
+
+          <ul class="stats">
+            <li><b>4,600건</b><span>2024년 소방드론 출동. 5년 전의 6배가 넘어요</span></li>
+            <li><b>554대</b><span>전국 소방관서에 배치된 소방드론</span></li>
+            <li><b>2m</b><span>열영상으로 잔해 속 사람을 찾을 수 있는 깊이의 한계</span></li>
+          </ul>
+        </section>
+
+        <section class="section" aria-labelledby="hongje">
+          <h2 id="hongje">2001년 홍제동에서 있었던 일</h2>
+
+          <div class="prose">
+            <p>
+              화재 현장에 소방관 10명이 들어갔어요. 건물 내부 구조를 모르는 채였어요. 건물이
+              무너지면서 10명이 매몰됐고, 그중 6명이 숨졌어요.
+            </p>
+            <p>
+              진입하기 전에 건물이 어떻게 생겼는지, 어디가 무너질 것 같은지 볼 수 있었다면 판단이
+              달랐을 거예요. SkyLens가 만들려는 건 정확히 그 장면이에요 —
+              <strong>진입 직전에, 지휘관이 현장의 형상을 3D로 보는 것.</strong>
+            </p>
+            <p>
+              잔해 속 생존자를 찾는 일도 아직 막혀 있어요. 열영상은 잔해가 두꺼우면 2m 깊이까지가
+              한계예요. 소리를 쓰면 더 깊은 곳도 찾을 수 있는데, 프로펠러 소음이 약 80dB이라
+              사람 목소리 약 60dB을 덮어 버려요. 다만 이 장벽은 AI 소음 억제 연구와 구조용 오디오
+              데이터셋이 나오면서 낮아지는 중이에요.
+            </p>
+          </div>
+        </section>
+
+        <section class="section" aria-labelledby="what">
+          <span class="kicker">우리가 하는 것</span>
+          <h2 id="what">세 가지를 합쳐요</h2>
+
+          <ol class="steps">
+            <li>
+              <h3>나눠서 봐요</h3>
+              <p>
+                드론 2~3대가 구역을 나눠 동시에 탐색해요. 한 대가 순서대로 도는 것보다 2~3배 빨라요.
+                한 대를 잃어도 남은 드론이 그 구역을 메워요.
+              </p>
+            </li>
+            <li>
+              <h3>고속망으로 모아서 3D로 만들어요</h3>
+              <p>
+                드론 영상을 연구망(KOREN)으로 GPU 서버에 모아 현장을 3D로 복원해요. 같은 영상에
+                AI를 함께 돌려서 위험구역과 사람을 찾아요. 무거운 연산은 전부 여기서 해요.
+              </p>
+            </li>
+            <li>
+              <h3>3D 상황판으로 보여줘요</h3>
+              <p>
+                복원이 끝난 구간부터 차례로 화면에 올라와요. 촬영이 다 끝날 때까지 기다리지 않아요.
+                AI가 찾은 사람과 위험구역은 실제 GPS 좌표로 그 3D 위에 얹혀요.
+              </p>
+            </li>
+          </ol>
+        </section>
+
+        <section class="section" aria-labelledby="honest">
+          <h2 id="honest">없는 건 없다고 표시해요</h2>
+          <div class="panel panel--warn">
+            <p class="panel__title">설계 원칙</p>
+            <p>
+              화면은 <strong>실제로 도착한 것만</strong> 그려요. 복원 결과가 아직 안 왔으면 그
+              구간은 비어 있고, 탐지 결과가 없으면 마커도 없어요.
+            </p>
+            <p>
+              그럴듯해 보이려고 시뮬레이션으로 빈칸을 채우지 않아요. 재난 현장에서 "있는 것처럼
+              보이는 화면"은 없는 화면보다 위험하거든요.
+            </p>
+          </div>
+        </section>
+
+        <section class="section" aria-labelledby="next">
+          <h2 id="next">더 볼 것</h2>
+          <ul class="cards">
+            <li>
+              <a class="card" href="how-it-works.html">
+                <span class="card__kicker">FLOW</span>
+                <span class="card__title">어떻게 동작하나요</span>
+                <span class="card__desc">분할 탐색 → 고속망으로 모아 3D 복원 + AI 감지 → 3D 상황판. 세 단계를 순서대로 풀어요.</span>
+              </a>
+            </li>
+            <li>
+              <a class="card" href="screens.html">
+                <span class="card__kicker">SCREENS</span>
+                <span class="card__title">화면 둘러보기</span>
+                <span class="card__desc">관제탑과 현황판이 각각 뭘 하는 화면인지, 그리고 딜레이 패턴이 뭔지 설명해요.</span>
+              </a>
+            </li>
+            <li>
+              <a class="card" href="architecture.html">
+                <span class="card__kicker">SYSTEM</span>
+                <span class="card__title">시스템 구조</span>
+                <span class="card__desc">컴포넌트 8개와 데이터가 흐르는 길, 포트 맵, 그리고 연구 기록을 보는 법.</span>
+              </a>
+            </li>
+            <li>
+              <a class="card" href="model.html">
+                <span class="card__kicker">MODEL</span>
+                <span class="card__title">AI 모델</span>
+                <span class="card__desc">RGB에 열화상을 붙인 4채널 UNet, 백본 하나에 헤드 둘, 그리고 2D를 3D로 바꾸는 법.</span>
+              </a>
+            </li>
+          </ul>
+        </section>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="site-footer__inner">
+        <div>
+          <h2>가이드북</h2>
+          <ul>
+            <li><a href="how-it-works.html">어떻게 동작하나요</a></li>
+            <li><a href="screens.html">화면 둘러보기</a></li>
+            <li><a href="architecture.html">시스템 구조</a></li>
+            <li><a href="run.html">직접 돌려보기</a></li>
+            <li><a href="model.html">AI 모델</a></li>
+          </ul>
+        </div>
+        <div>
+          <h2>연구 기록</h2>
+          <ul>
+            <li>
+              <a href="https://darkpyonix.github.io/researchtree/?repo=NET-Challenge-S13/skylens" rel="noreferrer">실험 트리 보기</a>
+            </li>
+            <li>
+              <a href="https://github.com/NET-Challenge-S13/skylens/blob/develop/docs/SPEC.md" rel="noreferrer">설계 스펙</a>
+            </li>
+            <li>
+              <a href="https://github.com/NET-Challenge-S13/skylens/blob/develop/docs/INTENT.md" rel="noreferrer">의도와 주장</a>
+            </li>
+            <li><a href="https://github.com/NET-Challenge-S13/skylens" rel="noreferrer">GitHub 저장소</a></li>
+          </ul>
+        </div>
+        <p class="site-footer__note">
+          SkyLens · NET 챌린지 캠프 시즌13.<br />
+          트리를 처음 열 때는 우측 설정에서 루트 브랜치를 <code>develop</code>으로 한 번 바꿔 주세요.
+        </p>
+      </div>
+    </footer>
+
+    <script src="assets/guide.js"></script>
+  </body>
+</html>

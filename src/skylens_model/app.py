@@ -1,7 +1,7 @@
 """FastAPI entry point for the ``skylens_model`` component.
 
 The compute API the core talks to. It is the only request/response surface in
-SkyLens -- everything else in the system is push (see res/docs/COMPONENTS.md
+SkyLens -- everything else in the system is push (see docs/COMPONENTS.md
 section 3.5, and src/shared/protocol.ts section 7 for the wire shapes).
 
     POST /recon/jobs   ReconJobRequest  -> JobAccepted

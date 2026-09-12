@@ -1,0 +1,45 @@
+# MediaMTX — 대전 VM, 2단계 (브리지에서 당겨오기)
+#
+# mediamtx.yml 과 같되 drone 경로의 소스가 다르다:
+#   1단계 mediamtx.yml       : publisher (로컬 ffmpeg 테스트 소스가 밀어넣음)
+#   2단계 mediamtx-pull.yml  : 브리지 SRT 에서 대전이 당겨옴 (대전→브리지 아웃바운드)
+#
+# 게이트웨이는 5G 라 KOREN 에 직접 못 들어가므로 브리지가 받아두고 대전이 가져간다.
+# 브리지 MediaMTX 는 116.89.187.181 에서의 read 를 비밀번호 없이 허용한다.
+
+logLevel: info
+logDestinations: [stdout]
+
+api: no
+metrics: no
+pprof: no
+playback: no
+rtsp: no
+rtmp: no
+hls: no
+moq: no
+
+srt: yes
+srtAddress: :10890
+
+webrtc: yes
+webrtcAddress: :10889
+webrtcEncryption: no
+webrtcAllowOrigins: ['*']
+webrtcTrustedProxies: [127.0.0.1]
+webrtcLocalUDPAddress: :10189
+webrtcLocalTCPAddress: ''
+webrtcIPsFromInterfaces: yes
+webrtcIPsFromInterfacesList: [ens3]
+webrtcAdditionalHosts: []
+webrtcICEServers2: []
+webrtcHandshakeTimeout: 10s
+webrtcTrackGatherTimeout: 2s
+
+pathDefaults:
+  sourceOnDemand: no
+
+paths:
+  drone:
+    source: srt://175.126.98.44:10890?streamid=read:drone
+    sourceOnDemand: no

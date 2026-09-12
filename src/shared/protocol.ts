@@ -1,4 +1,4 @@
-// Cross-component wire contract for SkyLens (see res/docs/COMPONENTS.md).
+// Cross-component wire contract for SkyLens (see docs/COMPONENTS.md).
 //
 //   드론 → 게이트웨이 → 프록시 → 코어 → (모델 API | 관제탑 화면 | 현황판 WebRTC)
 //

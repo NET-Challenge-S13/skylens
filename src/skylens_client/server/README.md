@@ -5,7 +5,7 @@ links: "[[COMPONENTS]] · [[ARCHITECTURE]]"
 
 # `skylens_client` 서버 — 현황판 웹서버 + WebRTC 연결 중계
 
-KOREN **외부망**에 놓이는 컴포넌트다(`res/docs/COMPONENTS.md` §3.6). 포트 **8090** 하나에
+KOREN **외부망**에 놓이는 컴포넌트다(`docs/COMPONENTS.md` §3.6). 포트 **8090** 하나에
 현황판이 필요로 하는 모든 것이 올라간다. 코어(내부망)로 들어가는 소켓은 **정확히 하나**이고,
 브라우저는 그 하나를 N개의 현황판이 나눠 쓴다.
 
@@ -84,7 +84,7 @@ mission-status(1) → link-status(hop별) → telemetry(드론별)
 이 절이 이 컴포넌트에서 가장 오해하기 쉬운 부분이라 명시한다.
 
 **지금 살아있는 것 (LIVE).** 현황판은 데이터를 **`/stream` WebSocket**으로 받는다.
-`res/docs/COMPONENTS.md` §8이 적어 둔 대로 Node에는 WebRTC 구현이 없고 이번 단계에
+`docs/COMPONENTS.md` §8이 적어 둔 대로 Node에는 WebRTC 구현이 없고 이번 단계에
 네이티브 의존을 끌어들이지 않기로 했으므로, 코어→클라이언트도 클라이언트→브라우저도
 WebSocket이다. 현황판에 보이는 모든 것은 이 경로로 온다.
 

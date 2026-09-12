@@ -1,0 +1,44 @@
+name: Deploy guidebook to GitHub Pages
+
+# main is the deployment branch. develop carries the design documents that
+# scripts/sync-main.sh strips on the way to main, so publishing from develop
+# would put the guidebook online from a branch that is not what we ship.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'site/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+# Allow the workflow to publish to Pages. No repo write access is needed.
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time. A queued run is superseded rather than cancelled
+# mid-flight, so a push during a deploy does not leave the site half-published.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # The guidebook is plain HTML/CSS/JS, so site/ is uploaded as-is. There
+      # is no build step to break and nothing to install.
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -12,8 +12,8 @@ SkyLens의 AI·복원 모델 코드를 담는 Python 패키지.
 
 학습은 루트의 `train.ipynb` 에서 돌린다.
 
-> 관련 문서: [ARCHITECTURE.md](../../res/docs/ARCHITECTURE.md) §3-A (모델·융합 파이프라인) ·
-> [DATASETS.md](../../res/docs/DATASETS.md) (데이터셋 조사) · [IDEA.md](../../res/docs/IDEA.md) (기획)
+> 관련 문서: [ARCHITECTURE.md](../../docs/ARCHITECTURE.md) §3-A (모델·융합 파이프라인) ·
+> [DATASETS.md](../../docs/DATASETS.md) (데이터셋 조사) · [INTENT.md](../../docs/INTENT.md) (기획)
 
 ---
 
@@ -45,7 +45,7 @@ SkyLens의 AI는 **하나의 큰 모델이 전부 하는 구조가 아니다.** 
 **왜:**
 - 시공간 일관성은 ③이 이미 담당한다. 모델까지 시계열을 보면 역할이 중복된다.
 - 시계열 모델(3D conv, temporal attention)은 무겁고 데이터를 훨씬 많이 요구하는데,
-  우리는 [DATASETS.md](../../res/docs/DATASETS.md)에서 확인했듯 데이터가 부족하고 파편화돼 있다.
+  우리는 [DATASETS.md](../../docs/DATASETS.md)에서 확인했듯 데이터가 부족하고 파편화돼 있다.
 - stateless면 프레임을 드론 구분 없이 큐에 넣고 배치 추론할 수 있어 GPU 효율이 좋다.
 
 **예상 질문 대응** — "왜 모델이 시계열을 안 보나요?"

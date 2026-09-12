@@ -2,7 +2,7 @@
 
 현장의 드론에서 도는 컴포넌트. 촬영 영상을 **일정 구간마다 잘라 H.265로 게이트웨이에 올리고**, 자기 위치·자세(텔레메트리)를 계속 흘려보내며, 관제탑이 내려보낸 **경로 지정(`AssignRoute`)과 수동 조종(`ManualControl`)을 받는다**.
 
-컴포넌트 경계와 책임의 단일 출처는 [`res/docs/COMPONENTS.md`](../../res/docs/COMPONENTS.md) §3.1이고, 메시지 계약은 [`src/shared/protocol.ts`](../shared/protocol.ts)다. 이 드론은 `DroneHello` · `DroneTelemetry` · `VideoSegment`의 **발신처(origin)** 이며 `AssignRoute` · `ManualControl`의 **수신처**다.
+컴포넌트 경계와 책임의 단일 출처는 [`docs/COMPONENTS.md`](../../docs/COMPONENTS.md) §3.1이고, 메시지 계약은 [`src/shared/protocol.ts`](../shared/protocol.ts)다. 이 드론은 `DroneHello` · `DroneTelemetry` · `VideoSegment`의 **발신처(origin)** 이며 `AssignRoute` · `ManualControl`의 **수신처**다.
 
 ---
 
