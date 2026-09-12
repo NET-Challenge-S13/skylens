@@ -120,6 +120,7 @@ related: "[[INTENT.md]], [[COMPONENTS.md]], [[ARCHITECTURE.md]], [[NETWORK_ARCHI
 - modality dropout으로 열화상이 없는 입력도 견딘다.
 - 헤드별로 분리 학습한다.
 - **`road_blocked` 픽셀이 있는 학습 이미지는 오버샘플링한다.** 배수는 4다. 이 클래스는 학습 표본의 약 2%에만 나타나 대부분의 배치에 아예 들어오지 않는다. 근거: experiment/road-oversample.
+- **오버샘플링할 때 fire_seg 도 같은 배수로 불려 세그 데이터셋 구성비를 보존한다.** RescueNet만 불리면 fire의 유일한 출처인 fire_seg의 비중이 24.2%에서 17.8%로 희석되어 `fire`가 학습되지 않는다. 근거: experiment/balanced-oversample.
 - 모달리티 융합은 latent 융합이 아니라 **Hybrid Fusion**이다. 합쳐지는 단계가 모달리티마다 다르다: 영상+열화상은 입력단, 포즈는 투영단, 소리는 결정단.
 - 설계 결정과 그 근거의 단일 출처는 `src/skylens_model/README.md`다. 상위 문서와 어긋나면 모델 문서가 우선한다.
 
