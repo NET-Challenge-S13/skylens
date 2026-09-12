@@ -1,4 +1,0 @@
-# ResearchTree 설정. 루트 브랜치(develop)에 있는 이 파일을 뷰어·CLI·Python API가 함께 읽는다.
-# 루트 브랜치 이름은 이 파일로 지정할 수 없다. 환경변수 RESEARCHTREE_ROOT=develop 를 쓴다.
-spec: docs/SPEC.md
-intent: docs/INTENT.md
