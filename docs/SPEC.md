@@ -115,8 +115,9 @@ related: "[[INTENT.md]], [[COMPONENTS.md]], [[ARCHITECTURE.md]], [[NETWORK_ARCHI
 > RGB와 열화상을 입력단에서 합친 4채널 단일 백본에 헤드 둘을 달아, 위험구역과 사람을 함께 낸다.
 
 - 백본: UNet, 입력 4채널(RGB 3 + 열 1).
-- 세그 헤드 — 위험구역(stuff). 통합 클래스 스키마는 `0 normal / 1 fire / 2 collapse / 3 road_blocked / 255 ignore`.
-- 점 검출 헤드 — 사람.
+- 세그 헤드는 위험구역(stuff)을 맡는다. 통합 클래스 스키마는 `0 normal / 1 fire / 2 collapse / 3 road_blocked / 255 ignore`.
+- **세그 손실은 클래스 가중 cross-entropy다.** 가중치는 혼합 학습셋의 클래스 빈도를 역제곱근으로 뒤집은 값이고, normal을 1로 정규화한다: `normal 1.0 / fire 10.19 / collapse 4.67 / road_blocked 7.52`. 가중치 없는 CE에서는 `road_blocked`가 전혀 학습되지 않았다. 근거: experiment/seg-class-weights.
+- 점 검출 헤드는 사람을 맡는다.
 - modality dropout으로 열화상이 없는 입력도 견딘다.
 - 헤드별로 분리 학습한다.
 - 모달리티 융합은 latent 융합이 아니라 **Hybrid Fusion**이다. 합쳐지는 단계가 모달리티마다 다르다: 영상+열화상은 입력단, 포즈는 투영단, 소리는 결정단.

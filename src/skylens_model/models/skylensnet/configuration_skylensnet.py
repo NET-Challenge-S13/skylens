@@ -44,6 +44,9 @@ class SkyLensConfig(PretrainedConfig):
             총 loss 가중합 계수.
         danger_ignore_index (`int`):
             세그 CrossEntropy에서 무시할 라벨 값.
+        danger_class_weights (`list[float]`, optional):
+            세그 CrossEntropy의 클래스별 가중치. 길이는 num_danger_classes.
+            None 이면 가중치 없이 계산한다.
     """
 
     model_type = "skylens"
@@ -65,6 +68,7 @@ class SkyLensConfig(PretrainedConfig):
         heatmap_loss_weight: float = 1.0,
         wh_loss_weight: float = 0.1,
         danger_ignore_index: int = 255,
+        danger_class_weights: list[float] | None = None,
         **kwargs,
     ):
         self.backbone = backbone
@@ -80,6 +84,7 @@ class SkyLensConfig(PretrainedConfig):
         self.modality_dropout_rgb_only = modality_dropout_rgb_only
         self.modality_dropout_thermal_only = modality_dropout_thermal_only
         self.seg_loss_weight = seg_loss_weight
+        self.danger_class_weights = danger_class_weights
         self.heatmap_loss_weight = heatmap_loss_weight
         self.wh_loss_weight = wh_loss_weight
         self.danger_ignore_index = danger_ignore_index
