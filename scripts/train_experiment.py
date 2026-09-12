@@ -58,6 +58,14 @@ def parse_args() -> argparse.Namespace:
         metavar="N",
         help="road_blocked 픽셀이 있는 RescueNet 학습 이미지를 N배로 반복한다. 1이면 반복 없음",
     )
+    p.add_argument(
+        "--balance-fire-seg",
+        action="store_true",
+        help=(
+            "road 오버샘플링을 할 때 fire_seg 도 같은 배수로 불려 세그 데이터셋 구성비를 "
+            "보존한다. 이것이 없으면 fire 의 유일한 출처가 희석되어 fire 가 학습되지 않는다"
+        ),
+    )
     p.add_argument("--data-root", type=Path, default=None, help="기본값은 자동 탐색")
     p.add_argument("--eval-max-samples", type=int, default=EVAL_MAX_SAMPLES)
     p.add_argument("--no-resume", action="store_true", help="체크포인트가 있어도 처음부터 학습한다")
@@ -215,6 +223,16 @@ def main() -> int:
                         repeats = [Subset(ds, idx) for _ in range(args.road_oversample - 1)]
                         ds = ConcatDataset([ds, *repeats])
                         extra = f"  (+road {len(idx):,}장 x{args.road_oversample - 1})"
+                if (
+                    which == "train"
+                    and args.balance_fire_seg
+                    and args.road_oversample > 1
+                    and cls is FireSegmentation
+                ):
+                    # fire 의 유일한 출처다. RescueNet 만 불리면 세그 표본 안에서
+                    # 비중이 줄어 fire 가 학습되지 않는다.
+                    ds = ConcatDataset([ds] * args.road_oversample)
+                    extra = f"  (x{args.road_oversample} 구성비 보존)"
                 print(f"  [ok]   {cls.__name__:24s} {split:5s} {len(ds):>6,}장{extra}")
                 parts.append(ds)
             except Exception as exc:
