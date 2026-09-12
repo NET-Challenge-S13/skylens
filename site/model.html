@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>AI 모델 — SkyLens</title>
+    <title>AI 모델 | SkyLens</title>
     <meta
       name="description"
       content="RGB에 열화상을 붙인 4채널 UNet, 백본 하나에 헤드 둘, 그리고 2D 탐지를 3D 좌표로 바꾸는 Depth Map 레이캐스팅을 설명해요."
@@ -103,7 +103,7 @@
           <div class="prose">
             <p>
               밤이거나 연기가 차 있으면 일반 카메라는 아무것도 못 봐요. 열화상은 그럴 때도 사람과
-              불을 봐요. 그래서 둘을 <strong>입력 단계에서</strong> 합쳐요 — 일반 영상 3채널에
+              불을 봐요. 그래서 둘을 <strong>입력 단계에서</strong> 합쳐요. 일반 영상 3채널에
               열화상 1채널을 붙여 4채널을 만들고, 그걸 모델 하나에 넣어요 (Early Fusion).
             </p>
             <p>
@@ -375,7 +375,7 @@
 
           <div class="prose">
             <p>
-              흰 벽에 반사되는 바닥, 반복되는 구조 — 실내는 특징이 잘 안 잡혀요. SIFT는 특징점을
+              흰 벽에 반사되는 바닥, 반복되는 구조. 실내는 특징이 잘 안 잡혀요. SIFT는 특징점을
               3.3배 많이 잡지만 절반이 검증에서 떨어지고, 살아남은 잘못된 짝이 카메라 보정을
               발산시켜요. <strong>정확도와 속도 양쪽에서 ALIKED가 이겼어요.</strong>
             </p>
@@ -393,7 +393,7 @@
             />
             <figcaption>
               (a) 품질 곡선이 로그 형태라 초반에 대부분을 벌어요. (b) 입력 장수가 1.5배가 되면
-              프레임 간 대조는 5배로 늘어나요 — 장수의 제곱에 비례해요.
+              프레임 간 대조는 5배로 늘어나요. 장수의 제곱에 비례해요.
             </figcaption>
           </figure>
 
@@ -504,19 +504,19 @@
           <ul class="prose">
             <li>
               <a href="https://github.com/NET-Challenge-S13/skylens/blob/develop/src/skylens_model/README.md" rel="noreferrer">모델 설계 철학</a>
-              — 왜 이렇게 설계했는지와, 채택하지 않은 대안을 기각 사유와 함께 적어 뒀어요.
+              왜 이렇게 설계했는지와, 채택하지 않은 대안을 기각 사유와 함께 적어 뒀어요.
             </li>
             <li>
               <a href="https://github.com/NET-Challenge-S13/skylens/blob/develop/src/skylens_model/models/skylens/README.md" rel="noreferrer">3D 복원 설계</a>
-              — 파이프라인 3단계와 촬영 가이드가 있어요.
+              파이프라인 3단계와 촬영 가이드가 있어요.
             </li>
             <li>
               <a href="https://github.com/NET-Challenge-S13/skylens/blob/develop/src/skylens_model/models/skylens/RESULTS.md" rel="noreferrer">측정 원자료</a>
-              — 실험 5건, 학습 조건 28개의 수치 전체예요.
+              실험 5건, 학습 조건 28개의 수치 전체예요.
             </li>
             <li>
               <a href="https://github.com/NET-Challenge-S13/skylens/blob/develop/docs/DATASETS.md" rel="noreferrer">데이터셋 조사</a>
-              — "RGB+열 페어 + 재난 + 사람 + 위험구역"을 다 가진 공개 데이터는 없다는 결론과,
+              "RGB+열 페어 + 재난 + 사람 + 위험구역"을 다 가진 공개 데이터는 없다는 결론과,
               그래서 어떻게 조합했는지가 적혀 있어요.
             </li>
           </ul>

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# sync-main.sh — develop 을 main 에 머지하면서 설계 문서를 걷어낸다.
+# sync-main.sh: develop 을 main 에 머지하면서 설계 문서를 걷어낸다.
 #
 # main 은 배포용 브랜치다. develop 에 쌓이는 설계·기획 문서(INTENT / SPEC / ARCHITECTURE …)는
 # 연구 기록이지 배포물이 아니므로 main 에서는 지운다. 남기는 것은 README.md 하나다.
@@ -38,7 +38,7 @@ TMP_REMOVED="$(mktemp)"
 # --- 사전 점검 -------------------------------------------------------------
 
 # 추적 중인 파일에 변경이 남아 있으면 멈춘다. 머지가 그 변경을 덮어쓸 수 있기 때문이다.
-# untracked 파일은 머지에 영향이 없으므로 막지 않는다 — 다만 대상 브랜치에 같은 이름의
+# untracked 파일은 머지에 영향이 없으므로 막지 않는다: 다만 대상 브랜치에 같은 이름의
 # 파일이 있으면 git 이 브랜치 전환 단계에서 알아서 거부한다.
 if [ -n "$(git status --porcelain --untracked-files=no)" ]; then
   echo "error: tracked files have uncommitted changes. commit or stash first." >&2
@@ -101,11 +101,33 @@ git switch "$TARGET_BRANCH"
 git merge --ff-only "origin/$TARGET_BRANCH" 2>/dev/null || true
 
 echo "==> merging $SOURCE_BRANCH into $TARGET_BRANCH"
-# -X theirs: main 에서 문서를 지운 이력과 develop 의 같은 파일이 충돌하므로,
-# 내용 충돌은 항상 develop 쪽을 채택한다. 지우는 일은 머지 후에 다시 한다.
+# -X theirs 는 내용 충돌만 해결한다. main 이 지운 문서를 develop 이 고치면
+# delete/modify 충돌(DU)이 되는데 여기에는 -X 가 적용되지 않아 머지가 멈춘다.
+# 매번 생기는 정상 상황이므로, 충돌한 경로는 전부 develop 쪽으로 되살린 뒤
+# 아래 "문서 제거" 단계에서 다시 지운다.
 if ! git merge --no-ff -X theirs "$SOURCE_BRANCH" -m "merge $SOURCE_BRANCH into $TARGET_BRANCH"; then
-  echo "error: merge conflict. resolve it, then re-run this script." >&2
-  exit 1
+  UNMERGED="$(git diff --name-only --diff-filter=U)"
+  if [ -z "$UNMERGED" ]; then
+    echo "error: merge failed with no conflicted paths. resolve it by hand." >&2
+    exit 1
+  fi
+
+  echo "==> restoring $(printf '%s\n' "$UNMERGED" | wc -l | tr -d ' ') conflicted path(s) from $SOURCE_BRANCH"
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    if git cat-file -e "$SOURCE_BRANCH:$f" 2>/dev/null; then
+      git checkout "$SOURCE_BRANCH" -- "$f"   # develop 에 있으면 그 내용으로
+      git add -- "$f"
+    else
+      git rm -q -- "$f"                       # develop 에서도 지워졌으면 삭제 확정
+    fi
+  done <<< "$UNMERGED"
+
+  if [ -n "$(git diff --name-only --diff-filter=U)" ]; then
+    echo "error: conflicts remain after auto-resolve. resolve them by hand." >&2
+    exit 1
+  fi
+  git commit -q --no-edit
 fi
 
 # --- 문서 제거 --------------------------------------------------------------

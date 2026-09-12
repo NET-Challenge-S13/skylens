@@ -23,12 +23,12 @@
 
 SkyLens는 여러 대의 드론이 재난 현장을 분할 탐색하며 보낸 영상을 고속망으로 모아 **현장을 실시간 3D(Gaussian Splatting)로 복원**하고, 같은 영상에 **AI를 돌려 위험구역·사람을 감지**해 3D 현장 위에 마커로 얹는 재난 대응 시스템입니다.
 
-이 저장소는 파이프라인 전체를 컴포넌트로 나눠 담고 있습니다 — 드론 → 게이트웨이 → 프록시 → 코어 → (모델 API · 관제탑 · 현황판). 구성과 각 컴포넌트의 책임은 **[COMPONENTS.md](https://github.com/NET-Challenge-S13/skylens/blob/develop/docs/COMPONENTS.md)가 단일 출처**입니다.
+이 저장소는 파이프라인 전체를 컴포넌트로 나눠 담고 있습니다. 드론 → 게이트웨이 → 프록시 → 코어 → (모델 API · 관제탑 · 현황판). 구성과 각 컴포넌트의 책임은 **[COMPONENTS.md](docs/COMPONENTS.md)가 단일 출처**입니다.
 
 운영자가 보는 화면은 둘이고, **서로 직접 연결되지 않습니다.** 둘 사이에는 파이프라인 전체가 놓입니다:
 
-- **관제탑** — 오퍼레이터가 **실제 GPS로 드론 경로를 지정**하는 화면. VWorld 실지형 위에 드론의 실제 텔레메트리를 그리며, 건물 표시를 점·검정 텍스처·실사 항공뷰 중에서 고를 수 있습니다. 코어가 서빙합니다.
-- **현황판** — 드론이 지나간 **구간부터** 서버가 복원 결과를 보내옵니다. 한 구간을 최종 품질까지 한 번에 처리하지 않고 **낮은 수준을 먼저 확정해 띄운 뒤 정제**하며, 앞 구간이 정제되는 동안 다음 구간의 낮은 수준이 도착합니다(**딜레이 패턴**). **서버의 인간 탐지 모델 결과(GPS)**가 도착하면 3D 위에 마커로 표시됩니다.
+- **관제탑**: 오퍼레이터가 **실제 GPS로 드론 경로를 지정**하는 화면. VWorld 실지형 위에 드론의 실제 텔레메트리를 그리며, 건물 표시를 점·검정 텍스처·실사 항공뷰 중에서 고를 수 있습니다. 코어가 서빙합니다.
+- **현황판**: 드론이 지나간 **구간부터** 서버가 복원 결과를 보내옵니다. 한 구간을 최종 품질까지 한 번에 처리하지 않고 **낮은 수준을 먼저 확정해 띄운 뒤 정제**하며, 앞 구간이 정제되는 동안 다음 구간의 낮은 수준이 도착합니다(**딜레이 패턴**). **서버의 인간 탐지 모델 결과(GPS)**가 도착하면 3D 위에 마커로 표시됩니다.
 
 > 📄 기획·설계: [INTENT.md](https://github.com/NET-Challenge-S13/skylens/blob/develop/docs/INTENT.md) · [ARCHITECTURE.md](https://github.com/NET-Challenge-S13/skylens/blob/develop/docs/ARCHITECTURE.md) · [PROJECT.md](https://github.com/NET-Challenge-S13/skylens/blob/develop/PROJECT.md)
 
@@ -43,7 +43,7 @@ SkyLens는 여러 대의 드론이 재난 현장을 분할 탐색하며 보낸 �
 | 드론 촬영 | 기체 카메라 → H.265 실시간 인코딩 | `res/static/video/h265`의 사전 인코딩 영상 |
 | 3D 복원 | Core HPC에서 gsplat 학습 | 미리 만들어 둔 구간×수준 자산 |
 
-나머지는 전부 실제 경로입니다 — 드론이 게이트웨이에 붙고, 프록시가 코어로 중계하고, 코어가 모델 API에 잡을 발행하고, 현황판이 릴레이를 통해 받습니다. 화면은 도착한 것만 그리며, 파이프라인이 없으면 **없다고 표시**합니다(시뮬레이션으로 메우지 않습니다).
+나머지는 전부 실제 경로입니다. 드론이 게이트웨이에 붙고, 프록시가 코어로 중계하고, 코어가 모델 API에 잡을 발행하고, 현황판이 릴레이를 통해 받습니다. 화면은 도착한 것만 그리며, 파이프라인이 없으면 **없다고 표시**합니다(시뮬레이션으로 메우지 않습니다).
 
 ---
 
@@ -51,7 +51,7 @@ SkyLens는 여러 대의 드론이 재난 현장을 분할 탐색하며 보낸 �
 
 실세계 GPS를 1급 좌표계로 씁니다([geo.ts](src/skylens_core/geo.ts)):
 
-- **GeoAnchor**(기준 GPS, `CONFIG.geo.anchor`)를 원점으로 하는 **로컬 ENU(동/북/상) 미터** 프레임 — 1 unit = 1 m.
+- **GeoAnchor**(기준 GPS, `CONFIG.geo.anchor`)를 원점으로 하는 **로컬 ENU(동/북/상) 미터** 프레임이고 1 unit = 1 m 입니다.
 - 드론 경로는 **GPS로 지정** → ENU → 씬으로 변환. 탐지 결과도 **GPS로 수신** → 씬 좌표로 변환해 마커 배치.
 - 각 스플랫 청크는 **명시적 align transform**(pos/rot/scale, 선택적 GPS anchor)을 가져 공통 ENU 프레임에 정렬됩니다.
 
@@ -84,11 +84,11 @@ npm run demo         # 파이프라인 전체를 데모 모드로 기동
 `?demo` 자동 데모 · `?room=<이름>` P2P 방 · `?splat=off|demo|cdn|light|<url>` 스플랫 자산 · `?delay=off` 딜레이 패턴 끄고 단일 장면으로 · `?reveal=on/off` 스플랫 reveal 마스크 · `?spin=off` 카메라 자동회전 끔 · `?up=<preset|euler>` 스플랫 방향 · `?level=on` PCA 자동 레벨링.
 
 **실지형 지도 옵션** (`?map` 사용 시)
-- `?map` — 실지형 지도 씬 활성화; `?map=uljin|gangneung|서,남,동,북` 으로 씬/영역 선택 가능
-- `?tex=sat|off` — 위성 드레이프 (sat: VWorld 위성영상, off: 없음)
-- `?drone=<n>` — 드론 뷰 스케일 (기본값 0.15)
-- `?ring=off` — 배경 지형 링 비활성화
-- `?bld=off` — 3D 건물 렌더링 비활성화
+- `?map`: 실지형 지도 씬 활성화; `?map=uljin|gangneung|서,남,동,북` 으로 씬/영역 선택 가능
+- `?tex=sat|off`: 위성 드레이프 (sat: VWorld 위성영상, off: 없음)
+- `?drone=<n>`: 드론 뷰 스케일 (기본값 0.15)
+- `?ring=off`: 배경 지형 링 비활성화
+- `?bld=off`: 3D 건물 렌더링 비활성화
 
 ---
 
@@ -105,7 +105,7 @@ npm run demo         # 파이프라인 전체를 데모 모드로 기동
 
 새 수준이 도착하면 같은 구간의 낮은 수준을 **교체**하고(누적되지 않음), 처리가 밀려 이미 추월당한 수준은 아예 건너뜁니다. 좌측 상단 서버 패널에 구간별 현재 수준이 표시됩니다.
 
-**데모 자산 만들기** — `res/static/demo/`에 학습 스텝별 경량 PLY(`step00250_light.ply` …)를 두고 구간으로 자릅니다. 자산은 커밋하지 않으며, 없으면 현황판은 단일 장면 스트림으로 자동 폴백합니다.
+**데모 자산 만들기**: `res/static/demo/`에 학습 스텝별 경량 PLY(`step00250_light.ply` …)를 두고 구간으로 자릅니다. 자산은 커밋하지 않으며, 없으면 현황판은 단일 장면 스트림으로 자동 폴백합니다.
 
 ```bash
 uv run python -m skylens_model.models.skylens.split_segments res/static/demo/step*_light.ply --segments 4
@@ -116,17 +116,17 @@ uv run python -m skylens_model.models.skylens.split_segments res/static/demo/ste
 ---
 
 ## 조작법 (관제탑)
-- **경로 계획 모달** — 툴바 `경로 계획 · ROUTE` → GPS 웨이포인트 추가 → **배정**하면 리더가 그 경로를 비행.
+- **경로 계획 모달**: 툴바 `경로 계획 · ROUTE` → GPS 웨이포인트 추가 → **배정**하면 리더가 그 경로를 비행.
 - **방향키 ↑↓←→** 수동 조향(전/후진 + 좌/우 점진 회전), **Q/E** 고도, **1/2/3·Tab** 드론 전환, **Space** 일시정지.
 
 ### 실지형 지도 씬 (`?map`)
 
 지형 메시와 건물 3D 모델을 실제 고도·영상·위치 데이터로 렌더하여 현장을 사실적으로 재구성합니다.
 
-- **지형 메시** — AWS Terrain Tiles DEM(한국 약 30m급) 기반 고도 데이터
-- **위성 드레이프** — VWorld WMTS 위성 이미지를 지형 위에 매핑
-- **3D 건물** — VWorld 건물 폴리곤 데이터(WFS lt_c_bldginfo)를 지붕까지 입체 프리즘으로 렌더
-- **월드 스트리밍** — 드론 반경 내 미로드 셀을 가까운 순으로 실시간 로드 · 씬 주변 3배 저해상 배경 지형 링
+- **지형 메시**: AWS Terrain Tiles DEM(한국 약 30m급) 기반 고도 데이터
+- **위성 드레이프**: VWorld WMTS 위성 이미지를 지형 위에 매핑
+- **3D 건물**: VWorld 건물 폴리곤 데이터(WFS lt_c_bldginfo)를 지붕까지 입체 프리즘으로 렌더
+- **월드 스트리밍**: 드론 반경 내 미로드 셀을 가까운 순으로 실시간 로드 · 씬 주변 3배 저해상 배경 지형 링
 
 **기준 씬**: 대전(충남대~카이스트 일대, ~3km, 약 6,191동)
 
@@ -151,12 +151,12 @@ EOF
 컴포넌트 경계와 책임은 [COMPONENTS.md](https://github.com/NET-Challenge-S13/skylens/blob/develop/docs/COMPONENTS.md)가 단일 출처입니다.
 
 ```
-res/static/           # 정적 html 셸 — index · control · status
+res/static/           # 정적 html 셸: index · control · status
 src/
 ├─ shared/            # 컴포넌트 공통 계약: protocol · geo · types (DOM·Three 없음)
 │  ├─ viewer/         # 두 화면이 함께 쓰는 브라우저 층 (씬 소스 · 스토어 · 설정)
 │  └─ net/            # WebRTC 트랜스포트
-├─ skylens_drone/     # Tauri 드론 클라이언트 — 비행 · H.265 슬라이스 전송
+├─ skylens_drone/     # Tauri 드론 클라이언트: 비행 · H.265 슬라이스 전송
 ├─ skylens_gateway/   # KOREN 진입점 (relay | webrtc 홀펀칭)
 ├─ skylens_proxy/     # KOREN 내부 다중 경로 + 페일오버
 ├─ skylens_core/      # 관제탑 UI + server/(오케스트레이터 · 인메모리 스토어 · 배포)
@@ -201,8 +201,8 @@ src/test/             # 모든 테스트와 검증 하네스가 여기 모입니
 
 ---
 
-📖 **가이드북**: [SkyLens가 뭔지, 어떻게 동작하는지 처음부터](https://net-challenge-s13.github.io/skylens/) — 소스는 [`site/`](site/)
+📖 **가이드북**: [SkyLens가 뭔지, 어떻게 동작하는지 처음부터](https://net-challenge-s13.github.io/skylens/). 소스는 [`site/`](site/)
 
 <div align="center">
-<sub>SkyLens — 재난 현장을 실시간 3D로, 그 위에 AI를 얹다.</sub>
+<sub>SkyLens: 재난 현장을 실시간 3D로, 그 위에 AI를 얹다.</sub>
 </div>

@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>시스템 구조 — SkyLens</title>
+    <title>시스템 구조 | SkyLens</title>
     <meta
       name="description"
       content="SkyLens를 이루는 컴포넌트 8개와 데이터가 흐르는 길, 포트 맵, 그리고 실험 기록을 브랜치로 관리하는 방법을 설명해요."
@@ -129,7 +129,7 @@
 
               <!-- shared library, drawn as a footnote box -->
               <rect class="d-zone" x="20" y="246" width="380" height="52" rx="6" />
-              <text class="d-sub" x="36" y="268">shared — 프로토콜 · 좌표 변환 · 공통 타입</text>
+              <text class="d-sub" x="36" y="268">shared: 프로토콜 · 좌표 변환 · 공통 타입</text>
               <text class="d-sub" x="36" y="285">배포 단위가 아니라 여섯 컴포넌트가 함께 쓰는 라이브러리예요</text>
             </svg>
           </div>
@@ -196,13 +196,13 @@
                 </tr>
                 <tr>
                   <th scope="row"><code>shared</code></th>
-                  <td>—</td>
+                  <td>없음</td>
                   <td>프로토콜·좌표 변환·공통 타입. 배포하는 게 아니라 함께 쓰는 라이브러리예요</td>
                   <td>TS 라이브러리</td>
                 </tr>
                 <tr>
                   <th scope="row"><code>demo</code></th>
-                  <td>—</td>
+                  <td>없음</td>
                   <td>위 컴포넌트를 전부 조립해서 데모 모드로 띄우는 런처예요</td>
                   <td>Node · TS</td>
                 </tr>
@@ -340,9 +340,9 @@
           <h2 id="failure">하나가 죽어도 나머지는 살아 있어요</h2>
 
           <ul class="prose">
-            <li><strong>프록시</strong> — 코어가 죽으면 대기 경로로 바꾸고, 복구되면 돌아와요.</li>
-            <li><strong>코어</strong> — 모델 API가 없으면 잡을 다시 제출해요.</li>
-            <li><strong>현황판</strong> — 코어가 없으면 마지막으로 받은 상태를 그대로 들고 있어요.</li>
+            <li><strong>프록시</strong> 코어가 죽으면 대기 경로로 바꾸고, 복구되면 돌아와요.</li>
+            <li><strong>코어</strong> 모델 API가 없으면 잡을 다시 제출해요.</li>
+            <li><strong>현황판</strong> 코어가 없으면 마지막으로 받은 상태를 그대로 들고 있어요.</li>
           </ul>
 
           <div class="prose">
@@ -387,15 +387,15 @@
           <ul class="prose">
             <li>
               <a href="https://github.com/NET-Challenge-S13/skylens/blob/develop/docs/SPEC.md" rel="noreferrer">설계 스펙 (SPEC.md)</a>
-              — 지금 이 시스템이 무엇으로 되어 있는지만 적어요. 역사는 안 적어요.
+              지금 이 시스템이 무엇으로 되어 있는지만 적어요. 역사는 안 적어요.
             </li>
             <li>
               <a href="https://github.com/NET-Challenge-S13/skylens/blob/develop/docs/INTENT.md" rel="noreferrer">의도와 주장 (INTENT.md)</a>
-              — 왜 이걸 하는지와, 실험으로 검증하려는 주장 일곱 가지가 적혀 있어요.
+              왜 이걸 하는지와, 실험으로 검증하려는 주장 일곱 가지가 적혀 있어요.
             </li>
             <li>
               <a href="https://darkpyonix.github.io/researchtree/guide/" rel="noreferrer">ResearchTree 안내서</a>
-              — 이 방식 자체가 궁금하면 여기부터 보세요.
+              이 방식 자체가 궁금하면 여기부터 보세요.
             </li>
           </ul>
         </section>
