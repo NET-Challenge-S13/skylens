@@ -155,13 +155,19 @@ scripts/         # sync-main.sh (develop → main 동기화)
 
 ### 설정
 
+설정은 전부 저장소 루트의 **`.researchtree`** 파일에 있다(확장자 없음). 뷰어·CLI·Python API가 같은 파일을 읽으므로 머신마다 따로 맞출 것이 없다. 환경변수는 쓰지 않는다.
+
 | 항목 | 값 | 어디서 지정 |
 |---|---|---|
-| 루트 브랜치 | **`develop`** | 환경변수 `RESEARCHTREE_ROOT=develop` (파일로는 지정 불가) |
-| 실험 브랜치 접두사 | `experiment/` (기본값) | 해당 없음 |
-| 스펙 문서 | `docs/SPEC.md` | `.researchtree.yml` |
-| 인텐트 문서 | `docs/INTENT.md` | `.researchtree.yml` |
+| 루트 브랜치 | **`develop`** | `.researchtree` 의 `root:` |
+| 실험 브랜치 접두사 | `experiment/` (기본값) | 지정하지 않음 |
+| 스펙 문서 | `docs/SPEC.md` | `.researchtree` 의 `spec:` |
+| 인텐트 문서 | `docs/INTENT.md` | `.researchtree` 의 `intent:` |
 | 버전 태그 | `develop/v1`, `develop/v2` … | `researchtree release` |
+
+> `.researchtree` 는 **기본 브랜치(`main`)에 있어야** 뷰어가 읽는다. `scripts/sync-main.sh` 가 `main` 으로 같이 넘긴다.
+>
+> 뷰어 주소는 계정을 먼저 적는다: `https://darkpyonix.github.io/researchtree/?user=NET-Challenge-S13&repo=skylens`. `researchtree open` 이 그 주소를 출력한다.
 
 ```bash
 researchtree memory                   # 지금까지의 실험 트리
@@ -172,11 +178,23 @@ researchtree spec --claims            # 주장별로 어떤 실험이 붙었는�
 
 ### 작업 순서
 
-1. 실험을 제안하기 전에 `researchtree memory` 로 **같은 가설이 이미 기각됐는지** 확인한다.
-2. 브랜치는 워크트리로 딴다. `git worktree add -b experiment/<이름> ../skylens-<이름> develop/v1`
-3. 설계를 바꾸는 실험이면 **`docs/SPEC.md` 를 그 브랜치에서 먼저 고치고** 구현한다. 값만 조정하는 실험은 스펙을 건드리지 않고 `spec: none` 이라 적는다.
-4. 푸시하고 **draft PR** 을 연다. base 는 `develop`(버전에서 출발) 또는 부모 실험 브랜치. 본문 맨 위에 YAML 블록을 둔다.
-5. 결론을 쓰고 지표를 채운 뒤, **채택이면 머지 / 기각이면 머지 없이 close** 한다.
+> ⚠️ **순서를 틀리지 마라. 구현보다 draft PR 이 먼저다.**
+>
+> 실험은 트리에 보이는 순간부터 실험이다. 구현을 다 끝내고 마지막에 푸시하면, 그동안 트리에는 실험이 0개로 보이고 사람이 진행 상황을 볼 수 없다. 실제로 한 번 이렇게 틀렸다.
+
+1. **기존 기록을 읽는다.** `researchtree memory` 로 같은 가설이 이미 기각됐는지, `researchtree spec --claims` 로 어떤 주장에 붙일지 확인한다.
+2. **워크트리로 브랜치를 딴다.** `git worktree add -b experiment/<이름> .worktrees/<이름> develop/v1`
+   저장소 밖에 디렉터리를 만들지 않는다. `.worktrees/` 는 `.gitignore` 대상이다.
+3. **설계를 바꾸는 실험이면 `docs/SPEC.md` 를 먼저 고친다.** 값만 조정하는 실험은 스펙을 건드리지 않고 `spec: none` 이라 적는다.
+4. **곧바로 푸시하고 draft PR 을 연다.** 여기까지가 구현 전에 끝나야 한다. base 는 `develop`(버전에서 출발) 또는 부모 실험 브랜치. 본문 맨 위에 YAML 블록(`hypothesis` · `parent` · `change` · `claims`)을 둔다. 가설과 판정 기준을 이 시점에 써 둬야 결과를 보고 기준을 바꾸는 일이 없다.
+   ```bash
+   git push -u origin experiment/<이름>
+   gh pr create --draft --base develop --title "<가설 한 줄>" --body-file <본문>
+   researchtree memory            # running 으로 보이는지 확인한다
+   ```
+5. **그다음 구현한다.** 커밋마다 푸시해서 진행 상황이 PR에 계속 반영되게 한다. 마지막에 몰아서 푸시하지 않는다.
+6. 학습하고 측정한다. 지표는 `rt.log()` 로 PR에 적는다.
+7. 결론을 쓰고 지표를 채운 뒤, **채택이면 머지 / 기각이면 머지 없이 close** 한다. 이 판단은 사람이 한다.
 
 ### 지켜야 할 것
 
@@ -192,8 +210,10 @@ researchtree spec --claims            # 주장별로 어떤 실험이 붙었는�
 
 ```bash
 bash scripts/sync-main.sh --dry-run   # 무엇을 지울지만 확인
-bash scripts/sync-main.sh             # develop → main 머지 + 설계 문서 제거 (push 안 함)
-bash scripts/sync-main.sh --push      # 머지 후 origin/main 으로 push
+bash scripts/sync-main.sh             # 임시 release 브랜치까지만 만들고 멈춘다
+bash scripts/sync-main.sh --pr        # push 하고 main 으로 가는 PR 을 연다
 ```
 
-지우는 대상은 `docs/` **바로 아래**의 `.md` 전부와 프로젝트 루트의 `.md` 중 `README.md` 를 뺀 나머지다. `docs/figures/` · `docs/materials/` 같은 하위 폴더는 건드리지 않는다.
+지우는 대상은 `docs/` **바로 아래**의 `.md` 전부와 프로젝트 루트의 `.md` 중 `README.md` 를 뺀 나머지다. `docs/figures/` · `docs/materials/` · `docs/site/` 같은 하위 폴더는 건드리지 않는다. 지운 문서를 가리키던 상대 링크는 `develop` 절대 URL 로 바뀐다.
+
+`main` 에는 PR 을 거쳐야 하는 보호 규칙이 걸려 있다. 그래서 이 스크립트는 `main` 을 직접 건드리지 않고 임시 `release` 브랜치에 결과를 만들어 PR 을 연다. 머지는 사람이 한다.

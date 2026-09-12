@@ -216,6 +216,8 @@ related: "[[INTENT.md]], [[COMPONENTS.md]], [[ARCHITECTURE.md]], [[NETWORK_ARCHI
 > `develop`이 ResearchTree 루트 브랜치이고, 실험은 `experiment/*` 브랜치와 그 PR이 기록한다.
 
 - 실험 브랜치 접두사는 기본값 `experiment/`를 그대로 쓴다.
-- `.researchtree.yml`이 `spec: docs/SPEC.md` · `intent: docs/INTENT.md`를 가리킨다.
+- 설정은 저장소 루트의 `.researchtree` 파일 하나에 있다. `root: develop` · `spec: docs/SPEC.md` · `intent: docs/INTENT.md`.
+  뷰어·CLI·Python API가 같은 파일을 읽으므로 환경변수를 쓰지 않는다. 뷰어가 읽으려면 기본 브랜치 `main`에도 있어야 하고, `scripts/sync-main.sh`가 같이 넘긴다.
+- 실험 워크트리는 저장소 안 `.worktrees/<이름>`에 만든다. 이 경로는 `.gitignore` 대상이다.
 - 버전 태그는 `develop/v1`, `develop/v2` … 형태다(루트 브랜치 이름이 접두사).
-- `main`은 배포용 브랜치다. `scripts/sync-main.sh`가 `develop`을 `main`에 머지하면서 설계 문서(`docs/*.md`와 루트 `.md` 중 `README.md` 제외)를 걷어낸다. `docs/` 하위 폴더(`figures/` · `materials/`)는 그대로 둔다.
+- `main`은 배포용 브랜치다. `scripts/sync-main.sh`가 `develop`을 `main`에 머지하면서 설계 문서(`docs/*.md`와 루트 `.md` 중 `README.md` 제외)를 걷어낸다. `docs/` 하위 폴더(`figures/` · `materials/` · `site/`)는 그대로 둔다. 지운 문서를 가리키던 상대 링크는 `develop` 절대 URL로 바뀐다.
