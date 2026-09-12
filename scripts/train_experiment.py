@@ -51,11 +51,44 @@ def parse_args() -> argparse.Namespace:
         metavar=("NORMAL", "FIRE", "COLLAPSE", "ROAD"),
         help="세그 CrossEntropy 의 클래스 가중치. 주지 않으면 가중치 없이 학습한다(기준선)",
     )
-    p.add_argument("--data-root", type=Path, default=Path("data"))
+    p.add_argument("--data-root", type=Path, default=None, help="기본값은 자동 탐색")
     p.add_argument("--eval-max-samples", type=int, default=EVAL_MAX_SAMPLES)
     p.add_argument("--no-resume", action="store_true", help="체크포인트가 있어도 처음부터 학습한다")
     p.add_argument("--no-log-pr", action="store_true", help="결과를 PR 에 적지 않는다")
     return p.parse_args()
+
+
+def resolve_data_root(explicit: Path | None) -> Path:
+    """데이터셋 디렉터리를 찾는다.
+
+    실험은 `.worktrees/<이름>` 워크트리에서 돌지만 `data/` 는 gitignore 대상이라
+    메인 체크아웃에만 있다. 워크트리마다 23GB 를 복사할 수는 없으므로, 여기서
+    메인 체크아웃을 찾아 그쪽 `data/` 를 함께 쓴다. 리사이즈 캐시(`data/_cache`)도
+    같이 공유되어 실험마다 다시 만들지 않는다.
+    """
+    if explicit is not None:
+        return explicit
+
+    here = Path("data")
+    if here.exists():
+        return here
+
+    # git 공통 디렉터리(.git)의 부모가 메인 체크아웃이다.
+    import subprocess
+
+    try:
+        common = subprocess.run(
+            ["git", "rev-parse", "--path-format=absolute", "--git-common-dir"],
+            capture_output=True, text=True, check=True,
+        ).stdout.strip()
+        candidate = Path(common).parent / "data"
+        if candidate.exists():
+            print(f"data/ 가 없어 메인 체크아웃의 데이터를 쓴다: {candidate}")
+            return candidate
+    except Exception:
+        pass
+
+    return here  # 없으면 아래에서 안내 메시지와 함께 실패한다
 
 
 def main() -> int:
@@ -114,13 +147,14 @@ def main() -> int:
         return sample
 
     # --- 데이터셋 (노트북 §3) ----------------------------------------------
-    cache_root = args.data_root / "_cache"
+    data_root = resolve_data_root(args.data_root)
+    cache_root = data_root / "_cache"
     sources = [
-        (LLVIP, args.data_root / "llvip" / "LLVIP", "train", "test"),
-        (VisDronePerson, args.data_root / "visdrone", "train", "val"),
-        (RescueNetSegmentation, args.data_root / "rescuenet", "train", "test"),
-        (FireSegmentation, args.data_root / "fire_seg", "train", "val"),
-        (SARD, args.data_root / "sard", "train", "val"),
+        (LLVIP, data_root / "llvip" / "LLVIP", "train", "test"),
+        (VisDronePerson, data_root / "visdrone", "train", "val"),
+        (RescueNetSegmentation, data_root / "rescuenet", "train", "test"),
+        (FireSegmentation, data_root / "fire_seg", "train", "val"),
+        (SARD, data_root / "sard", "train", "val"),
     ]
 
     def build_split(which: str, augment):
