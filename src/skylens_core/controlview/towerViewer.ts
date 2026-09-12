@@ -74,7 +74,7 @@ const STYLES: Record<DisplayMode, ModeStyle> = {
   // Default (COMPONENTS.md §4). The map is graded cold and stays dim so the
   // drones and mission overlays own the brightest values; the prisms carry
   // their own baked wall/roof colours, lit, with linework on top. This is the
-  // look the interim report figure shows (res/docs/figures/sim_map_view.jpg).
+  // look the interim report figure shows (docs/figures/sim_map_view.jpg).
   black: {
     background: CONFIG.color.controlBg,
     fogNear: 70,

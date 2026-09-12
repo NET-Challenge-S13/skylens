@@ -6,7 +6,7 @@ links: "[[COMPONENTS]] · [[ARCHITECTURE]] · [[PROJECT]]"
 # skylens_core / server — 오케스트레이터
 
 `skylens_core` 컴포넌트의 **서버 절반**. 관제탑 UI(`control.ts` · `controlview/` · `control/` · `ui/`)는
-컴포넌트 루트에 그대로 있고, 이 디렉터리는 [COMPONENTS.md §3.4](../../../res/docs/COMPONENTS.md)의
+컴포넌트 루트에 그대로 있고, 이 디렉터리는 [COMPONENTS.md §3.4](../../../docs/COMPONENTS.md)의
 네 가지 책임만 맡는다.
 
 | 책임 | 사는 곳 |
@@ -62,7 +62,7 @@ SKYLENS_DEMO=1 uv run uvicorn skylens_model.app:app --port 8100
 
 ## 2. 엔드포인트 · 포트
 
-포트 **8080** ([COMPONENTS.md §7](../../../res/docs/COMPONENTS.md) 포트 맵).
+포트 **8080** ([COMPONENTS.md §7](../../../docs/COMPONENTS.md) 포트 맵).
 
 | 경로 | 방향 | 내용 |
 |---|---|---|
