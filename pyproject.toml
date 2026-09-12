@@ -17,6 +17,7 @@ dependencies = [
     "tqdm>=4.66",
     "requests>=2.32",
     "huggingface-hub>=0.34",
+    "researchtree>=1.3.0",
 ]
 
 [dependency-groups]
