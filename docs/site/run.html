@@ -34,17 +34,20 @@
     </header>
 
     <main id="main">
-      <div class="wrap">
-        <section class="hero">
-          <span class="kicker">RUN IT</span>
+      <section class="seg page-head">
+        <div class="seg__rail"><span class="tick tick--lv4"></span></div>
+        <div class="seg__body">
           <h1>직접 돌려보기</h1>
           <p class="lede">
             명령어 두 줄이면 파이프라인 전체가 떠요. 드론부터 게이트웨이·프록시·코어·모델 API·두
             화면까지 전부 실제 코드로 돌아가요.
           </p>
-        </section>
+        </div>
+      </section>
 
-        <section class="section" aria-labelledby="start">
+      <section class="seg" aria-labelledby="start">
+        <div class="seg__rail"><span class="tick tick--lv4"></span></div>
+        <div class="seg__body">
           <h2 id="start">시작하기</h2>
 
           <pre><code>npm install
@@ -86,12 +89,15 @@ npm run demo</code></pre>
               위 주소를 그대로 쳐 주세요.
             </p>
           </div>
-        </section>
+        </div>
+      </section>
 
-        <section class="section" aria-labelledby="scenario">
+      <section class="seg" aria-labelledby="scenario">
+        <div class="seg__rail"><span class="tick tick--lv4"></span></div>
+        <div class="seg__body">
           <h2 id="scenario">데모는 이렇게 흘러가요</h2>
 
-          <ol class="steps">
+          <ol class="track">
             <li>
               <h3>시작하면 멈춰 있어요</h3>
               <p>아직 아무 일도 일어나지 않아요. 경로가 지정되기를 기다리는 상태예요.</p>
@@ -119,9 +125,12 @@ npm run demo</code></pre>
               </p>
             </li>
           </ol>
-        </section>
+        </div>
+      </section>
 
-        <section class="section" aria-labelledby="demo-mode">
+      <section class="seg" aria-labelledby="demo-mode">
+        <div class="seg__rail"><span class="tick tick--lv3"></span></div>
+        <div class="seg__body">
           <h2 id="demo-mode">데모에서 바뀌는 건 두 가지뿐이에요</h2>
 
           <div class="prose">
@@ -135,7 +144,7 @@ npm run demo</code></pre>
               <caption>실운영과 데모의 차이</caption>
               <thead>
                 <tr>
-                  <th scope="col"></th>
+                  <th scope="col">항목</th>
                   <th scope="col">실운영</th>
                   <th scope="col">데모</th>
                 </tr>
@@ -165,9 +174,12 @@ npm run demo</code></pre>
               안 보이고 나머지는 그대로예요.
             </p>
           </div>
-        </section>
+        </div>
+      </section>
 
-        <section class="section" aria-labelledby="query">
+      <section class="seg" aria-labelledby="query">
+        <div class="seg__rail"><span class="tick tick--lv4"></span></div>
+        <div class="seg__body">
           <h2 id="query">주소 뒤에 붙이는 옵션</h2>
 
           <div class="prose">
@@ -255,9 +267,12 @@ npm run demo</code></pre>
               </tbody>
             </table>
           </div>
-        </section>
+        </div>
+      </section>
 
-        <section class="section" aria-labelledby="vworld">
+      <section class="seg" aria-labelledby="vworld">
+        <div class="seg__rail"><span class="tick tick--lv3"></span></div>
+        <div class="seg__body">
           <h2 id="vworld">VWorld 키 설정</h2>
 
           <div class="prose">
@@ -282,9 +297,12 @@ EOF</code></pre>
               <strong>프론트엔드 번들에는 절대 들어가지 않아요.</strong>
             </p>
           </div>
-        </section>
+        </div>
+      </section>
 
-        <section class="section" aria-labelledby="commands">
+      <section class="seg" aria-labelledby="commands">
+        <div class="seg__rail"><span class="tick tick--lv4"></span></div>
+        <div class="seg__body">
           <h2 id="commands">명령어 전체</h2>
 
           <div class="table-scroll">
@@ -359,16 +377,19 @@ EOF</code></pre>
             </table>
           </div>
 
-          <div class="note">
+          <div class="note note--info">
             <p>
               <b>torch는 PyPI에서 안 받아요.</b> CUDA 12.8 인덱스에서 받도록
               <code>pyproject.toml</code>에 지정해 뒀어요. Python은 3.11 이상 3.14 미만이고,
               기준 버전은 3.13이에요.
             </p>
           </div>
-        </section>
+        </div>
+      </section>
 
-        <section class="section" aria-labelledby="lan">
+      <section class="seg" aria-labelledby="lan">
+        <div class="seg__rail"><span class="tick tick--lv3"></span></div>
+        <div class="seg__body">
           <h2 id="lan">두 대로 나눠서 보고 싶다면</h2>
 
           <div class="prose">
@@ -383,8 +404,8 @@ EOF</code></pre>
               자동 데모로 돌아가요.
             </p>
           </div>
-        </section>
-      </div>
+        </div>
+      </section>
     </main>
 
     <footer class="site-footer">
@@ -416,7 +437,7 @@ EOF</code></pre>
         </div>
         <p class="site-footer__note">
           SkyLens · NET 챌린지 캠프 시즌13.<br />
-          트리를 처음 열 때는 우측 설정에서 루트 브랜치를 <code>develop</code>으로 한 번 바꿔 주세요.
+          실험 트리 링크에는 루트 브랜치 <code>develop</code>이 이미 들어 있어요.
         </p>
       </div>
     </footer>

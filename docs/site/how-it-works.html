@@ -34,17 +34,20 @@
     </header>
 
     <main id="main">
-      <div class="wrap">
-        <section class="hero">
-          <span class="kicker">FLOW</span>
+      <section class="seg page-head">
+        <div class="seg__rail"><span class="tick tick--lv4"></span></div>
+        <div class="seg__body">
           <h1>어떻게 동작하나요</h1>
           <p class="lede">
             드론이 나눠서 찍어요. 그 영상을 고속망으로 한곳에 모아 3D로 복원하고 AI를 돌려요.
             복원이 끝난 구간부터 3D 상황판에 올라와요. 크게 이 세 단계예요.
           </p>
-        </section>
+        </div>
+      </section>
 
-        <section class="section" aria-labelledby="overview">
+      <section class="seg" aria-labelledby="overview">
+        <div class="seg__rail"><span class="tick tick--lv4"></span></div>
+        <div class="seg__body">
           <h2 id="overview">전체 그림</h2>
 
           <div class="diagram">
@@ -57,26 +60,27 @@
               </desc>
               <defs>
                 <marker id="fa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#5ec8ff" />
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#9fe8ff" />
                 </marker>
                 <marker id="fb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#94bdf0" />
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#93a5c2" />
                 </marker>
               </defs>
 
-              <!-- Zone 1 · field -->
-              <rect class="d-zone" x="8" y="56" width="202" height="200" rx="8" />
+              <!-- Zone 1 · field. The three drones carry the three tints from
+                   DRONE_TINTS, the same as on the control tower. -->
+              <rect class="d-zone" x="8" y="56" width="202" height="200" />
               <text class="d-tag" x="24" y="78">① 현장</text>
-              <rect class="d-box" x="24" y="96" width="76" height="30" rx="4" />
+              <rect class="d-box d-box--scene" x="24" y="96" width="76" height="30" />
               <text class="d-sub" x="62" y="115" text-anchor="middle">드론 #1</text>
-              <rect class="d-box" x="24" y="134" width="76" height="30" rx="4" />
+              <rect class="d-box d-box--danger" x="24" y="134" width="76" height="30" />
               <text class="d-sub" x="62" y="153" text-anchor="middle">드론 #2</text>
-              <rect class="d-box" x="24" y="172" width="76" height="30" rx="4" />
+              <rect class="d-box d-box--person" x="24" y="172" width="76" height="30" />
               <text class="d-sub" x="62" y="191" text-anchor="middle">드론 #3</text>
               <path class="d-line" d="M100 111 H106 V149 H112" />
               <path class="d-line" d="M100 149 H112" />
               <path class="d-line" d="M100 187 H106 V149 H112" />
-              <rect class="d-box d-box--ink" x="112" y="134" width="82" height="30" rx="4" />
+              <rect class="d-box" x="112" y="134" width="82" height="30" />
               <text class="d-sub" x="153" y="153" text-anchor="middle">게이트웨이</text>
               <text class="d-sub" x="24" y="228">구역을 나눠</text>
               <text class="d-sub" x="24" y="242">동시에 탐색해요</text>
@@ -87,17 +91,20 @@
               <text class="d-sub" x="252" y="144" text-anchor="middle">3대 합쳐 15~33 Mbps</text>
 
               <!-- Zone 2 · compute -->
-              <rect class="d-zone" x="300" y="56" width="320" height="200" rx="8" />
+              <rect class="d-zone" x="300" y="56" width="320" height="200" />
               <text class="d-tag" x="316" y="78">② KOREN 고속망 · GPU 서버</text>
-              <rect class="d-box d-box--ink" x="316" y="96" width="138" height="52" rx="4" />
+              <rect class="d-box d-box--scene" x="316" y="96" width="138" height="52" />
               <text class="d-label" x="385" y="118" text-anchor="middle">3D 복원</text>
               <text class="d-sub" x="385" y="136" text-anchor="middle">3DGS</text>
-              <rect class="d-box d-box--person" x="466" y="96" width="138" height="52" rx="4" />
+              <rect class="d-box" x="466" y="96" width="138" height="52" />
               <text class="d-label" x="535" y="118" text-anchor="middle">AI 감지</text>
               <text class="d-sub" x="535" y="136" text-anchor="middle">UNet 4채널</text>
+              <!-- Two outputs, two inks: danger zones and people. -->
+              <rect class="d-ink-danger" x="578" y="103" width="7" height="7" />
+              <rect class="d-ink-person" x="589" y="103" width="7" height="7" />
               <path class="d-line" d="M385 148 V174" marker-end="url(#fb)" />
               <path class="d-line" d="M535 148 V174" marker-end="url(#fb)" />
-              <rect class="d-box" x="316" y="176" width="288" height="44" rx="4" />
+              <rect class="d-box" x="316" y="176" width="288" height="44" />
               <text class="d-sub" x="460" y="195" text-anchor="middle">2D 탐지를 3D 세계좌표로 투영</text>
               <text class="d-sub" x="460" y="211" text-anchor="middle">Depth Map 레이캐스팅</text>
               <text class="d-sub" x="316" y="242">둘은 서로를 기다리지 않아요</text>
@@ -107,21 +114,26 @@
               <text class="d-sub" x="657" y="137" text-anchor="middle">구간 + 마커</text>
 
               <!-- Zone 3 · screens -->
-              <rect class="d-zone" x="700" y="56" width="192" height="200" rx="8" />
+              <rect class="d-zone" x="700" y="56" width="192" height="200" />
               <text class="d-tag" x="716" y="78">③ 두 화면</text>
-              <rect class="d-box d-box--ink" x="716" y="104" width="160" height="48" rx="4" />
+              <rect class="d-box d-box--scene" x="716" y="104" width="160" height="48" />
               <text class="d-label" x="796" y="124" text-anchor="middle">관제탑</text>
               <text class="d-sub" x="796" y="141" text-anchor="middle">경로를 지정해요</text>
-              <rect class="d-box d-box--person" x="716" y="164" width="160" height="48" rx="4" />
+              <rect class="d-box d-box--danger" x="716" y="164" width="160" height="48" />
               <text class="d-label" x="796" y="184" text-anchor="middle">현황판</text>
               <text class="d-sub" x="796" y="201" text-anchor="middle">3D로 확인해요</text>
               <text class="d-sub" x="716" y="242">둘은 직접 연결되지 않아요</text>
             </svg>
           </div>
-        </section>
+        </div>
+      </section>
 
-        <section class="section" aria-labelledby="step1">
-          <span class="kicker">STEP 1</span>
+      <section class="seg" aria-labelledby="step1">
+        <div class="seg__rail">
+          <span class="tick tick--lv4"></span>
+          <span class="rail-note">STEP 1</span>
+        </div>
+        <div class="seg__body">
           <h2 id="step1">나눠서 봐요</h2>
 
           <div class="prose">
@@ -175,10 +187,15 @@
             영상은 H.265로 실시간 인코딩해서 보내요. 1080p30이면 드론 3대를 합쳐 15~33 Mbps예요.
             복원에 들어가는 입력이 긴 변 1,600px이라 1080p로도 품질 손실이 없어요.
           </p>
-        </section>
+        </div>
+      </section>
 
-        <section class="section" aria-labelledby="step2">
-          <span class="kicker">STEP 2</span>
+      <section class="seg" aria-labelledby="step2">
+        <div class="seg__rail">
+          <span class="tick tick--lv4"></span>
+          <span class="rail-note">STEP 2</span>
+        </div>
+        <div class="seg__body">
           <h2 id="step2">고속망으로 모아서 3D로 복원하고, AI를 돌려요</h2>
 
           <div class="prose">
@@ -224,9 +241,12 @@
               깊이를 참조하는 부분이에요. 이 참조도 비동기라서 탐지를 막지 않아요.
             </p>
           </div>
-        </section>
+        </div>
+      </section>
 
-        <section class="section" aria-labelledby="koren">
+      <section class="seg" aria-labelledby="koren">
+        <div class="seg__rail"><span class="tick tick--lv3"></span></div>
+        <div class="seg__body">
           <h2 id="koren">KOREN이 실제로 값을 하는 구간은 따로 있어요</h2>
 
           <div class="prose">
@@ -278,10 +298,15 @@
               재요. 대조군이 있어야 "연구망이 필요하다"가 주장이 아니라 숫자가 되거든요.
             </p>
           </div>
-        </section>
+        </div>
+      </section>
 
-        <section class="section" aria-labelledby="step3">
-          <span class="kicker">STEP 3</span>
+      <section class="seg" aria-labelledby="step3">
+        <div class="seg__rail">
+          <span class="tick tick--lv4"></span>
+          <span class="rail-note">STEP 3</span>
+        </div>
+        <div class="seg__body">
           <h2 id="step3">복원된 구간부터 화면에 올라와요</h2>
 
           <div class="prose">
@@ -299,9 +324,12 @@
               정리해 뒀어요.
             </p>
           </div>
-        </section>
+        </div>
+      </section>
 
-        <section class="section" aria-labelledby="coords">
+      <section class="seg" aria-labelledby="coords">
+        <div class="seg__rail"><span class="tick tick--lv4"></span></div>
+        <div class="seg__body">
           <h2 id="coords">좌표는 전부 실제 GPS로 맞춰요</h2>
 
           <div class="prose">
@@ -316,17 +344,20 @@
             </p>
           </div>
 
-          <div class="panel">
-            <p class="panel__title">같은 수식, 두 구현</p>
+          <div class="plate plate--lv4">
+            <p class="plate__title">같은 수식, 두 구현</p>
             <p>
               변환 코드는 TypeScript와 Python 두 벌로 존재해요 (<code>geo.ts</code>와
               <code>geo.py</code>). 뷰어와 모델 서버가 각각 다른 언어라서예요. 두 파일은 수치가
               항상 같아야 해서, 한쪽만 고치는 일은 없어요.
             </p>
           </div>
-        </section>
+        </div>
+      </section>
 
-        <section class="section" aria-labelledby="budget">
+      <section class="seg" aria-labelledby="budget">
+        <div class="seg__rail"><span class="tick tick--lv2"></span></div>
+        <div class="seg__body">
           <h2 id="budget">30초 안에 들어오나요</h2>
 
           <div class="prose">
@@ -376,15 +407,15 @@
             </table>
           </div>
 
-          <div class="note">
+          <div class="note note--open">
             <p>
               <b>아직 안 끝난 것.</b> 배정받은 GPU가 V100으로 확정되면서 복원 1회가 15초 안에
               들어오는지가 남은 질문이에요. 학습 스텝을 줄여 맞추되 품질이 버티는 지점을 찾는
               중이에요. 이 숫자가 안 나오면 30초라는 주기 자체를 다시 정해야 해요.
             </p>
           </div>
-        </section>
-      </div>
+        </div>
+      </section>
     </main>
 
     <footer class="site-footer">
@@ -416,7 +447,7 @@
         </div>
         <p class="site-footer__note">
           SkyLens · NET 챌린지 캠프 시즌13.<br />
-          트리를 처음 열 때는 우측 설정에서 루트 브랜치를 <code>develop</code>으로 한 번 바꿔 주세요.
+          실험 트리 링크에는 루트 브랜치 <code>develop</code>이 이미 들어 있어요.
         </p>
       </div>
     </footer>
