@@ -34,18 +34,21 @@
     </header>
 
     <main id="main">
-      <div class="wrap">
-        <section class="hero">
-          <span class="kicker">SYSTEM</span>
+      <section class="seg page-head">
+        <div class="seg__rail"><span class="tick tick--lv4"></span></div>
+        <div class="seg__body">
           <h1>시스템 구조</h1>
           <p class="lede">
             저장소는 컴포넌트 8개로 나뉘어 있어요. 나눈 기준은 기능이 아니라
             <strong>망 위치</strong>예요. 현장에 있는 것, 연구망 밖에 있는 것, 안에 있는 것을
             그대로 폴더로 옮겼어요.
           </p>
-        </section>
+        </div>
+      </section>
 
-        <section class="section" aria-labelledby="flow">
+      <section class="seg" aria-labelledby="flow">
+        <div class="seg__rail"><span class="tick tick--lv4"></span></div>
+        <div class="seg__body">
           <h2 id="flow">데이터가 흐르는 길</h2>
 
           <div class="prose">
@@ -66,69 +69,69 @@
               </desc>
               <defs>
                 <marker id="aa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#5ec8ff" />
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#9fe8ff" />
                 </marker>
                 <marker id="ab" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#94bdf0" />
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#93a5c2" />
                 </marker>
               </defs>
 
               <!-- network zone separators -->
-              <path d="M148 56 V320" stroke="rgba(255,255,255,0.07)" stroke-width="1" stroke-dasharray="3 5" />
-              <path d="M288 56 V320" stroke="rgba(255,255,255,0.07)" stroke-width="1" stroke-dasharray="3 5" />
-              <path d="M566 56 V320" stroke="rgba(255,255,255,0.07)" stroke-width="1" stroke-dasharray="3 5" />
+              <path d="M148 56 V320" stroke="rgba(126,165,219,0.22)" stroke-width="1" stroke-dasharray="2 9" />
+              <path d="M288 56 V320" stroke="rgba(126,165,219,0.22)" stroke-width="1" stroke-dasharray="2 9" />
+              <path d="M566 56 V320" stroke="rgba(126,165,219,0.22)" stroke-width="1" stroke-dasharray="2 9" />
               <text class="d-tag" x="78" y="44" text-anchor="middle">현장</text>
               <text class="d-tag" x="218" y="44" text-anchor="middle">KOREN 외부망</text>
               <text class="d-tag" x="427" y="44" text-anchor="middle">KOREN 내부망</text>
               <text class="d-tag" x="730" y="44" text-anchor="middle">KOREN 외부망</text>
 
               <!-- control tower -->
-              <rect class="d-box d-box--ink" x="424" y="80" width="120" height="50" rx="4" />
+              <rect class="d-box d-box--scene" x="424" y="80" width="120" height="50" />
               <text class="d-label" x="484" y="102" text-anchor="middle">관제탑</text>
               <text class="d-sub" x="484" y="119" text-anchor="middle">경로를 지정해요</text>
               <path class="d-line d-line--ink" d="M484 146 V134" marker-start="url(#aa)" marker-end="url(#aa)" />
               <text class="d-sub" x="554" y="144">제어 ↔ 화면 서빙</text>
 
               <!-- main chain -->
-              <rect class="d-box" x="20" y="152" width="108" height="50" rx="4" />
+              <rect class="d-box" x="20" y="152" width="108" height="50" />
               <text class="d-label" x="74" y="174" text-anchor="middle">드론</text>
               <text class="d-sub" x="74" y="191" text-anchor="middle">H.265 · 텔레메트리</text>
               <path class="d-line d-line--ink" d="M128 177 H158" marker-end="url(#aa)" />
 
-              <rect class="d-box" x="162" y="152" width="110" height="50" rx="4" />
+              <rect class="d-box" x="162" y="152" width="110" height="50" />
               <text class="d-label" x="217" y="174" text-anchor="middle">게이트웨이</text>
               <text class="d-sub" x="217" y="191" text-anchor="middle">relay | webrtc</text>
               <path class="d-line d-line--ink" d="M272 177 H296" marker-end="url(#aa)" />
 
-              <rect class="d-box" x="300" y="152" width="100" height="50" rx="4" />
+              <rect class="d-box" x="300" y="152" width="100" height="50" />
               <text class="d-label" x="350" y="174" text-anchor="middle">프록시</text>
               <text class="d-sub" x="350" y="191" text-anchor="middle">경로 이중화</text>
               <path class="d-line d-line--ink" d="M400 177 H420" marker-end="url(#aa)" />
 
-              <rect class="d-box d-box--ink" x="424" y="148" width="120" height="58" rx="4" />
+              <rect class="d-box d-box--scene" x="424" y="148" width="120" height="58" />
               <text class="d-label" x="484" y="170" text-anchor="middle">코어</text>
               <text class="d-sub" x="484" y="187" text-anchor="middle">보관 · 잡 발행</text>
               <text class="d-sub" x="484" y="200" text-anchor="middle">딜레이 패턴 · 배포</text>
               <path class="d-line d-line--ink" d="M544 177 H586" marker-end="url(#aa)" />
 
-              <rect class="d-box d-box--person" x="590" y="152" width="120" height="50" rx="4" />
+              <rect class="d-box" x="590" y="152" width="120" height="50" />
               <text class="d-label" x="650" y="174" text-anchor="middle">클라이언트</text>
               <text class="d-sub" x="650" y="191" text-anchor="middle">웹서버 · 시그널링</text>
               <path class="d-line d-line--ink" d="M710 177 H740" marker-end="url(#aa)" />
 
-              <rect class="d-box d-box--person" x="744" y="152" width="134" height="50" rx="4" />
+              <rect class="d-box d-box--danger" x="744" y="152" width="134" height="50" />
               <text class="d-label" x="811" y="174" text-anchor="middle">현황판</text>
               <text class="d-sub" x="811" y="191" text-anchor="middle">3D 상황판</text>
 
               <!-- model api -->
               <path class="d-line d-line--ink" d="M484 208 V242" marker-start="url(#aa)" marker-end="url(#aa)" />
               <text class="d-sub" x="554" y="230">잡 ↔ 결과</text>
-              <rect class="d-box" x="424" y="246" width="120" height="52" rx="4" />
+              <rect class="d-box" x="424" y="246" width="120" height="52" />
               <text class="d-label" x="484" y="268" text-anchor="middle">모델 API</text>
               <text class="d-sub" x="484" y="285" text-anchor="middle">3DGS 복원 · 탐지</text>
 
               <!-- shared library, drawn as a footnote box -->
-              <rect class="d-zone" x="20" y="246" width="380" height="52" rx="6" />
+              <rect class="d-zone" x="20" y="246" width="380" height="52" />
               <text class="d-sub" x="36" y="268">shared: 프로토콜 · 좌표 변환 · 공통 타입</text>
               <text class="d-sub" x="36" y="285">배포 단위가 아니라 여섯 컴포넌트가 함께 쓰는 라이브러리예요</text>
             </svg>
@@ -141,9 +144,12 @@
               길은 일부러 만들지 않았어요.
             </p>
           </div>
-        </section>
+        </div>
+      </section>
 
-        <section class="section" aria-labelledby="components">
+      <section class="seg" aria-labelledby="components">
+        <div class="seg__rail"><span class="tick tick--lv4"></span></div>
+        <div class="seg__body">
           <h2 id="components">컴포넌트 8개</h2>
 
           <div class="table-scroll">
@@ -223,15 +229,18 @@
             </p>
           </div>
 
-          <div class="note">
+          <div class="note note--open">
             <p>
               <b>이번 단계에는 DB가 없어요.</b> 코어가 구간·복원 결과·마커·텔레메트리를 전부
               메모리에 들고 있고, 세션이 끝나면 사라져요.
             </p>
           </div>
-        </section>
+        </div>
+      </section>
 
-        <section class="section" aria-labelledby="ports">
+      <section class="seg" aria-labelledby="ports">
+        <div class="seg__rail"><span class="tick tick--lv4"></span></div>
+        <div class="seg__body">
           <h2 id="ports">포트 맵</h2>
 
           <div class="table-scroll">
@@ -278,9 +287,12 @@
               </tbody>
             </table>
           </div>
-        </section>
+        </div>
+      </section>
 
-        <section class="section" aria-labelledby="deploy">
+      <section class="seg" aria-labelledby="deploy">
+        <div class="seg__rail"><span class="tick tick--lv3"></span></div>
+        <div class="seg__body">
           <h2 id="deploy">KOREN 실회선에는 이렇게 올려요</h2>
 
           <div class="prose">
@@ -334,9 +346,12 @@
               코드를 한 줄도 안 썼어요.
             </p>
           </div>
-        </section>
+        </div>
+      </section>
 
-        <section class="section" aria-labelledby="failure">
+      <section class="seg" aria-labelledby="failure">
+        <div class="seg__rail"><span class="tick tick--lv3"></span></div>
+        <div class="seg__body">
           <h2 id="failure">하나가 죽어도 나머지는 살아 있어요</h2>
 
           <ul class="prose">
@@ -351,10 +366,12 @@
               일부러 떼어 놨어요. 탐지가 죽어도 3D는 계속 갱신되고, 복원이 밀려도 마커는 나가요.
             </p>
           </div>
-        </section>
+        </div>
+      </section>
 
-        <section class="section" aria-labelledby="research">
-          <span class="kicker">RESEARCH TREE</span>
+      <section class="seg" aria-labelledby="research">
+        <div class="seg__rail"><span class="tick tick--lv4"></span></div>
+        <div class="seg__body">
           <h2 id="research">브랜치 하나가 실험 하나예요</h2>
 
           <div class="prose">
@@ -369,8 +386,8 @@
             </p>
           </div>
 
-          <div class="panel panel--accent">
-            <p class="panel__title">실험 트리 보기</p>
+          <div class="plate plate--lv4">
+            <p class="plate__title">실험 트리 보기</p>
             <div class="btn-row">
               <a class="btn btn--primary" href="https://darkpyonix.github.io/researchtree/?repo=NET-Challenge-S13%2Fskylens&root=develop&prefix=experiment%2F" rel="noreferrer">SkyLens 실험 트리 열기</a>
             </div>
@@ -398,8 +415,8 @@
               이 방식 자체가 궁금하면 여기부터 보세요.
             </li>
           </ul>
-        </section>
-      </div>
+        </div>
+      </section>
     </main>
 
     <footer class="site-footer">
@@ -431,7 +448,7 @@
         </div>
         <p class="site-footer__note">
           SkyLens · NET 챌린지 캠프 시즌13.<br />
-          트리를 처음 열 때는 우측 설정에서 루트 브랜치를 <code>develop</code>으로 한 번 바꿔 주세요.
+          실험 트리 링크에는 루트 브랜치 <code>develop</code>이 이미 들어 있어요.
         </p>
       </div>
     </footer>

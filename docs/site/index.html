@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>SkyLens | 들어가기 전에, 안을 먼저 봐요</title>
+    <title>SkyLens | 재난 현장을 실시간 3D로 복원하는 인텔리전스 플랫폼</title>
     <meta
       name="description"
       content="SkyLens는 드론 여러 대가 찍은 영상으로 재난 현장을 3D로 다시 그리고, 그 위에 AI가 위험한 곳과 사람을 표시하는 시스템이에요."
@@ -34,10 +34,34 @@
     </header>
 
     <main id="main">
-      <div class="wrap">
-        <section class="hero">
-          <span class="kicker">NET 챌린지 캠프 시즌13</span>
-          <h1>들어가기 전에,<br />안을 먼저 봐요.</h1>
+      <!-- The band is the delay pattern drawn as one picture: one city cut into
+           four flight segments, each at the level it has reached. -->
+      <div class="hero__band">
+        <canvas
+          class="hero__scene"
+          id="hero-scene"
+          role="img"
+          aria-label="한 도시를 네 구간으로 나눠 그린 와이어프레임. 왼쪽 두 구간은 면까지 올라온 수준 4, 세 번째 구간은 윤곽선만 있는 수준 3, 오른쪽 구간은 성긴 점으로만 찍힌 수준 1이에요."
+        ></canvas>
+        <div class="hero__segs" aria-hidden="true">
+          <span class="hero__seg" data-lv="4">SEG 1 · LV 4</span>
+          <span class="hero__seg" data-lv="4">SEG 2 · LV 4</span>
+          <span class="hero__seg" data-lv="3">SEG 3 · LV 3</span>
+          <span class="hero__seg" data-lv="1">SEG 4 · LV 1</span>
+        </div>
+      </div>
+      <div class="hero__readout">
+        <p><b>SKYLENS</b> · NET 챌린지 캠프 시즌13</p>
+        <p>
+          SCENE 대전 · R 3.0 km · BLD 6,191 · SEG 4<br />
+          LV1 250 · LV2 1,000 · LV3 3,500 · LV4 7,000 STEP
+        </p>
+      </div>
+
+      <section class="seg hero__title">
+        <div class="seg__rail"><span class="tick tick--lv4"></span></div>
+        <div class="seg__body">
+          <h1>멀티드론 영상을 실시간 3D로 복원하고,<br />그 위에 AI가 위험구역과 사람을 표시해요.</h1>
           <p class="lede">
             SkyLens는 드론 여러 대가 찍은 영상으로 무너진 현장을 3D로 다시 그려요 (3D Gaussian
             Splatting). 그리고 같은 영상에 AI를 돌려서 위험한 곳과 사람이 있는 곳을 그 3D 위에
@@ -47,10 +71,12 @@
             <a class="btn btn--primary" href="how-it-works.html">어떻게 동작하나요</a>
             <a class="btn" href="run.html">직접 돌려보기</a>
           </div>
-        </section>
+        </div>
+      </section>
 
-        <section class="section" aria-labelledby="problem">
-          <span class="kicker">문제</span>
+      <section class="seg" aria-labelledby="problem">
+        <div class="seg__rail"><span class="tick tick--lv3"></span></div>
+        <div class="seg__body">
           <h2 id="problem">지금 소방드론이 하는 일은, 영상 중계가 전부예요</h2>
 
           <div class="prose">
@@ -66,14 +92,17 @@
             </p>
           </div>
 
-          <ul class="stats">
+          <ul class="readout">
             <li><b>4,600건</b><span>2024년 소방드론 출동. 5년 전의 6배가 넘어요</span></li>
             <li><b>554대</b><span>전국 소방관서에 배치된 소방드론</span></li>
             <li><b>2m</b><span>열영상으로 잔해 속 사람을 찾을 수 있는 깊이의 한계</span></li>
           </ul>
-        </section>
+        </div>
+      </section>
 
-        <section class="section" aria-labelledby="hongje">
+      <section class="seg" aria-labelledby="hongje">
+        <div class="seg__rail"><span class="tick tick--lv3"></span></div>
+        <div class="seg__body">
           <h2 id="hongje">2001년 홍제동에서 있었던 일</h2>
 
           <div class="prose">
@@ -93,13 +122,15 @@
               데이터셋이 나오면서 낮아지는 중이에요.
             </p>
           </div>
-        </section>
+        </div>
+      </section>
 
-        <section class="section" aria-labelledby="what">
-          <span class="kicker">우리가 하는 것</span>
+      <section class="seg" aria-labelledby="what">
+        <div class="seg__rail"><span class="tick tick--lv4"></span></div>
+        <div class="seg__body">
           <h2 id="what">세 가지를 합쳐요</h2>
 
-          <ol class="steps">
+          <ol class="track">
             <li>
               <h3>나눠서 봐요</h3>
               <p>
@@ -122,12 +153,15 @@
               </p>
             </li>
           </ol>
-        </section>
+        </div>
+      </section>
 
-        <section class="section" aria-labelledby="honest">
+      <section class="seg" aria-labelledby="honest">
+        <div class="seg__rail"><span class="tick tick--lv4"></span></div>
+        <div class="seg__body">
           <h2 id="honest">없는 건 없다고 표시해요</h2>
-          <div class="panel panel--warn">
-            <p class="panel__title">설계 원칙</p>
+          <div class="plate plate--lv4">
+            <p class="plate__title">설계 원칙</p>
             <p>
               화면은 <strong>실제로 도착한 것만</strong> 그려요. 복원 결과가 아직 안 왔으면 그
               구간은 비어 있고, 탐지 결과가 없으면 마커도 없어요.
@@ -137,42 +171,41 @@
               보이는 화면"은 없는 화면보다 위험하거든요.
             </p>
           </div>
-        </section>
+        </div>
+      </section>
 
-        <section class="section" aria-labelledby="next">
+      <section class="seg" aria-labelledby="next">
+        <div class="seg__rail"><span class="tick tick--lv3"></span></div>
+        <div class="seg__body">
           <h2 id="next">더 볼 것</h2>
-          <ul class="cards">
+          <ul class="index-list">
             <li>
-              <a class="card" href="how-it-works.html">
-                <span class="card__kicker">FLOW</span>
-                <span class="card__title">어떻게 동작하나요</span>
-                <span class="card__desc">분할 탐색 → 고속망으로 모아 3D 복원 + AI 감지 → 3D 상황판. 세 단계를 순서대로 풀어요.</span>
+              <a href="how-it-works.html">
+                <span class="index-list__t">어떻게 동작하나요</span>
+                <span class="index-list__d">분할 탐색 → 고속망으로 모아 3D 복원 + AI 감지 → 3D 상황판. 세 단계를 순서대로 풀어요.</span>
               </a>
             </li>
             <li>
-              <a class="card" href="screens.html">
-                <span class="card__kicker">SCREENS</span>
-                <span class="card__title">화면 둘러보기</span>
-                <span class="card__desc">관제탑과 현황판이 각각 뭘 하는 화면인지, 그리고 딜레이 패턴이 뭔지 설명해요.</span>
+              <a href="screens.html">
+                <span class="index-list__t">화면 둘러보기</span>
+                <span class="index-list__d">관제탑과 현황판이 각각 뭘 하는 화면인지, 그리고 딜레이 패턴이 뭔지 설명해요.</span>
               </a>
             </li>
             <li>
-              <a class="card" href="architecture.html">
-                <span class="card__kicker">SYSTEM</span>
-                <span class="card__title">시스템 구조</span>
-                <span class="card__desc">컴포넌트 8개와 데이터가 흐르는 길, 포트 맵, 그리고 연구 기록을 보는 법.</span>
+              <a href="architecture.html">
+                <span class="index-list__t">시스템 구조</span>
+                <span class="index-list__d">컴포넌트 8개와 데이터가 흐르는 길, 포트 맵, 그리고 연구 기록을 보는 법.</span>
               </a>
             </li>
             <li>
-              <a class="card" href="model.html">
-                <span class="card__kicker">MODEL</span>
-                <span class="card__title">AI 모델</span>
-                <span class="card__desc">RGB에 열화상을 붙인 4채널 UNet, 백본 하나에 헤드 둘, 그리고 2D를 3D로 바꾸는 법.</span>
+              <a href="model.html">
+                <span class="index-list__t">AI 모델</span>
+                <span class="index-list__d">RGB에 열화상을 붙인 4채널 UNet, 백본 하나에 헤드 둘, 그리고 2D를 3D로 바꾸는 법.</span>
               </a>
             </li>
           </ul>
-        </section>
-      </div>
+        </div>
+      </section>
     </main>
 
     <footer class="site-footer">
@@ -204,11 +237,12 @@
         </div>
         <p class="site-footer__note">
           SkyLens · NET 챌린지 캠프 시즌13.<br />
-          트리를 처음 열 때는 우측 설정에서 루트 브랜치를 <code>develop</code>으로 한 번 바꿔 주세요.
+          실험 트리 링크에는 루트 브랜치 <code>develop</code>이 이미 들어 있어요.
         </p>
       </div>
     </footer>
 
     <script src="assets/guide.js"></script>
+    <script src="assets/hero.js"></script>
   </body>
 </html>
