@@ -34,18 +34,21 @@
     </header>
 
     <main id="main">
-      <div class="wrap">
-        <section class="hero">
-          <span class="kicker">SCREENS</span>
+      <section class="seg page-head">
+        <div class="seg__rail"><span class="tick tick--lv4"></span></div>
+        <div class="seg__body">
           <h1>화면 둘러보기</h1>
           <p class="lede">
             사람이 보는 화면은 둘이에요. 관제탑은 드론을 어디로 보낼지 정하는 화면이고, 현황판은
             복원된 현장을 3D로 보는 화면이에요. 역할이 다르니까 보이는 것도 달라요.
           </p>
-        </section>
+        </div>
+      </section>
 
-        <section class="section" aria-labelledby="control">
-          <p><span class="chip"><span class="chip__dot"></span>관제탑 · CONTROL</span></p>
+      <section class="seg" aria-labelledby="control">
+        <div class="seg__rail"><span class="tick tick--lv4"></span></div>
+        <div class="seg__body">
+          <p class="chip-row"><span class="chip"><span class="chip__dot"></span>관제탑 · CONTROL</span></p>
           <h2 id="control">관제탑: 어디로 보낼지 정하는 화면</h2>
 
           <div class="prose">
@@ -161,10 +164,13 @@
               </tbody>
             </table>
           </div>
-        </section>
+        </div>
+      </section>
 
-        <section class="section" aria-labelledby="status">
-          <p><span class="chip chip--status"><span class="chip__dot"></span>현황판 · STATUS</span></p>
+      <section class="seg" aria-labelledby="status">
+        <div class="seg__rail"><span class="tick tick--lv4"></span></div>
+        <div class="seg__body">
+          <p class="chip-row"><span class="chip chip--status"><span class="chip__dot"></span>현황판 · STATUS</span></p>
           <h2 id="status">현황판: 도착한 것만 보이는 화면</h2>
 
           <div class="prose">
@@ -194,18 +200,20 @@
             </figcaption>
           </figure>
 
-          <div class="panel panel--warn">
-            <p class="panel__title">비어 있으면 비워 둬요</p>
+          <div class="plate plate--lv4">
+            <p class="plate__title">비어 있으면 비워 둬요</p>
             <p>
               파이프라인이 끊겨 있으면 화면은 그 자리를 비워 두고 끊겼다고 표시해요. 그럴듯한
               가짜 장면을 대신 그리지 않아요. 지휘관이 보고 있는 게 실제로 도착한 정보인지
               아닌지가 헷갈리면 안 되니까요.
             </p>
           </div>
-        </section>
+        </div>
+      </section>
 
-        <section class="section" aria-labelledby="delay">
-          <span class="kicker">DELAY PATTERN</span>
+      <section class="seg" aria-labelledby="delay">
+        <div class="seg__rail"><span class="tick tick--lv4"></span></div>
+        <div class="seg__body">
           <h2 id="delay">딜레이 패턴: 거칠게 먼저 보여주고, 뒤에서 다듬어요</h2>
 
           <div class="prose">
@@ -256,6 +264,9 @@
             </table>
           </div>
 
+          <!-- The bars are drawn at the density they describe: level 1 is a
+               sparse dotted outline, level 4 is solid. Same grammar as the
+               rest of the page. -->
           <div class="diagram">
             <svg viewBox="0 0 900 300" role="img" aria-labelledby="delay-title delay-desc">
               <title id="delay-title">딜레이 패턴 타임라인</title>
@@ -265,57 +276,57 @@
               </desc>
               <defs>
                 <marker id="da" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#94bdf0" />
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#93a5c2" />
                 </marker>
               </defs>
 
               <!-- 'now' guide -->
-              <path d="M500 48 V262" stroke="#ffb454" stroke-width="1" stroke-dasharray="4 4" />
-              <text class="d-tag" x="500" y="40" text-anchor="middle" fill="#ffb454">지금</text>
+              <path d="M500 48 V262" stroke="#ffd27f" stroke-width="1" stroke-dasharray="4 4" />
+              <text class="d-tag" x="500" y="40" text-anchor="middle" fill="#ffd27f">지금</text>
 
               <!-- segment 1 -->
               <text class="d-sub" x="88" y="92" text-anchor="end">구간 1</text>
-              <rect x="100" y="70" width="60" height="34" rx="3" fill="#5ec8ff" fill-opacity="0.18" />
+              <rect class="d-lv1" x="100.5" y="70.5" width="59" height="33" />
               <text class="d-sub" x="130" y="92" text-anchor="middle">1</text>
-              <rect x="160" y="70" width="70" height="34" rx="3" fill="#5ec8ff" fill-opacity="0.34" />
+              <rect class="d-lv2" x="160.5" y="70.5" width="69" height="33" />
               <text class="d-sub" x="195" y="92" text-anchor="middle">2</text>
-              <rect x="230" y="70" width="90" height="34" rx="3" fill="#5ec8ff" fill-opacity="0.55" />
+              <rect class="d-lv3" x="230.5" y="70.5" width="89" height="33" />
               <text class="d-sub" x="275" y="92" text-anchor="middle">3</text>
-              <rect x="320" y="70" width="550" height="34" rx="3" fill="#5ec8ff" fill-opacity="0.85" />
-              <text class="d-sub" x="595" y="92" text-anchor="middle" fill="#05070a">수준 4 · 유지</text>
+              <rect class="d-lv4" x="320" y="70" width="550" height="34" />
+              <text class="d-sub d-on-lv4" x="595" y="92" text-anchor="middle">수준 4 · 유지</text>
 
               <!-- segment 2 -->
               <text class="d-sub" x="88" y="142" text-anchor="end">구간 2</text>
-              <rect x="220" y="120" width="60" height="34" rx="3" fill="#5ec8ff" fill-opacity="0.18" />
+              <rect class="d-lv1" x="220.5" y="120.5" width="59" height="33" />
               <text class="d-sub" x="250" y="142" text-anchor="middle">1</text>
-              <rect x="280" y="120" width="70" height="34" rx="3" fill="#5ec8ff" fill-opacity="0.34" />
+              <rect class="d-lv2" x="280.5" y="120.5" width="69" height="33" />
               <text class="d-sub" x="315" y="142" text-anchor="middle">2</text>
-              <rect x="350" y="120" width="90" height="34" rx="3" fill="#5ec8ff" fill-opacity="0.55" />
+              <rect class="d-lv3" x="350.5" y="120.5" width="89" height="33" />
               <text class="d-sub" x="395" y="142" text-anchor="middle">3</text>
-              <rect x="440" y="120" width="430" height="34" rx="3" fill="#5ec8ff" fill-opacity="0.85" />
-              <text class="d-sub" x="655" y="142" text-anchor="middle" fill="#05070a">수준 4 · 유지</text>
+              <rect class="d-lv4" x="440" y="120" width="430" height="34" />
+              <text class="d-sub d-on-lv4" x="655" y="142" text-anchor="middle">수준 4 · 유지</text>
 
               <!-- segment 3 -->
               <text class="d-sub" x="88" y="192" text-anchor="end">구간 3</text>
-              <rect x="340" y="170" width="60" height="34" rx="3" fill="#5ec8ff" fill-opacity="0.18" />
+              <rect class="d-lv1" x="340.5" y="170.5" width="59" height="33" />
               <text class="d-sub" x="370" y="192" text-anchor="middle">1</text>
-              <rect x="400" y="170" width="70" height="34" rx="3" fill="#5ec8ff" fill-opacity="0.34" />
+              <rect class="d-lv2" x="400.5" y="170.5" width="69" height="33" />
               <text class="d-sub" x="435" y="192" text-anchor="middle">2</text>
-              <rect x="470" y="170" width="90" height="34" rx="3" fill="#5ec8ff" fill-opacity="0.55" />
+              <rect class="d-lv3" x="470.5" y="170.5" width="89" height="33" />
               <text class="d-sub" x="515" y="192" text-anchor="middle">3</text>
-              <rect x="560" y="170" width="310" height="34" rx="3" fill="#5ec8ff" fill-opacity="0.85" />
-              <text class="d-sub" x="715" y="192" text-anchor="middle" fill="#05070a">수준 4 · 유지</text>
+              <rect class="d-lv4" x="560" y="170" width="310" height="34" />
+              <text class="d-sub d-on-lv4" x="715" y="192" text-anchor="middle">수준 4 · 유지</text>
 
               <!-- segment 4 -->
               <text class="d-sub" x="88" y="242" text-anchor="end">구간 4</text>
-              <rect x="460" y="220" width="60" height="34" rx="3" fill="#5ec8ff" fill-opacity="0.18" />
+              <rect class="d-lv1" x="460.5" y="220.5" width="59" height="33" />
               <text class="d-sub" x="490" y="242" text-anchor="middle">1</text>
-              <rect x="520" y="220" width="70" height="34" rx="3" fill="#5ec8ff" fill-opacity="0.34" />
+              <rect class="d-lv2" x="520.5" y="220.5" width="69" height="33" />
               <text class="d-sub" x="555" y="242" text-anchor="middle">2</text>
-              <rect x="590" y="220" width="90" height="34" rx="3" fill="#5ec8ff" fill-opacity="0.55" />
+              <rect class="d-lv3" x="590.5" y="220.5" width="89" height="33" />
               <text class="d-sub" x="635" y="242" text-anchor="middle">3</text>
-              <rect x="680" y="220" width="190" height="34" rx="3" fill="#5ec8ff" fill-opacity="0.85" />
-              <text class="d-sub" x="775" y="242" text-anchor="middle" fill="#05070a">수준 4 · 유지</text>
+              <rect class="d-lv4" x="680" y="220" width="190" height="34" />
+              <text class="d-sub d-on-lv4" x="775" y="242" text-anchor="middle">수준 4 · 유지</text>
 
               <!-- time axis -->
               <path class="d-line" d="M100 274 H878" marker-end="url(#da)" />
@@ -347,9 +358,12 @@
               스스로 타이머를 돌려 단계를 올리지 않아요.
             </li>
           </ul>
-        </section>
+        </div>
+      </section>
 
-        <section class="section" aria-labelledby="pair">
+      <section class="seg" aria-labelledby="pair">
+        <div class="seg__rail"><span class="tick tick--lv3"></span></div>
+        <div class="seg__body">
           <h2 id="pair">두 화면은 서로 직접 연결되지 않아요</h2>
 
           <div class="prose">
@@ -367,8 +381,8 @@
               구조가 궁금하면 <a href="architecture.html">시스템 구조</a>로 가 보세요.
             </p>
           </div>
-        </section>
-      </div>
+        </div>
+      </section>
     </main>
 
     <footer class="site-footer">
@@ -400,7 +414,7 @@
         </div>
         <p class="site-footer__note">
           SkyLens · NET 챌린지 캠프 시즌13.<br />
-          트리를 처음 열 때는 우측 설정에서 루트 브랜치를 <code>develop</code>으로 한 번 바꿔 주세요.
+          실험 트리 링크에는 루트 브랜치 <code>develop</code>이 이미 들어 있어요.
         </p>
       </div>
     </footer>

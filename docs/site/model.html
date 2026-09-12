@@ -34,17 +34,20 @@
     </header>
 
     <main id="main">
-      <div class="wrap">
-        <section class="hero">
-          <span class="kicker">MODEL</span>
+      <section class="seg page-head">
+        <div class="seg__rail"><span class="tick tick--lv4"></span></div>
+        <div class="seg__body">
           <h1>AI 모델</h1>
           <p class="lede">
             모델 하나가 전부 하는 구조가 아니에요. 성격이 다른 문제를 네 개의 층이 나눠 맡고,
             각 층은 자기 문제만 풀어요. 이 분리가 나머지 결정을 거의 다 만들어 냈어요.
           </p>
-        </section>
+        </div>
+      </section>
 
-        <section class="section" aria-labelledby="layers">
+      <section class="seg" aria-labelledby="layers">
+        <div class="seg__rail"><span class="tick tick--lv4"></span></div>
+        <div class="seg__body">
           <h2 id="layers">네 개의 층</h2>
 
           <div class="table-scroll">
@@ -82,8 +85,8 @@
             </table>
           </div>
 
-          <div class="panel panel--accent">
-            <p class="panel__title">탐지기는 앞뒤를 안 봐요</p>
+          <div class="plate plate--lv4">
+            <p class="plate__title">탐지기는 앞뒤를 안 봐요</p>
             <p>
               탐지 모델의 입력은 프레임 한 장이고 출력은 그 프레임의 2D 결과예요. 이전 프레임과의
               연결도, 기억도 없어요. 순수 함수처럼 다뤄요.
@@ -95,9 +98,12 @@
               추론할 수 있어서 GPU 효율이 좋아요.
             </p>
           </div>
-        </section>
+        </div>
+      </section>
 
-        <section class="section" aria-labelledby="unet">
+      <section class="seg" aria-labelledby="unet">
+        <div class="seg__rail"><span class="tick tick--lv4"></span></div>
+        <div class="seg__body">
           <h2 id="unet">RGB에 열화상을 붙여서 4채널로 넣어요</h2>
 
           <div class="prose">
@@ -112,6 +118,8 @@
             </p>
           </div>
 
+          <!-- The two heads carry the two inks they produce: amber for danger
+               zones, violet for people. -->
           <div class="diagram">
             <svg viewBox="0 0 900 250" role="img" aria-labelledby="model-title model-desc">
               <title id="model-title">4채널 입력과 이중 헤드 구조</title>
@@ -122,31 +130,31 @@
               </desc>
               <defs>
                 <marker id="ma" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#5ec8ff" />
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#9fe8ff" />
                 </marker>
                 <marker id="mb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#94bdf0" />
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#93a5c2" />
                 </marker>
               </defs>
 
-              <rect class="d-box" x="16" y="62" width="112" height="42" rx="4" />
+              <rect class="d-box" x="16" y="62" width="112" height="42" />
               <text class="d-sub" x="72" y="80" text-anchor="middle">일반 영상</text>
               <text class="d-sub" x="72" y="95" text-anchor="middle">RGB · 3채널</text>
 
-              <rect class="d-box" x="16" y="140" width="112" height="42" rx="4" />
+              <rect class="d-box" x="16" y="140" width="112" height="42" />
               <text class="d-sub" x="72" y="158" text-anchor="middle">열화상</text>
               <text class="d-sub" x="72" y="173" text-anchor="middle">1채널</text>
 
               <path class="d-line" d="M128 83 H148 V122 H166" marker-end="url(#mb)" />
               <path class="d-line" d="M128 161 H148 V122 H166" marker-end="url(#mb)" />
 
-              <rect class="d-box d-box--ink" x="170" y="100" width="94" height="44" rx="4" />
+              <rect class="d-box d-box--scene" x="170" y="100" width="94" height="44" />
               <text class="d-label" x="217" y="119" text-anchor="middle">4채널</text>
               <text class="d-sub" x="217" y="135" text-anchor="middle">입력단 결합</text>
 
               <path class="d-line d-line--ink" d="M264 122 H288" marker-end="url(#ma)" />
 
-              <rect class="d-box d-box--ink" x="292" y="88" width="176" height="68" rx="4" />
+              <rect class="d-box d-box--scene" x="292" y="88" width="176" height="68" />
               <text class="d-label" x="380" y="112" text-anchor="middle">공유 백본</text>
               <text class="d-sub" x="380" y="129" text-anchor="middle">인코더 + UNet 디코더</text>
               <text class="d-sub" x="380" y="144" text-anchor="middle">하나만 돌려요</text>
@@ -154,22 +162,22 @@
               <path class="d-line d-line--ink" d="M468 122 H486 V82 H504" marker-end="url(#ma)" />
               <path class="d-line d-line--ink" d="M468 122 H486 V172 H504" marker-end="url(#ma)" />
 
-              <rect class="d-box" x="508" y="58" width="186" height="48" rx="4" />
+              <rect class="d-box d-box--danger" x="508" y="58" width="186" height="48" />
               <text class="d-label" x="601" y="79" text-anchor="middle">세그 헤드</text>
               <text class="d-sub" x="601" y="95" text-anchor="middle">위험구역을 영역으로</text>
 
-              <rect class="d-box d-box--person" x="508" y="148" width="186" height="48" rx="4" />
+              <rect class="d-box d-box--person" x="508" y="148" width="186" height="48" />
               <text class="d-label" x="601" y="169" text-anchor="middle">점 검출 헤드</text>
               <text class="d-sub" x="601" y="185" text-anchor="middle">사람을 점으로</text>
 
               <path class="d-line" d="M694 82 H722" marker-end="url(#mb)" />
               <path class="d-line" d="M694 172 H722" marker-end="url(#mb)" />
 
-              <rect class="d-zone" x="726" y="58" width="158" height="48" rx="4" />
+              <rect class="d-zone" x="726" y="58" width="158" height="48" />
               <text class="d-sub" x="805" y="79" text-anchor="middle">불 · 붕괴 · 도로차단</text>
               <text class="d-sub" x="805" y="95" text-anchor="middle">마스크</text>
 
-              <rect class="d-zone" x="726" y="148" width="158" height="48" rx="4" />
+              <rect class="d-zone" x="726" y="148" width="158" height="48" />
               <text class="d-sub" x="805" y="169" text-anchor="middle">위치 + 확신도</text>
               <text class="d-sub" x="805" y="185" text-anchor="middle">한 명이 점 하나</text>
             </svg>
@@ -222,9 +230,12 @@
               </tbody>
             </table>
           </div>
-        </section>
+        </div>
+      </section>
 
-        <section class="section" aria-labelledby="why-unet">
+      <section class="seg" aria-labelledby="why-unet">
+        <div class="seg__rail"><span class="tick tick--lv4"></span></div>
+        <div class="seg__body">
           <h2 id="why-unet">왜 최신 모델이 아니라 UNet인가요</h2>
 
           <div class="prose">
@@ -244,8 +255,8 @@
             </p>
           </div>
 
-          <div class="panel">
-            <p class="panel__title">한쪽 카메라가 없어도 돌아가요</p>
+          <div class="plate plate--lv4">
+            <p class="plate__title">한쪽 카메라가 없어도 돌아가요</p>
             <p>
               열화상 카메라가 고장 나거나, 드론 일부만 열화상을 달고 있거나, 데이터셋에 한쪽만
               있는 상황은 드물지 않아요. <strong>결손은 예외가 아니라 정상 상태</strong>로 다뤄요.
@@ -255,9 +266,12 @@
               때·열화상만 있을 때·둘 다 있을 때 세 경우 모두에서 동작하게 만들어요.
             </p>
           </div>
-        </section>
+        </div>
+      </section>
 
-        <section class="section" aria-labelledby="projection">
+      <section class="seg" aria-labelledby="projection">
+        <div class="seg__rail"><span class="tick tick--lv4"></span></div>
+        <div class="seg__body">
           <h2 id="projection">2D 탐지를 3D 좌표로 바꿔요</h2>
 
           <div class="prose">
@@ -318,9 +332,12 @@
               때문"이에요.
             </p>
           </div>
-        </section>
+        </div>
+      </section>
 
-        <section class="section" aria-labelledby="recon">
+      <section class="seg" aria-labelledby="recon">
+        <div class="seg__rail"><span class="tick tick--lv4"></span></div>
+        <div class="seg__body">
           <h2 id="recon">3D 복원은 실제로 돌려 봤어요</h2>
 
           <div class="prose">
@@ -329,7 +346,7 @@
             </p>
           </div>
 
-          <ul class="stats">
+          <ul class="readout">
             <li><b>540 / 540</b><span>프레임 전부가 하나의 모델에 등록됐어요</span></li>
             <li><b>653,353</b><span>복원된 3D 덩어리(가우시안) 개수</span></li>
             <li><b>23.62 dB</b><span>PSNR. SSIM 0.907 · LPIPS 0.301</span></li>
@@ -348,7 +365,7 @@
               <caption>기본값 SIFT와 ALIKED + LightGlue 비교</caption>
               <thead>
                 <tr>
-                  <th scope="col"></th>
+                  <th scope="col">항목</th>
                   <th scope="col">SIFT</th>
                   <th scope="col">ALIKED + LightGlue</th>
                 </tr>
@@ -450,55 +467,65 @@
             </p>
           </div>
 
-          <div class="note">
+          <div class="note note--open">
             <p>
               <b>아직 판정 안 한 것.</b> 드론 편대를 얼마나 벌려 놓을지 실험은 6조건을 돌렸는데,
               조건마다 평가 세트가 달라서 숫자를 비교할 수 없었어요. 공통 평가 세트로 다시 돌려야
               해요. 정황상 간격을 넓히는 쪽이 유력해 보이지만, 아직 결론이라고 말하지 않아요.
             </p>
           </div>
-        </section>
+        </div>
+      </section>
 
-        <section class="section" aria-labelledby="sound">
+      <!-- Roadmap, not built. The section is drawn at level 1: sparse outline,
+           no accent ink. Its text stays at full reading contrast. -->
+      <section class="seg" aria-labelledby="sound">
+        <div class="seg__rail"><span class="tick tick--lv1"></span></div>
+        <div class="seg__body">
           <h2 id="sound">(확장) 소리로 놓친 사람을 찾아요</h2>
 
-          <div class="prose">
-            <p>
-              열영상은 잔해가 두꺼우면 2m 깊이까지가 한계예요. 소리는 더 깊은 곳도 닿아요.
-              신음·기침·두드리는 소리·구조 요청 같은 환경음을 분류해서, 그 구역 사람 마커의
-              확신도를 올려요. 놓치는 걸 줄이는 쪽으로 쓰는 거예요.
-            </p>
-            <p>
-              마이크가 여럿이면 다수결로 판정하고, 드론이 여럿이면 소리 발생 위치를 삼각측량으로
-              좁힐 수 있어요.
-            </p>
+          <div class="plate plate--lv1">
+            <div class="prose">
+              <p>
+                열영상은 잔해가 두꺼우면 2m 깊이까지가 한계예요. 소리는 더 깊은 곳도 닿아요.
+                신음·기침·두드리는 소리·구조 요청 같은 환경음을 분류해서, 그 구역 사람 마커의
+                확신도를 올려요. 놓치는 걸 줄이는 쪽으로 쓰는 거예요.
+              </p>
+              <p>
+                마이크가 여럿이면 다수결로 판정하고, 드론이 여럿이면 소리 발생 위치를 삼각측량으로
+                좁힐 수 있어요.
+              </p>
+            </div>
+
+            <h3>왜 최고 성능 모델 대신 YAMNet인가요</h3>
+            <ul class="prose">
+              <li>
+                <strong>CPU에서 실시간으로 돌아요.</strong> MobileNet 기반 초경량이라 3D 복원이
+                쓰는 GPU를 뺏지 않아요.
+              </li>
+              <li>
+                <strong>우리가 하려는 게 음성 인식이 아니에요.</strong> 말을 알아듣는 게 아니라
+                환경음을 구분하는 거예요. YAMNet은 환경음 521종으로 학습돼 있어요.
+              </li>
+              <li>
+                <strong>필요한 클래스를 이미 갖고 있어요.</strong> 울음·비명·신음·두드림이 들어
+                있어서 추가 학습 없이 바로 시연할 수 있어요.
+              </li>
+            </ul>
+
+            <div class="note note--open">
+              <p>
+                <b>이건 확장이에요.</b> 이번 단계의 필수 범위는 3D 복원과 영상 AI예요. 소리는 따로
+                떼어 두고 로드맵으로 둬요.
+              </p>
+            </div>
           </div>
+        </div>
+      </section>
 
-          <h3>왜 최고 성능 모델 대신 YAMNet인가요</h3>
-          <ul class="prose">
-            <li>
-              <strong>CPU에서 실시간으로 돌아요.</strong> MobileNet 기반 초경량이라 3D 복원이
-              쓰는 GPU를 뺏지 않아요.
-            </li>
-            <li>
-              <strong>우리가 하려는 게 음성 인식이 아니에요.</strong> 말을 알아듣는 게 아니라
-              환경음을 구분하는 거예요. YAMNet은 환경음 521종으로 학습돼 있어요.
-            </li>
-            <li>
-              <strong>필요한 클래스를 이미 갖고 있어요.</strong> 울음·비명·신음·두드림이 들어
-              있어서 추가 학습 없이 바로 시연할 수 있어요.
-            </li>
-          </ul>
-
-          <div class="note">
-            <p>
-              <b>이건 확장이에요.</b> 이번 단계의 필수 범위는 3D 복원과 영상 AI예요. 소리는 따로
-              떼어 두고 로드맵으로 둬요.
-            </p>
-          </div>
-        </section>
-
-        <section class="section" aria-labelledby="more">
+      <section class="seg" aria-labelledby="more">
+        <div class="seg__rail"><span class="tick tick--lv3"></span></div>
+        <div class="seg__body">
           <h2 id="more">더 자세한 건 저장소에 있어요</h2>
 
           <ul class="prose">
@@ -520,8 +547,8 @@
               그래서 어떻게 조합했는지가 적혀 있어요.
             </li>
           </ul>
-        </section>
-      </div>
+        </div>
+      </section>
     </main>
 
     <footer class="site-footer">
@@ -553,7 +580,7 @@
         </div>
         <p class="site-footer__note">
           SkyLens · NET 챌린지 캠프 시즌13.<br />
-          트리를 처음 열 때는 우측 설정에서 루트 브랜치를 <code>develop</code>으로 한 번 바꿔 주세요.
+          실험 트리 링크에는 루트 브랜치 <code>develop</code>이 이미 들어 있어요.
         </p>
       </div>
     </footer>
