@@ -141,7 +141,7 @@ RGB(3ch) ⊕ 열화상(1ch) = 4채널 concat → 단일 백본.
 | FLAME 3, KAIST, LLVIP | RGB+열 페어 | ✅ 4채널 모드 |
 
 모델을 둘로 나누면 열화상 단독인 AIResQ는 어느 쪽에도 못 넣고 **버려진다.**
-대칭 dropout이면 [DATASETS.md](../../../../docs/DATASETS.md)의 모든 데이터셋을 하나의 모델에 태울 수 있다.
+대칭 dropout이면 [DATASETS.md](https://github.com/NET-Challenge-S13/skylens/blob/develop/docs/DATASETS.md)의 모든 데이터셋을 하나의 모델에 태울 수 있다.
 
 **운용상 이점** — 열화상 카메라 고장이나 기종 혼용 시에도 graceful degradation.
 모달리티 하나가 죽어도 시스템은 계속 돈다.

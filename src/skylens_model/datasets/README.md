@@ -5,7 +5,7 @@ torchvision 스타일 Dataset API. **데이터는 이 저장소에 포함되지 
 `download=True`로 직접 가져온다.
 
 > 설계 근거: [`../README.md`](../README.md) §1.4(bbox↔점) · §2(4채널·modality dropout) ·
-> §6.3(헤드별 분리 학습) · 데이터셋 조사: [`../../../docs/DATASETS.md`](../../../docs/DATASETS.md)
+> §6.3(헤드별 분리 학습) · 데이터셋 조사: [`../../../docs/DATASETS.md`](https://github.com/NET-Challenge-S13/skylens/blob/develop/docs/DATASETS.md)
 
 ---
 
