@@ -5,7 +5,7 @@ tags:
   - dataset
   - AI
 parent: '[[넷 챌린지 캠프]]'
-related: '[[ARCHITECTURE.md]], [[IDEA.md]]'
+related: '[[ARCHITECTURE.md]], [[INTENT.md]]'
 ---
 
 # DATASETS.md — 영상 AI 학습 데이터셋 조사
@@ -65,7 +65,7 @@ related: '[[ARCHITECTURE.md]], [[IDEA.md]]'
 | **[xBD](https://xview2.org/)** | 대규모 | ✅ 건물 폴리곤 + 손상등급 | 19종 재난 | ★☆☆ **위성** 시점 — 드론 저고도 시점과 스케일 갭 큼 |
 
 > **RescueNet의 "Road-Blocked"** 클래스는 지휘관 관점에서 특히 가치가 큼 —
-> IDEA.md의 홍제동 사례(진입 경로 판단)와 직결되는 정보라 데모 서사로 쓰기 좋다.
+> INTENT.md의 홍제동 사례(진입 경로 판단)와 직결되는 정보라 데모 서사로 쓰기 좋다.
 
 ---
 
@@ -89,7 +89,7 @@ related: '[[ARCHITECTURE.md]], [[IDEA.md]]'
 
 | 데이터셋 | 내용 | 비고 |
 |---|---|---|
-| **[야간 사건사고 대응을 위한 IR 열화상 데이터셋](https://aihub.or.kr/aihubdata/data/view.do?dataSetSn=497)** | 도심 야간 CCTV IR/열화상 사건·사고 분석 | IDEA.md §3-A에서 언급한 "야간 사고 대응 계열"이 이것. **CCTV 시점**이며 RGB 페어 여부는 실제 다운로드 후 확인 필요 |
+| **[야간 사건사고 대응을 위한 IR 열화상 데이터셋](https://aihub.or.kr/aihubdata/data/view.do?dataSetSn=497)** | 도심 야간 CCTV IR/열화상 사건·사고 분석 | INTENT.md §3-A에서 언급한 "야간 사고 대응 계열"이 이것. **CCTV 시점**이며 RGB 페어 여부는 실제 다운로드 후 확인 필요 |
 | **화재 발생 영상 데이터셋** | 8종 장소 · 15종 화재 장면 객체 · 4각도 이상 | RGB 위주 · 지상 시점 추정 |
 
 > AI Hub는 **국내 데이터 활용**이라는 대회 명분에서 가치가 있으나, 조사 범위에서는
