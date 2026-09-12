@@ -386,6 +386,19 @@ class SkyLensForDisasterPerception(SkyLensPreTrainedModel):
         # 세그멘테이션 헤드 — 1x1 conv
         self.danger_head = nn.Conv2d(feat_ch, config.num_danger_classes, kernel_size=1)
 
+        # 세그 CrossEntropy 의 클래스 가중치. buffer 로 등록해야 .to(device) 가 같이 옮기고
+        # state_dict 에도 남는다. persistent=False 로 두어 체크포인트 크기에는 영향이 없다.
+        if config.danger_class_weights is None:
+            danger_class_weight = None
+        else:
+            if len(config.danger_class_weights) != config.num_danger_classes:
+                raise ValueError(
+                    "danger_class_weights must have num_danger_classes entries, got "
+                    f"{len(config.danger_class_weights)} for {config.num_danger_classes} classes"
+                )
+            danger_class_weight = torch.tensor(config.danger_class_weights, dtype=torch.float32)
+        self.register_buffer("danger_class_weight", danger_class_weight, persistent=False)
+
         # 점 검출 헤드 (CenterNet) — 3x3 conv → 1x1 conv
         self.person_stem = SkyLensConvBlock(feat_ch, feat_ch)
         self.heatmap_head = nn.Conv2d(feat_ch, 1, kernel_size=1)
@@ -493,6 +506,7 @@ class SkyLensForDisasterPerception(SkyLensPreTrainedModel):
             seg_loss = F.cross_entropy(
                 danger_logits,
                 danger_labels.long(),
+                weight=self.danger_class_weight,
                 ignore_index=self.config.danger_ignore_index,
             )
             loss_dict["danger_seg"] = seg_loss
