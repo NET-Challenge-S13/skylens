@@ -1,6 +1,6 @@
-# site: GitHub Pages 가이드북
+# docs/site: GitHub Pages 가이드북
 
-SkyLens를 처음 보는 사람에게 설명하는 **정적 가이드북**이다. `docs/`의 설계 문서와 목적이 다르다. `docs/`는 만드는 사람이 읽고, `site/`는 보는 사람이 읽는다.
+SkyLens를 처음 보는 사람에게 설명하는 **정적 가이드북**이다. 같은 `docs/` 안에 있지만 설계 문서와 목적이 다르다. `docs/`는 만드는 사람이 읽고, `docs/site/`는 보는 사람이 읽는다.
 
 ## 구성
 
@@ -18,7 +18,7 @@ SkyLens를 처음 보는 사람에게 설명하는 **정적 가이드북**이다
 
 ## 규약
 
-- **빌드 스텝이 없다.** 프레임워크도 번들러도 쓰지 않는다. `site/`를 그대로 올린다.
+- **빌드 스텝이 없다.** 프레임워크도 번들러도 쓰지 않는다. `docs/site/`를 그대로 올린다.
 - **경로는 전부 상대경로다.** Pages base path가 `/skylens/`라도 그대로 동작해야 한다.
 - **디자인 토큰은 관제탑 UI가 출처다.** 색·폰트·반경·그림자를 새로 만들지 말고 `src/shared/viewer/style.css`에서 가져온다. 단 본문 타이포 스케일과 `--text-muted`는 가독성·대비비(4.5:1) 때문에 가이드북에서 따로 정의한다.
 - **다이어그램은 인라인 SVG로 직접 그린다.** mermaid 같은 런타임 의존을 붙이지 않는다.
@@ -37,4 +37,4 @@ python -m http.server 4173 -d site
 
 ## 배포
 
-`.github/workflows/pages.yml` 이 `develop` 브랜치 push 때 `site/`를 GitHub Pages에 올린다(`actions/upload-pages-artifact` → `actions/deploy-pages`). 저장소 Settings → Pages 에서 **Source 를 "GitHub Actions"** 로 한 번 설정해 둬야 한다.
+`.github/workflows/pages.yml` 이 `main` 브랜치 push 때 `docs/site/`를 GitHub Pages에 올린다(`actions/upload-pages-artifact` → `actions/deploy-pages`). 저장소 Settings → Pages 에서 **Source 를 "GitHub Actions"** 로 한 번 설정해 둬야 한다.

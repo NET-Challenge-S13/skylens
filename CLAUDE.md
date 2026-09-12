@@ -42,6 +42,7 @@ SkyLens는 **멀티드론 영상을 실시간 3D(Gaussian Splatting)로 복원�
 | `src/skylens_model/models/skylens/INSTALL.md` | COLMAP(CUDA 빌드)·gsplat 설치 절차, `recon` 의존성 그룹에서 뺀 항목과 이유, **밟았던 함정 10건** |
 | `src/skylens_model/datasets/README.md` | 데이터셋 **API 계약**(`__getitem__` 반환 dict, `None`은 정상값), 통합 클래스 스키마(0 normal / 1 fire / 2 collapse / 3 road_blocked / 255 ignore), RescueNet·VisDrone 매핑, 자동 다운로드 가능 여부 판정 |
 | `src/skylens_model/utils/README.md` | `geo.py`가 `src/skylens_core/geo.ts`의 순수 파이썬 미러라는 사실. **두 파일은 수치적으로 동기 유지** |
+| `docs/site/` | **GitHub Pages 가이드북**. 프로젝트를 처음 보는 사람에게 설명하는 정적 사이트. 6페이지(홈·동작 방식·두 화면·시스템 구조·실행·AI 모델). 빌드 스텝 없이 `.github/workflows/pages.yml` 이 `main` push 때 그대로 올린다. 말투는 토스 톤, 디자인은 관제탑 UI 토큰을 따른다 |
 | `train.ipynb` (루트) | 데이터셋 → 학습 → 추론 결과를 마커 좌표로 흘려보내는 학습 노트북 |
 
 ### 문서 간 관계
@@ -99,6 +100,8 @@ src/
 └─ demo/            # 데모 런처 (컴포넌트 조립 + 모킹)
 src/test/smoke.spec.ts  # Playwright E2E
 docs/            # INTENT · SPEC · COMPONENTS · ARCHITECTURE · DATASETS · NETWORK_ARCHITECTURE
+  └─ site/       # GitHub Pages 가이드북 (정적 HTML/CSS/JS, 빌드 없음)
+scripts/         # sync-main.sh (develop → main 동기화)
 ```
 
 컴포넌트 경계와 각 컴포넌트의 책임은 **`docs/COMPONENTS.md`가 단일 출처**다.
@@ -139,7 +142,7 @@ docs/            # INTENT · SPEC · COMPONENTS · ARCHITECTURE · DATASETS · N
 - `.claude/`, `.omc/`도 git 제외 대상이다.
 - `src/skylens_core/geo.ts` ↔ `src/skylens_model/utils/geo.py`는 **같은 수식의 두 구현**이다. 한쪽만 고치지 말 것.
 - 문서는 한국어로 작성한다. 코드 주석은 기존 파일의 언어(TS는 영어, Python 독스트링은 영어)를 따른다.
-- **문서에 음대시(`—`)를 쓰지 않는다.** 마침표로 문장을 끊거나, 쉼표·콜론·괄호를 쓴다. 표에서 "해당 없음"을 나타낼 때도 `—` 대신 글자로 적는다. 가이드북(`site/`)의 본문도 같다.
+- **문서에 음대시(`—`)를 쓰지 않는다.** 마침표로 문장을 끊거나, 쉼표·콜론·괄호를 쓴다. 표에서 "해당 없음"을 나타낼 때도 `—` 대신 글자로 적는다. 가이드북(`docs/site/`)의 본문도 같다.
 - `docs/` 안 문서의 이미지는 `docs/figures/`에 있다.
 - 문서 상단 YAML frontmatter의 `[[...]]` 링크는 Obsidian 위키링크로, 파일명 기반이라 경로 이동과 무관하다.
 

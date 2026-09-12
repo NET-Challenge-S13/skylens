@@ -7,7 +7,7 @@ on:
   push:
     branches: [main]
     paths:
-      - 'site/**'
+      - 'docs/site/**'
       - '.github/workflows/pages.yml'
   workflow_dispatch:
 
@@ -32,13 +32,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # The guidebook is plain HTML/CSS/JS, so site/ is uploaded as-is. There
+      # The guidebook is plain HTML/CSS/JS, so docs/site/ is uploaded as-is.
       # is no build step to break and nothing to install.
       - uses: actions/configure-pages@v5
 
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: site
+          path: docs/site
 
       - id: deployment
         uses: actions/deploy-pages@v4
