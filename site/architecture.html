@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>시스템 구조 — SkyLens</title>
+    <meta
+      name="description"
+      content="SkyLens를 이루는 컴포넌트 8개와 데이터가 흐르는 길, 포트 맵, 그리고 실험 기록을 브랜치로 관리하는 방법을 설명해요."
+    />
+    <link rel="stylesheet" href="assets/guide.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">본문으로 건너뛰기</a>
+
+    <header class="site-header">
+      <div class="site-header__inner">
+        <a class="brand" href="index.html"><span class="brand__dot"></span>SkyLens</a>
+        <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="site-nav">메뉴</button>
+        <nav class="site-nav" id="site-nav" aria-label="주요 메뉴">
+          <ul>
+            <li><a href="index.html">홈</a></li>
+            <li><a href="how-it-works.html">어떻게 동작하나요</a></li>
+            <li><a href="screens.html">화면 둘러보기</a></li>
+            <li><a href="architecture.html">시스템 구조</a></li>
+            <li><a href="run.html">직접 돌려보기</a></li>
+            <li><a href="model.html">AI 모델</a></li>
+            <li>
+              <a class="is-external" href="https://darkpyonix.github.io/researchtree/?repo=NET-Challenge-S13/skylens" rel="noreferrer">연구 기록</a>
+            </li>
+          </ul>
+        </nav>
+      </div>
+    </header>
+
+    <main id="main">
+      <div class="wrap">
+        <section class="hero">
+          <span class="kicker">SYSTEM</span>
+          <h1>시스템 구조</h1>
+          <p class="lede">
+            저장소는 컴포넌트 8개로 나뉘어 있어요. 나눈 기준은 기능이 아니라
+            <strong>망 위치</strong>예요. 현장에 있는 것, 연구망 밖에 있는 것, 안에 있는 것을
+            그대로 폴더로 옮겼어요.
+          </p>
+        </section>
+
+        <section class="section" aria-labelledby="flow">
+          <h2 id="flow">데이터가 흐르는 길</h2>
+
+          <div class="prose">
+            <p>
+              드론이 보낸 영상이 게이트웨이와 프록시를 거쳐 코어에 모여요. 코어가 모델 API에
+              일을 시키고, 받은 결과를 두 화면으로 내보내요.
+            </p>
+          </div>
+
+          <div class="diagram">
+            <svg viewBox="0 0 900 340" role="img" aria-labelledby="arch-title arch-desc">
+              <title id="arch-title">SkyLens 컴포넌트 데이터 흐름도</title>
+              <desc id="arch-desc">
+                현장의 드론이 KOREN 외부망의 게이트웨이로, 게이트웨이가 내부망의 프록시로, 프록시가
+                코어로 데이터를 보냅니다. 코어는 위쪽의 관제탑과 제어를 주고받고, 아래쪽의 모델
+                API에 잡을 발행하며, 오른쪽의 클라이언트 릴레이를 거쳐 외부망의 현황판으로 결과를
+                배포합니다.
+              </desc>
+              <defs>
+                <marker id="aa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#5ec8ff" />
+                </marker>
+                <marker id="ab" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#94bdf0" />
+                </marker>
+              </defs>
+
+              <!-- network zone separators -->
+              <path d="M148 56 V320" stroke="rgba(255,255,255,0.07)" stroke-width="1" stroke-dasharray="3 5" />
+              <path d="M288 56 V320" stroke="rgba(255,255,255,0.07)" stroke-width="1" stroke-dasharray="3 5" />
+              <path d="M566 56 V320" stroke="rgba(255,255,255,0.07)" stroke-width="1" stroke-dasharray="3 5" />
+              <text class="d-tag" x="78" y="44" text-anchor="middle">현장</text>
+              <text class="d-tag" x="218" y="44" text-anchor="middle">KOREN 외부망</text>
+              <text class="d-tag" x="427" y="44" text-anchor="middle">KOREN 내부망</text>
+              <text class="d-tag" x="730" y="44" text-anchor="middle">KOREN 외부망</text>
+
+              <!-- control tower -->
+              <rect class="d-box d-box--ink" x="424" y="80" width="120" height="50" rx="4" />
+              <text class="d-label" x="484" y="102" text-anchor="middle">관제탑</text>
+              <text class="d-sub" x="484" y="119" text-anchor="middle">경로를 지정해요</text>
+              <path class="d-line d-line--ink" d="M484 146 V134" marker-start="url(#aa)" marker-end="url(#aa)" />
+              <text class="d-sub" x="554" y="144">제어 ↔ 화면 서빙</text>
+
+              <!-- main chain -->
+              <rect class="d-box" x="20" y="152" width="108" height="50" rx="4" />
+              <text class="d-label" x="74" y="174" text-anchor="middle">드론</text>
+              <text class="d-sub" x="74" y="191" text-anchor="middle">H.265 · 텔레메트리</text>
+              <path class="d-line d-line--ink" d="M128 177 H158" marker-end="url(#aa)" />
+
+              <rect class="d-box" x="162" y="152" width="110" height="50" rx="4" />
+              <text class="d-label" x="217" y="174" text-anchor="middle">게이트웨이</text>
+              <text class="d-sub" x="217" y="191" text-anchor="middle">relay | webrtc</text>
+              <path class="d-line d-line--ink" d="M272 177 H296" marker-end="url(#aa)" />
+
+              <rect class="d-box" x="300" y="152" width="100" height="50" rx="4" />
+              <text class="d-label" x="350" y="174" text-anchor="middle">프록시</text>
+              <text class="d-sub" x="350" y="191" text-anchor="middle">경로 이중화</text>
+              <path class="d-line d-line--ink" d="M400 177 H420" marker-end="url(#aa)" />
+
+              <rect class="d-box d-box--ink" x="424" y="148" width="120" height="58" rx="4" />
+              <text class="d-label" x="484" y="170" text-anchor="middle">코어</text>
+              <text class="d-sub" x="484" y="187" text-anchor="middle">보관 · 잡 발행</text>
+              <text class="d-sub" x="484" y="200" text-anchor="middle">딜레이 패턴 · 배포</text>
+              <path class="d-line d-line--ink" d="M544 177 H586" marker-end="url(#aa)" />
+
+              <rect class="d-box d-box--person" x="590" y="152" width="120" height="50" rx="4" />
+              <text class="d-label" x="650" y="174" text-anchor="middle">클라이언트</text>
+              <text class="d-sub" x="650" y="191" text-anchor="middle">웹서버 · 시그널링</text>
+              <path class="d-line d-line--ink" d="M710 177 H740" marker-end="url(#aa)" />
+
+              <rect class="d-box d-box--person" x="744" y="152" width="134" height="50" rx="4" />
+              <text class="d-label" x="811" y="174" text-anchor="middle">현황판</text>
+              <text class="d-sub" x="811" y="191" text-anchor="middle">3D 상황판</text>
+
+              <!-- model api -->
+              <path class="d-line d-line--ink" d="M484 208 V242" marker-start="url(#aa)" marker-end="url(#aa)" />
+              <text class="d-sub" x="554" y="230">잡 ↔ 결과</text>
+              <rect class="d-box" x="424" y="246" width="120" height="52" rx="4" />
+              <text class="d-label" x="484" y="268" text-anchor="middle">모델 API</text>
+              <text class="d-sub" x="484" y="285" text-anchor="middle">3DGS 복원 · 탐지</text>
+
+              <!-- shared library, drawn as a footnote box -->
+              <rect class="d-zone" x="20" y="246" width="380" height="52" rx="6" />
+              <text class="d-sub" x="36" y="268">shared — 프로토콜 · 좌표 변환 · 공통 타입</text>
+              <text class="d-sub" x="36" y="285">배포 단위가 아니라 여섯 컴포넌트가 함께 쓰는 라이브러리예요</text>
+            </svg>
+          </div>
+
+          <div class="prose">
+            <p>
+              화살표의 방향이 곧 규칙이에요. <strong>제어는 관제탑에서 코어로만</strong> 가고,
+              <strong>배포는 코어에서 현황판으로만</strong> 가요. 현황판에서 코어로 되돌아가는
+              길은 일부러 만들지 않았어요.
+            </p>
+          </div>
+        </section>
+
+        <section class="section" aria-labelledby="components">
+          <h2 id="components">컴포넌트 8개</h2>
+
+          <div class="table-scroll">
+            <table>
+              <caption>각 컴포넌트가 어디에 있고 뭘 맡는지</caption>
+              <thead>
+                <tr>
+                  <th scope="col">컴포넌트</th>
+                  <th scope="col">망 위치</th>
+                  <th scope="col">하는 일</th>
+                  <th scope="col">스택</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row"><code>skylens_drone</code></th>
+                  <td>현장</td>
+                  <td>촬영 영상을 H.265로 잘라 보내고, 자기 위치와 자세를 같이 올려요</td>
+                  <td>Tauri</td>
+                </tr>
+                <tr>
+                  <th scope="row"><code>skylens_gateway</code></th>
+                  <td>KOREN 외부망</td>
+                  <td>연구망으로 들어가는 문이에요. 중계(relay)와 직결 주선(webrtc) 두 모드가 있어요</td>
+                  <td>Node · TS</td>
+                </tr>
+                <tr>
+                  <th scope="row"><code>skylens_proxy</code></th>
+                  <td>KOREN 내부망</td>
+                  <td>접속 경로를 이중화해요. 한쪽이 죽어도 서비스가 이어져요</td>
+                  <td>Node · TS</td>
+                </tr>
+                <tr>
+                  <th scope="row"><code>skylens_core</code></th>
+                  <td>KOREN 내부망</td>
+                  <td>관제탑을 서빙하고, 데이터를 전부 들고 있고, 잡을 발행하고, 결과를 배포해요</td>
+                  <td>Node · TS · Vite</td>
+                </tr>
+                <tr>
+                  <th scope="row"><code>skylens_model</code></th>
+                  <td>KOREN 내부망</td>
+                  <td>연산 API예요. 3D 복원과 탐지 추론이 여기서 돌아요</td>
+                  <td>Python · FastAPI</td>
+                </tr>
+                <tr>
+                  <th scope="row"><code>skylens_client</code></th>
+                  <td>KOREN 외부망</td>
+                  <td>현황판 웹서버 겸 WebRTC 시그널링 중계예요</td>
+                  <td>Node · TS · Vite</td>
+                </tr>
+                <tr>
+                  <th scope="row"><code>shared</code></th>
+                  <td>—</td>
+                  <td>프로토콜·좌표 변환·공통 타입. 배포하는 게 아니라 함께 쓰는 라이브러리예요</td>
+                  <td>TS 라이브러리</td>
+                </tr>
+                <tr>
+                  <th scope="row"><code>demo</code></th>
+                  <td>—</td>
+                  <td>위 컴포넌트를 전부 조립해서 데모 모드로 띄우는 런처예요</td>
+                  <td>Node · TS</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3>코어가 딜레이 패턴을 쥐고 있어요</h3>
+          <div class="prose">
+            <p>
+              코어는 프록시에서 온 입력을 구간으로 나눠 모델 API에 잡을 어사인해요. 어느 구간을
+              먼저 낮은 수준으로 확정할지, 언제 다음 수준을 올릴지 정하는 곳이 여기예요.
+            </p>
+            <p>
+              이 결정권은 <strong>코어에만</strong> 있어요. 화면이 자기 타이머로 단계를 올리는
+              구조는 쓰지 않아요. 그러면 화면이 "실제로 계산된 것"이 아니라 "계산됐을 법한 것"을
+              그리게 되니까요.
+            </p>
+          </div>
+
+          <div class="note">
+            <p>
+              <b>이번 단계에는 DB가 없어요.</b> 코어가 구간·복원 결과·마커·텔레메트리를 전부
+              메모리에 들고 있고, 세션이 끝나면 사라져요.
+            </p>
+          </div>
+        </section>
+
+        <section class="section" aria-labelledby="ports">
+          <h2 id="ports">포트 맵</h2>
+
+          <div class="table-scroll">
+            <table>
+              <caption>컴포넌트별 포트와 엔드포인트</caption>
+              <thead>
+                <tr>
+                  <th scope="col">컴포넌트</th>
+                  <th scope="col" class="num">포트</th>
+                  <th scope="col">엔드포인트</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row"><code>skylens_core</code></th>
+                  <td class="num">8080</td>
+                  <td><code>ws /uplink</code> · <code>ws /viewer</code> · <code>GET /health</code> · 관제탑 서빙</td>
+                </tr>
+                <tr>
+                  <th scope="row"><code>skylens_gateway</code></th>
+                  <td class="num">8081</td>
+                  <td>드론 접속 · <code>GET /health</code></td>
+                </tr>
+                <tr>
+                  <th scope="row"><code>skylens_proxy</code></th>
+                  <td class="num">8082</td>
+                  <td>게이트웨이·드론 접속 · <code>GET /health</code></td>
+                </tr>
+                <tr>
+                  <th scope="row"><code>skylens_client</code></th>
+                  <td class="num">8090</td>
+                  <td>현황판 서빙 · WebRTC 시그널링 · <code>GET /health</code></td>
+                </tr>
+                <tr>
+                  <th scope="row"><code>skylens_model</code></th>
+                  <td class="num">8100</td>
+                  <td><code>POST /recon/jobs</code> · <code>POST /detect/jobs</code> · <code>GET /jobs/{id}</code></td>
+                </tr>
+                <tr>
+                  <th scope="row">Vite 개발 서버</th>
+                  <td class="num">5173</td>
+                  <td>두 화면의 개발 모드 원본</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="section" aria-labelledby="deploy">
+          <h2 id="deploy">KOREN 실회선에는 이렇게 올려요</h2>
+
+          <div class="prose">
+            <p>
+              호스트 세 대에 나눠 올려요. 브리지는 연구망 바깥에 있는 등록 IP 노드로, 들어가는
+              문과 나오는 문을 겸해요. 연구망이 폐쇄망이라 망 안에서는 일반 사용자 단말을 받을 수
+              없기 때문이에요.
+            </p>
+          </div>
+
+          <div class="table-scroll">
+            <table>
+              <caption>호스트별 배치</caption>
+              <thead>
+                <tr>
+                  <th scope="col">호스트</th>
+                  <th scope="col">망</th>
+                  <th scope="col">올라가는 것</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row">브리지</th>
+                  <td>KOREN 외부망 · 등록 IP</td>
+                  <td><code>skylens_gateway</code> · <code>skylens_client</code> · nginx · 영상 수신(SRT)</td>
+                </tr>
+                <tr>
+                  <th scope="row">대전</th>
+                  <td>KOREN 내부망</td>
+                  <td><code>skylens_proxy</code> · <code>skylens_core</code> · 영상 송출(WHEP)</td>
+                </tr>
+                <tr>
+                  <th scope="row">판교</th>
+                  <td>KOREN 내부망 · V100</td>
+                  <td><code>skylens_model</code></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3>영상만 길이 달라요</h3>
+          <div class="prose">
+            <p>
+              복원 결과와 마커는 위 그림의 경로를 그대로 타요. 그런데
+              <strong>라이브 영상은 대전이 현황판으로 직접 쏴요.</strong> 영상은 캐시가 안 되고
+              보는 사람 수만큼 대역이 필요해서, 브리지가 나르면 브리지 회선이 상한이 돼 버리거든요.
+              대전 출구는 4스트림 2,618 Mbps로 실측했어요.
+            </p>
+            <p>
+              들어올 때는 SRT, 내보낼 때는 WebRTC를 써요. 미디어 서버가 둘 다 내장이라 영상 처리
+              코드를 한 줄도 안 썼어요.
+            </p>
+          </div>
+        </section>
+
+        <section class="section" aria-labelledby="failure">
+          <h2 id="failure">하나가 죽어도 나머지는 살아 있어요</h2>
+
+          <ul class="prose">
+            <li><strong>프록시</strong> — 코어가 죽으면 대기 경로로 바꾸고, 복구되면 돌아와요.</li>
+            <li><strong>코어</strong> — 모델 API가 없으면 잡을 다시 제출해요.</li>
+            <li><strong>현황판</strong> — 코어가 없으면 마지막으로 받은 상태를 그대로 들고 있어요.</li>
+          </ul>
+
+          <div class="prose">
+            <p>
+              재난 대응 시스템이라서 부분 장애가 전체 중단이 되면 안 돼요. 그래서 복원과 탐지도
+              일부러 떼어 놨어요. 탐지가 죽어도 3D는 계속 갱신되고, 복원이 밀려도 마커는 나가요.
+            </p>
+          </div>
+        </section>
+
+        <section class="section" aria-labelledby="research">
+          <span class="kicker">RESEARCH TREE</span>
+          <h2 id="research">브랜치 하나가 실험 하나예요</h2>
+
+          <div class="prose">
+            <p>
+              이 저장소는 설계를 바꿀 만한 시도를 할 때마다 브랜치를 새로 따요. 그리고
+              <strong>그 브랜치의 PR 본문이 그 실험의 기록</strong>이에요. 뭘 가정했고, 뭘
+              재봤고, 숫자가 어떻게 나왔고, 결론이 뭔지가 거기 적혀요.
+            </p>
+            <p>
+              채택하면 머지하고, 기각하면 머지하지 않고 닫아요. 기각된 실험도 트리에 남아요.
+              "이건 이미 해 봤고 안 됐어요"를 다음 사람이 알 수 있어야 하니까요.
+            </p>
+          </div>
+
+          <div class="panel panel--accent">
+            <p class="panel__title">실험 트리 보기</p>
+            <div class="btn-row">
+              <a class="btn btn--primary" href="https://darkpyonix.github.io/researchtree/?repo=NET-Challenge-S13/skylens" rel="noreferrer">SkyLens 실험 트리 열기</a>
+            </div>
+            <p>
+              처음 열면 트리가 비어 보일 수 있어요. 이 저장소의 루트 브랜치가 기본값
+              <code>research</code>가 아니라 <code>develop</code>이거든요. 뷰어는 루트 브랜치를
+              주소로 받지 못해서, <strong>우측 설정(Settings) 패널의 "루트 브랜치"를
+              <code>develop</code>으로 한 번 바꿔 주세요.</strong> 이 값은 저장소별로 브라우저에
+              저장되니까 처음 한 번만 하면 돼요. 실험 브랜치 접두사는 기본값
+              <code>experiment/</code> 그대로예요.
+            </p>
+          </div>
+
+          <h3>같이 보면 좋은 문서</h3>
+          <ul class="prose">
+            <li>
+              <a href="https://github.com/NET-Challenge-S13/skylens/blob/develop/docs/SPEC.md" rel="noreferrer">설계 스펙 (SPEC.md)</a>
+              — 지금 이 시스템이 무엇으로 되어 있는지만 적어요. 역사는 안 적어요.
+            </li>
+            <li>
+              <a href="https://github.com/NET-Challenge-S13/skylens/blob/develop/docs/INTENT.md" rel="noreferrer">의도와 주장 (INTENT.md)</a>
+              — 왜 이걸 하는지와, 실험으로 검증하려는 주장 일곱 가지가 적혀 있어요.
+            </li>
+            <li>
+              <a href="https://darkpyonix.github.io/researchtree/guide/" rel="noreferrer">ResearchTree 안내서</a>
+              — 이 방식 자체가 궁금하면 여기부터 보세요.
+            </li>
+          </ul>
+        </section>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="site-footer__inner">
+        <div>
+          <h2>가이드북</h2>
+          <ul>
+            <li><a href="index.html">홈</a></li>
+            <li><a href="how-it-works.html">어떻게 동작하나요</a></li>
+            <li><a href="screens.html">화면 둘러보기</a></li>
+            <li><a href="run.html">직접 돌려보기</a></li>
+            <li><a href="model.html">AI 모델</a></li>
+          </ul>
+        </div>
+        <div>
+          <h2>연구 기록</h2>
+          <ul>
+            <li>
+              <a href="https://darkpyonix.github.io/researchtree/?repo=NET-Challenge-S13/skylens" rel="noreferrer">실험 트리 보기</a>
+            </li>
+            <li>
+              <a href="https://github.com/NET-Challenge-S13/skylens/blob/develop/docs/SPEC.md" rel="noreferrer">설계 스펙</a>
+            </li>
+            <li>
+              <a href="https://github.com/NET-Challenge-S13/skylens/blob/develop/docs/INTENT.md" rel="noreferrer">의도와 주장</a>
+            </li>
+            <li><a href="https://github.com/NET-Challenge-S13/skylens" rel="noreferrer">GitHub 저장소</a></li>
+          </ul>
+        </div>
+        <p class="site-footer__note">
+          SkyLens · NET 챌린지 캠프 시즌13.<br />
+          트리를 처음 열 때는 우측 설정에서 루트 브랜치를 <code>develop</code>으로 한 번 바꿔 주세요.
+        </p>
+      </div>
+    </footer>
+
+    <script src="assets/guide.js"></script>
+  </body>
+</html>

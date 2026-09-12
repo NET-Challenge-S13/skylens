@@ -199,6 +199,10 @@ src/test/             # 모든 테스트와 검증 하네스가 여기 모입니
 ## 기술 스택
 **Three.js** · **@mkkellogg/gaussian-splats-3d** · **TypeScript** · **Vite** · **PeerJS/WebRTC** · **Playwright** · **Python**(모델) · **AWS Terrain Tiles** · **VWorld**(위성/건물)
 
+---
+
+📖 **가이드북**: [SkyLens가 뭔지, 어떻게 동작하는지 처음부터](https://net-challenge-s13.github.io/skylens/) — 소스는 [`site/`](site/)
+
 <div align="center">
 <sub>SkyLens — 재난 현장을 실시간 3D로, 그 위에 AI를 얹다.</sub>
 </div>

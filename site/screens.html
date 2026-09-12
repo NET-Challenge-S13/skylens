@@ -1,0 +1,410 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>화면 둘러보기 — SkyLens</title>
+    <meta
+      name="description"
+      content="관제탑은 경로를 정하는 화면이고, 현황판은 복원된 3D를 보는 화면이에요. 딜레이 패턴이 뭔지도 함께 설명해요."
+    />
+    <link rel="stylesheet" href="assets/guide.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">본문으로 건너뛰기</a>
+
+    <header class="site-header">
+      <div class="site-header__inner">
+        <a class="brand" href="index.html"><span class="brand__dot"></span>SkyLens</a>
+        <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="site-nav">메뉴</button>
+        <nav class="site-nav" id="site-nav" aria-label="주요 메뉴">
+          <ul>
+            <li><a href="index.html">홈</a></li>
+            <li><a href="how-it-works.html">어떻게 동작하나요</a></li>
+            <li><a href="screens.html">화면 둘러보기</a></li>
+            <li><a href="architecture.html">시스템 구조</a></li>
+            <li><a href="run.html">직접 돌려보기</a></li>
+            <li><a href="model.html">AI 모델</a></li>
+            <li>
+              <a class="is-external" href="https://darkpyonix.github.io/researchtree/?repo=NET-Challenge-S13/skylens" rel="noreferrer">연구 기록</a>
+            </li>
+          </ul>
+        </nav>
+      </div>
+    </header>
+
+    <main id="main">
+      <div class="wrap">
+        <section class="hero">
+          <span class="kicker">SCREENS</span>
+          <h1>화면 둘러보기</h1>
+          <p class="lede">
+            사람이 보는 화면은 둘이에요. 관제탑은 드론을 어디로 보낼지 정하는 화면이고, 현황판은
+            복원된 현장을 3D로 보는 화면이에요. 역할이 다르니까 보이는 것도 달라요.
+          </p>
+        </section>
+
+        <section class="section" aria-labelledby="control">
+          <p><span class="chip"><span class="chip__dot"></span>관제탑 · CONTROL</span></p>
+          <h2 id="control">관제탑 — 어디로 보낼지 정하는 화면</h2>
+
+          <div class="prose">
+            <p>
+              오퍼레이터가 드론의 경로를 GPS 좌표로 지정하는 화면이에요. 실제 지형 위에 드론의
+              현재 위치가 그려지고, 메인 드론이 보내는 카메라 영상이 우측 아래 패널에 떠요.
+            </p>
+          </div>
+
+          <figure>
+            <img
+              src="assets/control-tower.jpg"
+              alt="관제탑 화면. 어두운 배경 위에 파란 윤곽선으로 그려진 도시 건물들과 드론 세 대의 아이콘, 우측 아래에 메인 카메라 영상 패널이 있습니다."
+              width="1568"
+              height="760"
+              loading="lazy"
+            />
+            <figcaption>
+              관제탑 화면. 실제 지형 위에 건물이 올라가고, 드론 세 대가 각자의 색으로 표시돼요.
+              우측 아래는 메인 드론의 카메라 영상이에요.
+            </figcaption>
+          </figure>
+
+          <h3>지형은 실제 데이터예요</h3>
+          <div class="prose">
+            <p>
+              배경으로 깔리는 지형과 건물은 그린 그림이 아니라 공개 데이터예요. 고도는 AWS Terrain
+              Tiles DEM(한국 약 30m급), 위성 영상과 건물 폴리곤은 VWorld에서 받아 와요. 건물은 지붕
+              높이까지 입체로 세워요.
+            </p>
+            <p>
+              기준 씬은 대전(충남대~카이스트 일대)이에요. 반경 약 3km, 건물 약 6,191동이 올라가요.
+              드론 주변부터 가까운 순서로 실시간으로 불러오고, 씬 바깥쪽에는 3배 넓은 저해상 지형
+              링을 둘러서 끝이 잘려 보이지 않게 해요.
+            </p>
+          </div>
+
+          <div class="table-scroll">
+            <table>
+              <caption>건물을 어떻게 보여줄지 고를 수 있어요</caption>
+              <thead>
+                <tr>
+                  <th scope="col">표시 옵션</th>
+                  <th scope="col">이럴 때 좋아요</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row">점</th>
+                  <td>건물을 포인트로만 찍어요. 가장 가볍고, 드론 위치가 잘 보여요</td>
+                </tr>
+                <tr>
+                  <th scope="row">검정 텍스처 (기본값)</th>
+                  <td>건물 덩어리가 또렷해요. 경로를 잡을 때 지형지물 판단이 쉬워요</td>
+                </tr>
+                <tr>
+                  <th scope="row">실사 항공뷰</th>
+                  <td>위성·항공 영상을 그대로 입혀요. 실제 현장과 대조할 때 좋아요</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3>경로는 클릭으로 찍어요</h3>
+          <div class="prose">
+            <p>
+              툴바의 <code>경로 계획 · ROUTE</code>를 누르면 지도가 떠요. 가고 싶은 지점을 찍으면
+              GPS 웨이포인트가 쌓이고, <code>ASSIGN</code>을 누르면 리더 드론이 그 경로를 따라
+              비행해요. 나머지 드론은 리더와 일정한 간격을 유지하며 따라가요.
+            </p>
+          </div>
+
+          <figure>
+            <img
+              src="assets/route-planner.png"
+              alt="경로 계획 모달. 위도, 경도, 고도 입력 칸과 웨이포인트 다섯 개가 목록으로 쌓여 있고 아래에 CLEAR와 ASSIGN 버튼이 있습니다."
+              width="1683"
+              height="1080"
+              loading="lazy"
+            />
+            <figcaption>
+              경로 계획 모달. 웨이포인트마다 위도·경도·고도가 그대로 보여요. 배정하면 리더 드론이
+              그 순서대로 비행해요.
+            </figcaption>
+          </figure>
+
+          <div class="table-scroll">
+            <table>
+              <caption>관제탑 조작법</caption>
+              <thead>
+                <tr>
+                  <th scope="col">키</th>
+                  <th scope="col">동작</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row"><code>↑ ↓ ← →</code></th>
+                  <td>수동 조향. 전진·후진과 좌우 회전이에요</td>
+                </tr>
+                <tr>
+                  <th scope="row"><code>Q</code> · <code>E</code></th>
+                  <td>고도를 올리고 내려요</td>
+                </tr>
+                <tr>
+                  <th scope="row"><code>1</code> <code>2</code> <code>3</code> · <code>Tab</code></th>
+                  <td>조종할 드론을 바꿔요</td>
+                </tr>
+                <tr>
+                  <th scope="row"><code>Space</code></th>
+                  <td>일시정지</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="section" aria-labelledby="status">
+          <p><span class="chip chip--status"><span class="chip__dot"></span>현황판 · STATUS</span></p>
+          <h2 id="status">현황판 — 도착한 것만 보이는 화면</h2>
+
+          <div class="prose">
+            <p>
+              지휘관이 보는 3D 상황판이에요. 서버가 복원을 마친 구간을 보내오면 그 구간이 화면에
+              나타나요. 드론이 지나갔다고 보이는 게 아니라
+              <strong>복원돼서 도착해야 보여요.</strong>
+            </p>
+            <p>
+              AI가 찾은 사람과 위험구역은 GPS 좌표로 도착해서 3D 위에 마커로 얹혀요. 마커도
+              해당 구간이 복원돼야 표시돼요. 마커를 누르면 카메라가 그 지점으로 날아가고,
+              확인을 누르면 원래 보던 곳으로 돌아와요.
+            </p>
+          </div>
+
+          <figure>
+            <img
+              src="assets/status-board.png"
+              alt="현황판 화면. 3D로 복원된 정원 장면 위에 초록색 원형 마커가 하나 찍혀 있고, 좌측 상단에 서버 수신 상태, 우측 하단에 생존자 추정 카드와 확신도 86퍼센트가 표시돼 있습니다."
+              width="1280"
+              height="720"
+              loading="lazy"
+            />
+            <figcaption>
+              현황판 화면. 실제 촬영본으로 복원한 3D 장면 위에 탐지 마커가 올라와 있어요. 좌측
+              상단에 지금까지 받은 구간 수와 지연이, 우측 아래에 탐지 카드가 떠요.
+            </figcaption>
+          </figure>
+
+          <div class="panel panel--warn">
+            <p class="panel__title">비어 있으면 비워 둬요</p>
+            <p>
+              파이프라인이 끊겨 있으면 화면은 그 자리를 비워 두고 끊겼다고 표시해요. 그럴듯한
+              가짜 장면을 대신 그리지 않아요. 지휘관이 보고 있는 게 실제로 도착한 정보인지
+              아닌지가 헷갈리면 안 되니까요.
+            </p>
+          </div>
+        </section>
+
+        <section class="section" aria-labelledby="delay">
+          <span class="kicker">DELAY PATTERN</span>
+          <h2 id="delay">딜레이 패턴 — 거칠게 먼저 보여주고, 뒤에서 다듬어요</h2>
+
+          <div class="prose">
+            <p>
+              한 구간을 최종 품질까지 다 만들어서 보내면, 지휘관은 그동안 아무것도 못 봐요. 그래서
+              <strong>낮은 품질을 먼저 확정해 띄우고 뒤에서 정제해요.</strong> 앞 구간을 다듬는
+              동안 다음 구간의 첫 결과가 도착하니까, 화면에는 서로 다른 수준의 구간이 동시에
+              올라와 있어요.
+            </p>
+            <p>
+              품질은 3D 장면을 얼마나 학습했는지로 갈려요. 수준이 올라갈수록 학습 스텝이 늘고,
+              그만큼 판단할 수 있는 게 늘어나요.
+            </p>
+          </div>
+
+          <div class="table-scroll">
+            <table>
+              <caption>수준별로 지휘관이 확인할 수 있는 것</caption>
+              <thead>
+                <tr>
+                  <th scope="col">수준</th>
+                  <th scope="col" class="num">학습 스텝</th>
+                  <th scope="col">이때 판단할 수 있는 것</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row">1</th>
+                  <td class="num">250</td>
+                  <td>형상 윤곽만 보여요</td>
+                </tr>
+                <tr>
+                  <th scope="row">2</th>
+                  <td class="num">1,000</td>
+                  <td>공간이 어떻게 생겼는지 알 수 있어요</td>
+                </tr>
+                <tr>
+                  <th scope="row">3</th>
+                  <td class="num">3,500</td>
+                  <td>표면이 만들어져요</td>
+                </tr>
+                <tr>
+                  <th scope="row">4</th>
+                  <td class="num">7,000</td>
+                  <td>진입 동선을 판단할 수 있는 실용 품질이에요</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="diagram">
+            <svg viewBox="0 0 900 300" role="img" aria-labelledby="delay-title delay-desc">
+              <title id="delay-title">딜레이 패턴 타임라인</title>
+              <desc id="delay-desc">
+                구간 네 개가 시간 차를 두고 시작하고, 각 구간이 수준 1에서 4까지 단계적으로
+                올라갑니다. 같은 시각에 서로 다른 구간이 서로 다른 수준으로 화면에 올라와 있습니다.
+              </desc>
+              <defs>
+                <marker id="da" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#94bdf0" />
+                </marker>
+              </defs>
+
+              <!-- 'now' guide -->
+              <path d="M500 48 V262" stroke="#ffb454" stroke-width="1" stroke-dasharray="4 4" />
+              <text class="d-tag" x="500" y="40" text-anchor="middle" fill="#ffb454">지금</text>
+
+              <!-- segment 1 -->
+              <text class="d-sub" x="88" y="92" text-anchor="end">구간 1</text>
+              <rect x="100" y="70" width="60" height="34" rx="3" fill="#5ec8ff" fill-opacity="0.18" />
+              <text class="d-sub" x="130" y="92" text-anchor="middle">1</text>
+              <rect x="160" y="70" width="70" height="34" rx="3" fill="#5ec8ff" fill-opacity="0.34" />
+              <text class="d-sub" x="195" y="92" text-anchor="middle">2</text>
+              <rect x="230" y="70" width="90" height="34" rx="3" fill="#5ec8ff" fill-opacity="0.55" />
+              <text class="d-sub" x="275" y="92" text-anchor="middle">3</text>
+              <rect x="320" y="70" width="550" height="34" rx="3" fill="#5ec8ff" fill-opacity="0.85" />
+              <text class="d-sub" x="595" y="92" text-anchor="middle" fill="#05070a">수준 4 · 유지</text>
+
+              <!-- segment 2 -->
+              <text class="d-sub" x="88" y="142" text-anchor="end">구간 2</text>
+              <rect x="220" y="120" width="60" height="34" rx="3" fill="#5ec8ff" fill-opacity="0.18" />
+              <text class="d-sub" x="250" y="142" text-anchor="middle">1</text>
+              <rect x="280" y="120" width="70" height="34" rx="3" fill="#5ec8ff" fill-opacity="0.34" />
+              <text class="d-sub" x="315" y="142" text-anchor="middle">2</text>
+              <rect x="350" y="120" width="90" height="34" rx="3" fill="#5ec8ff" fill-opacity="0.55" />
+              <text class="d-sub" x="395" y="142" text-anchor="middle">3</text>
+              <rect x="440" y="120" width="430" height="34" rx="3" fill="#5ec8ff" fill-opacity="0.85" />
+              <text class="d-sub" x="655" y="142" text-anchor="middle" fill="#05070a">수준 4 · 유지</text>
+
+              <!-- segment 3 -->
+              <text class="d-sub" x="88" y="192" text-anchor="end">구간 3</text>
+              <rect x="340" y="170" width="60" height="34" rx="3" fill="#5ec8ff" fill-opacity="0.18" />
+              <text class="d-sub" x="370" y="192" text-anchor="middle">1</text>
+              <rect x="400" y="170" width="70" height="34" rx="3" fill="#5ec8ff" fill-opacity="0.34" />
+              <text class="d-sub" x="435" y="192" text-anchor="middle">2</text>
+              <rect x="470" y="170" width="90" height="34" rx="3" fill="#5ec8ff" fill-opacity="0.55" />
+              <text class="d-sub" x="515" y="192" text-anchor="middle">3</text>
+              <rect x="560" y="170" width="310" height="34" rx="3" fill="#5ec8ff" fill-opacity="0.85" />
+              <text class="d-sub" x="715" y="192" text-anchor="middle" fill="#05070a">수준 4 · 유지</text>
+
+              <!-- segment 4 -->
+              <text class="d-sub" x="88" y="242" text-anchor="end">구간 4</text>
+              <rect x="460" y="220" width="60" height="34" rx="3" fill="#5ec8ff" fill-opacity="0.18" />
+              <text class="d-sub" x="490" y="242" text-anchor="middle">1</text>
+              <rect x="520" y="220" width="70" height="34" rx="3" fill="#5ec8ff" fill-opacity="0.34" />
+              <text class="d-sub" x="555" y="242" text-anchor="middle">2</text>
+              <rect x="590" y="220" width="90" height="34" rx="3" fill="#5ec8ff" fill-opacity="0.55" />
+              <text class="d-sub" x="635" y="242" text-anchor="middle">3</text>
+              <rect x="680" y="220" width="190" height="34" rx="3" fill="#5ec8ff" fill-opacity="0.85" />
+              <text class="d-sub" x="775" y="242" text-anchor="middle" fill="#05070a">수준 4 · 유지</text>
+
+              <!-- time axis -->
+              <path class="d-line" d="M100 274 H878" marker-end="url(#da)" />
+              <text class="d-sub" x="100" y="292">드론이 구간 1을 통과</text>
+              <text class="d-sub" x="860" y="292" text-anchor="end">시간</text>
+            </svg>
+          </div>
+
+          <div class="prose">
+            <p>
+              노란 선이 그어진 순간을 보면, 구간 1·2는 이미 최종 품질이고 구간 3은 아직 표면을
+              만드는 중, 구간 4는 윤곽만 잡혀 있어요. <strong>같은 화면에 네 구간이 서로 다른
+              수준으로 동시에 올라와 있는 게 정상</strong>이에요.
+            </p>
+          </div>
+
+          <h3>알아 두면 좋은 세 가지</h3>
+          <ul class="prose">
+            <li>
+              <strong>다음 구간이 열리는 기준은 시간이 아니라 드론의 이동량이에요.</strong> 드론이
+              한 구간을 통과해야 그 구간의 수준 1이 확정돼요.
+            </li>
+            <li>
+              <strong>새 수준은 낮은 수준을 교체해요.</strong> 쌓이지 않아요. 처리가 밀려서 이미
+              추월당한 수준은 아예 건너뛰어요.
+            </li>
+            <li>
+              <strong>순서를 정하는 쪽은 서버예요.</strong> 화면은 도착한 걸 받아서 그릴 뿐,
+              스스로 타이머를 돌려 단계를 올리지 않아요.
+            </li>
+          </ul>
+        </section>
+
+        <section class="section" aria-labelledby="pair">
+          <h2 id="pair">두 화면은 서로 직접 연결되지 않아요</h2>
+
+          <div class="prose">
+            <p>
+              관제탑과 현황판 사이에는 파이프라인 전체가 놓여 있어요. 관제탑이 현황판에 직접
+              드론 위치를 쏘는 구조가 아니에요.
+            </p>
+            <p>
+              제어는 관제탑에서 서버로만 가고(<code>경로 배정</code>, <code>수동 조작</code>),
+              배포는 서버에서 현황판으로만 가요. 현황판에서 서버로 되돌아가는 길은 일부러 만들지
+              않았어요. 그래야 <strong>"화면에 보인다 = 실제로 파이프라인을 통과해서
+              도착했다"</strong>가 하나의 진실로 유지되거든요.
+            </p>
+            <p>
+              구조가 궁금하면 <a href="architecture.html">시스템 구조</a>로 가 보세요.
+            </p>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="site-footer__inner">
+        <div>
+          <h2>가이드북</h2>
+          <ul>
+            <li><a href="index.html">홈</a></li>
+            <li><a href="how-it-works.html">어떻게 동작하나요</a></li>
+            <li><a href="architecture.html">시스템 구조</a></li>
+            <li><a href="run.html">직접 돌려보기</a></li>
+            <li><a href="model.html">AI 모델</a></li>
+          </ul>
+        </div>
+        <div>
+          <h2>연구 기록</h2>
+          <ul>
+            <li>
+              <a href="https://darkpyonix.github.io/researchtree/?repo=NET-Challenge-S13/skylens" rel="noreferrer">실험 트리 보기</a>
+            </li>
+            <li>
+              <a href="https://github.com/NET-Challenge-S13/skylens/blob/develop/docs/SPEC.md" rel="noreferrer">설계 스펙</a>
+            </li>
+            <li>
+              <a href="https://github.com/NET-Challenge-S13/skylens/blob/develop/docs/INTENT.md" rel="noreferrer">의도와 주장</a>
+            </li>
+            <li><a href="https://github.com/NET-Challenge-S13/skylens" rel="noreferrer">GitHub 저장소</a></li>
+          </ul>
+        </div>
+        <p class="site-footer__note">
+          SkyLens · NET 챌린지 캠프 시즌13.<br />
+          트리를 처음 열 때는 우측 설정에서 루트 브랜치를 <code>develop</code>으로 한 번 바꿔 주세요.
+        </p>
+      </div>
+    </footer>
+
+    <script src="assets/guide.js"></script>
+  </body>
+</html>

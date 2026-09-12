@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>직접 돌려보기 — SkyLens</title>
+    <meta
+      name="description"
+      content="명령어 두 줄이면 파이프라인 전체가 데모 모드로 떠요. 접속 주소, 쿼리 옵션, VWorld 키 설정까지 정리했어요."
+    />
+    <link rel="stylesheet" href="assets/guide.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">본문으로 건너뛰기</a>
+
+    <header class="site-header">
+      <div class="site-header__inner">
+        <a class="brand" href="index.html"><span class="brand__dot"></span>SkyLens</a>
+        <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="site-nav">메뉴</button>
+        <nav class="site-nav" id="site-nav" aria-label="주요 메뉴">
+          <ul>
+            <li><a href="index.html">홈</a></li>
+            <li><a href="how-it-works.html">어떻게 동작하나요</a></li>
+            <li><a href="screens.html">화면 둘러보기</a></li>
+            <li><a href="architecture.html">시스템 구조</a></li>
+            <li><a href="run.html">직접 돌려보기</a></li>
+            <li><a href="model.html">AI 모델</a></li>
+            <li>
+              <a class="is-external" href="https://darkpyonix.github.io/researchtree/?repo=NET-Challenge-S13/skylens" rel="noreferrer">연구 기록</a>
+            </li>
+          </ul>
+        </nav>
+      </div>
+    </header>
+
+    <main id="main">
+      <div class="wrap">
+        <section class="hero">
+          <span class="kicker">RUN IT</span>
+          <h1>직접 돌려보기</h1>
+          <p class="lede">
+            명령어 두 줄이면 파이프라인 전체가 떠요. 드론부터 게이트웨이·프록시·코어·모델 API·두
+            화면까지 전부 실제 코드로 돌아가요.
+          </p>
+        </section>
+
+        <section class="section" aria-labelledby="start">
+          <h2 id="start">시작하기</h2>
+
+          <pre><code>npm install
+npm run demo</code></pre>
+
+          <div class="prose">
+            <p>그러면 이 주소들이 열려요.</p>
+          </div>
+
+          <div class="table-scroll">
+            <table>
+              <caption>접속 주소</caption>
+              <thead>
+                <tr>
+                  <th scope="col">화면</th>
+                  <th scope="col">주소</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row">관제탑</th>
+                  <td><code>http://localhost:8080/res/static/control.html</code></td>
+                </tr>
+                <tr>
+                  <th scope="row">현황판</th>
+                  <td><code>http://localhost:8090/res/static/status.html</code></td>
+                </tr>
+                <tr>
+                  <th scope="row">드론 패널</th>
+                  <td><code>http://localhost:5173/src/skylens_drone/index.html</code></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="note note--info">
+            <p>
+              <b><code>/</code>는 아무것도 안 띄워요.</b> 랜딩 페이지를 자동으로 서빙하지 않아요.
+              위 주소를 그대로 쳐 주세요.
+            </p>
+          </div>
+        </section>
+
+        <section class="section" aria-labelledby="scenario">
+          <h2 id="scenario">데모는 이렇게 흘러가요</h2>
+
+          <ol class="steps">
+            <li>
+              <h3>시작하면 멈춰 있어요</h3>
+              <p>아직 아무 일도 일어나지 않아요. 경로가 지정되기를 기다리는 상태예요.</p>
+            </li>
+            <li>
+              <h3>관제탑에서 경로를 지정해요</h3>
+              <p>
+                <code>경로 계획 · ROUTE</code>에서 웨이포인트를 찍고 배정하면 "태스크 지정 완료"로
+                바뀌어요. 드론이 현장에 도착해 연결되면 작업이 시작된다는 안내가 떠요.
+              </p>
+            </li>
+            <li>
+              <h3>약 10초 뒤 드론이 붙어요</h3>
+              <p>
+                "드론 연결됨" 알림이 뜨고 주행이 시작돼요. 지정한 경로를 왕복해요. 드론은
+                이동하는 동안에도 위치를 계속 보내지만, 코어는 도착 인사(<code>drone-hello</code>)를
+                보낸 드론만 도착으로 세요.
+              </p>
+            </li>
+            <li>
+              <h3>지나간 구간부터 현황판이 채워져요</h3>
+              <p>
+                드론이 한 구간을 통과할 때마다 그 구간의 수준 1이 확정되고, 이어서 수준이
+                올라가요. 좌측 상단 패널에서 구간별 현재 수준을 볼 수 있어요.
+              </p>
+            </li>
+          </ol>
+        </section>
+
+        <section class="section" aria-labelledby="demo-mode">
+          <h2 id="demo-mode">데모에서 바뀌는 건 두 가지뿐이에요</h2>
+
+          <div class="prose">
+            <p>
+              컴포넌트는 전부 실제 코드예요. 한 대의 컴퓨터에서 재현할 수 없는 것만 바꿔 놨어요.
+            </p>
+          </div>
+
+          <div class="table-scroll">
+            <table>
+              <caption>실운영과 데모의 차이</caption>
+              <thead>
+                <tr>
+                  <th scope="col"></th>
+                  <th scope="col">실운영</th>
+                  <th scope="col">데모</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row">드론 촬영</th>
+                  <td>기체 카메라 → H.265 실시간 인코딩</td>
+                  <td>미리 인코딩해 둔 영상 파일</td>
+                </tr>
+                <tr>
+                  <th scope="row">3D 복원</th>
+                  <td>GPU 서버에서 gsplat 학습</td>
+                  <td>미리 만들어 둔 구간 × 수준 자산</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="prose">
+            <p>
+              나머지는 전부 실제 경로예요. 드론이 게이트웨이에 붙고, 프록시가 코어로 중계하고,
+              코어가 모델 API에 잡을 발행하고, 현황판이 릴레이를 통해 받아요.
+            </p>
+            <p>
+              데모 자산이 없으면 현황판은 단일 장면 스트림으로 알아서 돌아가요. 딜레이 패턴만
+              안 보이고 나머지는 그대로예요.
+            </p>
+          </div>
+        </section>
+
+        <section class="section" aria-labelledby="query">
+          <h2 id="query">주소 뒤에 붙이는 옵션</h2>
+
+          <div class="prose">
+            <p>주소 끝에 <code>?옵션</code>을 붙이면 동작을 바꿀 수 있어요.</p>
+          </div>
+
+          <div class="table-scroll">
+            <table>
+              <caption>자주 쓰는 옵션</caption>
+              <thead>
+                <tr>
+                  <th scope="col">옵션</th>
+                  <th scope="col">하는 일</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row"><code>?demo</code></th>
+                  <td>자동 데모로 돌아가요</td>
+                </tr>
+                <tr>
+                  <th scope="row"><code>?room=&lt;이름&gt;</code></th>
+                  <td>두 화면을 같은 방 이름으로 열면 서로 연결돼요</td>
+                </tr>
+                <tr>
+                  <th scope="row"><code>?splat=off|demo|cdn|light|&lt;url&gt;</code></th>
+                  <td>3D 장면 자산을 어디서 가져올지 정해요</td>
+                </tr>
+                <tr>
+                  <th scope="row"><code>?delay=off</code></th>
+                  <td>딜레이 패턴을 끄고 장면 하나로 봐요</td>
+                </tr>
+                <tr>
+                  <th scope="row"><code>?reveal=on|off</code></th>
+                  <td>장면이 드러나는 마스크를 켜고 꺼요</td>
+                </tr>
+                <tr>
+                  <th scope="row"><code>?spin=off</code></th>
+                  <td>카메라 자동 회전을 꺼요</td>
+                </tr>
+                <tr>
+                  <th scope="row"><code>?up=&lt;preset|euler&gt;</code></th>
+                  <td>3D 장면의 위쪽 방향을 맞춰요</td>
+                </tr>
+                <tr>
+                  <th scope="row"><code>?level=on</code></th>
+                  <td>장면 수평을 자동으로 맞춰요 (PCA)</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3>실지형 지도 옵션</h3>
+
+          <div class="table-scroll">
+            <table>
+              <caption><code>?map</code>을 쓸 때 함께 쓰는 옵션</caption>
+              <thead>
+                <tr>
+                  <th scope="col">옵션</th>
+                  <th scope="col">하는 일</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row"><code>?map</code></th>
+                  <td>실지형 씬을 켜요. <code>?map=uljin|gangneung|서,남,동,북</code>으로 지역을 고를 수 있어요</td>
+                </tr>
+                <tr>
+                  <th scope="row"><code>?tex=sat|off</code></th>
+                  <td>지형 위에 위성 영상을 입힐지 정해요</td>
+                </tr>
+                <tr>
+                  <th scope="row"><code>?drone=&lt;n&gt;</code></th>
+                  <td>드론 아이콘 크기예요. 기본값은 0.15</td>
+                </tr>
+                <tr>
+                  <th scope="row"><code>?ring=off</code></th>
+                  <td>씬 바깥의 배경 지형 링을 꺼요</td>
+                </tr>
+                <tr>
+                  <th scope="row"><code>?bld=off</code></th>
+                  <td>3D 건물을 안 그려요</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="section" aria-labelledby="vworld">
+          <h2 id="vworld">VWorld 키 설정</h2>
+
+          <div class="prose">
+            <p>
+              위성 영상과 건물 데이터는 VWorld 인증 키가 필요해요. 키는 저장소 안이 아니라
+              <strong>저장소의 부모 폴더</strong>에 둬요.
+            </p>
+          </div>
+
+          <pre><code># 저장소 바로 바깥 디렉터리에서
+cat &gt; .env.vworld &lt;&lt; EOF
+VWORLD_KEY=&lt;vworld.kr에서 발급한 인증키&gt;
+VWORLD_DOMAIN=http://localhost:5173
+EOF</code></pre>
+
+          <div class="prose">
+            <p>
+              키가 없어도 괜찮아요. 지형과 건물만 안 그려지고 나머지는 그대로 돌아가요.
+            </p>
+            <p>
+              키는 개발 서버의 프록시가 서버 쪽에서만 끼워 넣어요.
+              <strong>프론트엔드 번들에는 절대 들어가지 않아요.</strong>
+            </p>
+          </div>
+        </section>
+
+        <section class="section" aria-labelledby="commands">
+          <h2 id="commands">명령어 전체</h2>
+
+          <div class="table-scroll">
+            <table>
+              <caption>TypeScript 쪽</caption>
+              <thead>
+                <tr>
+                  <th scope="col">명령</th>
+                  <th scope="col">하는 일</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row"><code>npm run demo</code></th>
+                  <td>전 컴포넌트를 데모 모드로 조립해서 띄워요</td>
+                </tr>
+                <tr>
+                  <th scope="row"><code>npm run dev</code></th>
+                  <td>Vite 개발 서버만 띄워요 (HMR, LAN 노출)</td>
+                </tr>
+                <tr>
+                  <th scope="row"><code>npm run core</code> 등</th>
+                  <td>
+                    컴포넌트를 하나씩 띄워요. <code>core</code> · <code>client</code> ·
+                    <code>gateway</code> · <code>proxy</code> · <code>drone</code> ·
+                    <code>model</code>
+                  </td>
+                </tr>
+                <tr>
+                  <th scope="row"><code>npm run build</code></th>
+                  <td>타입체크하고 빌드해요</td>
+                </tr>
+                <tr>
+                  <th scope="row"><code>npm test</code></th>
+                  <td>Playwright E2E를 돌려요. <code>npm run test:headed</code>면 브라우저가 보여요</td>
+                </tr>
+                <tr>
+                  <th scope="row"><code>npm run demo:clean</code></th>
+                  <td>데모로 띄운 프로세스를 정리해요</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="table-scroll">
+            <table>
+              <caption>Python 쪽 — 의존성은 uv로 관리해요</caption>
+              <thead>
+                <tr>
+                  <th scope="col">명령</th>
+                  <th scope="col">하는 일</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row"><code>uv sync</code></th>
+                  <td><code>.venv/</code>를 만들고 패키지를 설치해요</td>
+                </tr>
+                <tr>
+                  <th scope="row"><code>uv run pytest</code></th>
+                  <td>테스트를 돌려요</td>
+                </tr>
+                <tr>
+                  <th scope="row"><code>uv run ruff check src/</code></th>
+                  <td>린트를 돌려요</td>
+                </tr>
+                <tr>
+                  <th scope="row"><code>uv run jupyter lab</code></th>
+                  <td>학습 노트북(<code>train.ipynb</code>)을 열어요</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="note">
+            <p>
+              <b>torch는 PyPI에서 안 받아요.</b> CUDA 12.8 인덱스에서 받도록
+              <code>pyproject.toml</code>에 지정해 뒀어요. Python은 3.11 이상 3.14 미만이고,
+              기준 버전은 3.13이에요.
+            </p>
+          </div>
+        </section>
+
+        <section class="section" aria-labelledby="lan">
+          <h2 id="lan">두 대로 나눠서 보고 싶다면</h2>
+
+          <div class="prose">
+            <p>
+              관제탑과 현황판은 각자 다른 컴퓨터에서 전체화면으로 띄우는 걸 전제로 만들었어요.
+              <code>npm run dev</code>는 LAN에 열려 있으니까 같은 네트워크의 다른 컴퓨터에서
+              <code>http://&lt;IP&gt;:5173/res/static/control.html?room=demo</code> 같은 주소로
+              접속하면 돼요.
+            </p>
+            <p>
+              두 화면의 <code>room</code> 값만 같으면 연결돼요. <code>&amp;demo</code>를 붙이면
+              자동 데모로 돌아가요.
+            </p>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="site-footer__inner">
+        <div>
+          <h2>가이드북</h2>
+          <ul>
+            <li><a href="index.html">홈</a></li>
+            <li><a href="how-it-works.html">어떻게 동작하나요</a></li>
+            <li><a href="screens.html">화면 둘러보기</a></li>
+            <li><a href="architecture.html">시스템 구조</a></li>
+            <li><a href="model.html">AI 모델</a></li>
+          </ul>
+        </div>
+        <div>
+          <h2>연구 기록</h2>
+          <ul>
+            <li>
+              <a href="https://darkpyonix.github.io/researchtree/?repo=NET-Challenge-S13/skylens" rel="noreferrer">실험 트리 보기</a>
+            </li>
+            <li>
+              <a href="https://github.com/NET-Challenge-S13/skylens/blob/develop/docs/SPEC.md" rel="noreferrer">설계 스펙</a>
+            </li>
+            <li>
+              <a href="https://github.com/NET-Challenge-S13/skylens/blob/develop/docs/INTENT.md" rel="noreferrer">의도와 주장</a>
+            </li>
+            <li><a href="https://github.com/NET-Challenge-S13/skylens" rel="noreferrer">GitHub 저장소</a></li>
+          </ul>
+        </div>
+        <p class="site-footer__note">
+          SkyLens · NET 챌린지 캠프 시즌13.<br />
+          트리를 처음 열 때는 우측 설정에서 루트 브랜치를 <code>develop</code>으로 한 번 바꿔 주세요.
+        </p>
+      </div>
+    </footer>
+
+    <script src="assets/guide.js"></script>
+  </body>
+</html>

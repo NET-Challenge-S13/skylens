@@ -1,0 +1,426 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>어떻게 동작하나요 — SkyLens</title>
+    <meta
+      name="description"
+      content="드론이 나눠서 찍고, 고속망으로 모아 3D로 복원하고, 복원된 구간부터 3D 상황판에 올려요. 세 단계를 순서대로 설명해요."
+    />
+    <link rel="stylesheet" href="assets/guide.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">본문으로 건너뛰기</a>
+
+    <header class="site-header">
+      <div class="site-header__inner">
+        <a class="brand" href="index.html"><span class="brand__dot"></span>SkyLens</a>
+        <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="site-nav">메뉴</button>
+        <nav class="site-nav" id="site-nav" aria-label="주요 메뉴">
+          <ul>
+            <li><a href="index.html">홈</a></li>
+            <li><a href="how-it-works.html">어떻게 동작하나요</a></li>
+            <li><a href="screens.html">화면 둘러보기</a></li>
+            <li><a href="architecture.html">시스템 구조</a></li>
+            <li><a href="run.html">직접 돌려보기</a></li>
+            <li><a href="model.html">AI 모델</a></li>
+            <li>
+              <a class="is-external" href="https://darkpyonix.github.io/researchtree/?repo=NET-Challenge-S13/skylens" rel="noreferrer">연구 기록</a>
+            </li>
+          </ul>
+        </nav>
+      </div>
+    </header>
+
+    <main id="main">
+      <div class="wrap">
+        <section class="hero">
+          <span class="kicker">FLOW</span>
+          <h1>어떻게 동작하나요</h1>
+          <p class="lede">
+            드론이 나눠서 찍어요. 그 영상을 고속망으로 한곳에 모아 3D로 복원하고 AI를 돌려요.
+            복원이 끝난 구간부터 3D 상황판에 올라와요. 크게 이 세 단계예요.
+          </p>
+        </section>
+
+        <section class="section" aria-labelledby="overview">
+          <h2 id="overview">전체 그림</h2>
+
+          <div class="diagram">
+            <svg viewBox="0 0 900 290" role="img" aria-labelledby="flow-title flow-desc">
+              <title id="flow-title">SkyLens 전체 흐름도</title>
+              <desc id="flow-desc">
+                현장의 드론 세 대가 게이트웨이로 영상을 보내고, 그 영상이 KOREN 고속망을 거쳐 GPU
+                서버에서 3D 복원과 AI 감지를 동시에 거친 뒤, 좌표 투영을 지나 관제탑과 현황판 두
+                화면으로 나갑니다.
+              </desc>
+              <defs>
+                <marker id="fa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#5ec8ff" />
+                </marker>
+                <marker id="fb" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#94bdf0" />
+                </marker>
+              </defs>
+
+              <!-- Zone 1 · field -->
+              <rect class="d-zone" x="8" y="56" width="202" height="200" rx="8" />
+              <text class="d-tag" x="24" y="78">① 현장</text>
+              <rect class="d-box" x="24" y="96" width="76" height="30" rx="4" />
+              <text class="d-sub" x="62" y="115" text-anchor="middle">드론 #1</text>
+              <rect class="d-box" x="24" y="134" width="76" height="30" rx="4" />
+              <text class="d-sub" x="62" y="153" text-anchor="middle">드론 #2</text>
+              <rect class="d-box" x="24" y="172" width="76" height="30" rx="4" />
+              <text class="d-sub" x="62" y="191" text-anchor="middle">드론 #3</text>
+              <path class="d-line" d="M100 111 H106 V149 H112" />
+              <path class="d-line" d="M100 149 H112" />
+              <path class="d-line" d="M100 187 H106 V149 H112" />
+              <rect class="d-box d-box--ink" x="112" y="134" width="82" height="30" rx="4" />
+              <text class="d-sub" x="153" y="153" text-anchor="middle">게이트웨이</text>
+              <text class="d-sub" x="24" y="228">구역을 나눠</text>
+              <text class="d-sub" x="24" y="242">동시에 탐색해요</text>
+
+              <!-- field → KOREN -->
+              <path class="d-line d-line--ink" d="M210 149 H294" marker-end="url(#fa)" />
+              <text class="d-sub" x="252" y="130" text-anchor="middle">H.265 · 1080p30</text>
+              <text class="d-sub" x="252" y="144" text-anchor="middle">3대 합쳐 15~33 Mbps</text>
+
+              <!-- Zone 2 · compute -->
+              <rect class="d-zone" x="300" y="56" width="320" height="200" rx="8" />
+              <text class="d-tag" x="316" y="78">② KOREN 고속망 · GPU 서버</text>
+              <rect class="d-box d-box--ink" x="316" y="96" width="138" height="52" rx="4" />
+              <text class="d-label" x="385" y="118" text-anchor="middle">3D 복원</text>
+              <text class="d-sub" x="385" y="136" text-anchor="middle">3DGS</text>
+              <rect class="d-box d-box--person" x="466" y="96" width="138" height="52" rx="4" />
+              <text class="d-label" x="535" y="118" text-anchor="middle">AI 감지</text>
+              <text class="d-sub" x="535" y="136" text-anchor="middle">UNet 4채널</text>
+              <path class="d-line" d="M385 148 V174" marker-end="url(#fb)" />
+              <path class="d-line" d="M535 148 V174" marker-end="url(#fb)" />
+              <rect class="d-box" x="316" y="176" width="288" height="44" rx="4" />
+              <text class="d-sub" x="460" y="195" text-anchor="middle">2D 탐지를 3D 세계좌표로 투영</text>
+              <text class="d-sub" x="460" y="211" text-anchor="middle">Depth Map 레이캐스팅</text>
+              <text class="d-sub" x="316" y="242">둘은 서로를 기다리지 않아요</text>
+
+              <!-- KOREN → screens -->
+              <path class="d-line d-line--ink" d="M620 149 H694" marker-end="url(#fa)" />
+              <text class="d-sub" x="657" y="137" text-anchor="middle">구간 + 마커</text>
+
+              <!-- Zone 3 · screens -->
+              <rect class="d-zone" x="700" y="56" width="192" height="200" rx="8" />
+              <text class="d-tag" x="716" y="78">③ 두 화면</text>
+              <rect class="d-box d-box--ink" x="716" y="104" width="160" height="48" rx="4" />
+              <text class="d-label" x="796" y="124" text-anchor="middle">관제탑</text>
+              <text class="d-sub" x="796" y="141" text-anchor="middle">경로를 지정해요</text>
+              <rect class="d-box d-box--person" x="716" y="164" width="160" height="48" rx="4" />
+              <text class="d-label" x="796" y="184" text-anchor="middle">현황판</text>
+              <text class="d-sub" x="796" y="201" text-anchor="middle">3D로 확인해요</text>
+              <text class="d-sub" x="716" y="242">둘은 직접 연결되지 않아요</text>
+            </svg>
+          </div>
+        </section>
+
+        <section class="section" aria-labelledby="step1">
+          <span class="kicker">STEP 1</span>
+          <h2 id="step1">나눠서 봐요</h2>
+
+          <div class="prose">
+            <p>
+              드론 2~3대가 각자 다른 구역을 맡아 동시에 날아요. 한 대가 구역을 하나씩 순서대로 도는
+              것보다 탐색이 2~3배 빨라요.
+            </p>
+            <p>
+              속도만 얻는 게 아니에요. 여러 대가 같은 지점을 <strong>다른 각도에서</strong> 보기
+              때문에 3D 복원에 사각이 줄어들고, 소리를 쓸 때는 발생 위치를 삼각측량으로 추정할 수
+              있어요. 한 대가 떨어져도 남은 드론이 그 구역을 메워요.
+            </p>
+          </div>
+
+          <div class="table-scroll">
+            <table>
+              <caption>드론 한 대와 군집(2~3대)의 차이</caption>
+              <thead>
+                <tr>
+                  <th scope="col">항목</th>
+                  <th scope="col">단일 드론</th>
+                  <th scope="col">군집 2~3대</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row">탐색 범위</th>
+                  <td>구역 1개를 순서대로</td>
+                  <td>구역 2~3개를 동시에</td>
+                </tr>
+                <tr>
+                  <th scope="row">탐색 속도</th>
+                  <td class="num">×1</td>
+                  <td class="num">×2~3</td>
+                </tr>
+                <tr>
+                  <th scope="row">소리 위치 추정</th>
+                  <td>불가 — 관측점이 하나예요</td>
+                  <td>삼각측량으로 가능해요</td>
+                </tr>
+                <tr>
+                  <th scope="row">한 대를 잃으면</th>
+                  <td>그 구역은 못 봐요</td>
+                  <td>남은 드론이 커버해요</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <p class="prose">
+            영상은 H.265로 실시간 인코딩해서 보내요. 1080p30이면 드론 3대를 합쳐 15~33 Mbps예요.
+            복원에 들어가는 입력이 긴 변 1,600px이라 1080p로도 품질 손실이 없어요.
+          </p>
+        </section>
+
+        <section class="section" aria-labelledby="step2">
+          <span class="kicker">STEP 2</span>
+          <h2 id="step2">고속망으로 모아서 3D로 복원하고, AI를 돌려요</h2>
+
+          <div class="prose">
+            <p>
+              모인 영상은 두 갈래로 동시에 흘러요. 한쪽은 현장을 3D로 다시 그리고, 다른 쪽은 같은
+              영상에서 위험구역과 사람을 찾아요.
+            </p>
+          </div>
+
+          <h3>3D 복원 — 사진에서 공간을 되찾아요</h3>
+          <div class="prose">
+            <p>
+              먼저 각 프레임을 어디서 찍었는지 역산해요 (COLMAP SfM). 그다음 그 위치들을 근거로
+              공간을 수십만 개의 작은 반투명 덩어리로 학습해요 (gsplat, 3D Gaussian Splatting).
+              메시를 만드는 게 아니라 <strong>보이는 그대로의 장면</strong>을 학습하기 때문에
+              잔해처럼 형태가 복잡한 대상에 잘 맞아요.
+            </p>
+            <p>
+              실내 복도를 직접 찍어 검증했어요. 540프레임에서 가우시안 653,353개, PSNR 23.62를
+              얻었어요. 자세한 숫자는 <a href="model.html#recon">AI 모델</a> 쪽에 있어요.
+            </p>
+          </div>
+
+          <h3>AI 감지 — 위험한 곳과 사람을 같이 찾아요</h3>
+          <div class="prose">
+            <p>
+              일반 카메라 영상(RGB 3채널)에 열화상(1채널)을 붙여 4채널로 만들어 한 모델에 넣어요.
+              밤이나 연기 속처럼 눈에 안 보이는 상황을 열화상이 메워 줘요. 자세한 구조는
+              <a href="model.html">AI 모델</a>에서 설명해요.
+            </p>
+          </div>
+
+          <h3>둘은 서로를 기다리지 않아요</h3>
+          <div class="prose">
+            <p>
+              3D 복원은 프레임을 모아 도는 무거운 배치 작업이고, 탐지는 프레임이 오는 대로 계속
+              도는 스트림 작업이에요. 한 프로세스에 묶으면 복원이 도는 동안 탐지가 멈춰요. 재난
+              상황에서 그건 <strong>사람을 늦게 찾는다</strong>는 뜻이에요. 그래서 둘을 따로
+              떼어 놨어요.
+            </p>
+            <p>
+              두 갈래가 만나는 지점은 하나뿐이에요. 탐지 결과를 3D 좌표로 바꿀 때 복원된 장면의
+              깊이를 참조하는 부분이에요. 이 참조도 비동기라서 탐지를 막지 않아요.
+            </p>
+          </div>
+        </section>
+
+        <section class="section" aria-labelledby="koren">
+          <h2 id="koren">KOREN이 실제로 값을 하는 구간은 따로 있어요</h2>
+
+          <div class="prose">
+            <p>
+              솔직하게 짚고 갈 게 있어요. <strong>연구망은 드론에서 서버로 가는 구간을 빠르게
+              해 주지 않아요.</strong> 그 구간의 상한은 상용 5G 업링크가 정하고, 그 뒤가 10Gbps든
+              1Tbps든 총량은 늘지 않아요.
+            </p>
+            <p>
+              고속망이 실제로 값을 하는 곳은 <strong>복원된 3D 장면을 나르는 구간</strong>이에요.
+              장면 1회분이 30MB이고 이건 주기마다 한 번에 터지는 버스트라, 평균 대역이 아니라
+              순간 대역이 지배해요.
+            </p>
+          </div>
+
+          <div class="table-scroll">
+            <table>
+              <caption>3D 장면 한 번(30MB)을 보내는 데 걸리는 시간</caption>
+              <thead>
+                <tr>
+                  <th scope="col">링크</th>
+                  <th scope="col" class="num">전송 시간</th>
+                  <th scope="col">판정</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row">100 Mbps (일반 회선)</th>
+                  <td class="num">2.4초</td>
+                  <td>30초 예산의 8%를 전송에만 써요</td>
+                </tr>
+                <tr>
+                  <th scope="row">1 Gbps</th>
+                  <td class="num">240 ms</td>
+                  <td>목표를 충족해요</td>
+                </tr>
+                <tr>
+                  <th scope="row">10 Gbps (KOREN 백본)</th>
+                  <td class="num">24 ms</td>
+                  <td>여유 있어요</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="note note--info">
+            <p>
+              <b>대조군을 같이 돌려요.</b> 같은 코드를 KOREN과 일반 인터넷 두 경로에 태워 동시에
+              재요. 대조군이 있어야 "연구망이 필요하다"가 주장이 아니라 숫자가 되거든요.
+            </p>
+          </div>
+        </section>
+
+        <section class="section" aria-labelledby="step3">
+          <span class="kicker">STEP 3</span>
+          <h2 id="step3">복원된 구간부터 화면에 올라와요</h2>
+
+          <div class="prose">
+            <p>
+              촬영이 다 끝난 뒤에 한 번에 복원하면 결과는 항상 사후예요. 그래서 드론이 지나간
+              <strong>구간</strong>부터 복원해서 바로 내보내요. 비행 중에 앞 구간을 볼 수 있어요.
+            </p>
+            <p>
+              여기에 한 가지를 더 얹었어요. 한 구간을 최종 품질까지 한 번에 처리하지 않고,
+              <strong>거친 결과를 먼저 확정해서 띄운 다음 뒤에서 다듬어요.</strong> 앞 구간이
+              다듬어지는 동안 다음 구간의 거친 결과가 도착해요. 이걸 딜레이 패턴이라고 불러요.
+            </p>
+            <p>
+              수준별로 뭐가 보이는지는 <a href="screens.html#delay">화면 둘러보기</a>에
+              정리해 뒀어요.
+            </p>
+          </div>
+        </section>
+
+        <section class="section" aria-labelledby="coords">
+          <h2 id="coords">좌표는 전부 실제 GPS로 맞춰요</h2>
+
+          <div class="prose">
+            <p>
+              드론 경로도, AI가 찾은 사람 위치도, 복원된 3D 조각도 전부 같은 좌표계 위에 있어야
+              겹쳐 보여요. 그래서 실세계 GPS를 기준으로 삼아요.
+            </p>
+            <p>
+              기준점 GPS 하나를 정하고, 거기서부터 동쪽·북쪽·위쪽으로 몇 미터인지로 바꿔서 써요
+              (로컬 ENU 좌표계). 1 유닛이 정확히 1미터예요. 화면에 그릴 때만 씬 좌표로 한 번 더
+              바꿔요.
+            </p>
+          </div>
+
+          <div class="panel">
+            <p class="panel__title">같은 수식, 두 구현</p>
+            <p>
+              변환 코드는 TypeScript와 Python 두 벌로 존재해요 (<code>geo.ts</code>와
+              <code>geo.py</code>). 뷰어와 모델 서버가 각각 다른 언어라서예요. 두 파일은 수치가
+              항상 같아야 해서, 한쪽만 고치는 일은 없어요.
+            </p>
+          </div>
+        </section>
+
+        <section class="section" aria-labelledby="budget">
+          <h2 id="budget">30초 안에 들어오나요</h2>
+
+          <div class="prose">
+            <p>
+              한 바퀴를 30초 주기로 잡고 구간별 예산을 나눴어요. 네트워크 쪽은 전부 여유가
+              있고, <strong>성립 여부는 복원 잡 하나에 걸려 있어요.</strong>
+            </p>
+          </div>
+
+          <div class="table-scroll">
+            <table>
+              <caption>30초 주기 예산</caption>
+              <thead>
+                <tr>
+                  <th scope="col">단계</th>
+                  <th scope="col" class="num">예산</th>
+                  <th scope="col">근거</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row">드론 → 서버 업링크</th>
+                  <td class="num">1~2초</td>
+                  <td>SRT 지연 200~500ms + 인코딩</td>
+                </tr>
+                <tr>
+                  <th scope="row">한 묶음이 채워지는 시간</th>
+                  <td class="num">약 10초</td>
+                  <td>10초 분량 프레임으로 잡 1회분을 만들어요</td>
+                </tr>
+                <tr>
+                  <th scope="row">3D 복원 1회</th>
+                  <td class="num">10~15초</td>
+                  <td>V100에서 실측이 필요해요 — 유일한 미검증 항목</td>
+                </tr>
+                <tr>
+                  <th scope="row">서버 → 배포 지점</th>
+                  <td class="num">1초 미만</td>
+                  <td>KOREN 백본</td>
+                </tr>
+                <tr>
+                  <th scope="row">배포 지점 → 단말</th>
+                  <td class="num">1~3초</td>
+                  <td>전송 포맷을 <code>.spz</code>로 바꾸는 걸 전제로 해요</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="note">
+            <p>
+              <b>아직 안 끝난 것.</b> 배정받은 GPU가 V100으로 확정되면서 복원 1회가 15초 안에
+              들어오는지가 남은 질문이에요. 학습 스텝을 줄여 맞추되 품질이 버티는 지점을 찾는
+              중이에요. 이 숫자가 안 나오면 30초라는 주기 자체를 다시 정해야 해요.
+            </p>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <footer class="site-footer">
+      <div class="site-footer__inner">
+        <div>
+          <h2>가이드북</h2>
+          <ul>
+            <li><a href="index.html">홈</a></li>
+            <li><a href="screens.html">화면 둘러보기</a></li>
+            <li><a href="architecture.html">시스템 구조</a></li>
+            <li><a href="run.html">직접 돌려보기</a></li>
+            <li><a href="model.html">AI 모델</a></li>
+          </ul>
+        </div>
+        <div>
+          <h2>연구 기록</h2>
+          <ul>
+            <li>
+              <a href="https://darkpyonix.github.io/researchtree/?repo=NET-Challenge-S13/skylens" rel="noreferrer">실험 트리 보기</a>
+            </li>
+            <li>
+              <a href="https://github.com/NET-Challenge-S13/skylens/blob/develop/docs/SPEC.md" rel="noreferrer">설계 스펙</a>
+            </li>
+            <li>
+              <a href="https://github.com/NET-Challenge-S13/skylens/blob/develop/docs/INTENT.md" rel="noreferrer">의도와 주장</a>
+            </li>
+            <li><a href="https://github.com/NET-Challenge-S13/skylens" rel="noreferrer">GitHub 저장소</a></li>
+          </ul>
+        </div>
+        <p class="site-footer__note">
+          SkyLens · NET 챌린지 캠프 시즌13.<br />
+          트리를 처음 열 때는 우측 설정에서 루트 브랜치를 <code>develop</code>으로 한 번 바꿔 주세요.
+        </p>
+      </div>
+    </footer>
+
+    <script src="assets/guide.js"></script>
+  </body>
+</html>
