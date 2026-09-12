@@ -117,6 +117,7 @@ def main() -> int:
     from skylens_model.models import SkyLensConfig, SkyLensForDisasterPerception
     from skylens_model.utils import ResizedCache, SkyLensCollator, build_resized_cache
     from skylens_model.utils.callbacks import GracefulInterruptCallback, find_resume_checkpoint
+    from skylens_model.utils.metrics import build_compute_metrics
     from skylens_model.utils.trainer import SkyLensTrainer
     from skylens_model.utils.training_args import SkyLensTrainingArguments
 
@@ -244,6 +245,13 @@ def main() -> int:
             validity_channel=False,
             modality_dropout=(0.0, 0.0),
         ),
+        # 이것이 없으면 평가가 손실만 내고 mIoU·클래스별 IoU·사람 점지표가 전부
+        # 빠진다. 판정 기준이 그 지표들이라 빠지면 실험이 무의미해진다.
+        compute_metrics=build_compute_metrics(
+            num_classes=NUM_DANGER_CLASSES,
+            distance_threshold=targs.point_distance_threshold,
+            score_threshold=targs.eval_score_threshold,
+        ),
         callbacks=[GracefulInterruptCallback()],
     )
 
@@ -253,6 +261,17 @@ def main() -> int:
     print(f"\n[완료] train_loss {result.training_loss:.4f} | steps {result.global_step}")
 
     metrics = trainer.evaluate()
+
+    # 판정에 쓰는 지표가 실제로 나왔는지 확인한다. 한 번 compute_metrics 를 빠뜨려
+    # 90분을 손실만 보고 태운 적이 있다.
+    required = ("eval_miou", "eval_iou_class_3", "eval_point_f1")
+    missing = [k for k in required if k not in metrics]
+    if missing:
+        raise RuntimeError(
+            "평가에 판정 지표가 없다: " + ", ".join(missing) + ". "
+            "compute_metrics 가 Trainer 에 전달됐는지 확인할 것."
+        )
+
     print("\n=== 최종 평가 ===")
     for k, v in sorted(metrics.items()):
         if isinstance(v, float):
