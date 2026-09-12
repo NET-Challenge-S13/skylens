@@ -649,6 +649,13 @@ table {
   line-height: 1.6;
 }
 
+/* Without a floor the table shrinks to the phone width instead of scrolling,
+   and prose cells wrap to two or three characters per line. Keep the table
+   wide enough to read and let .table-scroll pan it sideways. */
+.table-scroll table {
+  min-width: 560px;
+}
+
 caption {
   caption-side: top;
   text-align: left;
