@@ -1,8 +1,11 @@
 name: Deploy guidebook to GitHub Pages
 
+# main is the deployment branch. develop carries the design documents that
+# scripts/sync-main.sh strips on the way to main, so publishing from develop
+# would put the guidebook online from a branch that is not what we ship.
 on:
   push:
-    branches: [develop]
+    branches: [main]
     paths:
       - 'site/**'
       - '.github/workflows/pages.yml'
