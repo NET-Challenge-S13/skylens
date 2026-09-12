@@ -382,10 +382,30 @@ def build_metrics_table(history: list, final: dict) -> str:
 
 def update_pr_section(heading: str, body_md: str) -> bool:
     """PR 본문의 한 절만 갈아 끼운다. 맨 위 YAML 블록과 다른 절은 건드리지 않는다."""
+    # Windows 에서는 gh 가 gh.exe 라 이름만으로는 CreateProcess 가 못 찾는다.
+    # shutil.which 로 실제 경로를 먼저 찾는다.
+    import shutil
     import subprocess
 
+    exe = shutil.which("gh") or shutil.which("gh.exe")
+    if exe is None:
+        # uv run 아래에서는 PATH 가 좁아져 설치 경로가 빠질 수 있다.
+        for candidate in (
+            r"C:\Program Files\GitHub CLI\gh.exe",
+            r"C:\Program Files (x86)\GitHub CLI\gh.exe",
+            str(Path.home() / "AppData/Local/GitHubCLI/gh.exe"),
+            "/usr/bin/gh",
+            "/usr/local/bin/gh",
+        ):
+            if Path(candidate).exists():
+                exe = candidate
+                break
+    if exe is None:
+        print("gh 를 찾지 못해 PR 본문 기록을 건너뛴다")
+        return False
+
     def gh(*argv):
-        return subprocess.run(["gh", *argv], capture_output=True, text=True, encoding="utf-8")
+        return subprocess.run([exe, *argv], capture_output=True, text=True, encoding="utf-8")
 
     got = gh("pr", "view", "--json", "body", "-q", ".body")
     if got.returncode != 0:
