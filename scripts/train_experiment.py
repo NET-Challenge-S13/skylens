@@ -264,34 +264,167 @@ def main() -> int:
     )
 
     if not args.no_log_pr:
-        log_to_pr(metrics, args)
+        log_to_pr(metrics, trainer.state.log_history, args)
     return 0
 
 
-def log_to_pr(metrics: dict, args: argparse.Namespace) -> None:
-    """실험 브랜치의 PR 에 최종 지표를 적는다. 실패해도 학습 결과에는 영향이 없다."""
+# 사람이 읽을 때 이 순서로 보는 것이 자연스럽다. 여기 없는 지표도 전부 기록하되 뒤로 밀린다.
+METRIC_ORDER = (
+    "eval_loss",
+    "eval_miou",
+    "eval_pixel_accuracy",
+    "eval_iou_class_0",
+    "eval_iou_class_1",
+    "eval_iou_class_2",
+    "eval_iou_class_3",
+    "eval_point_precision",
+    "eval_point_recall",
+    "eval_point_f1",
+    "eval_point_tp",
+    "eval_point_fp",
+    "eval_point_fn",
+    "loss_danger_seg",
+    "loss_person_heatmap",
+    "loss_person_wh",
+    "eval_runtime",
+    "eval_samples_per_second",
+)
+
+METRIC_LABEL = {
+    "eval_loss": "총 손실",
+    "eval_miou": "mIoU",
+    "eval_pixel_accuracy": "픽셀 정확도",
+    "eval_iou_class_0": "IoU normal",
+    "eval_iou_class_1": "IoU fire",
+    "eval_iou_class_2": "IoU collapse",
+    "eval_iou_class_3": "IoU road_blocked",
+    "eval_point_precision": "사람 precision",
+    "eval_point_recall": "사람 recall",
+    "eval_point_f1": "사람 F1",
+    "eval_point_tp": "사람 TP",
+    "eval_point_fp": "사람 FP",
+    "eval_point_fn": "사람 FN",
+    "loss_danger_seg": "손실 세그",
+    "loss_person_heatmap": "손실 히트맵",
+    "loss_person_wh": "손실 크기",
+    "eval_runtime": "평가 시간(초)",
+    "eval_samples_per_second": "평가 처리량(장/초)",
+}
+
+# 강조해서 보여줄 지표. 판정 기준에 직접 쓰이는 것들이다.
+HIGHLIGHT = ("eval_miou", "eval_iou_class_3", "eval_point_f1")
+
+
+def _numeric(d: dict) -> dict:
+    """숫자 지표만 남긴다. nan 은 None 으로 바꿔 '계산 안 됨' 과 0 을 구분한다."""
+    out = {}
+    for k, v in d.items():
+        if isinstance(v, bool) or not isinstance(v, (int, float)):
+            continue
+        out[k] = None if v != v else round(float(v), 4)
+    return out
+
+
+def _ordered(keys) -> list:
+    known = [k for k in METRIC_ORDER if k in keys]
+    return known + sorted(k for k in keys if k not in METRIC_ORDER)
+
+
+def _cell(value) -> str:
+    if value is None:
+        return "없음"
+    if abs(value) >= 1000:
+        return f"{value:,.0f}"
+    return f"{value:.4f}"
+
+
+def build_metrics_table(history: list, final: dict) -> str:
+    """에폭별 전 지표 표. 최종 수치 하나로는 추세도 과적합도 보이지 않는다."""
+    rows_src = [h for h in history if "eval_miou" in h]
+    if rows_src:
+        cols = [_numeric(h) for h in rows_src]
+        labels = [f"epoch {round(float(h.get('epoch', i + 1)), 2)}" for i, h in enumerate(rows_src)]
+    else:
+        cols, labels = [_numeric(final)], ["최종"]
+
+    keys = _ordered({k for c in cols for k in c})
+    lines = [
+        "| 지표 | 키 | " + " | ".join(labels) + " |",
+        "|---|---|" + "---|" * len(labels),
+    ]
+    for key in keys:
+        label = METRIC_LABEL.get(key, key)
+        if key in HIGHLIGHT:
+            label = f"**{label}**"
+        cells = " | ".join(_cell(c.get(key)) for c in cols)
+        lines.append(f"| {label} | `{key}` | {cells} |")
+    return "\n".join(lines)
+
+
+def update_pr_section(heading: str, body_md: str) -> bool:
+    """PR 본문의 한 절만 갈아 끼운다. 맨 위 YAML 블록과 다른 절은 건드리지 않는다."""
+    import subprocess
+
+    def gh(*argv):
+        return subprocess.run(["gh", *argv], capture_output=True, text=True, encoding="utf-8")
+
+    got = gh("pr", "view", "--json", "body", "-q", ".body")
+    if got.returncode != 0:
+        print("PR 본문을 읽지 못했다: " + got.stderr.strip()[:100])
+        return False
+
+    marker = "## " + heading
+    block = marker + "\n\n" + body_md + "\n"
+    body = got.stdout
+
+    if marker in body:
+        before, rest = body.split(marker, 1)
+        idx = rest.find("\n## ")
+        after = rest[idx + 1 :] if idx != -1 else ""
+        body = before + block + ("\n" + after if after else "")
+    else:
+        body = body.rstrip() + "\n\n" + block
+
+    tmp = Path("runs") / "_pr_body.md"
+    tmp.parent.mkdir(parents=True, exist_ok=True)
+    tmp.write_text(body, encoding="utf-8")
+    put = gh("pr", "edit", "--body-file", str(tmp))
+    tmp.unlink(missing_ok=True)
+    if put.returncode != 0:
+        print("PR 본문을 쓰지 못했다: " + put.stderr.strip()[:100])
+        return False
+    return True
+
+
+def log_to_pr(metrics: dict, history: list, args: argparse.Namespace) -> None:
+    """실험 브랜치의 PR 에 지표를 적는다. 실패해도 학습 결과에는 영향이 없다.
+
+    두 곳에 적는다. YAML 블록에는 최종 수치를 전부 넣어 트리에서 실험끼리 비교할 수
+    있게 하고, 본문에는 에폭별 전 지표 표를 넣어 추세를 볼 수 있게 한다. F1 하나만
+    남기면 precision 과 recall 중 어느 쪽을 버려서 얻은 값인지 알 수 없다.
+    """
+    payload = {k: v for k, v in _numeric(metrics).items() if v is not None}
+    payload["epochs"] = args.epochs
+
     try:
         import researchtree as rt
-    except ImportError:
-        print("\nresearchtree 가 없어 PR 기록을 건너뛴다 (uv add researchtree)")
-        return
 
-    keep = (
-        "eval_miou",
-        "eval_pixel_accuracy",
-        "eval_iou_class_0",
-        "eval_iou_class_1",
-        "eval_iou_class_2",
-        "eval_iou_class_3",
-        "eval_point_precision",
-        "eval_point_recall",
-        "eval_point_f1",
-        "eval_loss",
+        rt.log(**payload)
+        print("\nPR YAML 에 지표 " + str(len(payload)) + "개 기록")
+    except ImportError:
+        print("\nresearchtree 가 없어 YAML 기록을 건너뛴다 (uv add researchtree)")
+    except Exception as exc:  # 학습 결과를 잃지 않는다
+        print("\nYAML 기록 실패: " + type(exc).__name__ + ": " + str(exc)[:120])
+
+    weights = args.danger_class_weights or "없음(가중치 미적용)"
+    note = (
+        f"학습 조건: {args.epochs} 에폭 · batch {args.batch_size} · lr {args.lr} · "
+        f"세그 클래스 가중치 {weights}\n\n"
+        + build_metrics_table(history, metrics)
+        + "\n\n`없음` 은 평가셋에 그 클래스가 없어 계산되지 않았다는 뜻이고, 0 과 다르다."
     )
-    payload = {k: round(float(v), 4) for k, v in metrics.items() if k in keep and isinstance(v, (int, float))}
-    payload["epochs"] = args.epochs
-    rt.log(**payload)
-    print(f"\nPR 에 기록: {', '.join(f'{k}={v}' for k, v in payload.items())}")
+    if update_pr_section("측정값 전체", note):
+        print("PR 본문에 에폭별 지표 표 기록")
 
 
 if __name__ == "__main__":
