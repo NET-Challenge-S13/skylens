@@ -170,7 +170,12 @@ def check(name, ds, *, expect_mask, expect_boxes, stride=4, validity=False):
         assert tuple(batch["person_heatmap"].shape) == (b, 1, oh, ow)
         assert tuple(batch["person_wh"].shape) == (b, 2, oh, ow)
         assert tuple(batch["person_reg_mask"].shape) == (b, 1, oh, ow)
-        for k in ("person_heatmap", "person_wh", "person_reg_mask"):
+        assert tuple(batch["person_offset"].shape) == (b, 2, oh, ow)
+        off = batch["person_offset"]
+        assert float(off.min()) >= 0.0 and float(off.max()) < 1.0, "offset must lie in [0, 1)"
+        # 오프셋은 유효 중심에서만 값을 가진다
+        assert float((off * (1 - batch["person_reg_mask"])).abs().sum()) == 0.0
+        for k in ("person_heatmap", "person_wh", "person_reg_mask", "person_offset"):
             assert batch[k].dtype == torch.float32
         hm = batch["person_heatmap"]
         print(f"  heatmap peak={hm.max().item():.4f}  "

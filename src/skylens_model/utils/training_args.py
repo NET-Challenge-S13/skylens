@@ -41,8 +41,13 @@ class SkyLensTrainingArguments(TrainingArguments):
         },
     )
     eval_max_detections: int = field(
-        default=100,
-        metadata={"help": "평가 시 히트맵에서 뽑을 이미지당 최대 피크 수 (top-k)."},
+        default=300,
+        metadata={
+            "help": (
+                "평가 시 히트맵에서 뽑을 이미지당 최대 피크 수 (top-k). GT 복원에도 같은 "
+                "k를 쓰므로 100이면 VisDrone 군중 이미지의 GT가 잘린다."
+            )
+        },
     )
     eval_score_threshold: float = field(
         default=0.3,

@@ -77,6 +77,7 @@ major damage 이상이다. medium까지 넣으면 양성 클래스가 과포화�
 | `person_heatmap` | (B, 1, H/s, W/s) float32 | CenterNet 가우시안 |
 | `person_wh` | (B, 2, H/s, W/s) float32 | (w, h), **출력 stride 단위** |
 | `person_reg_mask` | (B, 1, H/s, W/s) float32 | 1 = 유효 중심 |
+| `person_offset` | (B, 2, H/s, W/s) float32 | (dx, dy) = 중심/s − floor(중심/s), [0, 1). `person_reg_mask`=1 위치만 유효 |
 
 키 생략이 §6.3의 헤드별 분리 학습을 구현하는 방식이다 — 학습 루프는 키 존재
 여부만 보고 어느 loss를 계산할지 정한다.
@@ -94,8 +95,11 @@ FLAME 3의 radiometric thermal은 픽셀당 실제 온도라 raw 0이 유효값�
 
 **타겟 인코딩**은 CenterNet 방식이다. bbox 중심을 stride로 나눈 좌표에 가우시안을
 splat하고, 반경은 CornerNet `gaussian_radius`(세 경우의 최소근), 겹치면
-`np.maximum`으로 합친다. 오프셋 회귀는 계약에 없어 생략했다 — 필요해지면
-`person_offset` 키를 추가하는 방향으로 확장한다.
+`np.maximum`으로 합친다. 정수 격자로 자르면서 버려지는 중심의 나머지는
+`person_offset` 키로 내보낸다(CenterNet `reg`). stride 4에서 8px짜리 사람은 중심이
+1–2px만 어긋나도 IoU 0.5를 못 넘기므로, 모델의 `offset_head`
+(`SkyLensConfig.use_offset_head`)가 이를 회귀하고 디코딩 시 피크 좌표에 더한다.
+같은 격자에 중심이 둘 떨어지면 나중 박스가 wh/offset을 덮어쓰는 한계는 그대로다.
 
 ---
 

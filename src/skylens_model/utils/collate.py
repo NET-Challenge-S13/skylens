@@ -15,9 +15,12 @@ key                 shape / dtype                  notes
 ``person_heatmap``  (B, 1, H/s, W/s) float32       CenterNet gaussian splat
 ``person_wh``       (B, 2, H/s, W/s) float32       (w, h) in output-stride units
 ``person_reg_mask`` (B, 1, H/s, W/s) float32       1 at valid centres
+``person_offset``   (B, 2, H/s, W/s) float32       sub-cell centre offset in [0, 1):
+                                                   ``c/s - floor(c/s)``, valid where
+                                                   ``person_reg_mask`` is 1
 =================== ============================== =================================
 
-The three ``person_*`` keys are omitted together when no sample in the batch
+The four ``person_*`` keys are omitted together when no sample in the batch
 carries boxes. That is what makes README §6.3 (per-head training) work: the
 training loop just checks key presence to decide which loss to compute.
 
@@ -207,14 +210,17 @@ class SkyLensCollator:
             hm = np.zeros((len(samples), 1, oh, ow), dtype=np.float32)
             wh = np.zeros((len(samples), 2, oh, ow), dtype=np.float32)
             reg = np.zeros((len(samples), 1, oh, ow), dtype=np.float32)
+            off = np.zeros((len(samples), 2, oh, ow), dtype=np.float32)
             for i, s_ in enumerate(samples):
                 boxes = s_.get("person_boxes")
                 if boxes is None or len(boxes) == 0:
                     continue
-                self._encode_boxes(np.asarray(boxes, np.float32), hm[i, 0], wh[i], reg[i, 0])
+                self._encode_boxes(np.asarray(boxes, np.float32), hm[i, 0], wh[i], reg[i, 0],
+                                   off[i])
             batch["person_heatmap"] = torch.from_numpy(hm)
             batch["person_wh"] = torch.from_numpy(wh)
             batch["person_reg_mask"] = torch.from_numpy(reg)
+            batch["person_offset"] = torch.from_numpy(off)
 
         return batch
 
@@ -283,8 +289,13 @@ class SkyLensCollator:
         return (THERMAL_MIN + (1.0 - THERMAL_MIN) * norm).astype(np.float32)
 
     def _encode_boxes(self, boxes: np.ndarray, heatmap: np.ndarray,
-                      wh: np.ndarray, reg_mask: np.ndarray) -> None:
-        """CenterNet encoding of xyxy pixel boxes into the output-stride grids."""
+                      wh: np.ndarray, reg_mask: np.ndarray,
+                      offset: np.ndarray | None = None) -> None:
+        """CenterNet encoding of xyxy pixel boxes into the output-stride grids.
+
+        ``offset`` (2, H/s, W/s) receives the sub-cell remainder of the centre
+        that the integer cell index throws away (CenterNet's ``reg`` target).
+        """
         s = self.person_head_stride
         oh, ow = heatmap.shape
 
@@ -303,3 +314,6 @@ class SkyLensCollator:
             wh[0, cyi, cxi] = bw
             wh[1, cyi, cxi] = bh
             reg_mask[cyi, cxi] = 1.0
+            if offset is not None:
+                offset[0, cyi, cxi] = cx - cxi
+                offset[1, cyi, cxi] = cy - cyi

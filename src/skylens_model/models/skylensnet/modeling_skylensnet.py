@@ -38,10 +38,12 @@ class SkyLensOutput(ModelOutput):
 
     Args:
         loss: 가중합된 총 loss. 어떤 GT도 주어지지 않으면 `None`.
-        loss_dict: 개별 loss (`danger_seg`, `person_heatmap`, `person_wh`).
+        loss_dict: 개별 loss (`danger_seg`, `person_heatmap`, `person_wh`, `person_offset`).
         danger_logits: `(B, num_danger_classes, H, W)` — 입력 해상도 위험구역 로짓.
         person_heatmap: `(B, 1, H/s, W/s)` — **sigmoid가 적용된 확률**.
         person_wh: `(B, 2, H/s, W/s)` — 중심점 기준 (w, h) 회귀값.
+        person_offset: `(B, 2, H/s, W/s)` — 격자 내 서브픽셀 중심 오프셋 (x, y).
+            `use_offset_head=False`면 `None`.
     """
 
     loss: torch.FloatTensor | None = None
@@ -49,6 +51,7 @@ class SkyLensOutput(ModelOutput):
     danger_logits: torch.FloatTensor = None
     person_heatmap: torch.FloatTensor = None
     person_wh: torch.FloatTensor = None
+    person_offset: torch.FloatTensor | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -390,11 +393,19 @@ class SkyLensForDisasterPerception(SkyLensPreTrainedModel):
         self.person_stem = SkyLensConvBlock(feat_ch, feat_ch)
         self.heatmap_head = nn.Conv2d(feat_ch, 1, kernel_size=1)
         self.wh_head = nn.Conv2d(feat_ch, 2, kernel_size=1)
+        # 서브픽셀 오프셋 헤드 — stride 격자로 잘린 중심의 나머지 [0, 1)를 회귀한다.
+        # 설정에 키가 없는 기존 체크포인트는 헤드 없이 그대로 로드된다.
+        self.offset_head = (
+            nn.Conv2d(feat_ch, 2, kernel_size=1)
+            if getattr(config, "use_offset_head", False)
+            else None
+        )
         # CenterNet 관례: 초기 sigmoid ≈ 0.1 이 되도록 bias = -2.19
         self.heatmap_head._skylens_bias_init = -2.19
         # 출력 헤드는 kaiming(fan_out) 대상에서 제외한다 (_init_weights 주석 참조).
-        for _head in (self.danger_head, self.heatmap_head, self.wh_head):
-            _head._skylens_head_init = True
+        for _head in (self.danger_head, self.heatmap_head, self.wh_head, self.offset_head):
+            if _head is not None:
+                _head._skylens_head_init = True
 
         self.post_init()
 
@@ -448,6 +459,7 @@ class SkyLensForDisasterPerception(SkyLensPreTrainedModel):
         person_heatmap: torch.FloatTensor | None = None,
         person_wh: torch.FloatTensor | None = None,
         person_reg_mask: torch.FloatTensor | None = None,
+        person_offset: torch.FloatTensor | None = None,
         return_dict: bool | None = None,
     ) -> SkyLensOutput:
         # transformers 5.x 에서 config.use_return_dict 는 deprecated.
@@ -484,6 +496,7 @@ class SkyLensForDisasterPerception(SkyLensPreTrainedModel):
         person_feat = self.person_stem(person_feat)
         heatmap_pred = torch.sigmoid(self.heatmap_head(person_feat))
         wh_pred = self.wh_head(person_feat)
+        offset_pred = self.offset_head(person_feat) if self.offset_head is not None else None
 
         # 5) loss — GT가 없는 헤드는 건너뛴다 (README §6.3 헤드별 분리 학습)
         loss = None
@@ -505,11 +518,20 @@ class SkyLensForDisasterPerception(SkyLensPreTrainedModel):
             wh_loss = masked_l1_loss(wh_pred, person_wh, person_reg_mask)
             loss_dict["person_wh"] = wh_loss
 
+        if (
+            offset_pred is not None
+            and person_offset is not None
+            and person_reg_mask is not None
+        ):
+            # wh loss와 같은 정규화 — 유효 중심 수로 나눈다.
+            loss_dict["person_offset"] = masked_l1_loss(offset_pred, person_offset, person_reg_mask)
+
         if loss_dict:
             weights = {
                 "danger_seg": self.config.seg_loss_weight,
                 "person_heatmap": self.config.heatmap_loss_weight,
                 "person_wh": self.config.wh_loss_weight,
+                "person_offset": getattr(self.config, "offset_loss_weight", 1.0),
             }
             loss = sum(weights[k] * v for k, v in loss_dict.items())
         else:
@@ -517,6 +539,8 @@ class SkyLensForDisasterPerception(SkyLensPreTrainedModel):
 
         if not return_dict:
             output = (danger_logits, heatmap_pred, wh_pred)
+            if offset_pred is not None:
+                output = output + (offset_pred,)
             return ((loss, loss_dict) + output) if loss is not None else output
 
         return SkyLensOutput(
@@ -525,6 +549,7 @@ class SkyLensForDisasterPerception(SkyLensPreTrainedModel):
             danger_logits=danger_logits,
             person_heatmap=heatmap_pred,
             person_wh=wh_pred,
+            person_offset=offset_pred,
         )
 
 
