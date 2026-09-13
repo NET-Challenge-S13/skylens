@@ -68,6 +68,13 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     p.add_argument(
+        "--visdrone-oversample",
+        type=int,
+        default=1,
+        metavar="N",
+        help="VisDrone 학습 분할 전체를 N배로 반복한다. 1이면 반복 없음",
+    )
+    p.add_argument(
         "--wh-loss-weight",
         type=float,
         default=0.1,
@@ -258,6 +265,15 @@ def main() -> int:
                     # 비중이 줄어 fire 가 학습되지 않는다.
                     ds = ConcatDataset([ds] * args.road_oversample)
                     extra = f"  (x{args.road_oversample} 구성비 보존)"
+                if (
+                    which == "train"
+                    and args.visdrone_oversample > 1
+                    and cls is VisDronePerson
+                ):
+                    # 사람 탐지의 병목이다. LLVIP 에 묻히지 않도록 분할 전체를 N배로 반복한다.
+                    base = len(ds)
+                    ds = ConcatDataset([ds] * args.visdrone_oversample)
+                    extra = f"  (+visdrone {base:,}장 x{args.visdrone_oversample - 1})"
                 print(f"  [ok]   {cls.__name__:24s} {split:5s} {len(ds):>6,}장{extra}")
                 parts.append(ds)
             except Exception as exc:
