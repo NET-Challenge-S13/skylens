@@ -83,6 +83,18 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--eval-max-samples", type=int, default=EVAL_MAX_SAMPLES)
     p.add_argument("--no-resume", action="store_true", help="체크포인트가 있어도 처음부터 학습한다")
     p.add_argument("--no-log-pr", action="store_true", help="결과를 PR 에 적지 않는다")
+    p.add_argument(
+        "--image-size",
+        type=int,
+        default=IMAGE_SIZE,
+        help="학습·평가 입력 해상도. 캐시는 해상도별로 따로 만든다",
+    )
+    p.add_argument(
+        "--num-workers",
+        type=int,
+        default=0,
+        help="데이터로더 워커 수. Windows 는 spawn 비용 때문에 0, Linux 는 늘려도 된다",
+    )
     return p.parse_args()
 
 
@@ -221,8 +233,8 @@ def main() -> int:
                 continue
             try:
                 raw = cls(root, split=split)
-                cache_dir = cache_root / f"{cls.__name__}_{split}_{IMAGE_SIZE}"
-                build_resized_cache(raw, cache_dir, IMAGE_SIZE)
+                cache_dir = cache_root / f"{cls.__name__}_{split}_{args.image_size}"
+                build_resized_cache(raw, cache_dir, args.image_size)
                 ds = ResizedCache(cache_dir, transforms=augment)
                 extra = ""
                 if (
@@ -303,7 +315,7 @@ def main() -> int:
         load_best_model_at_end=False,
         report_to=[],
         fp16=(device == "cuda"),
-        dataloader_num_workers=0,
+        dataloader_num_workers=args.num_workers,
         person_head_stride=PERSON_HEAD_STRIDE,
         num_danger_classes=NUM_DANGER_CLASSES,
         freeze_backbone_epochs=0.0,
