@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 import warnings
 from pathlib import Path
@@ -510,6 +511,72 @@ def update_pr_section(heading: str, body_md: str) -> bool:
     return True
 
 
+
+def ensure_researchtree_token() -> None:
+    """researchtree 가 쓸 GitHub 토큰을 환경변수에 넣는다.
+
+    rt.log 와 rt.conclude 는 학습을 죽이지 않으려고 실패해도 경고만 내고 넘어간다.
+    그래서 토큰이 없으면 결과가 조용히 사라진다. 실제로 여섯 번의 실행에서 지표와
+    결론을 전부 잃었다. gh 가 이미 로그인돼 있으면 그 토큰을 빌려 쓴다.
+    """
+    import os
+    import shutil
+    import subprocess
+
+    if os.environ.get("RESEARCHTREE_TOKEN"):
+        return
+
+    exe = shutil.which("gh") or shutil.which("gh.exe")
+    if exe is None:
+        for candidate in (
+            r"C:\Program Files\GitHub CLI\gh.exe",
+            r"C:\Program Files (x86)\GitHub CLI\gh.exe",
+            "/usr/bin/gh",
+            "/usr/local/bin/gh",
+        ):
+            if Path(candidate).exists():
+                exe = candidate
+                break
+    if exe is None:
+        return
+
+    try:
+        got = subprocess.run([exe, "auth", "token"], capture_output=True, text=True, timeout=20)
+    except Exception:
+        return
+    token = got.stdout.strip()
+    if got.returncode == 0 and token:
+        os.environ["RESEARCHTREE_TOKEN"] = token
+
+
+def verify_pr_metrics(expected: int) -> None:
+    """PR 에 지표가 실제로 들어갔는지 다시 읽어서 확인한다.
+
+    쓰기가 조용히 실패할 수 있으므로 쓴 뒤에 읽는다. 확인에 실패해도 학습 결과를
+    잃지는 않으므로 예외를 올리지 않고 크게 경고만 남긴다.
+    """
+    try:
+        import researchtree as rt
+
+        research = rt.load()
+        branch = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"], capture_output=True, text=True, check=True
+        ).stdout.strip()
+        name = branch.split("/", 1)[-1]
+        got = len(research[name].metrics or {})
+    except Exception as exc:
+        print(f"[확인 실패] PR 기록을 되읽지 못했다: {type(exc).__name__}: {str(exc)[:80]}")
+        return
+
+    if got >= expected:
+        print(f"[확인] PR 에 지표 {got}개가 들어갔다")
+    else:
+        print(
+            f"[경고] PR 에 지표가 {got}개뿐이다. {expected}개를 보냈다. "
+            "researchtree login 또는 RESEARCHTREE_TOKEN 을 확인할 것"
+        )
+
+
 def log_to_pr(metrics: dict, history: list, args: argparse.Namespace) -> None:
     """실험 브랜치의 PR 에 지표를 적는다. 실패해도 학습 결과에는 영향이 없다.
 
@@ -520,6 +587,7 @@ def log_to_pr(metrics: dict, history: list, args: argparse.Namespace) -> None:
     payload = {k: v for k, v in _numeric(metrics).items() if v is not None}
     payload["epochs"] = args.epochs
 
+    ensure_researchtree_token()
     try:
         import researchtree as rt
 
@@ -539,6 +607,8 @@ def log_to_pr(metrics: dict, history: list, args: argparse.Namespace) -> None:
     )
     if update_pr_section("측정값 전체", note):
         print("PR 본문에 에폭별 지표 표 기록")
+
+    verify_pr_metrics(len(payload))
 
 
 if __name__ == "__main__":
