@@ -77,8 +77,9 @@ def forward_decode(model, images: list[np.ndarray], stride: int, k: int, thr: fl
     mm = torch.tensor([[True, False]] * len(images), device=device)
     with torch.autocast("cuda", dtype=torch.float16, enabled=device.type == "cuda"):
         out = model(pixel_values=pv, modality_mask=mm)
+    off = out.person_offset.float() if getattr(out, "person_offset", None) is not None else None
     det = decode_heatmap_peaks(out.person_heatmap.float(), out.person_wh.float(), k=k, threshold=thr,
-                               stride=stride).cpu().numpy().astype(np.float64)
+                               stride=stride, offset=off).cpu().numpy().astype(np.float64)
     return [d[d[:, 4] > 0] for d in det]
 
 
@@ -139,7 +140,8 @@ def main() -> int:
         if imgs[0].max() > 1.5:
             imgs = [im / 255.0 for im in imgs]
         det_a += forward_decode(model, imgs, stride, k, thr, device)
-        g = decode_gt_boxes(batch["person_reg_mask"], batch["person_wh"], k=k, stride=stride).numpy()
+        g = decode_gt_boxes(batch["person_reg_mask"], batch["person_wh"], k=k, stride=stride,
+                            offset=batch.get("person_offset")).numpy()
         gt_a += [x[x[:, 4] > 0][:, :4].astype(np.float64) for x in g]
     print(f"A done {time.time() - t0:.0f}s", flush=True)
 

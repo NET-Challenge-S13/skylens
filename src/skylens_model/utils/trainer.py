@@ -289,7 +289,11 @@ class SkyLensTrainer(Trainer):
             gt_reg = inputs.get("person_reg_mask")
             gt_wh = inputs.get("person_wh")
             if gt_reg is not None and gt_wh is not None:
-                gt_boxes = decode_gt_boxes(gt_reg, gt_wh, k=k, stride=stride).to(torch.float32)
+                # GT는 collator의 person_offset으로 항상 연속 좌표로 복원한다 (격자 스냅 X).
+                # 예측 오프셋과 무관한 GT 자체의 값이므로 모델 헤드 유무와 상관없다.
+                gt_boxes = decode_gt_boxes(
+                    gt_reg, gt_wh, k=k, stride=stride, offset=inputs.get("person_offset")
+                ).to(torch.float32)
             else:
                 # 회귀 타깃이 없으면 GT 히트맵 정점(가우시안 peak == 1.0)에서
                 # 중심만 복원하고 w=h=0으로 둔다.
