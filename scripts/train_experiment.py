@@ -92,6 +92,21 @@ def parse_args() -> argparse.Namespace:
         default=PERSON_HEAD_STRIDE,
         help="점 검출 헤드의 출력 stride",
     )
+    p.add_argument(
+        "--visdrone-tiles",
+        action="store_true",
+        help=(
+            "VisDrone 학습 샘플을 512 정사각 찌그러뜨림 대신 원본에 가까운 스케일(짧은 변 765px)의 "
+            "무작위 512 크롭으로 바꾼다. 평가는 그대로 둔다"
+        ),
+    )
+    p.add_argument(
+        "--visdrone-tile-crops",
+        type=int,
+        default=3,
+        metavar="N",
+        help="--visdrone-tiles 일 때 에폭당 이미지 1장에서 뽑는 크롭 수",
+    )
     p.add_argument("--data-root", type=Path, default=None, help="기본값은 자동 탐색")
     p.add_argument("--eval-max-samples", type=int, default=EVAL_MAX_SAMPLES)
     p.add_argument("--no-resume", action="store_true", help="체크포인트가 있어도 처음부터 학습한다")
@@ -186,6 +201,7 @@ def main() -> int:
     from skylens_model.utils.callbacks import GracefulInterruptCallback, find_resume_checkpoint
     from skylens_model.utils.metrics import build_compute_metrics
     from skylens_model.utils.trainer import SkyLensTrainer
+    from skylens_model.utils.tiling import SHORT_SIDE, ScaledTileCropDataset, build_scaled_cache
     from skylens_model.utils.training_args import SkyLensTrainingArguments
 
     # --- 증강 (노트북 §2) --------------------------------------------------
@@ -234,6 +250,21 @@ def main() -> int:
                 continue
             try:
                 raw = cls(root, split=split)
+                if which == "train" and args.visdrone_tiles and cls is VisDronePerson:
+                    # 공유 512 캐시와 섞이지 않도록 별도 디렉터리에 둔다.
+                    tile_dir = cache_root / f"{cls.__name__}_{split}_short{SHORT_SIDE}"
+                    build_scaled_cache(raw, tile_dir, SHORT_SIDE, workers=8)
+                    ds = ScaledTileCropDataset(
+                        tile_dir, crops_per_image=args.visdrone_tile_crops,
+                        tile=IMAGE_SIZE, transforms=augment,
+                    )
+                    print(
+                        f"  [ok]   {cls.__name__:24s} {split:5s} {len(ds):>6,}장"
+                        f"  (tiles: {len(raw):,}장 x{args.visdrone_tile_crops} 무작위 "
+                        f"{IMAGE_SIZE} 크롭, 짧은 변 {SHORT_SIDE})"
+                    )
+                    parts.append(ds)
+                    continue
                 cache_dir = cache_root / f"{cls.__name__}_{split}_{IMAGE_SIZE}"
                 build_resized_cache(raw, cache_dir, IMAGE_SIZE)
                 ds = ResizedCache(cache_dir, transforms=augment)
