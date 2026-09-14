@@ -35,7 +35,6 @@ otherwise tell "cold" from "no sensor".
 
 from __future__ import annotations
 
-import os
 from collections.abc import Sequence
 from typing import Any
 
@@ -169,25 +168,9 @@ class SkyLensCollator:
         self.person_head_stride = int(person_head_stride)
         self.validity_channel = bool(validity_channel)
         self.min_overlap = float(min_overlap)
-        p_thermal, p_rgb = (float(x) for x in modality_dropout)
-        if p_thermal < 0 or p_rgb < 0 or p_thermal + p_rgb > 1.0:
-            raise ValueError(f"modality_dropout must be >= 0 and sum to <= 1, got {modality_dropout}")
-        self.modality_dropout = (p_thermal, p_rgb)
+        self.modality_dropout = modality_dropout
         self.max_objects = int(max_objects)
-        self._explicit_rng = rng is not None
         self._rng = rng if rng is not None else np.random.default_rng()
-        self._rng_pid = os.getpid()
-
-    def _get_rng(self) -> np.random.Generator:
-        """Return the RNG, reseeding once per forked DataLoader worker.
-
-        A default RNG copied into forked workers would give every worker the
-        same draw sequence. An explicitly passed ``rng`` is used as is.
-        """
-        if not self._explicit_rng and os.getpid() != self._rng_pid:
-            self._rng = np.random.default_rng()
-            self._rng_pid = os.getpid()
-        return self._rng
 
     # -- public ----------------------------------------------------------
 
@@ -276,19 +259,14 @@ class SkyLensCollator:
             thermal = self._normalize_thermal(plane.astype(np.float32),
                                               already_scaled=(c >= 4))
 
-        # symmetric modality dropout (README §2.2). Only samples carrying both
-        # modalities are eligible, so a single-modality sample never loses its
-        # only input. One uniform draw splits into the two exclusive outcomes,
-        # matching SkyLensForDisasterPerception._sample_modality_mask.
+        # symmetric modality dropout (README §2.2)
         p_thermal, p_rgb = self.modality_dropout
-        if has_rgb and has_thermal and (p_thermal > 0 or p_rgb > 0):
-            u = self._get_rng().random()
-            if u < p_thermal:
-                thermal = np.full((h, w), THERMAL_ABSENT, dtype=np.float32)
-                has_thermal = False
-            elif u < p_thermal + p_rgb:
-                rgb = np.zeros((h, w, 3), dtype=np.float32)
-                has_rgb = False
+        if has_thermal and p_thermal > 0 and self._rng.random() < p_thermal:
+            thermal = np.full((h, w), THERMAL_ABSENT, dtype=np.float32)
+            has_thermal = False
+        elif has_rgb and p_rgb > 0 and self._rng.random() < p_rgb:
+            rgb = np.zeros((h, w, 3), dtype=np.float32)
+            has_rgb = False
 
         planes = [rgb, thermal[:, :, None]]
         if self.validity_channel:
