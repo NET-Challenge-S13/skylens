@@ -91,9 +91,6 @@ url = "https://download.pytorch.org/whl/cu126"
 explicit = true
 
 [tool.uv.sources]
-# CUDA 12.6 휠은 Windows 에서만 쓴다. 그 밖(Linux 등)은 PyPI 의 기본 torch 를 받는다.
-# PyPI 의 Linux torch 는 최신 CUDA 로 빌드돼 있어 Blackwell(RTX PRO 5000, sm_120) 도 돈다.
-# cu126 휠은 sm_120 을 지원하지 않는다.
 torch = { index = "pytorch-cu126", marker = "sys_platform == 'win32'" }
 torchvision = { index = "pytorch-cu126", marker = "sys_platform == 'win32'" }
 # recon 그룹의 세 패키지는 PyPI 에 없다. gsplat 예제가 고정한 커밋을 그대로 쓴다.
