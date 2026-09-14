@@ -69,6 +69,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--dist", type=float, default=8.0, help="point match distance (px)")
     p.add_argument("--legacy", action="store_true")
     p.add_argument("--calib", action="store_true")
+    p.add_argument("--llvip-modality", choices=["both", "rgb", "thermal"], default="both",
+                   help="force the LLVIP input modality (rgb: thermal removed, thermal: RGB removed)")
     return p.parse_args()
 
 
@@ -132,6 +134,12 @@ def main() -> None:
         det_l, gt_l = [], []
         with torch.no_grad(), torch.autocast(**amp):
             for batch in dl:
+                if a.llvip_modality == "rgb":  # remove thermal: channel 3 -> 0.0, mask False
+                    batch["pixel_values"][:, 3] = 0.0
+                    batch["modality_mask"][:, 1] = False
+                elif a.llvip_modality == "thermal":  # remove RGB
+                    batch["pixel_values"][:, :3] = 0.0
+                    batch["modality_mask"][:, 0] = False
                 batch = {k: (v.to(dev) if torch.is_tensor(v) else v) for k, v in batch.items()}
                 det_l += decode(model(**batch))
                 if legacy:
@@ -259,6 +267,8 @@ def main() -> None:
                    "centre_mode": centre_mode["v"],
                    "llvip_gt": "grid_decoded" if legacy else "continuous_cache_annotations",
                    "vd137_indices": vd137, "seconds": round(time.time() - t0, 1)}
+    if a.llvip_modality != "both":  # absent by default so existing outputs keep their keys
+        res["meta"]["llvip_modality"] = a.llvip_modality
 
     print(f"\n{'set':28s}{'mAP50':>8s}{'mAP5095':>9s}{'ptAP':>8s}{'bestF1':>8s}{'@thr':>6s}{'F1@.3':>8s}{'nGT':>7s}{'nDet':>8s}{'R@P50':>8s}{'Rmax':>8s}")
     for k, v in res.items():

@@ -118,8 +118,11 @@ class SkyLensTrainer(Trainer):
 
     args: SkyLensTrainingArguments
 
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
+    def __init__(self, *args: Any, eval_data_collator: Any = None, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
+        # 평가·테스트 전용 collator. None 이면 학습 collator 를 같이 쓴다.
+        # 학습 collator 에만 modality dropout 같은 확률적 변형을 걸 때 쓴다.
+        self.eval_data_collator = eval_data_collator
         # loss 컴포넌트 누적 버퍼: {이름: [값, ...]}
         self._loss_log_buffer: dict[str, list[float]] = {}
 
@@ -128,6 +131,25 @@ class SkyLensTrainer(Trainer):
             isinstance(cb, FreezeBackboneCallback) for cb in self.callback_handler.callbacks
         ):
             self.add_callback(FreezeBackboneCallback(freeze_epochs))
+
+    # ------------------------------------------------------------------
+    # eval dataloader: 학습 collator 대신 eval_data_collator 를 쓴다
+    # ------------------------------------------------------------------
+    def _with_eval_collator(self, build: Any, *args: Any, **kwargs: Any) -> Any:
+        if self.eval_data_collator is None:
+            return build(*args, **kwargs)
+        train_collator = self.data_collator
+        self.data_collator = self.eval_data_collator
+        try:
+            return build(*args, **kwargs)
+        finally:
+            self.data_collator = train_collator
+
+    def get_eval_dataloader(self, *args: Any, **kwargs: Any) -> Any:  # type: ignore[override]
+        return self._with_eval_collator(super().get_eval_dataloader, *args, **kwargs)
+
+    def get_test_dataloader(self, *args: Any, **kwargs: Any) -> Any:  # type: ignore[override]
+        return self._with_eval_collator(super().get_test_dataloader, *args, **kwargs)
 
     # ------------------------------------------------------------------
     # loss
