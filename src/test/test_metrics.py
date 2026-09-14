@@ -79,7 +79,10 @@ def test_decode_gt_boxes() -> None:
 
     boxes = decode_gt_boxes(reg, wh, k=4, stride=4)
     assert boxes.shape == (1, 4, 5)
-    assert boxes[0, 0].tolist() == [8.0, 12.0, 20.0, 28.0, 1.0]
+    # 셀 중앙 규약: (x + 0.5) * stride
+    assert boxes[0, 0].tolist() == [10.0, 14.0, 20.0, 28.0, 1.0]
+    legacy = decode_gt_boxes(reg, wh, k=4, stride=4, legacy_decode=True)
+    assert legacy[0, 0].tolist() == [8.0, 12.0, 20.0, 28.0, 1.0]
     assert boxes[0, 1:, 4].sum() == 0.0  # 빈 슬롯은 valid=0
 
 
@@ -103,3 +106,56 @@ def test_build_compute_metrics_accepts_both_gt_layouts() -> None:
     assert "map_50" not in legacy
     assert abs(legacy["point_ap"] - _AP_MIXED) < 1e-9
     assert legacy["point_f1"] == with_boxes["point_f1"]
+
+
+def test_decode_heatmap_single_peak_at_cell_centre() -> None:
+    from skylens_model.utils.metrics import decode_heatmap_peaks
+
+    hm = torch.zeros(1, 1, 8, 8)
+    hm[0, 0, 5, 3] = 0.9  # y=5, x=3
+    det = decode_heatmap_peaks(hm, None, k=3, threshold=0.3, stride=4)
+    assert det[0, 0, :2].tolist() == [14.0, 22.0]
+    assert abs(float(det[0, 0, 4]) - 0.9) < 1e-6
+    # 인코딩 int(c/stride)와 왕복: 셀 안의 어떤 연속 중심도 같은 셀로 가고, 오차는 <= stride/2
+    for c in (12.0, 13.9, 15.99):
+        assert int(c / 4) == 3 and abs(c - float(det[0, 0, 0])) <= 2.0
+    legacy = decode_heatmap_peaks(hm, None, k=3, threshold=0.3, stride=4, legacy_decode=True)
+    assert legacy[0, 0, :2].tolist() == [12.0, 20.0]
+
+
+def test_decode_heatmap_offset_overrides_half_cell() -> None:
+    from skylens_model.utils.metrics import decode_heatmap_peaks
+
+    hm = torch.zeros(1, 1, 8, 8)
+    hm[0, 0, 5, 3] = 0.9
+    off = torch.zeros(1, 2, 8, 8)
+    off[0, 0, 5, 3], off[0, 1, 5, 3] = 0.25, 0.75
+    det = decode_heatmap_peaks(hm, None, k=1, threshold=0.3, stride=4, offset=off)
+    assert det[0, 0, :2].tolist() == [13.0, 23.0]  # (3.25*4, 5.75*4), not +0.5
+
+
+def test_ap_score_floor_does_not_truncate_pr_curve() -> None:
+    # 5 GT; 높은 점수 검출 2개는 TP 1/FP 1, 낮은 점수(0.1~0.25) 검출 3개는 전부 TP.
+    gts = np.array([[20.0 * i + 10, 10, 8, 8] for i in range(5)])
+    preds = np.array(
+        [
+            [10, 10, 8, 8, 0.9],   # TP
+            [300, 300, 8, 8, 0.8],  # FP
+            [30, 10, 8, 8, 0.25],  # TP
+            [50, 10, 8, 8, 0.2],   # TP
+            [70, 10, 8, 8, 0.1],   # TP
+        ],
+        np.float32,
+    )
+    seg = np.zeros((1, 4, 4), np.int16)
+    gt = np.zeros((1, 5, 5), np.float32)
+    gt[0, :, :4] = gts
+    gt[0, :, 4] = 1.0
+    ev = ((seg, preds[None]), (seg, gt))
+    lo = build_compute_metrics(num_classes=4, score_threshold=0.3, ap_score_floor=0.05)(ev)
+    hi = build_compute_metrics(num_classes=4, score_threshold=0.3, ap_score_floor=0.3)(ev)
+    assert lo["map_50"] >= hi["map_50"] and lo["point_ap"] >= hi["point_ap"]
+    assert lo["map_50"] > hi["map_50"] + 0.2
+    # 점 P/R/F1은 운영 임계값(0.3)에서 그대로
+    assert lo["point_f1"] == hi["point_f1"]
+    assert lo["point_tp"] == 1.0 and lo["point_fp"] == 1.0

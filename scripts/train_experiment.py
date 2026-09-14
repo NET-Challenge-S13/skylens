@@ -372,6 +372,7 @@ def main() -> int:
             num_classes=NUM_DANGER_CLASSES,
             distance_threshold=targs.point_distance_threshold,
             score_threshold=targs.eval_score_threshold,
+            ap_score_floor=targs.eval_ap_score_floor,
         ),
         callbacks=[GracefulInterruptCallback()],
     )
