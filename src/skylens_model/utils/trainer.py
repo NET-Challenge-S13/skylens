@@ -252,6 +252,7 @@ class SkyLensTrainer(Trainer):
         stride = int(getattr(args, "person_head_stride", 4))
         k = int(getattr(args, "eval_max_detections", 100))
         thr = float(getattr(args, "eval_score_threshold", 0.3))
+        ap_floor = float(getattr(args, "eval_ap_score_floor", 0.05))
         ignore_index = int(getattr(args, "seg_ignore_index", 255))
 
         # --- 세그: 로짓 대신 argmax된 클래스 맵만 남긴다 (메모리) ---
@@ -279,8 +280,10 @@ class SkyLensTrainer(Trainer):
                 pred_hm,
                 getattr(outputs, "person_wh", None),
                 k=k,
-                threshold=thr,
+                # mAP/point_ap용 floor까지 남기고 F1 임계값은 compute_metrics가 적용한다.
+                threshold=min(thr, ap_floor),
                 stride=stride,
+                offset=getattr(outputs, "person_offset", None),
             ).to(torch.float32)
             # GT 박스는 collator의 회귀 타깃(person_reg_mask/person_wh)에서 복원한다.
             gt_reg = inputs.get("person_reg_mask")
