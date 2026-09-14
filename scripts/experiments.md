@@ -72,3 +72,9 @@ uv run python scripts/train_experiment.py --run-name balanced-5ep --epochs 5 \
 - 2 에폭 실행이 약 2시간이다. 오버샘플링을 켜면 한 에폭의 step 수가 2,905에서 3,545로 늘어 더 걸린다.
 - 평가는 에폭 경계에서만 돈다. 학습 도중에는 손실만 보인다.
 - 결과는 끝난 뒤 `rt.log()`로 PR의 YAML 블록에, 에폭별 전체 지표 표는 PR 본문 `측정값 전체` 절에 자동으로 올라간다.
+
+## person-anisotropic-heatmap
+
+```
+python scripts/train_experiment.py --run-name person-anisotropic-heatmap --epochs 5 --road-oversample 4 --balance-fire-seg --dice-loss-weight 1.0 --visdrone-tiles --offset-head --heatmap-gaussian anisotropic --num-workers 8
+```
