@@ -706,24 +706,37 @@ def _unpack_pair(x: object) -> tuple[object | None, object | None]:
     return x, None
 
 
-def point_match_flags(preds: np.ndarray, gts: np.ndarray, distance_threshold: float = 8.0) -> np.ndarray:
+def size_relative_radius(heights: np.ndarray, frac: float = 0.15, min_px: float = 8.0) -> np.ndarray:
+    """Per-GT match radius `max(min_px, frac * box height)` in the GT's own frame."""
+    h = np.asarray(heights, dtype=np.float64).reshape(-1)
+    return np.maximum(float(min_px), float(frac) * h)
+
+
+def point_match_flags(
+    preds: np.ndarray, gts: np.ndarray, distance_threshold: float | np.ndarray = 8.0
+) -> np.ndarray:
     """TP flag per prediction under `PointDetectionMetrics`' greedy rule.
 
     Predictions are visited in descending score (stable), so the matches of the
     detections above any threshold equal those of matching only that prefix.
     One call therefore serves a whole threshold sweep. Flags align with `preds`.
+
+    `distance_threshold` is a scalar or a per-GT radius array `(M,)`. The rule is
+    unchanged: each prediction takes the nearest unused GT, and it is a TP iff
+    that distance is within *that GT's* radius. A constant array equals the scalar.
     """
     p = _to_xy_score(preds)
     g = _to_xy(gts)
     flags = np.zeros(p.shape[0], dtype=bool)
     if p.size == 0 or g.size == 0:
         return flags
+    radius = np.broadcast_to(np.asarray(distance_threshold, dtype=np.float64), (g.shape[0],))
     used = np.zeros(g.shape[0], dtype=bool)
     for i in np.argsort(-p[:, 2], kind="stable"):
         d = np.hypot(g[:, 0] - p[i, 0], g[:, 1] - p[i, 1])
         d[used] = np.inf
         j = int(np.argmin(d))
-        if np.isfinite(d[j]) and d[j] <= distance_threshold:
+        if np.isfinite(d[j]) and d[j] <= radius[j]:
             used[j] = True
             flags[i] = True
     return flags
