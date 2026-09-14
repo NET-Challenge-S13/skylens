@@ -125,8 +125,9 @@ related: "[[INTENT.md]], [[COMPONENTS.md]], [[ARCHITECTURE.md]], [[NETWORK_ARCHI
 - 세그 손실은 cross-entropy 와 soft Dice 를 1:1 로 더한다. Dice 는 ignore(255) 픽셀을 분자·분모에서 뺀다. 근거: experiment/seg-dice-loss (#33).
 - 사람 헤드는 히트맵과 상자 크기(wh)가 3×3 stem 을 공유하지 않는다. 히트맵은 `person_stem`, wh 는 `wh_stem` 을 따로 거친다. 근거: experiment/combo-dice-wh (#38).
 - 사람 학습 표본 중 VisDrone 은 이미지를 짧은 변 765 로 맞춘 원본 스케일에서 512×512 무작위 크롭 3 장으로 만든다. 추론도 같은 스케일의 512 타일(64px 이상 겹침)로 하고, 타일 경계의 중복 검출은 병합한다. LLVIP 는 전체 프레임을 512 로 줄여 쓴다. 근거: experiment/combo-visdrone-tiles (#39).
+- 재난 수색 드론 데이터셋 SARD(누운 사람 · 탈진 · 부상 자세 포함)를 사람 학습에 넣는다. VisDrone 과 같은 원본 스케일 타일 규칙을 따른다(`--sard tiles`). 분할은 영상 프레임 번호 50 장 단위 구간으로 나누고 경계 10 장을 뺀다(`data/sard/SPLIT.json`). 근거: experiment/sard-person-tiles (#48).
 - 사람 헤드는 히트맵 stem 위에 서브픽셀 오프셋 헤드를 둔다. 검출 중심은 `(셀 + 예측 오프셋) × stride` 다. 근거: experiment/tiles-offset-head (#43).
-- 사람 검출은 실제 추론 방식으로 평가한다. LLVIP 전체 프레임과 VisDrone 원본 스케일 타일의 검출을 한 precision-recall 로 합산하고, mAP 는 점수 0.05 이상 검출로, F1 은 임계값 0.3 으로 잰다. 오프셋이 없는 모델의 중심은 `(셀 + 0.5) × stride` 다. 구현은 `scripts/eval_deploy.py`. 근거: experiment/eval-decode-fix (#44).
+- 사람 검출은 실제 추론 방식으로 평가한다. LLVIP 전체 프레임과 VisDrone · SARD 원본 스케일 타일의 검출을 한 precision-recall 로 합산하고(`pooled_target`), mAP 는 점수 0.05 이상 검출로, F1 은 임계값 0.3 으로 잰다. 점 매칭 반경은 `max(8px, 0.15 × 박스 높이)` 이고 고정 8px 결과도 함께 적는다. 오프셋이 없는 모델의 중심은 `(셀 + 0.5) × stride` 다. 구현은 `scripts/eval_deploy.py`. 근거: experiment/eval-decode-fix (#44), experiment/eval-size-relative-match (#52).
 - 학습은 5 에폭 이상으로 판정한다. road_blocked 는 cross-entropy 단독에서 3 에폭 이후에야 나타난다. 근거: experiment/balanced-5ep (#29).
 - 설계 결정과 그 근거의 단일 출처는 `src/skylens_model/README.md`다. 상위 문서와 어긋나면 모델 문서가 우선한다.
 
