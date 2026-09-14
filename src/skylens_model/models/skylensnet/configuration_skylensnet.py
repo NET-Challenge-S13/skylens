@@ -44,6 +44,10 @@ class SkyLensConfig(PretrainedConfig):
             총 loss 가중합 계수.
         dice_loss_weight (`float`):
             세그 CrossEntropy에 더할 soft Dice loss 계수. 0이면 Dice를 쓰지 않는다(기존과 동일).
+        wh_loss_type (`str`):
+            사람 박스 크기 loss 형태. `"l1"`(기본, raw 출력에 L1), `"log_l1"`(log-size L1),
+            `"giou"`(같은 중심 박스의 1 - GIoU). 뒤의 둘은 wh 헤드 raw 출력을 log-size로
+            보고 exp를 적용하므로 출력 `person_wh`는 모드와 무관하게 격자 단위 (w, h)다.
         danger_ignore_index (`int`):
             세그 CrossEntropy에서 무시할 라벨 값.
     """
@@ -67,6 +71,7 @@ class SkyLensConfig(PretrainedConfig):
         heatmap_loss_weight: float = 1.0,
         wh_loss_weight: float = 0.1,
         dice_loss_weight: float = 0.0,
+        wh_loss_type: str = "l1",
         danger_ignore_index: int = 255,
         **kwargs,
     ):
@@ -86,12 +91,17 @@ class SkyLensConfig(PretrainedConfig):
         self.heatmap_loss_weight = heatmap_loss_weight
         self.wh_loss_weight = wh_loss_weight
         self.dice_loss_weight = dice_loss_weight
+        self.wh_loss_type = wh_loss_type
         self.danger_ignore_index = danger_ignore_index
 
         if self.modality_dropout_rgb_only + self.modality_dropout_thermal_only > 1.0:
             raise ValueError(
                 "modality_dropout_rgb_only + modality_dropout_thermal_only 는 1.0 이하여야 한다 "
                 f"(현재 {self.modality_dropout_rgb_only} + {self.modality_dropout_thermal_only})."
+            )
+        if self.wh_loss_type not in ("l1", "log_l1", "giou"):
+            raise ValueError(
+                f"wh_loss_type 은 l1 / log_l1 / giou 중 하나여야 한다 (현재 {self.wh_loss_type!r})."
             )
         if self.in_channels < 4:
             raise ValueError("in_channels 는 최소 4 (RGB 3 + thermal 1) 여야 한다.")

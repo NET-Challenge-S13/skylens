@@ -70,8 +70,17 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--wh-loss-weight",
         type=float,
-        default=0.1,
-        help="사람 상자 크기 손실의 가중치. 기본 0.1 은 상자 크기 학습을 사실상 끈다",
+        default=None,
+        help=(
+            "사람 상자 크기 손실의 가중치. 지정하지 않으면 l1 은 0.1, "
+            "log_l1 / giou 는 1.0 (CenterNet/FCOS 관례)"
+        ),
+    )
+    p.add_argument(
+        "--wh-loss-type",
+        choices=("l1", "log_l1", "giou"),
+        default="l1",
+        help="사람 상자 크기 손실 형태. l1=기존 raw L1, log_l1=log-size L1, giou=같은 중심 1-GIoU",
     )
     p.add_argument(
         "--heatmap-loss-weight",
@@ -111,7 +120,10 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--eval-max-samples", type=int, default=EVAL_MAX_SAMPLES)
     p.add_argument("--no-resume", action="store_true", help="체크포인트가 있어도 처음부터 학습한다")
     p.add_argument("--no-log-pr", action="store_true", help="결과를 PR 에 적지 않는다")
-    return p.parse_args()
+    args = p.parse_args()
+    if args.wh_loss_weight is None:
+        args.wh_loss_weight = 0.1 if args.wh_loss_type == "l1" else 1.0
+    return args
 
 
 def resolve_data_root(explicit: Path | None) -> Path:
@@ -320,11 +332,13 @@ def main() -> int:
         seg_loss_weight=1.0,
         heatmap_loss_weight=args.heatmap_loss_weight,
         wh_loss_weight=args.wh_loss_weight,
+        wh_loss_type=args.wh_loss_type,
         dice_loss_weight=args.dice_loss_weight,
         danger_class_weights=args.danger_class_weights,
     )
     model = SkyLensForDisasterPerception(config)
     print(f"파라미터 {sum(p.numel() for p in model.parameters()) / 1e6:.1f}M")
+    print(f"상자 크기 손실: {args.wh_loss_type} (가중치 {args.wh_loss_weight})")
     print(f"세그 클래스 가중치: {args.danger_class_weights or '없음(기준선)'}\n")
 
     # --- 학습 (노트북 §6~7) ------------------------------------------------
