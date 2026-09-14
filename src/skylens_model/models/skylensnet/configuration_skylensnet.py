@@ -11,8 +11,6 @@ from __future__ import annotations
 
 from transformers.configuration_utils import PretrainedConfig
 
-HEATMAP_NORMS = ("batch", "per-sample")
-
 
 class SkyLensConfig(PretrainedConfig):
     r"""[`SkyLensModel`] / [`SkyLensForDisasterPerception`] 설정.
@@ -77,13 +75,8 @@ class SkyLensConfig(PretrainedConfig):
         use_offset_head: bool = False,
         offset_loss_weight: float = 1.0,
         danger_ignore_index: int = 255,
-        heatmap_norm: str = "batch",
         **kwargs,
     ):
-        if heatmap_norm not in HEATMAP_NORMS:
-            raise ValueError(f"heatmap_norm 은 {HEATMAP_NORMS} 중 하나여야 한다 (현재 {heatmap_norm!r}).")
-        # "batch": 배치 전체 positive 수로 나눈다(기존). "per-sample": 이미지별로 나눈 뒤 평균.
-        self.heatmap_norm = heatmap_norm
         self.backbone = backbone
         self.use_timm_backbone = use_timm_backbone
         self.use_pretrained_backbone = use_pretrained_backbone
