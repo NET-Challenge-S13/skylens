@@ -87,18 +87,6 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument("--num-workers", type=int, default=0, help="DataLoader 워커 수")
     p.add_argument(
-        "--person-neck",
-        choices=("decoder", "fpn"),
-        default="decoder",
-        help="사람 헤드 입력. decoder=UNet 디코더 출력 공유(v2), fpn=인코더 stage1~4 위 전용 FPN 넥",
-    )
-    p.add_argument(
-        "--person-neck-channels",
-        type=int,
-        default=128,
-        help="--person-neck fpn 일 때 넥 출력 채널 수",
-    )
-    p.add_argument(
         "--person-head-stride",
         type=int,
         default=PERSON_HEAD_STRIDE,
@@ -334,8 +322,6 @@ def main() -> int:
         wh_loss_weight=args.wh_loss_weight,
         dice_loss_weight=args.dice_loss_weight,
         danger_class_weights=args.danger_class_weights,
-        person_neck=args.person_neck,
-        person_neck_channels=args.person_neck_channels,
     )
     model = SkyLensForDisasterPerception(config)
     print(f"파라미터 {sum(p.numel() for p in model.parameters()) / 1e6:.1f}M")

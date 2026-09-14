@@ -119,33 +119,6 @@ class SkyLensUNetDecoder(nn.Module):
         return hidden_state
 
 
-class SkyLensPersonFPNNeck(nn.Module):
-    """사람 헤드 전용 FPN 넥 (lateral 1x1 → top-down nearest 업샘플 합 → 3x3 smoothing).
-
-    `features`는 얕은→깊은 순서(해상도 높은→낮은). 출력은 가장 얕은 입력 해상도의
-    `out_channels` 채널 map 하나(ResNet stage1 기준 stride 4).
-    """
-
-    def __init__(self, in_channels: list[int], out_channels: int):
-        super().__init__()
-        self.lateral = nn.ModuleList(
-            nn.Conv2d(ch, out_channels, kernel_size=1, bias=True) for ch in in_channels
-        )
-        self.smooth = nn.Sequential(
-            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1, bias=False),
-            nn.BatchNorm2d(out_channels),
-            nn.ReLU(inplace=True),
-        )
-        self.out_channels = out_channels
-
-    def forward(self, features: list[torch.Tensor]) -> torch.Tensor:
-        hidden_state = self.lateral[-1](features[-1])
-        for i in range(len(features) - 2, -1, -1):
-            lat = self.lateral[i](features[i])
-            hidden_state = lat + F.interpolate(hidden_state, size=lat.shape[-2:], mode="nearest")
-        return self.smooth(hidden_state)
-
-
 # ---------------------------------------------------------------------------
 # 4채널 inflation (README §6.1)
 # ---------------------------------------------------------------------------
@@ -416,54 +389,6 @@ class SkyLensModel(SkyLensPreTrainedModel):
         features = list(outputs.feature_maps)
         return self.decoder(features)
 
-    # -- 사람 FPN 넥용 인코더 feature ---------------------------------------
-
-    def _last_stage_extra(self) -> tuple[int, int] | None:
-        """out_indices 에 없는 마지막 스테이지(ResNet stage4)의 (index, channels).
-
-        HF Backbone(ResNet 등)은 out_indices 와 무관하게 모든 스테이지를 계산하므로
-        `output_hidden_states=True`로 추가 비용 없이 꺼낼 수 있다. 백본 모듈 구성·
-        out_indices·`backbone.channels`가 그대로라 세그 디코더 입력은 바뀌지 않는다.
-        """
-        stage_names = getattr(self.backbone, "stage_names", None)
-        num_features = getattr(self.backbone, "num_features", None)
-        if self.config.use_timm_backbone or not stage_names or not isinstance(num_features, (list, tuple)):
-            return None
-        last = len(stage_names) - 1
-        if last in tuple(self.config.backbone_out_indices) or len(num_features) != len(stage_names):
-            return None
-        return last, int(num_features[last])
-
-    def person_neck_in_channels(self) -> list[int]:
-        """FPN 넥 입력 채널 (얕은→깊은). stem(index 0)은 stage1과 stride가 같아 뺀다."""
-        chans = [
-            ch
-            for idx, ch in zip(self.config.backbone_out_indices, self.backbone.channels)
-            if idx != 0
-        ]
-        extra = self._last_stage_extra()
-        if extra is not None:
-            chans.append(extra[1])
-        return chans
-
-    def forward_with_encoder_features(
-        self, pixel_values: torch.FloatTensor
-    ) -> tuple[torch.Tensor, list[torch.Tensor]]:
-        """(디코더 출력, FPN 넥 입력 feature 목록) — 디코더 입력은 `forward`와 동일."""
-        extra = self._last_stage_extra()
-        if extra is not None:
-            outputs = self.backbone(pixel_values, output_hidden_states=True)
-        else:
-            outputs = self.backbone(pixel_values)
-        features = list(outputs.feature_maps)
-        decoded = self.decoder(features)
-        neck_feats = [
-            f for idx, f in zip(self.config.backbone_out_indices, features) if idx != 0
-        ]
-        if extra is not None:
-            neck_feats.append(outputs.hidden_states[extra[0]])
-        return decoded, neck_feats
-
 
 # ---------------------------------------------------------------------------
 # 이중 헤드 모델
@@ -487,20 +412,11 @@ class SkyLensForDisasterPerception(SkyLensPreTrainedModel):
         # 세그멘테이션 헤드 — 1x1 conv
         self.danger_head = nn.Conv2d(feat_ch, config.num_danger_classes, kernel_size=1)
 
-        # 사람 헤드 입력: v2 디코더 공유 또는 전용 FPN 넥
-        self.person_neck = None
-        person_ch = feat_ch
-        if getattr(config, "person_neck", "decoder") == "fpn":
-            self.person_neck = SkyLensPersonFPNNeck(
-                self.skylens.person_neck_in_channels(), config.person_neck_channels
-            )
-            person_ch = self.person_neck.out_channels
-
         # 점 검출 헤드 (CenterNet) — 3x3 conv → 1x1 conv
-        self.person_stem = SkyLensConvBlock(person_ch, person_ch)
-        self.wh_stem = SkyLensConvBlock(person_ch, person_ch)
-        self.heatmap_head = nn.Conv2d(person_ch, 1, kernel_size=1)
-        self.wh_head = nn.Conv2d(person_ch, 2, kernel_size=1)
+        self.person_stem = SkyLensConvBlock(feat_ch, feat_ch)
+        self.wh_stem = SkyLensConvBlock(feat_ch, feat_ch)
+        self.heatmap_head = nn.Conv2d(feat_ch, 1, kernel_size=1)
+        self.wh_head = nn.Conv2d(feat_ch, 2, kernel_size=1)
         # CenterNet 관례: 초기 sigmoid ≈ 0.1 이 되도록 bias = -2.19
         self.heatmap_head._skylens_bias_init = -2.19
         # 출력 헤드는 kaiming(fan_out) 대상에서 제외한다 (_init_weights 주석 참조).
@@ -575,10 +491,7 @@ class SkyLensForDisasterPerception(SkyLensPreTrainedModel):
             pixel_values = self._apply_modality_mask(pixel_values, sampled)
 
         # 2) 인코더 + UNet 디코더
-        if self.person_neck is not None:
-            features, neck_feats = self.skylens.forward_with_encoder_features(pixel_values)
-        else:
-            features = self.skylens(pixel_values)
+        features = self.skylens(pixel_values)
 
         # 3) 세그 헤드 — 입력 해상도로 bilinear 보간
         danger_logits = self.danger_head(features)
@@ -590,7 +503,7 @@ class SkyLensForDisasterPerception(SkyLensPreTrainedModel):
         # 4) 점 검출 헤드 — person_head_stride 해상도
         stride = self.config.person_head_stride
         target_hw = (max(height // stride, 1), max(width // stride, 1))
-        person_feat = self.person_neck(neck_feats) if self.person_neck is not None else features
+        person_feat = features
         if person_feat.shape[-2:] != target_hw:
             person_feat = F.interpolate(
                 person_feat, size=target_hw, mode="bilinear", align_corners=False
