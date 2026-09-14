@@ -124,7 +124,7 @@ related: "[[INTENT.md]], [[COMPONENTS.md]], [[ARCHITECTURE.md]], [[NETWORK_ARCHI
 - 모달리티 융합은 latent 융합이 아니라 **Hybrid Fusion**이다. 합쳐지는 단계가 모달리티마다 다르다: 영상+열화상은 입력단, 포즈는 투영단, 소리는 결정단.
 - 세그 손실은 cross-entropy 와 soft Dice 를 1:1 로 더한다. Dice 는 ignore(255) 픽셀을 분자·분모에서 뺀다. 근거: experiment/seg-dice-loss (#33).
 - 사람 헤드는 히트맵과 상자 크기(wh)가 3×3 stem 을 공유하지 않는다. 히트맵은 `person_stem`, wh 는 `wh_stem` 을 따로 거친다. 근거: experiment/combo-dice-wh (#38).
-- 세그 학습 표본은 road_blocked 픽셀이 있는 RescueNet 이미지를 4 배로 반복하고, fire_seg 도 같은 배수로 반복해 구성비를 보존한다. 근거: experiment/balanced-oversample (#27).
+- 사람 학습 표본 중 VisDrone 은 이미지를 짧은 변 765 로 맞춘 원본 스케일에서 512×512 무작위 크롭 3 장으로 만든다. 추론도 같은 스케일의 512 타일(64px 이상 겹침)로 하고, 타일 경계의 중복 검출은 병합한다. LLVIP 는 전체 프레임을 512 로 줄여 쓴다. 근거: experiment/combo-visdrone-tiles (#39).
 - 학습은 5 에폭 이상으로 판정한다. road_blocked 는 cross-entropy 단독에서 3 에폭 이후에야 나타난다. 근거: experiment/balanced-5ep (#29).
 - 설계 결정과 그 근거의 단일 출처는 `src/skylens_model/README.md`다. 상위 문서와 어긋나면 모델 문서가 우선한다.
 
