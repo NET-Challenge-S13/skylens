@@ -11,7 +11,6 @@ from skylens_model.utils.metrics import (
     box_iou_matrix,
     build_compute_metrics,
     decode_gt_boxes,
-    decode_heatmap_peaks,
 )
 
 # 예측 3개(score 0.9/0.8/0.7) 중 1·3번만 GT 2개와 맞는 구성의 101-point AP.
@@ -82,25 +81,6 @@ def test_decode_gt_boxes() -> None:
     assert boxes.shape == (1, 4, 5)
     assert boxes[0, 0].tolist() == [8.0, 12.0, 20.0, 28.0, 1.0]
     assert boxes[0, 1:, 4].sum() == 0.0  # 빈 슬롯은 valid=0
-
-
-def test_decode_with_offset() -> None:
-    reg = torch.zeros(1, 1, 8, 8)
-    wh = torch.zeros(1, 2, 8, 8)
-    off = torch.zeros(1, 2, 8, 8)
-    reg[0, 0, 3, 2] = 1.0
-    wh[0, :, 3, 2] = torch.tensor([2.0, 2.0])
-    off[0, :, 3, 2] = torch.tensor([0.25, 0.75])
-
-    gt = decode_gt_boxes(reg, wh, k=2, stride=4, offset=off)
-    assert gt[0, 0, :2].tolist() == [9.0, 15.0]
-
-    hm = torch.zeros(1, 1, 8, 8)
-    hm[0, 0, 3, 2] = 0.9
-    det = decode_heatmap_peaks(hm, wh, k=2, threshold=0.3, stride=4, offset=off)
-    assert det[0, 0, :2].tolist() == [9.0, 15.0]
-    # 오프셋 없이는 기존 격자 좌표 그대로
-    assert decode_heatmap_peaks(hm, wh, k=2, stride=4)[0, 0, :2].tolist() == [8.0, 12.0]
 
 
 def test_build_compute_metrics_accepts_both_gt_layouts() -> None:

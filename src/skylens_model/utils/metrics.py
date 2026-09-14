@@ -49,7 +49,6 @@ def decode_heatmap_peaks(
     k: int = 100,
     threshold: float = 0.3,
     stride: int = 4,
-    offset: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """CenterNet 스타일 피크 디코딩.
 
@@ -65,8 +64,6 @@ def decode_heatmap_peaks(
         k: 배치당 최대 검출 수.
         threshold: 이 값 미만인 피크는 score=0으로 무효화된다.
         stride: 히트맵 → 입력 이미지 해상도 배율.
-        offset: `(B, 2, h, w)` 서브픽셀 오프셋 맵 (격자 단위). 주어지면 피크의
-            정수 격자 좌표에 더한 뒤 stride를 곱한다. `None`이면 격자 좌표 그대로.
 
     Returns:
         `(B, k, 5)` 텐서. 마지막 축은 `(x, y, w, h, score)`이고,
@@ -111,9 +108,6 @@ def decode_heatmap_peaks(
         widths = torch.zeros_like(scores)
         heights = torch.zeros_like(scores)
 
-    if offset is not None:
-        xs, ys = _add_offset(xs, ys, offset, idx, (fh, fw))
-
     keep = scores >= float(threshold)
     scores = torch.where(keep, scores, torch.zeros_like(scores))
 
@@ -129,29 +123,11 @@ def decode_heatmap_peaks(
     return out
 
 
-def _add_offset(
-    xs: torch.Tensor,
-    ys: torch.Tensor,
-    offset: torch.Tensor,
-    idx: torch.Tensor,
-    hw: tuple[int, int],
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """top-k 인덱스 위치의 오프셋 `(dx, dy)`를 격자 좌표에 더한다."""
-    o = offset[None] if offset.dim() == 3 else offset
-    if o.shape[-2:] != hw:
-        raise ValueError("offset의 공간 크기가 heatmap과 다르다")
-    picked = o.reshape(o.size(0), 2, -1).float().gather(
-        2, idx.unsqueeze(1).expand(-1, 2, -1)
-    )  # (B, 2, k)
-    return xs + picked[:, 0], ys + picked[:, 1]
-
-
 def decode_gt_boxes(
     reg_mask: torch.Tensor,
     wh: torch.Tensor,
     k: int = 100,
     stride: int = 4,
-    offset: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """collator의 CenterNet 타깃에서 GT 박스를 복원한다.
 
@@ -163,9 +139,6 @@ def decode_gt_boxes(
         wh: `(B, 2, h, w)` 너비/높이 회귀 타깃 (격자 단위).
         k: 이미지당 최대 GT 수 (고정 shape 유지를 위한 패딩 길이).
         stride: 격자 → 입력 이미지 해상도 배율.
-        offset: `(B, 2, h, w)` collator의 `person_offset` 타깃. 주어지면 GT 중심을
-            서브픽셀 위치로 복원한다 — 예측에 오프셋을 더할 때 GT도 같이 복원해야
-            좌표계가 맞는다.
 
     Returns:
         `(B, k, 5)` 텐서, 마지막 축은 `(x, y, w, h, valid)`. 빈 슬롯은 전부 0.
@@ -188,9 +161,6 @@ def decode_gt_boxes(
 
     ys = (idx // fw).float()
     xs = (idx % fw).float()
-
-    if offset is not None:
-        xs, ys = _add_offset(xs, ys, offset, idx, tuple(m.shape[-2:]))
 
     wh_flat = wh.reshape(b, 2, -1).float()
     picked = wh_flat.gather(2, idx.unsqueeze(1).expand(-1, 2, -1))  # (B, 2, k)

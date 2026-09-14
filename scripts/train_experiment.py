@@ -79,17 +79,6 @@ def parse_args() -> argparse.Namespace:
         default=1.0,
         help="사람 히트맵 손실의 가중치",
     )
-    p.add_argument(
-        "--offset-loss-weight",
-        type=float,
-        default=1.0,
-        help="사람 중심 서브픽셀 오프셋 손실의 가중치 (CenterNet 표준 1.0)",
-    )
-    p.add_argument(
-        "--no-offset-head",
-        action="store_true",
-        help="오프셋 헤드를 끈다. 켜 두면 stride 격자로 잘린 중심을 격자 안에서 보정한다",
-    )
     p.add_argument("--data-root", type=Path, default=None, help="기본값은 자동 탐색")
     p.add_argument("--eval-max-samples", type=int, default=EVAL_MAX_SAMPLES)
     p.add_argument("--no-resume", action="store_true", help="체크포인트가 있어도 처음부터 학습한다")
@@ -287,15 +276,11 @@ def main() -> int:
         seg_loss_weight=1.0,
         heatmap_loss_weight=args.heatmap_loss_weight,
         wh_loss_weight=args.wh_loss_weight,
-        use_offset_head=not args.no_offset_head,
-        offset_loss_weight=args.offset_loss_weight,
         danger_class_weights=args.danger_class_weights,
     )
     model = SkyLensForDisasterPerception(config)
     print(f"파라미터 {sum(p.numel() for p in model.parameters()) / 1e6:.1f}M")
-    print(f"세그 클래스 가중치: {args.danger_class_weights or '없음(기준선)'}")
-    print(f"오프셋 헤드: {'켜짐' if config.use_offset_head else '꺼짐'} "
-          f"(가중치 {config.offset_loss_weight})\n")
+    print(f"세그 클래스 가중치: {args.danger_class_weights or '없음(기준선)'}\n")
 
     # --- 학습 (노트북 §6~7) ------------------------------------------------
     output_dir = Path("runs") / args.run_name
@@ -396,7 +381,6 @@ METRIC_ORDER = (
     "loss_danger_seg",
     "loss_person_heatmap",
     "loss_person_wh",
-    "loss_person_offset",
     "eval_runtime",
     "eval_samples_per_second",
 )
@@ -418,7 +402,6 @@ METRIC_LABEL = {
     "loss_danger_seg": "손실 세그",
     "loss_person_heatmap": "손실 히트맵",
     "loss_person_wh": "손실 크기",
-    "loss_person_offset": "손실 오프셋",
     "eval_runtime": "평가 시간(초)",
     "eval_samples_per_second": "평가 처리량(장/초)",
 }
