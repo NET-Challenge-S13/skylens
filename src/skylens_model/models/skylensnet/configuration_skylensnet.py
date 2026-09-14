@@ -46,6 +46,11 @@ class SkyLensConfig(PretrainedConfig):
             세그 CrossEntropy에 더할 soft Dice loss 계수. 0이면 Dice를 쓰지 않는다(기존과 동일).
         danger_ignore_index (`int`):
             세그 CrossEntropy에서 무시할 라벨 값.
+        person_neck (`str`):
+            사람 헤드 입력. `"decoder"`(기본, v2) = UNet 디코더 출력 공유,
+            `"fpn"` = 인코더 멀티스케일 feature(stage1~stage4) 위의 전용 FPN 넥.
+        person_neck_channels (`int`):
+            `person_neck="fpn"`일 때 넥 출력 채널 수.
     """
 
     model_type = "skylens"
@@ -68,8 +73,17 @@ class SkyLensConfig(PretrainedConfig):
         wh_loss_weight: float = 0.1,
         dice_loss_weight: float = 0.0,
         danger_ignore_index: int = 255,
+        person_neck: str = "decoder",
+        person_neck_channels: int = 128,
         **kwargs,
     ):
+        if person_neck not in ("decoder", "fpn"):
+            raise ValueError(f"person_neck 는 'decoder' 또는 'fpn' 이어야 한다 (현재 {person_neck!r}).")
+        # "decoder": v2 동작 — UNet 디코더 출력(32ch, s2)을 person stride로 줄여 쓴다.
+        # "fpn": 사람 헤드 전용 FPN 넥 — 인코더 s4~s32 feature를 top-down 융합해
+        #        person_neck_channels 채널의 person stride map을 만든다. 세그 경로는 그대로.
+        self.person_neck = person_neck
+        self.person_neck_channels = person_neck_channels
         self.backbone = backbone
         self.use_timm_backbone = use_timm_backbone
         self.use_pretrained_backbone = use_pretrained_backbone
