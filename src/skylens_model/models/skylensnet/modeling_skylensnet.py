@@ -388,7 +388,6 @@ class SkyLensForDisasterPerception(SkyLensPreTrainedModel):
 
         # 점 검출 헤드 (CenterNet) — 3x3 conv → 1x1 conv
         self.person_stem = SkyLensConvBlock(feat_ch, feat_ch)
-        self.wh_stem = SkyLensConvBlock(feat_ch, feat_ch)
         self.heatmap_head = nn.Conv2d(feat_ch, 1, kernel_size=1)
         self.wh_head = nn.Conv2d(feat_ch, 2, kernel_size=1)
         # CenterNet 관례: 초기 sigmoid ≈ 0.1 이 되도록 bias = -2.19
@@ -482,9 +481,9 @@ class SkyLensForDisasterPerception(SkyLensPreTrainedModel):
             person_feat = F.interpolate(
                 person_feat, size=target_hw, mode="bilinear", align_corners=False
             )
-        person_feat_hm = self.person_stem(person_feat)
-        heatmap_pred = torch.sigmoid(self.heatmap_head(person_feat_hm))
-        wh_pred = self.wh_head(self.wh_stem(person_feat))
+        person_feat = self.person_stem(person_feat)
+        heatmap_pred = torch.sigmoid(self.heatmap_head(person_feat))
+        wh_pred = self.wh_head(person_feat)
 
         # 5) loss — GT가 없는 헤드는 건너뛴다 (README §6.3 헤드별 분리 학습)
         loss = None
