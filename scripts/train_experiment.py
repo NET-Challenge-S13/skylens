@@ -96,12 +96,6 @@ def parse_args() -> argparse.Namespace:
         default=1.0,
         help="--offset-head 일 때 오프셋 L1 손실의 가중치",
     )
-    p.add_argument(
-        "--heatmap-gaussian",
-        choices=["isotropic", "anisotropic"],
-        default="isotropic",
-        help="사람 히트맵 타깃 모양. isotropic 은 v3 CenterNet 원형, anisotropic 은 TTFNet 타원형",
-    )
     p.add_argument("--num-workers", type=int, default=0, help="DataLoader 워커 수")
     p.add_argument(
         "--person-head-stride",
@@ -344,7 +338,6 @@ def main() -> int:
     )
     model = SkyLensForDisasterPerception(config)
     print(f"파라미터 {sum(p.numel() for p in model.parameters()) / 1e6:.1f}M")
-    print(f"사람 히트맵 가우시안: {args.heatmap_gaussian}")
     print(f"세그 클래스 가중치: {args.danger_class_weights or '없음(기준선)'}\n")
 
     # --- 학습 (노트북 §6~7) ------------------------------------------------
@@ -385,7 +378,6 @@ def main() -> int:
             person_head_stride=args.person_head_stride,
             validity_channel=False,
             modality_dropout=(0.0, 0.0),
-            heatmap_gaussian=args.heatmap_gaussian,
         ),
         # 이것이 없으면 평가가 손실만 내고 mIoU·클래스별 IoU·사람 점지표가 전부
         # 빠진다. 판정 기준이 그 지표들이라 빠지면 실험이 무의미해진다.

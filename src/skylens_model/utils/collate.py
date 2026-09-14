@@ -48,9 +48,6 @@ __all__ = [
     "gaussian_radius",
     "gaussian2d",
     "draw_gaussian",
-    "draw_elliptical_gaussian",
-    "HEATMAP_GAUSSIANS",
-    "TTFNET_ALPHA",
     "THERMAL_ABSENT",
     "THERMAL_MIN",
 ]
@@ -130,44 +127,6 @@ def draw_gaussian(heatmap: np.ndarray, center: tuple[int, int], radius: int,
     return heatmap
 
 
-#: Allowed values of ``SkyLensCollator(heatmap_gaussian=...)``.
-HEATMAP_GAUSSIANS = ("isotropic", "anisotropic")
-#: TTFNet default ratio between the gaussian extent and the box size.
-TTFNET_ALPHA = 0.54
-
-
-def draw_elliptical_gaussian(heatmap: np.ndarray, center: tuple[int, int],
-                             box_wh: tuple[float, float], alpha: float = TTFNET_ALPHA,
-                             k: float = 1.0) -> np.ndarray:
-    """Splat a TTFNet elliptical gaussian onto ``heatmap`` (H, W), combining with ``max``.
-
-    ``box_wh`` is the box ``(w, h)`` in heatmap cells. Following TTFNet
-    (Liu et al., AAAI 2020), the half extents are ``r = int(alpha * size / 2)``
-    and ``sigma = (2r + 1) / 6``, i.e. ``sigma ~= alpha * size / 6`` truncated at
-    a 3-sigma box. The ``(2r + 1) / 6`` form is the minimum-sigma guard: a tiny
-    box gets ``r = 0`` and exactly one positive cell. Peak is 1.0 at ``center``
-    (integer ``(cx, cy)``, same convention as :func:`draw_gaussian`).
-    """
-    rx = max(0, int(alpha * float(box_wh[0]) / 2.0))
-    ry = max(0, int(alpha * float(box_wh[1]) / 2.0))
-    sx, sy = (2 * rx + 1) / 6.0, (2 * ry + 1) / 6.0
-    y, x = np.ogrid[-ry:ry + 1, -rx:rx + 1]
-    gauss = np.exp(-(x * x) / (2.0 * sx * sx) - (y * y) / (2.0 * sy * sy))
-    gauss[gauss < np.finfo(gauss.dtype).eps * gauss.max()] = 0.0
-
-    cx, cy = int(center[0]), int(center[1])
-    h, w = heatmap.shape[:2]
-    left, right = min(cx, rx), min(w - cx, rx + 1)
-    top, bottom = min(cy, ry), min(h - cy, ry + 1)
-    if left + right <= 0 or top + bottom <= 0:
-        return heatmap
-
-    masked_heatmap = heatmap[cy - top:cy + bottom, cx - left:cx + right]
-    masked_gaussian = gauss[ry - top:ry + bottom, rx - left:rx + right]
-    np.maximum(masked_heatmap, masked_gaussian * k, out=masked_heatmap)
-    return heatmap
-
-
 # --------------------------------------------------------------------------- #
 # collator
 # --------------------------------------------------------------------------- #
@@ -191,11 +150,6 @@ class SkyLensCollator:
         README §2.2. Defaults to ``(0.0, 0.0)``; the recommended training value
         is ``(0.25, 0.25)`` (leaving p=0.5 for the full 4-channel mode). Dropout
         is applied *after* stacking, and updates ``modality_mask`` accordingly.
-    heatmap_gaussian:
-        ``"isotropic"`` (CenterNet round gaussian from :func:`gaussian_radius`,
-        the v3 behaviour) or ``"anisotropic"`` (TTFNet elliptical gaussian,
-        :func:`draw_elliptical_gaussian`). Only the heatmap changes; ``wh``,
-        ``offset`` and ``reg_mask`` are identical.
     max_objects:
         Safety cap on boxes encoded per image.
     """
@@ -208,13 +162,7 @@ class SkyLensCollator:
         modality_dropout: tuple[float, float] = (0.0, 0.0),
         max_objects: int = 512,
         rng: np.random.Generator | None = None,
-        heatmap_gaussian: str = "isotropic",
     ) -> None:
-        if heatmap_gaussian not in HEATMAP_GAUSSIANS:
-            raise ValueError(
-                f"heatmap_gaussian must be one of {HEATMAP_GAUSSIANS}, got {heatmap_gaussian!r}"
-            )
-        self.heatmap_gaussian = heatmap_gaussian
         if person_head_stride < 1:
             raise ValueError("person_head_stride must be >= 1")
         self.person_head_stride = int(person_head_stride)
@@ -353,11 +301,8 @@ class SkyLensCollator:
             if not (0 <= cxi < ow and 0 <= cyi < oh):
                 continue
 
-            if self.heatmap_gaussian == "anisotropic":
-                draw_elliptical_gaussian(heatmap, (cxi, cyi), (bw, bh))
-            else:
-                radius = max(0, int(gaussian_radius((bh, bw), self.min_overlap)))
-                draw_gaussian(heatmap, (cxi, cyi), radius)
+            radius = max(0, int(gaussian_radius((bh, bw), self.min_overlap)))
+            draw_gaussian(heatmap, (cxi, cyi), radius)
 
             wh[0, cyi, cxi] = bw
             wh[1, cyi, cxi] = bh
