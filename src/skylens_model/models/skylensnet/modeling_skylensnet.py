@@ -245,6 +245,32 @@ def masked_l1_loss(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor)
     return loss
 
 
+def masked_soft_dice_loss(
+    logits: torch.Tensor, labels: torch.Tensor, ignore_index: int = 255, smooth: float = 1.0
+) -> torch.Tensor:
+    """ignore 픽셀을 뺀 다중 클래스 soft Dice loss (클래스 평균).
+
+    `logits`는 (B, C, H, W) softmax 이전 값, `labels`는 (B, H, W) 정수 라벨.
+    ignore 픽셀은 분자·분모 모두에서 빠진다. GT도 예측도 없는 클래스는
+    smoothing 덕분에 dice=1(loss 0)이 되어 NaN이 나지 않는다.
+    """
+    num_classes = logits.shape[1]
+    # fp16 autocast에서도 합산이 넘치지 않도록 float32로 계산한다.
+    probs = torch.softmax(logits.float(), dim=1)
+    valid = labels.ne(ignore_index)
+    safe_labels = torch.where(valid, labels, torch.zeros_like(labels)).long()
+    one_hot = F.one_hot(safe_labels, num_classes).permute(0, 3, 1, 2).float()
+    valid_f = valid.unsqueeze(1).float()
+    probs = probs * valid_f
+    one_hot = one_hot * valid_f
+
+    dims = (0, 2, 3)
+    intersection = (probs * one_hot).sum(dims)
+    denominator = probs.sum(dims) + one_hot.sum(dims)
+    dice = (2.0 * intersection + smooth) / (denominator + smooth)
+    return 1.0 - dice.mean()
+
+
 # ---------------------------------------------------------------------------
 # PreTrainedModel
 # ---------------------------------------------------------------------------
@@ -388,6 +414,7 @@ class SkyLensForDisasterPerception(SkyLensPreTrainedModel):
 
         # 점 검출 헤드 (CenterNet) — 3x3 conv → 1x1 conv
         self.person_stem = SkyLensConvBlock(feat_ch, feat_ch)
+        self.wh_stem = SkyLensConvBlock(feat_ch, feat_ch)
         self.heatmap_head = nn.Conv2d(feat_ch, 1, kernel_size=1)
         self.wh_head = nn.Conv2d(feat_ch, 2, kernel_size=1)
         # CenterNet 관례: 초기 sigmoid ≈ 0.1 이 되도록 bias = -2.19
@@ -481,9 +508,9 @@ class SkyLensForDisasterPerception(SkyLensPreTrainedModel):
             person_feat = F.interpolate(
                 person_feat, size=target_hw, mode="bilinear", align_corners=False
             )
-        person_feat = self.person_stem(person_feat)
-        heatmap_pred = torch.sigmoid(self.heatmap_head(person_feat))
-        wh_pred = self.wh_head(person_feat)
+        person_feat_hm = self.person_stem(person_feat)
+        heatmap_pred = torch.sigmoid(self.heatmap_head(person_feat_hm))
+        wh_pred = self.wh_head(self.wh_stem(person_feat))
 
         # 5) loss — GT가 없는 헤드는 건너뛴다 (README §6.3 헤드별 분리 학습)
         loss = None
@@ -496,6 +523,13 @@ class SkyLensForDisasterPerception(SkyLensPreTrainedModel):
                 ignore_index=self.config.danger_ignore_index,
             )
             loss_dict["danger_seg"] = seg_loss
+            # Dice 항 — CE와 별도로 로깅한다 (`loss_danger_dice`). 0이면 기존과 동일.
+            if self.config.dice_loss_weight > 0:
+                loss_dict["danger_dice"] = masked_soft_dice_loss(
+                    danger_logits,
+                    danger_labels.long(),
+                    ignore_index=self.config.danger_ignore_index,
+                )
 
         if person_heatmap is not None:
             hm_loss = centernet_focal_loss(heatmap_pred, person_heatmap)
@@ -508,6 +542,7 @@ class SkyLensForDisasterPerception(SkyLensPreTrainedModel):
         if loss_dict:
             weights = {
                 "danger_seg": self.config.seg_loss_weight,
+                "danger_dice": self.config.seg_loss_weight * self.config.dice_loss_weight,
                 "person_heatmap": self.config.heatmap_loss_weight,
                 "person_wh": self.config.wh_loss_weight,
             }

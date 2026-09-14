@@ -79,6 +79,34 @@ def parse_args() -> argparse.Namespace:
         default=1.0,
         help="사람 히트맵 손실의 가중치",
     )
+    p.add_argument(
+        "--dice-loss-weight",
+        type=float,
+        default=0.0,
+        help="세그 CrossEntropy 에 더할 soft Dice 손실의 가중치. 0 이면 Dice 없이 학습한다(기준선)",
+    )
+    p.add_argument("--num-workers", type=int, default=0, help="DataLoader 워커 수")
+    p.add_argument(
+        "--person-head-stride",
+        type=int,
+        default=PERSON_HEAD_STRIDE,
+        help="점 검출 헤드의 출력 stride",
+    )
+    p.add_argument(
+        "--visdrone-tiles",
+        action="store_true",
+        help=(
+            "VisDrone 학습 샘플을 512 정사각 찌그러뜨림 대신 원본에 가까운 스케일(짧은 변 765px)의 "
+            "무작위 512 크롭으로 바꾼다. 평가는 그대로 둔다"
+        ),
+    )
+    p.add_argument(
+        "--visdrone-tile-crops",
+        type=int,
+        default=3,
+        metavar="N",
+        help="--visdrone-tiles 일 때 에폭당 이미지 1장에서 뽑는 크롭 수",
+    )
     p.add_argument("--data-root", type=Path, default=None, help="기본값은 자동 탐색")
     p.add_argument("--eval-max-samples", type=int, default=EVAL_MAX_SAMPLES)
     p.add_argument("--no-resume", action="store_true", help="체크포인트가 있어도 처음부터 학습한다")
@@ -173,6 +201,7 @@ def main() -> int:
     from skylens_model.utils.callbacks import GracefulInterruptCallback, find_resume_checkpoint
     from skylens_model.utils.metrics import build_compute_metrics
     from skylens_model.utils.trainer import SkyLensTrainer
+    from skylens_model.utils.tiling import SHORT_SIDE, ScaledTileCropDataset, build_scaled_cache
     from skylens_model.utils.training_args import SkyLensTrainingArguments
 
     # --- 증강 (노트북 §2) --------------------------------------------------
@@ -221,6 +250,21 @@ def main() -> int:
                 continue
             try:
                 raw = cls(root, split=split)
+                if which == "train" and args.visdrone_tiles and cls is VisDronePerson:
+                    # 공유 512 캐시와 섞이지 않도록 별도 디렉터리에 둔다.
+                    tile_dir = cache_root / f"{cls.__name__}_{split}_short{SHORT_SIDE}"
+                    build_scaled_cache(raw, tile_dir, SHORT_SIDE, workers=8)
+                    ds = ScaledTileCropDataset(
+                        tile_dir, crops_per_image=args.visdrone_tile_crops,
+                        tile=IMAGE_SIZE, transforms=augment,
+                    )
+                    print(
+                        f"  [ok]   {cls.__name__:24s} {split:5s} {len(ds):>6,}장"
+                        f"  (tiles: {len(raw):,}장 x{args.visdrone_tile_crops} 무작위 "
+                        f"{IMAGE_SIZE} 크롭, 짧은 변 {SHORT_SIDE})"
+                    )
+                    parts.append(ds)
+                    continue
                 cache_dir = cache_root / f"{cls.__name__}_{split}_{IMAGE_SIZE}"
                 build_resized_cache(raw, cache_dir, IMAGE_SIZE)
                 ds = ResizedCache(cache_dir, transforms=augment)
@@ -270,12 +314,13 @@ def main() -> int:
         use_pretrained_backbone=True,
         in_channels=4,
         num_danger_classes=NUM_DANGER_CLASSES,
-        person_head_stride=PERSON_HEAD_STRIDE,
+        person_head_stride=args.person_head_stride,
         modality_dropout_rgb_only=0.25,
         modality_dropout_thermal_only=0.25,
         seg_loss_weight=1.0,
         heatmap_loss_weight=args.heatmap_loss_weight,
         wh_loss_weight=args.wh_loss_weight,
+        dice_loss_weight=args.dice_loss_weight,
         danger_class_weights=args.danger_class_weights,
     )
     model = SkyLensForDisasterPerception(config)
@@ -303,8 +348,8 @@ def main() -> int:
         load_best_model_at_end=False,
         report_to=[],
         fp16=(device == "cuda"),
-        dataloader_num_workers=0,
-        person_head_stride=PERSON_HEAD_STRIDE,
+        dataloader_num_workers=args.num_workers,
+        person_head_stride=args.person_head_stride,
         num_danger_classes=NUM_DANGER_CLASSES,
         freeze_backbone_epochs=0.0,
         eval_score_threshold=0.3,
@@ -317,7 +362,7 @@ def main() -> int:
         train_dataset=train_ds,
         eval_dataset=eval_ds,
         data_collator=SkyLensCollator(
-            person_head_stride=PERSON_HEAD_STRIDE,
+            person_head_stride=args.person_head_stride,
             validity_channel=False,
             modality_dropout=(0.0, 0.0),
         ),
@@ -379,6 +424,7 @@ METRIC_ORDER = (
     "eval_point_fp",
     "eval_point_fn",
     "loss_danger_seg",
+    "loss_danger_dice",
     "loss_person_heatmap",
     "loss_person_wh",
     "eval_runtime",
@@ -400,6 +446,7 @@ METRIC_LABEL = {
     "eval_point_fp": "사람 FP",
     "eval_point_fn": "사람 FN",
     "loss_danger_seg": "손실 세그",
+    "loss_danger_dice": "손실 Dice",
     "loss_person_heatmap": "손실 히트맵",
     "loss_person_wh": "손실 크기",
     "eval_runtime": "평가 시간(초)",
