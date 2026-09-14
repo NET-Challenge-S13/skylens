@@ -86,6 +86,15 @@ def parse_args() -> argparse.Namespace:
         help="세그 CrossEntropy 에 더할 soft Dice 손실의 가중치. 0 이면 Dice 없이 학습한다(기준선)",
     )
     p.add_argument(
+        "--heatmap-norm",
+        choices=("batch", "per-sample"),
+        default="batch",
+        help=(
+            "사람 히트맵 focal loss 정규화. batch 는 배치 전체 positive 수로 나눈다(기준선), "
+            "per-sample 은 이미지별 positive 수로 나눈 뒤 사람 GT 가 있는 이미지 수로 평균낸다"
+        ),
+    )
+    p.add_argument(
         "--offset-head",
         action="store_true",
         help="CenterNet 서브픽셀 오프셋 헤드를 켠다 (기본 꺼짐)",
@@ -335,7 +344,9 @@ def main() -> int:
         use_offset_head=args.offset_head,
         offset_loss_weight=args.offset_loss_weight,
         danger_class_weights=args.danger_class_weights,
+        heatmap_norm=args.heatmap_norm,
     )
+    print(f"히트맵 loss 정규화: {config.heatmap_norm}")
     model = SkyLensForDisasterPerception(config)
     print(f"파라미터 {sum(p.numel() for p in model.parameters()) / 1e6:.1f}M")
     print(f"세그 클래스 가중치: {args.danger_class_weights or '없음(기준선)'}\n")

@@ -214,12 +214,28 @@ def inflate_first_conv(backbone: nn.Module, in_channels: int, pretrained: bool =
 # ---------------------------------------------------------------------------
 
 
-def centernet_focal_loss(pred: torch.Tensor, target: torch.Tensor, alpha: float = 2.0, beta: float = 4.0) -> torch.Tensor:
+def centernet_focal_loss(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    alpha: float = 2.0,
+    beta: float = 4.0,
+    norm: str = "batch",
+) -> torch.Tensor:
     """CenterNet penalty-reduced pixel-wise focal loss (Law & Deng, CornerNet).
 
     `pred`는 **sigmoid가 이미 적용된 확률**, `target`은 가우시안 GT 히트맵.
     중심점(target == 1)만 positive로 보고, 주변 픽셀은 가우시안 값만큼 페널티를 깎는다.
+
+    `norm="batch"`: 배치 전체 loss 합 / 배치 전체 positive 수 (기존 계산 그대로).
+    `norm="per-sample"`: 이미지별 loss 합 / max(1, 그 이미지 positive 수) 를 더한 뒤
+    positive 가 있는 이미지 수로 나눈다. positive 가 없는 이미지(세그 전용 샘플 포함)는
+    batch 모드처럼 negative loss 가 분자에 남되(÷1) 분모 개수에는 세지 않는다.
+    배치에 positive 가 하나도 없으면 두 모드는 같은 값(-neg 합)이 된다.
     """
+    if norm == "per-sample":
+        return _per_sample_focal_loss(pred, target, alpha, beta)
+    if norm != "batch":
+        raise ValueError(f"unknown heatmap norm {norm!r}")
     eps = 1e-4
     pred = pred.clamp(min=eps, max=1.0 - eps)
 
@@ -237,6 +253,22 @@ def centernet_focal_loss(pred: torch.Tensor, target: torch.Tensor, alpha: float 
     if num_pos == 0:
         return -neg_loss
     return -(pos_loss + neg_loss) / num_pos
+
+
+def _per_sample_focal_loss(pred: torch.Tensor, target: torch.Tensor, alpha: float, beta: float) -> torch.Tensor:
+    eps = 1e-4
+    pred = pred.clamp(min=eps, max=1.0 - eps)
+    pos_mask = target.eq(1.0).float()
+    neg_mask = 1.0 - pos_mask
+    pos_loss = torch.log(pred) * torch.pow(1.0 - pred, alpha) * pos_mask
+    neg_loss = torch.log(1.0 - pred) * torch.pow(pred, alpha) * torch.pow(1.0 - target, beta) * neg_mask
+
+    dims = tuple(range(1, pred.dim()))
+    per_image = -(pos_loss + neg_loss).sum(dim=dims)  # (B,)
+    num_pos = pos_mask.sum(dim=dims)  # (B,)
+    per_image = per_image / num_pos.clamp(min=1.0)
+    num_images_with_pos = (num_pos > 0).sum().clamp(min=1).to(per_image.dtype)
+    return per_image.sum() / num_images_with_pos
 
 
 def masked_l1_loss(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
@@ -542,7 +574,9 @@ class SkyLensForDisasterPerception(SkyLensPreTrainedModel):
                 )
 
         if person_heatmap is not None:
-            hm_loss = centernet_focal_loss(heatmap_pred, person_heatmap)
+            hm_loss = centernet_focal_loss(
+                heatmap_pred, person_heatmap, norm=getattr(self.config, "heatmap_norm", "batch")
+            )
             loss_dict["person_heatmap"] = hm_loss
 
         if person_wh is not None and person_reg_mask is not None:
