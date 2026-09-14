@@ -72,3 +72,11 @@ uv run python scripts/train_experiment.py --run-name balanced-5ep --epochs 5 \
 - 2 에폭 실행이 약 2시간이다. 오버샘플링을 켜면 한 에폭의 step 수가 2,905에서 3,545로 늘어 더 걸린다.
 - 평가는 에폭 경계에서만 돈다. 학습 도중에는 손실만 보인다.
 - 결과는 끝난 뒤 `rt.log()`로 PR의 YAML 블록에, 에폭별 전체 지표 표는 PR 본문 `측정값 전체` 절에 자동으로 올라간다.
+
+## combo-dice-wh-10ep
+
+combo-dice-wh 와 코드가 같고 에폭만 5 에서 10 으로 늘린다.
+
+```
+python scripts/train_experiment.py --run-name combo-dice-wh-10ep --epochs 10 --road-oversample 4 --balance-fire-seg --dice-loss-weight 1.0 --num-workers 8
+```
