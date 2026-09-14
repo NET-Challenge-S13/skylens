@@ -66,18 +66,6 @@ def parse_args() -> argparse.Namespace:
             "보존한다. 이것이 없으면 fire 의 유일한 출처가 희석되어 fire 가 학습되지 않는다"
         ),
     )
-    p.add_argument(
-        "--wh-loss-weight",
-        type=float,
-        default=0.1,
-        help="사람 상자 크기 손실의 가중치. 기본 0.1 은 상자 크기 학습을 사실상 끈다",
-    )
-    p.add_argument(
-        "--heatmap-loss-weight",
-        type=float,
-        default=1.0,
-        help="사람 히트맵 손실의 가중치",
-    )
     p.add_argument("--data-root", type=Path, default=None, help="기본값은 자동 탐색")
     p.add_argument("--eval-max-samples", type=int, default=EVAL_MAX_SAMPLES)
     p.add_argument("--no-resume", action="store_true", help="체크포인트가 있어도 처음부터 학습한다")
@@ -273,8 +261,8 @@ def main() -> int:
         modality_dropout_rgb_only=0.25,
         modality_dropout_thermal_only=0.25,
         seg_loss_weight=1.0,
-        heatmap_loss_weight=args.heatmap_loss_weight,
-        wh_loss_weight=args.wh_loss_weight,
+        heatmap_loss_weight=1.0,
+        wh_loss_weight=0.1,
         danger_class_weights=args.danger_class_weights,
     )
     model = SkyLensForDisasterPerception(config)

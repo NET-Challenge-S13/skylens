@@ -116,8 +116,7 @@ related: "[[INTENT.md]], [[COMPONENTS.md]], [[ARCHITECTURE.md]], [[NETWORK_ARCHI
 
 - 백본: UNet, 입력 4채널(RGB 3 + 열 1).
 - 세그 헤드 — 위험구역(stuff). 통합 클래스 스키마는 `0 normal / 1 fire / 2 collapse / 3 road_blocked / 255 ignore`.
-- 점 검출 헤드 — 사람. 중심점 히트맵과 상자 크기를 함께 낸다.
-- **손실 가중치는 세그 1.0 / 히트맵 1.0 / 상자 크기 0.5다.** 상자 크기 항은 값 자체가 커서(약 2.8) 가중치 0.1 에서는 실효 기여가 0.28 에 그치고 mAP@75 가 0.04 까지 떨어진다. 0.5 면 실효 기여가 히트맵 항과 비슷해진다. 근거: experiment/person-wh-weight.
+- 점 검출 헤드 — 사람.
 - modality dropout으로 열화상이 없는 입력도 견딘다.
 - 헤드별로 분리 학습한다.
 - **`road_blocked` 픽셀이 있는 학습 이미지는 오버샘플링한다.** 배수는 4다. 이 클래스는 학습 표본의 약 2%에만 나타나 대부분의 배치에 아예 들어오지 않는다. 근거: experiment/road-oversample.
