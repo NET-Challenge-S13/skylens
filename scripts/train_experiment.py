@@ -85,6 +85,17 @@ def parse_args() -> argparse.Namespace:
         default=0.0,
         help="세그 CrossEntropy 에 더할 soft Dice 손실의 가중치. 0 이면 Dice 없이 학습한다(기준선)",
     )
+    p.add_argument(
+        "--offset-head",
+        action="store_true",
+        help="CenterNet 서브픽셀 오프셋 헤드를 켠다 (기본 꺼짐)",
+    )
+    p.add_argument(
+        "--offset-loss-weight",
+        type=float,
+        default=1.0,
+        help="--offset-head 일 때 오프셋 L1 손실의 가중치",
+    )
     p.add_argument("--num-workers", type=int, default=0, help="DataLoader 워커 수")
     p.add_argument(
         "--person-head-stride",
@@ -321,6 +332,8 @@ def main() -> int:
         heatmap_loss_weight=args.heatmap_loss_weight,
         wh_loss_weight=args.wh_loss_weight,
         dice_loss_weight=args.dice_loss_weight,
+        use_offset_head=args.offset_head,
+        offset_loss_weight=args.offset_loss_weight,
         danger_class_weights=args.danger_class_weights,
     )
     model = SkyLensForDisasterPerception(config)
@@ -427,6 +440,7 @@ METRIC_ORDER = (
     "loss_danger_dice",
     "loss_person_heatmap",
     "loss_person_wh",
+    "loss_person_offset",
     "eval_runtime",
     "eval_samples_per_second",
 )
@@ -449,6 +463,7 @@ METRIC_LABEL = {
     "loss_danger_dice": "손실 Dice",
     "loss_person_heatmap": "손실 히트맵",
     "loss_person_wh": "손실 크기",
+    "loss_person_offset": "손실 오프셋",
     "eval_runtime": "평가 시간(초)",
     "eval_samples_per_second": "평가 처리량(장/초)",
 }

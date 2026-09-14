@@ -49,6 +49,7 @@ def decode_heatmap_peaks(
     k: int = 100,
     threshold: float = 0.3,
     stride: int = 4,
+    offset: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """CenterNet 스타일 피크 디코딩.
 
@@ -64,6 +65,8 @@ def decode_heatmap_peaks(
         k: 배치당 최대 검출 수.
         threshold: 이 값 미만인 피크는 score=0으로 무효화된다.
         stride: 히트맵 → 입력 이미지 해상도 배율.
+        offset: `(B, 2, h, w)` 서브픽셀 오프셋 (격자 단위). 주어지면 중심은
+            `(격자 + offset) * stride` — +0.5 없이 연속 좌표다.
 
     Returns:
         `(B, k, 5)` 텐서. 마지막 축은 `(x, y, w, h, score)`이고,
@@ -108,6 +111,9 @@ def decode_heatmap_peaks(
         widths = torch.zeros_like(scores)
         heights = torch.zeros_like(scores)
 
+    if offset is not None:
+        xs, ys = _add_offset(xs, ys, offset, idx, (fh, fw))
+
     keep = scores >= float(threshold)
     scores = torch.where(keep, scores, torch.zeros_like(scores))
 
@@ -123,11 +129,21 @@ def decode_heatmap_peaks(
     return out
 
 
+def _add_offset(xs, ys, offset: torch.Tensor, idx: torch.Tensor, hw: tuple[int, int]):
+    """top-k 인덱스 위치의 오프셋 `(dx, dy)`를 격자 좌표에 더한다."""
+    o = offset[None] if offset.dim() == 3 else offset
+    if tuple(o.shape[-2:]) != tuple(hw):
+        raise ValueError("offset의 공간 크기가 heatmap과 다르다")
+    picked = o.reshape(o.size(0), 2, -1).float().gather(2, idx.unsqueeze(1).expand(-1, 2, -1))
+    return xs + picked[:, 0], ys + picked[:, 1]
+
+
 def decode_gt_boxes(
     reg_mask: torch.Tensor,
     wh: torch.Tensor,
     k: int = 100,
     stride: int = 4,
+    offset: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """collator의 CenterNet 타깃에서 GT 박스를 복원한다.
 
@@ -161,6 +177,9 @@ def decode_gt_boxes(
 
     ys = (idx // fw).float()
     xs = (idx % fw).float()
+
+    if offset is not None:  # collator `person_offset` → 연속(스냅되지 않은) GT 중심
+        xs, ys = _add_offset(xs, ys, offset, idx, tuple(m.shape[-2:]))
 
     wh_flat = wh.reshape(b, 2, -1).float()
     picked = wh_flat.gather(2, idx.unsqueeze(1).expand(-1, 2, -1))  # (B, 2, k)

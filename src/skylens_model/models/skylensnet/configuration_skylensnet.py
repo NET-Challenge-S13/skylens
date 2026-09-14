@@ -42,6 +42,11 @@ class SkyLensConfig(PretrainedConfig):
             학습 중 RGB를 지워 thermal-only로 만들 확률.
         seg_loss_weight / heatmap_loss_weight / wh_loss_weight (`float`):
             총 loss 가중합 계수.
+        use_offset_head (`bool`):
+            True면 CenterNet 서브픽셀 오프셋 헤드(`offset_head`)를 히트맵 stem 위에 붙인다.
+            키가 없는 기존 설정/체크포인트는 False로 로드되어 구조가 그대로다.
+        offset_loss_weight (`float`):
+            오프셋 masked L1 loss 가중치 (CenterNet 표준 1.0).
         dice_loss_weight (`float`):
             세그 CrossEntropy에 더할 soft Dice loss 계수. 0이면 Dice를 쓰지 않는다(기존과 동일).
         danger_ignore_index (`int`):
@@ -67,6 +72,8 @@ class SkyLensConfig(PretrainedConfig):
         heatmap_loss_weight: float = 1.0,
         wh_loss_weight: float = 0.1,
         dice_loss_weight: float = 0.0,
+        use_offset_head: bool = False,
+        offset_loss_weight: float = 1.0,
         danger_ignore_index: int = 255,
         **kwargs,
     ):
@@ -86,6 +93,8 @@ class SkyLensConfig(PretrainedConfig):
         self.heatmap_loss_weight = heatmap_loss_weight
         self.wh_loss_weight = wh_loss_weight
         self.dice_loss_weight = dice_loss_weight
+        self.use_offset_head = use_offset_head
+        self.offset_loss_weight = offset_loss_weight
         self.danger_ignore_index = danger_ignore_index
 
         if self.modality_dropout_rgb_only + self.modality_dropout_thermal_only > 1.0:
