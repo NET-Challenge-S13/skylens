@@ -36,6 +36,37 @@ BATCH_SIZE = 8
 LR = 1e-4
 SAVE_EVERY_STEPS = 300
 EVAL_MAX_SAMPLES = 1200
+SARD_MODES = ("off", "squash", "tiles")
+
+
+def build_sources(data_root: Path, sard: str = "off") -> list:
+    """Return `(dataset_cls, root, train_split, eval_split)` for every source.
+
+    SARD is opt-in. Before data/sard existed it was listed unconditionally and
+    silently skipped, so `off` is the v3 data mix. `tiles` trains on SARD tiles
+    only and leaves the in-trainer eval subset untouched (eval_split None).
+    """
+    from skylens_model.datasets import (
+        LLVIP,
+        SARD,
+        FireSegmentation,
+        RescueNetSegmentation,
+        VisDronePerson,
+    )
+
+    if sard not in SARD_MODES:
+        raise ValueError(f"unknown --sard mode: {sard}")
+    sources = [
+        (LLVIP, data_root / "llvip" / "LLVIP", "train", "test"),
+        (VisDronePerson, data_root / "visdrone", "train", "val"),
+        (RescueNetSegmentation, data_root / "rescuenet", "train", "test"),
+        (FireSegmentation, data_root / "fire_seg", "train", "val"),
+    ]
+    if sard == "squash":
+        sources.append((SARD, data_root / "sard", "train", "val"))
+    elif sard == "tiles":
+        sources.append((SARD, data_root / "sard", "train", None))
+    return sources
 
 
 def parse_args() -> argparse.Namespace:
@@ -117,6 +148,18 @@ def parse_args() -> argparse.Namespace:
         default=3,
         metavar="N",
         help="--visdrone-tiles 일 때 에폭당 이미지 1장에서 뽑는 크롭 수",
+    )
+    p.add_argument(
+        "--sard",
+        choices=SARD_MODES,
+        default="off",
+        help=(
+            "SARD 사용 방식. off(기본): 쓰지 않는다(v3 데이터 구성 그대로). "
+            "squash: 512 정사각 찌그러뜨림으로 학습·평가에 넣는다. "
+            "tiles: 학습에만 짧은 변 765 무작위 512 크롭으로 넣고(크롭 수는 "
+            "--visdrone-tile-crops), 학습 중 평가 서브셋은 v3 와 같게 둔다. "
+            "SARD 평가는 scripts/eval_deploy.py 의 sard394_tiled765 로 한다"
+        ),
     )
     p.add_argument("--data-root", type=Path, default=None, help="기본값은 자동 탐색")
     p.add_argument("--eval-max-samples", type=int, default=EVAL_MAX_SAMPLES)
@@ -244,25 +287,26 @@ def main() -> int:
     # --- 데이터셋 (노트북 §3) ----------------------------------------------
     data_root = resolve_data_root(args.data_root)
     cache_root = data_root / "_cache"
-    sources = [
-        (LLVIP, data_root / "llvip" / "LLVIP", "train", "test"),
-        (VisDronePerson, data_root / "visdrone", "train", "val"),
-        (RescueNetSegmentation, data_root / "rescuenet", "train", "test"),
-        (FireSegmentation, data_root / "fire_seg", "train", "val"),
-        (SARD, data_root / "sard", "train", "val"),
-    ]
+    sources = build_sources(data_root, args.sard)
+    print(f"SARD: {args.sard}")
 
     def build_split(which: str, augment):
         parts = []
         for cls, root, tr_split, ev_split in sources:
             split = tr_split if which == "train" else ev_split
+            if split is None:
+                continue
             if not root.exists():
                 print(f"  [없음] {cls.__name__:24s} {root}")
                 continue
             try:
                 raw = cls(root, split=split)
-                if which == "train" and args.visdrone_tiles and cls is VisDronePerson:
+                tiled = (cls is VisDronePerson and args.visdrone_tiles) or (
+                    cls is SARD and args.sard == "tiles"
+                )
+                if which == "train" and tiled:
                     # 공유 512 캐시와 섞이지 않도록 별도 디렉터리에 둔다.
+                    # SARD 도 VisDrone 과 같은 규칙(짧은 변 765, 크롭 수, 박스 자르기)을 쓴다.
                     tile_dir = cache_root / f"{cls.__name__}_{split}_short{SHORT_SIDE}"
                     build_scaled_cache(raw, tile_dir, SHORT_SIDE, workers=8)
                     ds = ScaledTileCropDataset(
