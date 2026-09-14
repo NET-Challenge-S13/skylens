@@ -42,6 +42,8 @@ class SkyLensConfig(PretrainedConfig):
             학습 중 RGB를 지워 thermal-only로 만들 확률.
         seg_loss_weight / heatmap_loss_weight / wh_loss_weight (`float`):
             총 loss 가중합 계수.
+        dice_loss_weight (`float`):
+            세그 CrossEntropy에 더할 soft Dice loss 계수. 0이면 Dice를 쓰지 않는다(기존과 동일).
         danger_ignore_index (`int`):
             세그 CrossEntropy에서 무시할 라벨 값.
     """
@@ -64,6 +66,7 @@ class SkyLensConfig(PretrainedConfig):
         seg_loss_weight: float = 1.0,
         heatmap_loss_weight: float = 1.0,
         wh_loss_weight: float = 0.1,
+        dice_loss_weight: float = 0.0,
         danger_ignore_index: int = 255,
         **kwargs,
     ):
@@ -82,6 +85,7 @@ class SkyLensConfig(PretrainedConfig):
         self.seg_loss_weight = seg_loss_weight
         self.heatmap_loss_weight = heatmap_loss_weight
         self.wh_loss_weight = wh_loss_weight
+        self.dice_loss_weight = dice_loss_weight
         self.danger_ignore_index = danger_ignore_index
 
         if self.modality_dropout_rgb_only + self.modality_dropout_thermal_only > 1.0:
