@@ -78,9 +78,3 @@ uv run python scripts/train_experiment.py --run-name balanced-5ep --epochs 5 \
 ```
 python scripts/train_experiment.py --run-name sard-person-tiles --epochs 5 --road-oversample 4 --balance-fire-seg --dice-loss-weight 1.0 --visdrone-tiles --sard-tiles --offset-head --num-workers 8
 ```
-
-## sard-modality-dropout
-
-```
-python scripts/train_experiment.py --run-name sard-modality-dropout --epochs 5 --road-oversample 4 --balance-fire-seg --dice-loss-weight 1.0 --visdrone-tiles --offset-head --sard tiles --modality-dropout 0.25 0.25 --num-workers 8
-```
