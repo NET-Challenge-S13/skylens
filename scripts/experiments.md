@@ -78,3 +78,9 @@ uv run python scripts/train_experiment.py --run-name balanced-5ep --epochs 5 \
 ```
 python scripts/train_experiment.py --run-name sard-person-tiles --epochs 5 --road-oversample 4 --balance-fire-seg --dice-loss-weight 1.0 --visdrone-tiles --sard-tiles --offset-head --num-workers 8
 ```
+
+## eval-size-relative-match
+
+```
+python scripts/eval_deploy.py --ckpt <run>/final --data-root <data> --bs 4
+```
