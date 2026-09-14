@@ -318,9 +318,11 @@ def main() -> None:
                    "llvip_gt": "grid_decoded" if legacy else "continuous_cache_annotations",
                    "vd137_indices": vd137, "seconds": round(time.time() - t0, 1)}
 
+    if a.out:
+        Path(a.out).write_text(json.dumps(res, indent=1))
     print(f"\n{'set':28s}{'mAP50':>8s}{'mAP5095':>9s}{'ptAP':>8s}{'bestF1':>8s}{'@thr':>6s}{'F1@.3':>8s}{'nGT':>7s}{'nDet':>8s}{'R@P50':>8s}{'Rmax':>8s}")
     for k, v in res.items():
-        if isinstance(v, dict) and "map_50" in v:
+        if isinstance(v, dict) and "radii" in v:
             print(f"{k:28s}{v['map_50']:8.4f}{v['map_50_95']:9.4f}{v['point_ap']:8.4f}{v['best_f1']:8.4f}"
                   f"{v['best_thr']:6.2f}{v['f1_at_0.30']:8.4f}{v['num_gt']:7d}{v['num_det']:8d}"
                   f"{v['recall_at_p50']:8.4f}{v['recall_max']:8.4f}")
@@ -340,8 +342,6 @@ def main() -> None:
     for k in TARGETS:
         print(f"  {k:14s} {tg[k]['value']:.4f} >= {tg[k]['target']:.2f}  {'PASS' if tg[k]['pass'] else 'FAIL'}")
     print(f"  all_pass: {tg['all_pass']}")
-    if a.out:
-        Path(a.out).write_text(json.dumps(res, indent=1))
 
 
 if __name__ == "__main__":
