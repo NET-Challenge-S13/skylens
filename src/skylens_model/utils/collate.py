@@ -152,11 +152,6 @@ class SkyLensCollator:
         is applied *after* stacking, and updates ``modality_mask`` accordingly.
     max_objects:
         Safety cap on boxes encoded per image.
-    min_gaussian_radius:
-        Lower bound on the heatmap Gaussian radius (grid cells). ``0`` keeps the
-        plain CenterNet radius; ``1`` gives tiny boxes a 3x3 neighbourhood
-        instead of a single positive cell. ``reg_mask``/``wh``/``offset`` are
-        unaffected.
     """
 
     def __init__(
@@ -167,13 +162,9 @@ class SkyLensCollator:
         modality_dropout: tuple[float, float] = (0.0, 0.0),
         max_objects: int = 512,
         rng: np.random.Generator | None = None,
-        min_gaussian_radius: int = 0,
     ) -> None:
         if person_head_stride < 1:
             raise ValueError("person_head_stride must be >= 1")
-        if min_gaussian_radius < 0:
-            raise ValueError("min_gaussian_radius must be >= 0")
-        self.min_gaussian_radius = int(min_gaussian_radius)
         self.person_head_stride = int(person_head_stride)
         self.validity_channel = bool(validity_channel)
         self.min_overlap = float(min_overlap)
@@ -311,7 +302,6 @@ class SkyLensCollator:
                 continue
 
             radius = max(0, int(gaussian_radius((bh, bw), self.min_overlap)))
-            radius = max(self.min_gaussian_radius, radius)
             draw_gaussian(heatmap, (cxi, cyi), radius)
 
             wh[0, cyi, cxi] = bw

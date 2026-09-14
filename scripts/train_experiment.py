@@ -96,12 +96,6 @@ def parse_args() -> argparse.Namespace:
         default=1.0,
         help="--offset-head 일 때 오프셋 L1 손실의 가중치",
     )
-    p.add_argument(
-        "--min-gaussian-radius",
-        type=int,
-        default=0,
-        help="사람 히트맵 가우시안 반경의 하한(격자 칸). 0 이면 v3 그대로",
-    )
     p.add_argument("--num-workers", type=int, default=0, help="DataLoader 워커 수")
     p.add_argument(
         "--person-head-stride",
@@ -344,8 +338,7 @@ def main() -> int:
     )
     model = SkyLensForDisasterPerception(config)
     print(f"파라미터 {sum(p.numel() for p in model.parameters()) / 1e6:.1f}M")
-    print(f"세그 클래스 가중치: {args.danger_class_weights or '없음(기준선)'}")
-    print(f"히트맵 가우시안 최소 반경: {args.min_gaussian_radius}\n")
+    print(f"세그 클래스 가중치: {args.danger_class_weights or '없음(기준선)'}\n")
 
     # --- 학습 (노트북 §6~7) ------------------------------------------------
     output_dir = Path("runs") / args.run_name
@@ -385,9 +378,6 @@ def main() -> int:
             person_head_stride=args.person_head_stride,
             validity_channel=False,
             modality_dropout=(0.0, 0.0),
-            # 학습·평가가 같은 collator 를 쓴다. 평가 GT 박스는 reg_mask/wh/offset 에서
-            # 복원하므로 이 값은 평가 지표에 영향이 없고 eval 히트맵 손실에만 들어간다.
-            min_gaussian_radius=args.min_gaussian_radius,
         ),
         # 이것이 없으면 평가가 손실만 내고 mIoU·클래스별 IoU·사람 점지표가 전부
         # 빠진다. 판정 기준이 그 지표들이라 빠지면 실험이 무의미해진다.
