@@ -245,46 +245,6 @@ def masked_l1_loss(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor)
     return loss
 
 
-WH_LOSS_TYPES = ("l1", "log_l1", "giou")
-# log-size 파라미터화에서 exp 전 raw 출력 클램프 범위 (격자 단위 약 0.0025 ~ 2981).
-_WH_LOG_MIN, _WH_LOG_MAX = -6.0, 8.0
-
-
-def masked_log_l1_loss(
-    pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor, eps: float = 1e-3
-) -> torch.Tensor:
-    """중심점 위치에서 log(w), log(h) 사이 L1 — 상대 오차라 작은 박스에 민감하다.
-
-    `pred`는 양수 크기(격자 단위)여야 한다. fp16 안전을 위해 float32로 계산한다.
-    """
-    pred = pred.float()
-    target = target.float()
-    mask = mask.expand_as(pred).float()
-    diff = (torch.log(pred.clamp(min=0.0) + eps) - torch.log(target.clamp(min=0.0) + eps)).abs()
-    return (diff * mask).sum() / mask.sum().clamp(min=1.0)
-
-
-def masked_centered_giou_loss(
-    pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor, eps: float = 1e-6
-) -> torch.Tensor:
-    """중심을 공유하는 박스 쌍의 1 - GIoU. 중심이 같으므로 IoU는 크기에만 의존한다.
-
-    `pred`/`target`은 (B, 2, h, w) 양수 (w, h), `mask`는 (B, 1, h, w).
-    양성 셀 수로 정규화하며 양성이 없으면 0. float32로 계산한다.
-    """
-    pred = pred.float().clamp(min=0.0)
-    target = target.float().clamp(min=0.0)
-    m = mask[:, :1].float()
-    pw, ph = pred[:, 0:1], pred[:, 1:2]
-    gw, gh = target[:, 0:1], target[:, 1:2]
-    inter = torch.minimum(pw, gw) * torch.minimum(ph, gh)
-    union = pw * ph + gw * gh - inter
-    enclose = torch.maximum(pw, gw) * torch.maximum(ph, gh)
-    iou = inter / (union + eps)
-    giou = iou - (enclose - union) / (enclose + eps)
-    return ((1.0 - giou) * m).sum() / m.sum().clamp(min=1.0)
-
-
 def masked_soft_dice_loss(
     logits: torch.Tensor, labels: torch.Tensor, ignore_index: int = 255, smooth: float = 1.0
 ) -> torch.Tensor:
@@ -550,14 +510,7 @@ class SkyLensForDisasterPerception(SkyLensPreTrainedModel):
             )
         person_feat_hm = self.person_stem(person_feat)
         heatmap_pred = torch.sigmoid(self.heatmap_head(person_feat_hm))
-        wh_raw = self.wh_head(self.wh_stem(person_feat))
-        if self.config.wh_loss_type == "l1":
-            # 기존 동작: raw 출력이 곧 (w, h). 예전 체크포인트와 호환.
-            wh_pred = wh_raw
-        else:
-            # log_l1 / giou: raw = log-size. 출력은 항상 양수 격자 단위 (w, h)라
-            # 디코딩(decode_heatmap_peaks 등)은 모드와 무관하게 그대로다.
-            wh_pred = torch.exp(wh_raw.float().clamp(_WH_LOG_MIN, _WH_LOG_MAX))
+        wh_pred = self.wh_head(self.wh_stem(person_feat))
 
         # 5) loss — GT가 없는 헤드는 건너뛴다 (README §6.3 헤드별 분리 학습)
         loss = None
@@ -583,13 +536,7 @@ class SkyLensForDisasterPerception(SkyLensPreTrainedModel):
             loss_dict["person_heatmap"] = hm_loss
 
         if person_wh is not None and person_reg_mask is not None:
-            wh_loss_type = self.config.wh_loss_type
-            if wh_loss_type == "log_l1":
-                wh_loss = masked_log_l1_loss(wh_pred, person_wh, person_reg_mask)
-            elif wh_loss_type == "giou":
-                wh_loss = masked_centered_giou_loss(wh_pred, person_wh, person_reg_mask)
-            else:
-                wh_loss = masked_l1_loss(wh_pred, person_wh, person_reg_mask)
+            wh_loss = masked_l1_loss(wh_pred, person_wh, person_reg_mask)
             loss_dict["person_wh"] = wh_loss
 
         if loss_dict:
@@ -623,7 +570,5 @@ __all__ = [
     "SkyLensForDisasterPerception",
     "centernet_focal_loss",
     "masked_l1_loss",
-    "masked_log_l1_loss",
-    "masked_centered_giou_loss",
     "inflate_first_conv",
 ]
