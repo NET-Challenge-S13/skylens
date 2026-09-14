@@ -127,18 +127,6 @@ def parse_args() -> argparse.Namespace:
         default=1.0,
         help="--offset-head 일 때 오프셋 L1 손실의 가중치",
     )
-    p.add_argument(
-        "--modality-dropout",
-        type=float,
-        nargs=2,
-        default=[0.0, 0.0],
-        metavar=("RGB_ONLY", "THERMAL_ONLY"),
-        help=(
-            "학습 콜레이터의 modality dropout 확률. RGB+열 둘 다 있는 샘플(LLVIP)만 대상이며, "
-            "RGB_ONLY 는 열을 지워 RGB 만 남기고 THERMAL_ONLY 는 RGB 를 지운다. "
-            "평가는 항상 0 0. 기본 0 0 (v3)"
-        ),
-    )
     p.add_argument("--num-workers", type=int, default=0, help="DataLoader 워커 수")
     p.add_argument(
         "--person-head-stride",
@@ -394,15 +382,7 @@ def main() -> int:
     )
     model = SkyLensForDisasterPerception(config)
     print(f"파라미터 {sum(p.numel() for p in model.parameters()) / 1e6:.1f}M")
-    print(f"세그 클래스 가중치: {args.danger_class_weights or '없음(기준선)'}")
-    # CLI 는 (RGB_ONLY, THERMAL_ONLY), collator 는 (p_drop_thermal, p_drop_rgb) 순서다.
-    # RGB 만 남기기 = 열 지우기라서 두 순서의 의미가 같다.
-    p_rgb_only, p_thermal_only = args.modality_dropout
-    train_modality_dropout = (p_rgb_only, p_thermal_only)
-    print(
-        f"modality dropout (학습만, RGB+열 샘플 대상): RGB만 {p_rgb_only:.2f} · "
-        f"열만 {p_thermal_only:.2f} · 둘 다 {1 - p_rgb_only - p_thermal_only:.2f} | 평가 0 0\n"
-    )
+    print(f"세그 클래스 가중치: {args.danger_class_weights or '없음(기준선)'}\n")
 
     # --- 학습 (노트북 §6~7) ------------------------------------------------
     output_dir = Path("runs") / args.run_name
@@ -438,13 +418,7 @@ def main() -> int:
         args=targs,
         train_dataset=train_ds,
         eval_dataset=eval_ds,
-        # 학습 collator 에만 modality dropout 을 건다. 평가는 항상 (0, 0).
         data_collator=SkyLensCollator(
-            person_head_stride=args.person_head_stride,
-            validity_channel=False,
-            modality_dropout=train_modality_dropout,
-        ),
-        eval_data_collator=SkyLensCollator(
             person_head_stride=args.person_head_stride,
             validity_channel=False,
             modality_dropout=(0.0, 0.0),
