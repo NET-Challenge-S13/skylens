@@ -116,7 +116,6 @@ related: "[[INTENT.md]], [[COMPONENTS.md]], [[ARCHITECTURE.md]], [[NETWORK_ARCHI
 
 - 백본: UNet, 입력 4채널(RGB 3 + 열 1).
 - 세그 헤드 — 위험구역(stuff). 통합 클래스 스키마는 `0 normal / 1 fire / 2 collapse / 3 road_blocked / 255 ignore`.
-- **세그 손실은 `road_blocked`에만 가중치를 준 cross-entropy다.** 가중치는 `normal 1.0 / fire 1.0 / collapse 1.0 / road_blocked 8.0`. 오버샘플링으로 표본 비중을 올린 뒤에도 이 클래스는 픽셀 비중이 6% 안팎으로 남는다. 네 클래스 모두에 가중치를 주면 다수 클래스가 손해를 본다. 근거: experiment/balanced-plus-weights.
 - 점 검출 헤드 — 사람.
 - modality dropout으로 열화상이 없는 입력도 견딘다.
 - 헤드별로 분리 학습한다.
