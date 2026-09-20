@@ -90,3 +90,9 @@ python scripts/eval_deploy.py --ckpt <run>/final --data-root <data> --bs 4
 ```
 python scripts/train_experiment.py --run-name holdout-visdrone --epochs 5 --road-oversample 4 --balance-fire-seg --dice-loss-weight 1.0 --visdrone-tiles --offset-head --sard tiles --exclude-train-sources visdrone --num-workers 8
 ```
+
+## holdout-llvip
+
+```
+python scripts/train_experiment.py --run-name holdout-llvip --epochs 5 --road-oversample 4 --balance-fire-seg --dice-loss-weight 1.0 --visdrone-tiles --offset-head --sard tiles --exclude-train-sources llvip --num-workers 8
+```
