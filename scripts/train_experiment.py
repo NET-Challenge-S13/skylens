@@ -161,6 +161,25 @@ def parse_args() -> argparse.Namespace:
             "SARD 평가는 scripts/eval_deploy.py 의 sard394_tiled765 로 한다"
         ),
     )
+    p.add_argument(
+        "--min-overlap",
+        type=float,
+        default=0.7,
+        help=(
+            "사람 히트맵 가우시안 반지름을 정하는 최소 IoU. 낮출수록 반지름이 커져 "
+            "중심 주변의 부드러운 고리가 넓어진다. 학습 콜레이터에만 적용한다"
+        ),
+    )
+    p.add_argument(
+        "--radius-rounding",
+        choices=("trunc", "round"),
+        default="trunc",
+        help=(
+            "가우시안 반지름을 정수 칸 수로 바꾸는 규칙. trunc(기본, v4 그대로)는 버림이라 "
+            "반지름 1 미만인 작은 상자가 전부 one-hot 이 된다. round 는 반올림이라 "
+            "반지름 0.5 이상이면 최소한의 고리가 남는다. 학습 콜레이터에만 적용한다"
+        ),
+    )
     p.add_argument("--data-root", type=Path, default=None, help="기본값은 자동 탐색")
     p.add_argument("--eval-max-samples", type=int, default=EVAL_MAX_SAMPLES)
     p.add_argument("--no-resume", action="store_true", help="체크포인트가 있어도 처음부터 학습한다")
@@ -289,6 +308,7 @@ def main() -> int:
     cache_root = data_root / "_cache"
     sources = build_sources(data_root, args.sard)
     print(f"SARD: {args.sard}")
+    print(f"사람 히트맵 타깃(학습 전용): min_overlap {args.min_overlap} · radius_rounding {args.radius_rounding}")
 
     def build_split(which: str, augment):
         parts = []
@@ -413,16 +433,29 @@ def main() -> int:
         point_distance_threshold=8.0,
     )
 
+    # 학습 타깃만 바꾸고 평가는 v4 그대로 둔다. HF Trainer 는 data_collator 하나를
+    # 학습·평가 양쪽에 쓰므로, 평가 로더에는 기본값(trunc · 0.7) 콜레이터를 따로 끼운다.
+    # 점 지표의 정답 상자는 reg_mask/wh/offset 에서 나오므로 히트맵 모양은 지표에
+    # 영향을 주지 않지만, 평가 손실까지 v4 와 같게 두려면 이 분리가 필요하다.
+    train_collator = SkyLensCollator(
+        person_head_stride=args.person_head_stride,
+        validity_channel=False,
+        min_overlap=args.min_overlap,
+        radius_rounding=args.radius_rounding,
+        modality_dropout=(0.0, 0.0),
+    )
+    eval_collator = SkyLensCollator(
+        person_head_stride=args.person_head_stride,
+        validity_channel=False,
+        modality_dropout=(0.0, 0.0),
+    )
+
     trainer = SkyLensTrainer(
         model=model,
         args=targs,
         train_dataset=train_ds,
         eval_dataset=eval_ds,
-        data_collator=SkyLensCollator(
-            person_head_stride=args.person_head_stride,
-            validity_channel=False,
-            modality_dropout=(0.0, 0.0),
-        ),
+        data_collator=train_collator,
         # 이것이 없으면 평가가 손실만 내고 mIoU·클래스별 IoU·사람 점지표가 전부
         # 빠진다. 판정 기준이 그 지표들이라 빠지면 실험이 무의미해진다.
         compute_metrics=build_compute_metrics(
@@ -433,6 +466,18 @@ def main() -> int:
         ),
         callbacks=[GracefulInterruptCallback()],
     )
+
+    # 평가 로더만 기본값 콜레이터로 바꾼다.
+    _get_eval_dataloader = trainer.get_eval_dataloader
+
+    def _eval_dataloader_with_v4_collator(eval_dataset=None, *a, **kw):
+        saved, trainer.data_collator = trainer.data_collator, eval_collator
+        try:
+            return _get_eval_dataloader(eval_dataset, *a, **kw)
+        finally:
+            trainer.data_collator = saved
+
+    trainer.get_eval_dataloader = _eval_dataloader_with_v4_collator
 
     resume = None if args.no_resume else find_resume_checkpoint(output_dir)
     print(f"재개 지점: {resume}" if resume else "체크포인트 없음, 처음부터 학습")
