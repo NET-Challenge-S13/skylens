@@ -118,15 +118,6 @@ def parse_args() -> argparse.Namespace:
         "(--heatmap-loss-weight 와 다르다: 이쪽은 loss 전체가 아니라 양성 항만 키운다)",
     )
     p.add_argument(
-        "--seg-loss-weight",
-        type=float,
-        default=1.0,
-        help=(
-            "세그 손실 전체의 가중치. 사람 헤드 손실을 키우면 공유 백본에서 세그 몫이 "
-            "줄어드는데, 그때 균형을 되돌리는 데 쓴다"
-        ),
-    )
-    p.add_argument(
         "--dice-loss-weight",
         type=float,
         default=0.0,
@@ -409,7 +400,7 @@ def main() -> int:
         person_head_stride=args.person_head_stride,
         modality_dropout_rgb_only=0.25,
         modality_dropout_thermal_only=0.25,
-        seg_loss_weight=args.seg_loss_weight,
+        seg_loss_weight=1.0,
         heatmap_loss_weight=args.heatmap_loss_weight,
         wh_loss_weight=args.wh_loss_weight,
         heatmap_pos_weight=args.heatmap_pos_weight,
