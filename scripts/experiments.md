@@ -108,3 +108,9 @@ python scripts/train_experiment.py --run-name combo-10ep --epochs 10 --road-over
 ```
 python scripts/train_experiment.py --run-name combo-20ep --epochs 20 --road-oversample 4 --balance-fire-seg --dice-loss-weight 1.0 --visdrone-tiles --offset-head --sard tiles --person-head-stride 2 --radius-rounding round --num-workers 8
 ```
+
+## eval-topk-unbind
+
+```
+python scripts/eval_deploy.py --ckpt <run>/final --data-root <data> --bs 4
+```
