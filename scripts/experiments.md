@@ -90,3 +90,9 @@ python scripts/eval_deploy.py --ckpt <run>/final --data-root <data> --bs 4
 ```
 python scripts/train_experiment.py --run-name person-head-stride2-v4 --epochs 5 --road-oversample 4 --balance-fire-seg --dice-loss-weight 1.0 --visdrone-tiles --offset-head --sard tiles --person-head-stride 2 --num-workers 8
 ```
+
+## stride2-radius-combo
+
+```
+python scripts/train_experiment.py --run-name stride2-radius-combo --epochs 5 --road-oversample 4 --balance-fire-seg --dice-loss-weight 1.0 --visdrone-tiles --offset-head --sard tiles --person-head-stride 2 --radius-rounding round --num-workers 8
+```
