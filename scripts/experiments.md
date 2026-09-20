@@ -84,3 +84,9 @@ python scripts/train_experiment.py --run-name sard-person-tiles --epochs 5 --roa
 ```
 python scripts/eval_deploy.py --ckpt <run>/final --data-root <data> --bs 4
 ```
+
+## person-radius-consistency
+
+```
+python scripts/train_experiment.py --run-name person-radius-consistency --epochs 5 --road-oversample 4 --balance-fire-seg --dice-loss-weight 1.0 --visdrone-tiles --offset-head --sard tiles --min-overlap 0.85 --num-workers 8
+```
