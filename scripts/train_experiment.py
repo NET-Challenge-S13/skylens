@@ -289,6 +289,7 @@ def main() -> int:
     cache_root = data_root / "_cache"
     sources = build_sources(data_root, args.sard)
     print(f"SARD: {args.sard}")
+    print(f"점 검출 헤드 출력 stride: {args.person_head_stride}")
 
     def build_split(which: str, augment):
         parts = []
