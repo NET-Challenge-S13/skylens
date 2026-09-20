@@ -102,3 +102,9 @@ python scripts/train_experiment.py --run-name stride2-radius-combo --epochs 5 --
 ```
 python scripts/train_experiment.py --run-name combo-10ep --epochs 10 --road-oversample 4 --balance-fire-seg --dice-loss-weight 1.0 --visdrone-tiles --offset-head --sard tiles --person-head-stride 2 --radius-rounding round --num-workers 8
 ```
+
+## combo-20ep
+
+```
+python scripts/train_experiment.py --run-name combo-20ep --epochs 20 --road-oversample 4 --balance-fire-seg --dice-loss-weight 1.0 --visdrone-tiles --offset-head --sard tiles --person-head-stride 2 --radius-rounding round --num-workers 8
+```
