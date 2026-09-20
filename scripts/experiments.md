@@ -84,9 +84,3 @@ python scripts/train_experiment.py --run-name sard-person-tiles --epochs 5 --roa
 ```
 python scripts/eval_deploy.py --ckpt <run>/final --data-root <data> --bs 4
 ```
-
-## holdout-visdrone
-
-```
-python scripts/train_experiment.py --run-name holdout-visdrone --epochs 5 --road-oversample 4 --balance-fire-seg --dice-loss-weight 1.0 --visdrone-tiles --offset-head --sard tiles --exclude-train-sources visdrone --num-workers 8
-```
