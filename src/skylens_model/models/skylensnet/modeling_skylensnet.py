@@ -75,6 +75,21 @@ class SkyLensConvBlock(nn.Module):
         return self.block(hidden_state)
 
 
+class SkyLensDownsampleBlock(nn.Module):
+    """stride-2 Conv-BN-ReLU. 학습되는 저역통과 대신 쓰는 다운샘플."""
+
+    def __init__(self, channels: int):
+        super().__init__()
+        self.block = nn.Sequential(
+            nn.Conv2d(channels, channels, kernel_size=3, stride=2, padding=1, bias=False),
+            nn.BatchNorm2d(channels),
+            nn.ReLU(inplace=True),
+        )
+
+    def forward(self, hidden_state: torch.Tensor) -> torch.Tensor:
+        return self.block(hidden_state)
+
+
 class SkyLensDecoderBlock(nn.Module):
     """업샘플 → (있으면) 스킵 concat → Conv-BN-ReLU ×2."""
 
@@ -414,6 +429,17 @@ class SkyLensForDisasterPerception(SkyLensPreTrainedModel):
         self.danger_head = nn.Conv2d(feat_ch, config.num_danger_classes, kernel_size=1)
 
         # 점 검출 헤드 (CenterNet) — 3x3 conv → 1x1 conv
+        # 히트맵/오프셋 가지의 다운샘플 방식. 기존 설정에는 키가 없어 "bilinear" 로 온다.
+        self.person_downsample = getattr(config, "person_downsample", "bilinear")
+        if self.person_downsample not in ("bilinear", "conv"):
+            raise ValueError(
+                "person_downsample 은 'bilinear' 또는 'conv' 여야 한다 "
+                f"(현재 {self.person_downsample!r})."
+            )
+        # "conv" 일 때만 존재한다. stride 차이가 2를 넘으면 남는 배수는 기존 resize 가 처리한다.
+        self.person_down_conv = (
+            SkyLensDownsampleBlock(feat_ch) if self.person_downsample == "conv" else None
+        )
         self.person_stem = SkyLensConvBlock(feat_ch, feat_ch)
         self.wh_stem = SkyLensConvBlock(feat_ch, feat_ch)
         self.heatmap_head = nn.Conv2d(feat_ch, 1, kernel_size=1)
@@ -513,11 +539,27 @@ class SkyLensForDisasterPerception(SkyLensPreTrainedModel):
         stride = self.config.person_head_stride
         target_hw = (max(height // stride, 1), max(width // stride, 1))
         person_feat = features
+        # 히트맵/오프셋 가지: "conv" 면 학습되는 stride-2 conv 로 절반까지 내리고,
+        # 남는 배수(디코더 stride 와 person_head_stride 가 2배 넘게 차이날 때)만 resize 한다.
+        hm_feat = None
+        if (
+            self.person_down_conv is not None
+            and person_feat.shape[-2] > target_hw[0]
+            and person_feat.shape[-1] > target_hw[1]
+        ):
+            hm_feat = self.person_down_conv(person_feat)
+            if hm_feat.shape[-2:] != target_hw:
+                hm_feat = F.interpolate(
+                    hm_feat, size=target_hw, mode="bilinear", align_corners=False
+                )
+        # wh 가지는 두 모드 모두 기존 bilinear 경로 그대로다.
         if person_feat.shape[-2:] != target_hw:
             person_feat = F.interpolate(
                 person_feat, size=target_hw, mode="bilinear", align_corners=False
             )
-        person_feat_hm = self.person_stem(person_feat)
+        if hm_feat is None:
+            hm_feat = person_feat
+        person_feat_hm = self.person_stem(hm_feat)
         heatmap_pred = torch.sigmoid(self.heatmap_head(person_feat_hm))
         wh_pred = self.wh_head(self.wh_stem(person_feat))
         offset_pred = self.offset_head(person_feat_hm) if self.offset_head is not None else None

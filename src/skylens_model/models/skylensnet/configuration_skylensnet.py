@@ -36,6 +36,12 @@ class SkyLensConfig(PretrainedConfig):
             위험구역 클래스 수. 0=정상 1=화재 2=붕괴 3=도로차단.
         person_head_stride (`int`):
             점 검출 헤드(히트맵/wh)가 동작하는 출력 stride.
+        person_downsample (`str`):
+            디코더 feature(stride 2)를 점 검출 격자(`person_head_stride`)로 내리는 방법.
+            `"bilinear"`(기본)는 `F.interpolate` 로 내린다. 기존 설정/체크포인트는
+            키가 없으므로 항상 이 값으로 로드되어 구조가 그대로다.
+            `"conv"` 는 히트맵/오프셋 가지에 한해 학습되는 stride-2 3x3 conv 로 내린다.
+            wh 가지는 두 경우 모두 bilinear 경로를 쓴다.
         modality_dropout_rgb_only (`float`):
             학습 중 thermal을 지워 RGB-only로 만들 확률.
         modality_dropout_thermal_only (`float`):
@@ -66,6 +72,7 @@ class SkyLensConfig(PretrainedConfig):
         decoder_channels: tuple = (256, 128, 64, 32),
         num_danger_classes: int = 4,
         person_head_stride: int = 4,
+        person_downsample: str = "bilinear",
         modality_dropout_rgb_only: float = 0.25,
         modality_dropout_thermal_only: float = 0.25,
         seg_loss_weight: float = 1.0,
@@ -87,6 +94,7 @@ class SkyLensConfig(PretrainedConfig):
         self.decoder_channels = tuple(decoder_channels)
         self.num_danger_classes = num_danger_classes
         self.person_head_stride = person_head_stride
+        self.person_downsample = person_downsample
         self.modality_dropout_rgb_only = modality_dropout_rgb_only
         self.modality_dropout_thermal_only = modality_dropout_thermal_only
         self.seg_loss_weight = seg_loss_weight
@@ -101,6 +109,11 @@ class SkyLensConfig(PretrainedConfig):
             raise ValueError(
                 "modality_dropout_rgb_only + modality_dropout_thermal_only 는 1.0 이하여야 한다 "
                 f"(현재 {self.modality_dropout_rgb_only} + {self.modality_dropout_thermal_only})."
+            )
+        if self.person_downsample not in ("bilinear", "conv"):
+            raise ValueError(
+                "person_downsample 은 'bilinear' 또는 'conv' 여야 한다 "
+                f"(현재 {self.person_downsample!r})."
             )
         if self.in_channels < 4:
             raise ValueError("in_channels 는 최소 4 (RGB 3 + thermal 1) 여야 한다.")

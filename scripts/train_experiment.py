@@ -127,6 +127,16 @@ def parse_args() -> argparse.Namespace:
         default=1.0,
         help="--offset-head 일 때 오프셋 L1 손실의 가중치",
     )
+    p.add_argument(
+        "--person-downsample",
+        choices=("bilinear", "conv"),
+        default="bilinear",
+        help=(
+            "디코더 feature 를 점 검출 격자로 내리는 방법. "
+            "bilinear 는 기존 resize(기준선), conv 는 히트맵/오프셋 가지에만 "
+            "학습되는 stride-2 conv 를 쓴다"
+        ),
+    )
     p.add_argument("--num-workers", type=int, default=0, help="DataLoader 워커 수")
     p.add_argument(
         "--person-head-stride",
@@ -370,6 +380,7 @@ def main() -> int:
         in_channels=4,
         num_danger_classes=NUM_DANGER_CLASSES,
         person_head_stride=args.person_head_stride,
+        person_downsample=args.person_downsample,
         modality_dropout_rgb_only=0.25,
         modality_dropout_thermal_only=0.25,
         seg_loss_weight=1.0,
@@ -382,7 +393,8 @@ def main() -> int:
     )
     model = SkyLensForDisasterPerception(config)
     print(f"파라미터 {sum(p.numel() for p in model.parameters()) / 1e6:.1f}M")
-    print(f"세그 클래스 가중치: {args.danger_class_weights or '없음(기준선)'}\n")
+    print(f"세그 클래스 가중치: {args.danger_class_weights or '없음(기준선)'}")
+    print(f"점 검출 다운샘플: {args.person_downsample}\n")
 
     # --- 학습 (노트북 §6~7) ------------------------------------------------
     output_dir = Path("runs") / args.run_name
