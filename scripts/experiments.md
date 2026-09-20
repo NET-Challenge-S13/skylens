@@ -84,3 +84,9 @@ python scripts/train_experiment.py --run-name sard-person-tiles --epochs 5 --roa
 ```
 python scripts/eval_deploy.py --ckpt <run>/final --data-root <data> --bs 4
 ```
+
+## eval-topk-unbind
+
+```
+python scripts/eval_deploy.py --ckpt <run>/final --data-root <data> --bs 4
+```
