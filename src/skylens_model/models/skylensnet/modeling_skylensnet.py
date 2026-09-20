@@ -214,19 +214,11 @@ def inflate_first_conv(backbone: nn.Module, in_channels: int, pretrained: bool =
 # ---------------------------------------------------------------------------
 
 
-def centernet_focal_loss(
-    pred: torch.Tensor,
-    target: torch.Tensor,
-    alpha: float = 2.0,
-    beta: float = 4.0,
-    pos_weight: float = 1.0,
-) -> torch.Tensor:
+def centernet_focal_loss(pred: torch.Tensor, target: torch.Tensor, alpha: float = 2.0, beta: float = 4.0) -> torch.Tensor:
     """CenterNet penalty-reduced pixel-wise focal loss (Law & Deng, CornerNet).
 
     `pred`는 **sigmoid가 이미 적용된 확률**, `target`은 가우시안 GT 히트맵.
     중심점(target == 1)만 positive로 보고, 주변 픽셀은 가우시안 값만큼 페널티를 깎는다.
-    `pos_weight`는 positive 항에만 곱한다. 1.0이면 기존 식과 완전히 같다.
-    positive가 하나도 없는 배치는 negative 항만 남으므로 `pos_weight`의 영향을 받지 않는다.
     """
     eps = 1e-4
     pred = pred.clamp(min=eps, max=1.0 - eps)
@@ -244,7 +236,7 @@ def centernet_focal_loss(
 
     if num_pos == 0:
         return -neg_loss
-    return -(pos_weight * pos_loss + neg_loss) / num_pos
+    return -(pos_loss + neg_loss) / num_pos
 
 
 def masked_l1_loss(pred: torch.Tensor, target: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
@@ -550,11 +542,7 @@ class SkyLensForDisasterPerception(SkyLensPreTrainedModel):
                 )
 
         if person_heatmap is not None:
-            hm_loss = centernet_focal_loss(
-                heatmap_pred,
-                person_heatmap,
-                pos_weight=self.config.heatmap_pos_weight,
-            )
+            hm_loss = centernet_focal_loss(heatmap_pred, person_heatmap)
             loss_dict["person_heatmap"] = hm_loss
 
         if person_wh is not None and person_reg_mask is not None:
