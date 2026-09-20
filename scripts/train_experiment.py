@@ -39,23 +39,12 @@ EVAL_MAX_SAMPLES = 1200
 SARD_MODES = ("off", "squash", "tiles")
 
 
-TRAIN_SOURCE_NAMES = ("llvip", "visdrone", "sard", "rescuenet", "fireseg")
-PERSON_SOURCE_NAMES = ("llvip", "visdrone", "sard")
-
-
-def build_sources(data_root: Path, sard: str = "off", exclude_train=()) -> list:
+def build_sources(data_root: Path, sard: str = "off") -> list:
     """Return `(dataset_cls, root, train_split, eval_split)` for every source.
 
     SARD is opt-in. Before data/sard existed it was listed unconditionally and
     silently skipped, so `off` is the v3 data mix. `tiles` trains on SARD tiles
     only and leaves the in-trainer eval subset untouched (eval_split None).
-
-    `exclude_train` names sources to drop from the TRAIN split only, for
-    leave-one-dataset-out generalization runs. The eval split is never touched,
-    so metrics stay comparable across runs: an excluded source keeps its
-    eval_split and only its train_split becomes None. The one exception is
-    `sard`, which is a training-only, opt-in source: excluding it drops the
-    source outright, exactly as `--sard off` does.
     """
     from skylens_model.datasets import (
         LLVIP,
@@ -67,50 +56,16 @@ def build_sources(data_root: Path, sard: str = "off", exclude_train=()) -> list:
 
     if sard not in SARD_MODES:
         raise ValueError(f"unknown --sard mode: {sard}")
-    excluded = tuple(dict.fromkeys(exclude_train))
-    unknown = [n for n in excluded if n not in TRAIN_SOURCE_NAMES]
-    if unknown:
-        raise ValueError(
-            f"unknown --exclude-train-sources name(s): {', '.join(unknown)}. "
-            f"choose from: {', '.join(TRAIN_SOURCE_NAMES)}"
-        )
     sources = [
         (LLVIP, data_root / "llvip" / "LLVIP", "train", "test"),
         (VisDronePerson, data_root / "visdrone", "train", "val"),
         (RescueNetSegmentation, data_root / "rescuenet", "train", "test"),
         (FireSegmentation, data_root / "fire_seg", "train", "val"),
     ]
-    if sard == "squash" and "sard" not in excluded:
+    if sard == "squash":
         sources.append((SARD, data_root / "sard", "train", "val"))
-    elif sard == "tiles" and "sard" not in excluded:
+    elif sard == "tiles":
         sources.append((SARD, data_root / "sard", "train", None))
-
-    name_of = {
-        LLVIP: "llvip",
-        VisDronePerson: "visdrone",
-        RescueNetSegmentation: "rescuenet",
-        FireSegmentation: "fireseg",
-        SARD: "sard",
-    }
-    if excluded:
-        sources = [
-            (cls, root, None if name_of[cls] in excluded else tr, ev)
-            for cls, root, tr, ev in sources
-        ]
-
-    person_left = [
-        name_of[cls] for cls, _root, tr, _ev in sources
-        if tr is not None and name_of[cls] in PERSON_SOURCE_NAMES
-    ]
-    if not person_left:
-        raise ValueError(
-            "--exclude-train-sources would leave no person-labelled training source "
-            f"(candidates: {', '.join(PERSON_SOURCE_NAMES)}; note that sard is only "
-            "in training when --sard is squash or tiles). the person head would have "
-            "nothing to learn from; keep at least one."
-        )
-    if not any(tr is not None for _, _, tr, _ in sources):
-        raise ValueError("--exclude-train-sources removed every training source.")
     return sources
 
 
@@ -223,22 +178,6 @@ def parse_args() -> argparse.Namespace:
             "가우시안 반지름을 정수 칸 수로 바꾸는 규칙. trunc(기본, v4 그대로)는 버림이라 "
             "반지름 1 미만인 작은 상자가 전부 one-hot 이 된다. round 는 반올림이라 "
             "반지름 0.5 이상이면 최소한의 고리가 남는다. 학습 콜레이터에만 적용한다"
-        ),
-    )
-    p.add_argument(
-        "--exclude-train-sources",
-        nargs="*",
-        choices=TRAIN_SOURCE_NAMES,
-        default=[],
-        metavar="NAME",
-        help=(
-            "학습 구성에서 뺄 데이터셋 (leave-one-dataset-out 일반화 실험용). "
-            f"고를 수 있는 값: {', '.join(TRAIN_SOURCE_NAMES)}. 기본값은 없음. "
-            "학습 split 만 빠지고 평가 split 과 평가 서브셋은 그대로라서 "
-            "실험 간 수치를 그대로 비교할 수 있다. 다만 sard 는 학습 전용 "
-            "옵트인 출처라서, sard 를 빼면 --sard 값과 무관하게 출처 자체가 "
-            "빠진다(= --sard off 와 같다). 사람 라벨 출처"
-            f"({', '.join(PERSON_SOURCE_NAMES)})를 전부 빼면 오류로 막는다"
         ),
     )
     p.add_argument("--data-root", type=Path, default=None, help="기본값은 자동 탐색")
@@ -367,14 +306,10 @@ def main() -> int:
     # --- 데이터셋 (노트북 §3) ----------------------------------------------
     data_root = resolve_data_root(args.data_root)
     cache_root = data_root / "_cache"
-    sources = build_sources(data_root, args.sard, args.exclude_train_sources)
+    sources = build_sources(data_root, args.sard)
     print(f"SARD: {args.sard}")
     print(f"점 검출 헤드 출력 stride: {args.person_head_stride}")
     print(f"사람 히트맵 타깃(학습 전용): min_overlap {args.min_overlap} · radius_rounding {args.radius_rounding}")
-    if args.exclude_train_sources:
-        print(f"학습에서 제외한 출처: {', '.join(args.exclude_train_sources)}")
-    else:
-        print("학습에서 제외한 출처: 없음")
 
     def build_split(which: str, augment):
         parts = []
