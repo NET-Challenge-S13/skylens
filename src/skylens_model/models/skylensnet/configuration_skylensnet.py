@@ -47,6 +47,9 @@ class SkyLensConfig(PretrainedConfig):
             키가 없는 기존 설정/체크포인트는 False로 로드되어 구조가 그대로다.
         offset_loss_weight (`float`):
             오프셋 masked L1 loss 가중치 (CenterNet 표준 1.0).
+        heatmap_pos_weight (`float`):
+            CenterNet focal loss 의 positive 항에만 곱하는 계수. 1.0 이면 기존과 동일하고,
+            키가 없는 기존 설정/체크포인트도 1.0 으로 로드된다. 0 보다 커야 한다.
         dice_loss_weight (`float`):
             세그 CrossEntropy에 더할 soft Dice loss 계수. 0이면 Dice를 쓰지 않는다(기존과 동일).
         danger_ignore_index (`int`):
@@ -71,6 +74,7 @@ class SkyLensConfig(PretrainedConfig):
         seg_loss_weight: float = 1.0,
         heatmap_loss_weight: float = 1.0,
         wh_loss_weight: float = 0.1,
+        heatmap_pos_weight: float = 1.0,
         dice_loss_weight: float = 0.0,
         use_offset_head: bool = False,
         offset_loss_weight: float = 1.0,
@@ -92,6 +96,7 @@ class SkyLensConfig(PretrainedConfig):
         self.seg_loss_weight = seg_loss_weight
         self.heatmap_loss_weight = heatmap_loss_weight
         self.wh_loss_weight = wh_loss_weight
+        self.heatmap_pos_weight = heatmap_pos_weight
         self.dice_loss_weight = dice_loss_weight
         self.use_offset_head = use_offset_head
         self.offset_loss_weight = offset_loss_weight
@@ -101,6 +106,10 @@ class SkyLensConfig(PretrainedConfig):
             raise ValueError(
                 "modality_dropout_rgb_only + modality_dropout_thermal_only 는 1.0 이하여야 한다 "
                 f"(현재 {self.modality_dropout_rgb_only} + {self.modality_dropout_thermal_only})."
+            )
+        if self.heatmap_pos_weight <= 0:
+            raise ValueError(
+                f"heatmap_pos_weight 는 0 보다 커야 한다 (현재 {self.heatmap_pos_weight})."
             )
         if self.in_channels < 4:
             raise ValueError("in_channels 는 최소 4 (RGB 3 + thermal 1) 여야 한다.")
