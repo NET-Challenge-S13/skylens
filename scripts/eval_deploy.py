@@ -61,7 +61,10 @@ from skylens_model.utils.metrics import (
     size_relative_radius,
 )
 
-SIZE, K, SHORT, OVERLAP = 512, 100, 765, 64
+# K: 타일당 검출 상한. 100 은 조밀한 타일에서 참 검출을 버린다. VisDrone·SARD 타일의
+# 0.05 이상 피크 수는 중앙값 12, 최대 235 라 300 이면 이 데이터에서 상한이 완전히 풀린다
+# (600·1000 과 결과가 같다). 근거: experiment/eval-topk-unbind.
+SIZE, K, SHORT, OVERLAP = 512, 300, 765, 64
 # The training eval subset (v3). SARD_val is deliberately absent: a SARD_val_512
 # cache (e.g. from a --sard squash run) would otherwise change the stride.
 CACHE_NAMES = ["LLVIP_test", "VisDronePerson_val", "RescueNetSegmentation_test", "FireSegmentation_val"]
