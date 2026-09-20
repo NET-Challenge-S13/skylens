@@ -111,6 +111,13 @@ def parse_args() -> argparse.Namespace:
         help="사람 히트맵 손실의 가중치",
     )
     p.add_argument(
+        "--heatmap-pos-weight",
+        type=float,
+        default=1.0,
+        help="히트맵 focal loss 의 positive 항에만 곱하는 계수. 1.0 이면 기준선과 같다 "
+        "(--heatmap-loss-weight 와 다르다: 이쪽은 loss 전체가 아니라 양성 항만 키운다)",
+    )
+    p.add_argument(
         "--dice-loss-weight",
         type=float,
         default=0.0,
@@ -375,6 +382,7 @@ def main() -> int:
         seg_loss_weight=1.0,
         heatmap_loss_weight=args.heatmap_loss_weight,
         wh_loss_weight=args.wh_loss_weight,
+        heatmap_pos_weight=args.heatmap_pos_weight,
         dice_loss_weight=args.dice_loss_weight,
         use_offset_head=args.offset_head,
         offset_loss_weight=args.offset_loss_weight,
@@ -382,7 +390,8 @@ def main() -> int:
     )
     model = SkyLensForDisasterPerception(config)
     print(f"파라미터 {sum(p.numel() for p in model.parameters()) / 1e6:.1f}M")
-    print(f"세그 클래스 가중치: {args.danger_class_weights or '없음(기준선)'}\n")
+    print(f"세그 클래스 가중치: {args.danger_class_weights or '없음(기준선)'}")
+    print(f"히트맵 positive 가중치: {args.heatmap_pos_weight}\n")
 
     # --- 학습 (노트북 §6~7) ------------------------------------------------
     output_dir = Path("runs") / args.run_name
