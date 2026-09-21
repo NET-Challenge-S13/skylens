@@ -116,21 +116,13 @@ def merge_tile_detections(
     dets: Sequence[np.ndarray],
     iou_threshold: float = 0.5,
     center_distance: float = 2.0,
-    size_relative: bool = False,
-    rel_frac: float = 0.15,
 ) -> np.ndarray:
     """Greedy de-duplication across tiles, highest score wins.
 
     `dets[i]` are full-image detections from tile i. A detection is suppressed only
     by a higher-scoring one from a *different* tile (within a tile the heatmap
     max-pool already de-duplicates) when their box IoU > `iou_threshold` or their
-    centres are close enough.
-
-    "Close enough" is `center_distance` px by default. With `size_relative`, it is
-    `max(center_distance, rel_frac * h)` instead, where `h` is the height of the
-    higher-scoring box: the same rule the evaluation uses to decide whether two
-    detections point at one person, so the merge stops leaving duplicates that the
-    evaluation then counts as false positives.
+    centres are within `center_distance` px.
     """
     from .metrics import box_iou_matrix
 
@@ -144,12 +136,7 @@ def merge_tile_detections(
 
     iou = box_iou_matrix(all_d[:, :4], all_d[:, :4])
     dist = np.hypot(all_d[:, None, 0] - all_d[None, :, 0], all_d[:, None, 1] - all_d[None, :, 1])
-    if size_relative:
-        # row i is the suppressor, so the radius comes from its own box height
-        radius = np.maximum(center_distance, rel_frac * all_d[:, 3])[:, None]
-    else:
-        radius = center_distance
-    dup = ((iou > iou_threshold) | (dist <= radius)) & (tid[:, None] != tid[None, :])
+    dup = ((iou > iou_threshold) | (dist <= center_distance)) & (tid[:, None] != tid[None, :])
 
     suppressed = np.zeros(len(all_d), bool)
     keep = []

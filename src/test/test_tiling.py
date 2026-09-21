@@ -73,27 +73,3 @@ def test_merge_keeps_neighbours_within_one_tile() -> None:
     same = np.array([[50.0, 50.0, 8, 20, 0.9], [51.0, 50.0, 8, 20, 0.8]])
     assert len(merge_tile_detections([same])) == 2
     assert len(merge_tile_detections([])) == 0
-
-
-def test_merge_size_relative_radius_suppresses_small_box_duplicates():
-    """A 5px-apart duplicate of a 40px-tall person survives the 2px rule and not the relative one."""
-    import numpy as np
-
-    from skylens_model.utils.tiling import merge_tile_detections
-
-    # two tiles, same person: centres 5px apart, boxes too small for IoU > 0.5
-    a = np.array([[100.0, 100.0, 12.0, 40.0, 0.9]])
-    b = np.array([[105.0, 100.0, 12.0, 40.0, 0.7]])
-    assert len(merge_tile_detections([a, b])) == 2
-    assert len(merge_tile_detections([a, b], size_relative=True)) == 1
-
-
-def test_merge_size_relative_keeps_two_distinct_people():
-    """Two people 20px apart stay separate: 0.15 * 40px = 6px, so the radius does not reach."""
-    import numpy as np
-
-    from skylens_model.utils.tiling import merge_tile_detections
-
-    a = np.array([[100.0, 100.0, 12.0, 40.0, 0.9]])
-    b = np.array([[120.0, 100.0, 12.0, 40.0, 0.7]])
-    assert len(merge_tile_detections([a, b], size_relative=True)) == 2
