@@ -519,7 +519,9 @@ class SkyLensForDisasterPerception(SkyLensPreTrainedModel):
             )
         person_feat_hm = self.person_stem(person_feat)
         heatmap_pred = torch.sigmoid(self.heatmap_head(person_feat_hm))
-        wh_pred = self.wh_head(self.wh_stem(person_feat))
+        # 상자 가지는 공유 특징을 읽기만 하고, wh_detach 면 기울기를 되돌려보내지 않는다.
+        wh_src = person_feat.detach() if self.config.wh_detach else person_feat
+        wh_pred = self.wh_head(self.wh_stem(wh_src))
         offset_pred = self.offset_head(person_feat_hm) if self.offset_head is not None else None
 
         # 5) loss — GT가 없는 헤드는 건너뛴다 (README §6.3 헤드별 분리 학습)

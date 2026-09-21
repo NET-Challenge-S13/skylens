@@ -117,6 +117,14 @@ def parse_args() -> argparse.Namespace:
         help="세그 CrossEntropy 에 더할 soft Dice 손실의 가중치. 0 이면 Dice 없이 학습한다(기준선)",
     )
     p.add_argument(
+        "--wh-detach",
+        action="store_true",
+        help=(
+            "상자 회귀 가지를 공유 특징에서 끊는다. 상자 손실의 기울기가 백본으로 흐르지 않아, "
+            "--wh-loss-weight 를 올려도 사람 히트맵과 위험구역이 상자 회귀에 끌려가지 않는다"
+        ),
+    )
+    p.add_argument(
         "--offset-head",
         action="store_true",
         help="CenterNet 서브픽셀 오프셋 헤드를 켠다 (기본 꺼짐)",
@@ -396,6 +404,7 @@ def main() -> int:
         seg_loss_weight=1.0,
         heatmap_loss_weight=args.heatmap_loss_weight,
         wh_loss_weight=args.wh_loss_weight,
+        wh_detach=args.wh_detach,
         dice_loss_weight=args.dice_loss_weight,
         use_offset_head=args.offset_head,
         offset_loss_weight=args.offset_loss_weight,
