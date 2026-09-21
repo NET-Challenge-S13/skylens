@@ -12,7 +12,9 @@ Pools two sources into one PR curve, each at its deployment inference path:
   It is never part of the training eval subset. `pooled_with_sard` pools
   LLVIP-866 + VisDrone-137 + SARD-394; `pooled137_vd8` stays LLVIP + VisDrone-137.
 - `pooled_target` (same three sources as `pooled_with_sard`) is the pool the
-  TARGETS block judges, at the size-relative radius.
+  TARGETS block judges, at the size-relative radius. The judged metrics are all
+  point based (recall_at_p50, recall_max, f1_at_0.30, point_ap); box mAP is still
+  computed and reported but no longer decides pass/fail (see REFERENCE_TARGETS).
 - Point matching is reported at two radii per set under `radii`:
   `8px` (fixed, the historical protocol; also the top-level keys) and `rel15`
   (primary): r = max(8px, 0.15 * GT box height) per GT, in each source's
@@ -84,7 +86,10 @@ POOLS = {
 }
 TARGET_POOL, TARGET_RADIUS = "pooled_target", "rel15"
 # (metric key in the radius block, minimum to pass)
-TARGETS = {"recall_at_p50": 0.85, "recall_max": 0.90, "f1_at_0.30": 0.70, "map_50": 0.65}
+# 판정에 쓰는 네 지표. 전부 점 매칭 기준이다. 박스 mAP 는 판정에서 빠지지만 결과에는 계속 실린다.
+TARGETS = {"recall_at_p50": 0.85, "recall_max": 0.90, "f1_at_0.30": 0.70, "point_ap": 0.65}
+# 중간보고서가 쓰던 박스 지표. 판정하지 않고 참고선으로만 함께 적는다.
+REFERENCE_TARGETS = {"map_50": 0.65}
 
 
 def point_curve(scores: np.ndarray, flags: np.ndarray, n_gt: int, sweep, fine) -> dict:
@@ -110,7 +115,9 @@ def point_curve(scores: np.ndarray, flags: np.ndarray, n_gt: int, sweep, fine) -
 def targets_block(res: dict) -> dict:
     blk = res[TARGET_POOL]["radii"][TARGET_RADIUS]
     rows = {k: {"value": float(blk[k]), "target": t, "pass": bool(blk[k] >= t)} for k, t in TARGETS.items()}
-    return {"pool": TARGET_POOL, "radius": TARGET_RADIUS, **rows, "all_pass": all(r["pass"] for r in rows.values())}
+    ref = {k: {"value": float(blk[k]), "reference": t, "judged": False} for k, t in REFERENCE_TARGETS.items()}
+    return {"pool": TARGET_POOL, "radius": TARGET_RADIUS, **rows,
+            "reference": ref, "all_pass": all(r["pass"] for r in rows.values())}
 
 
 def parse_args() -> argparse.Namespace:
@@ -345,6 +352,8 @@ def main() -> None:
     for k in TARGETS:
         print(f"  {k:14s} {tg[k]['value']:.4f} >= {tg[k]['target']:.2f}  {'PASS' if tg[k]['pass'] else 'FAIL'}")
     print(f"  all_pass: {tg['all_pass']}")
+    for k, r in tg["reference"].items():
+        print(f"  [reference, not judged] {k} {r['value']:.4f} (중간보고서 목표 {r['reference']:.2f})")
 
 
 if __name__ == "__main__":
