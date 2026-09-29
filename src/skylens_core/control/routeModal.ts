@@ -22,6 +22,16 @@ export interface AssignedRoute {
    *  Sent EXPLICITLY on the wire: the core defaults a missing `loop` to true,
    *  but it should never have to guess what the operator meant. */
   loop: boolean;
+  /** Height above local ground selected by the operator. DJI Fly needs this
+   *  to translate SkyLens absolute GPS altitude into takeoff-relative height. */
+  aglM: number;
+  /**
+   * When set, the planned route is the formation CENTROID track, and three DJI
+   * Fly missions are generated around it — front-left / front-right / rear-centre
+   * of an equilateral triangle of side `spacingM` metres. Null means a single
+   * mission for the centre aircraft, as before.
+   */
+  formation: { spacingM: number } | null;
 }
 
 export interface RouteModalOptions {
@@ -130,6 +140,11 @@ export function createRouteModal(opts: RouteModalOptions): RouteModal {
   const cosLatAt = (lat: number): number => Math.cos((lat * Math.PI) / 180) || 1;
   let waypoints: Waypoint[] = [];
   let loop = true;
+  /** Generate a three-aircraft formation (front-left / front-right / rear-centre)
+   *  around the planned track, instead of one mission for the centre aircraft. */
+  let formationOn = false;
+  /** Equilateral-triangle side, metres. Default matches the hand-built missions. */
+  let spacingM = 10;
   let spanM = SPANS[1];
   /** Height above the ground, metres. Absolute altitude is derived per
    *  waypoint from the terrain under it. */
@@ -246,7 +261,36 @@ export function createRouteModal(opts: RouteModalOptions): RouteModal {
   });
   loopWrap.append(loopInput, loopText);
 
-  toolbar.append(spanGroup, altWrap, loopWrap);
+  // Formation: one planned track -> three offset DJI Fly missions.
+  const formWrap = document.createElement('label');
+  formWrap.className = 'route-modal__loop';
+  const formInput = document.createElement('input');
+  formInput.type = 'checkbox';
+  formInput.checked = formationOn;
+  const formText = document.createElement('span');
+  formText.textContent = '편대 3기 KMZ';
+  const spacingInput = document.createElement('input');
+  spacingInput.type = 'number';
+  spacingInput.min = '1';
+  spacingInput.max = '100';
+  spacingInput.step = '0.5';
+  spacingInput.value = String(spacingM);
+  spacingInput.className = 'route-modal__spacing';
+  spacingInput.title = '정삼각형 한 변 (m) · 앞왼·앞오·뒤중';
+  spacingInput.disabled = !formationOn;
+  const spacingUnit = document.createElement('span');
+  spacingUnit.textContent = 'm';
+  formInput.addEventListener('change', () => {
+    formationOn = formInput.checked;
+    spacingInput.disabled = !formationOn;
+  });
+  spacingInput.addEventListener('input', () => {
+    const v = parseFloat(spacingInput.value);
+    if (Number.isFinite(v) && v > 0) spacingM = v;
+  });
+  formWrap.append(formInput, formText, spacingInput, spacingUnit);
+
+  toolbar.append(spanGroup, altWrap, loopWrap, formWrap);
 
   // map canvas
   const mapWrap = document.createElement('div');
@@ -566,7 +610,13 @@ export function createRouteModal(opts: RouteModalOptions): RouteModal {
       hint.classList.add('is-warn');
       return;
     }
-    opts.onAssign({ droneId: opts.getLeaderId(), waypoints: [...waypoints], loop });
+    opts.onAssign({
+      droneId: opts.getLeaderId(),
+      waypoints: [...waypoints],
+      loop,
+      aglM: agl,
+      formation: formationOn ? { spacingM } : null,
+    });
     close();
   });
 

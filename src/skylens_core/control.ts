@@ -35,6 +35,7 @@ import { TowerViewer } from './controlview/towerViewer.ts';
 import { createTelemetryFleet } from './drones/telemetryFleet.ts';
 import { createManualLink } from './drones/manualLink.ts';
 import { createRouteModal } from './control/routeModal.ts';
+import { exportDjiMission, exportFormation, stationName } from './missionBridge.ts';
 import { createVideoPanel } from './control/videoPanel.ts';
 import { createSettingsPanel } from './ui/settingsPanel.ts';
 import { createMissionPanel } from './ui/missionPanel.ts';
@@ -179,7 +180,7 @@ async function main(): Promise<void> {
     // camera must not change who the route belongs to.
     getLeaderId: () =>
       fleet.drones().find((d) => d.station === 'center')?.id ?? state.activeDroneId,
-    onAssign: ({ droneId, waypoints, loop }) => {
+    onAssign: ({ droneId, waypoints, loop, aglM, formation }) => {
       const sent = core.send({ kind: 'assign-route', droneId, waypoints, loop });
       showToast(
         sent
@@ -187,6 +188,34 @@ async function main(): Promise<void> {
           : '코어에 연결되어 있지 않아 경로를 전송하지 못했습니다',
         sent ? 'info' : 'danger',
       );
+      if (formation) {
+        void exportFormation({ droneId, waypoints, loop, aglM, spacingM: formation.spacingM })
+          .then((members) => {
+            const warned = members.reduce((n, m) => n + m.warnings.length, 0);
+            const list = members.map((m) => stationName(m.station)).join(' · ');
+            showToast(
+              `편대 KMZ ${members.length}개 다운로드됨 · ${list}` +
+                (warned > 0 ? ` · 확인 ${warned}건` : ''),
+              'info',
+            );
+            for (const m of members)
+              for (const line of m.warnings) console.warn(`[mission ${m.station}] ${line}`);
+          })
+          .catch((error) => {
+            showToast(`편대 KMZ 생성 실패 · ${String(error)}`, 'danger');
+          });
+        return;
+      }
+      void exportDjiMission({ droneId, waypoints, loop, aglM })
+        .then((mission) => {
+          const delivered = mission.installed ? 'DJI Fly 임무에 설치됨' : 'KMZ 다운로드됨';
+          const warning = mission.warnings.length > 0 ? ` · 확인 ${mission.warnings.length}건` : '';
+          showToast(`${delivered} · ${mission.waypointCount} WP${warning}`, 'info');
+          for (const line of mission.warnings) console.warn(`[mission] ${line}`);
+        })
+        .catch((error) => {
+          showToast(`DJI 임무 생성 실패 · ${String(error)}`, 'danger');
+        });
     },
   });
 

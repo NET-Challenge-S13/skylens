@@ -175,6 +175,18 @@
   cursor: pointer;
 }
 
+.route-modal__spacing {
+  width: 52px;
+  margin-left: 2px;
+  padding: 2px 4px;
+  font-size: var(--text-sm);
+  text-align: right;
+}
+
+.route-modal__spacing:disabled {
+  opacity: 0.45;
+}
+
 /* --- Mission panel (phases + core link) --- */
 
 /* Placement only — the look comes from .sl-surface--panel. Clears the pane

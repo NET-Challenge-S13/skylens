@@ -15,6 +15,7 @@
     "gateway": "tsx src/skylens_gateway/index.ts",
     "proxy": "tsx src/skylens_proxy/index.ts",
     "drone": "tsx src/skylens_drone/node/run.ts",
+    "mission-bridge": "python3 src/skylens_mission_bridge/server.py",
     "model": "uv run uvicorn skylens_model.app:app --port 8100",
     "build": "tsc && vite build",
     "preview": "vite preview",

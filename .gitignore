@@ -194,3 +194,8 @@ res/static/video/h265/
 
 # git worktree (실험 브랜치별 작업 디렉터리)
 .worktrees/
+
+# DJI Fly mission bridge runtime files. The template may contain aircraft/account
+# metadata and generated routes contain real operating coordinates.
+/config/lito-x1-template.kmz
+/output/missions/
