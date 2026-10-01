@@ -14,9 +14,11 @@ extraction setup, not a field laptop:
   - frida-server running on that device, and ``pip install frida`` here.
   - adb on PATH, or SKYLENS_ADB pointing at it.
 
-It attaches to dji.go.v5, hooks the OkHttp header calls, triggers one waypoint
-sync so a request goes out, captures the ``x-mc-token`` header value, and writes
-it. Run it once, or on a schedule (Task Scheduler / cron) to keep the file fresh.
+It attaches to dji.go.v5 and scans process memory for the resident account token
+(it looks like ``US_<base64url>``), then writes it. A memory scan is used on
+purpose: DJI Fly minifies OkHttp method names and ships anti-frida guards, so
+hooking Java methods by name is brittle, while the token sits in memory as plain
+UTF-8. Run it once, or on a schedule (Task Scheduler / cron) to keep it fresh.
 
 Usage:
   python scripts/dji_token_refresh.py                 # write to default file
@@ -28,51 +30,71 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 import time
 from pathlib import Path
 
 PACKAGE = "dji.go.v5"
-MISSION_ACTIVITY = "dji.go.v5/com.uav.waypoint.missionlib.MissionLibActivity"
 ADB = os.getenv("SKYLENS_ADB", "adb")
 SERIAL = os.getenv("SKYLENS_WSA_SERIAL", "127.0.0.1:58526")
+# Token prefix to anchor the memory scan on. DJI Fly tokens observed as "US_...".
+TOKEN_PREFIX = os.getenv("SKYLENS_DJI_TOKEN_PREFIX", "US_")
+TOKEN_RE = re.compile(rf"{re.escape(TOKEN_PREFIX)}[A-Za-z0-9_-]{{80,240}}")
 
-# Hook the OkHttp header setters (okhttp3 package names survive R8) and report any
-# value whose header name is x-mc-token.
-HOOK_JS = r"""
-Java.perform(function () {
-    function report(name, value) {
-        if (name && name.toLowerCase() === 'x-mc-token' && value) {
-            send({ token: value });
-        }
-    }
-    var targets = [
-        ['okhttp3.Request$Builder', 'header'],
-        ['okhttp3.Request$Builder', 'addHeader'],
-        ['okhttp3.Headers$Builder', 'add'],
-        ['okhttp3.Headers$Builder', 'set'],
-    ];
-    targets.forEach(function (pair) {
+# Scan readable memory for the token prefix and send a window around each hit;
+# Python extracts and validates the token. No Java-method or OkHttp dependency.
+SCAN_JS = r"""
+(function () {
+    var prefixBytes = %s;  // hex byte pattern for the token prefix
+    var ranges = Process.enumerateRanges('r--');
+    ranges.forEach(function (r) {
         try {
-            var cls = Java.use(pair[0]);
-            cls[pair[1]].overload('java.lang.String', 'java.lang.String').implementation =
-                function (name, value) {
-                    report(name, value);
-                    return this[pair[1]](name, value);
-                };
-        } catch (e) {
-            /* overload absent in this build; the others still cover it */
-        }
+            Memory.scan(r.base, r.size, prefixBytes, {
+                onMatch: function (addr) {
+                    for (var len = 260; len >= 80; len -= 60) {
+                        try {
+                            var s = addr.readUtf8String(len);
+                            if (s) { send({ s: s }); break; }
+                        } catch (e) { /* page edge; try a shorter read */ }
+                    }
+                },
+                onError: function () {},
+                onComplete: function () {},
+            });
+        } catch (e) { /* unreadable range */ }
     });
-    send({ ready: true });
-});
+    send({ done: true });
+})();
 """
 
 
 def _adb(*args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [ADB, "-s", SERIAL, *args], capture_output=True, text=True, timeout=30
+    )
+
+
+def _resolve_pid(device: object) -> int | None:
+    """Find the app's main pid. frida's name lookup is flaky on WSA, so ask adb
+    first (largest RSS = the UI process), then fall back to frida enumeration."""
+    out = _adb("shell", "su", "-c", "ps -A -o PID,RSS,NAME").stdout
+    best_pid, best_rss = None, -1
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) >= 3 and parts[-1] == PACKAGE:
+            try:
+                pid_i, rss_i = int(parts[0]), int(parts[1])
+            except ValueError:
+                continue
+            if rss_i > best_rss:
+                best_pid, best_rss = pid_i, rss_i
+    if best_pid is not None:
+        return best_pid
+    return next(
+        (p.pid for p in device.enumerate_processes() if p.name == PACKAGE),  # type: ignore[attr-defined]
+        None,
     )
 
 
@@ -97,40 +119,46 @@ def main() -> int:
         print(f"cannot reach frida device ({SERIAL}): {exc}", file=sys.stderr)
         return 2
 
-    pid = next(
-        (p.pid for p in device.enumerate_processes() if p.name == PACKAGE),
-        None,
-    )
+    pid = _resolve_pid(device)
     if pid is None:
         print(f"{PACKAGE} is not running on {SERIAL}; open DJI Fly first", file=sys.stderr)
         return 2
 
-    captured: dict[str, str] = {}
+    prefix_hex = " ".join(f"{b:02x}" for b in TOKEN_PREFIX.encode())
+    done = {"flag": False}
+    candidates: set[str] = set()
     session = device.attach(pid)
-    script = session.create_script(HOOK_JS)
+    script = session.create_script(SCAN_JS % repr(prefix_hex))
 
     def on_message(message: dict, _data: object) -> None:
-        if message.get("type") == "send":
-            payload = message.get("payload") or {}
-            if payload.get("token"):
-                captured["token"] = payload["token"]
+        if message.get("type") != "send":
+            return
+        payload = message.get("payload") or {}
+        text = payload.get("s")
+        if isinstance(text, str):
+            match = TOKEN_RE.match(text)
+            if match:
+                candidates.add(match.group(0))
+        if payload.get("done"):
+            done["flag"] = True
 
     script.on("message", on_message)
     script.load()
 
-    # Trigger a request so the interceptor runs (opening the mission library syncs).
-    _adb("shell", "su", "-c", f"am start -n {MISSION_ACTIVITY}")
-
-    for _ in range(20):
-        if "token" in captured:
+    for _ in range(40):
+        if done["flag"]:
             break
         time.sleep(0.5)
     session.detach()
 
-    token = captured.get("token", "").strip()
-    if not token:
-        print("no x-mc-token seen; is the account logged in?", file=sys.stderr)
+    if not candidates:
+        print(
+            f"no {TOKEN_PREFIX!r} token found in memory; is the account logged in?",
+            file=sys.stderr,
+        )
         return 1
+    # The full token is the longest run that starts with the prefix.
+    token = max(candidates, key=len).strip()
 
     out_path = Path(args.out).expanduser()
     out_path.parent.mkdir(parents=True, exist_ok=True)
