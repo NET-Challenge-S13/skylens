@@ -51,6 +51,24 @@ _PLACEHOLDER_PNG = base64.b64decode(
 )
 
 
+# Short cache for URL-sourced tokens so each request does not re-fetch: {url: (ts, value)}.
+_TOKEN_URL_CACHE: dict[str, tuple[float, str]] = {}
+_TOKEN_URL_TTL = 15.0
+
+
+def _fetch_token_url(url: str, force: bool = False) -> str:
+    cached = _TOKEN_URL_CACHE.get(url)
+    if cached and not force and (time.time() - cached[0]) < _TOKEN_URL_TTL:
+        return cached[1]
+    try:
+        with urllib.request.urlopen(url, timeout=10) as resp:
+            value = resp.read().decode("utf-8", "replace").strip()
+    except (urllib.error.URLError, OSError):
+        return cached[1] if cached else ""
+    _TOKEN_URL_CACHE[url] = (time.time(), value)
+    return value
+
+
 class CloudError(RuntimeError):
     """The DJI cloud rejected a request or is not configured."""
 
@@ -73,17 +91,19 @@ class CloudConfig:
     secret_id: str = "uav"
     app_info: str = "Android-SkyLens-13-KR"
     token_file: str | None = None
+    token_url: str | None = None
 
     @classmethod
     def from_env(cls) -> CloudConfig | None:
         token = os.getenv("SKYLENS_DJI_MC_TOKEN", "").strip()
         wk_key = os.getenv("SKYLENS_DJI_WK_KEY", "").strip()
         token_file = os.getenv("SKYLENS_DJI_TOKEN_FILE", "").strip() or None
+        token_url = os.getenv("SKYLENS_DJI_TOKEN_URL", "").strip() or None
         if not wk_key:
             return None
-        # A token file counts as a configured token source even when empty now;
-        # the refresher may populate it before the first upload.
-        if not token and not token_file:
+        # A token file / URL counts as a configured token source even when empty
+        # now; a central refresher may populate it before the first upload.
+        if not token and not token_file and not token_url:
             return None
         return cls(
             token=token,
@@ -92,10 +112,21 @@ class CloudConfig:
             app_info=os.getenv("SKYLENS_DJI_APP_INFO", "Android-SkyLens-13-KR").strip()
             or "Android-SkyLens-13-KR",
             token_file=token_file,
+            token_url=token_url,
         )
 
-    def resolve_token(self) -> str:
-        """Current token: the token file if it has content, else the static one."""
+    def resolve_token(self, force: bool = False) -> str:
+        """Current token.
+
+        A WSA-less PC points SKYLENS_DJI_TOKEN_URL (or _FILE) at a central source
+        that a refresher keeps fresh, so no device is needed here. Priority:
+        URL (cached briefly) -> file -> static env token. ``force`` bypasses the
+        URL cache, used by the one auth-error retry.
+        """
+        if self.token_url:
+            value = _fetch_token_url(self.token_url, force=force)
+            if value:
+                return value
         if self.token_file:
             try:
                 value = Path(self.token_file).expanduser().read_text(encoding="utf-8").strip()
@@ -118,7 +149,7 @@ def sign_request(path_with_query: str, nonce: int, timestamp_ms: int, cfg: Cloud
     ).decode()
 
 
-def _wk_headers(path_with_query: str, cfg: CloudConfig) -> dict[str, str]:
+def _wk_headers(path_with_query: str, cfg: CloudConfig, force_token: bool = False) -> dict[str, str]:
     nonce = random.randint(-(2**31), 2**31 - 1)
     ts = int(time.time() * 1000)
     sign = sign_request(path_with_query, nonce, ts, cfg)
@@ -127,7 +158,7 @@ def _wk_headers(path_with_query: str, cfg: CloudConfig) -> dict[str, str]:
         "x-wk-secretid": cfg.secret_id,
         "x-wk-timestamp": str(ts),
         "x-wk-sign": sign,
-        "x-mc-token": cfg.resolve_token(),
+        "x-mc-token": cfg.resolve_token(force=force_token),
         "x-request-id": str(uuid.uuid4()),
         "x-app-info": cfg.app_info,
         "content-type": "application/json; charset=UTF-8",
@@ -143,10 +174,12 @@ def _looks_like_auth_error(message: str) -> bool:
     return any(hint in low for hint in _AUTH_HINTS)
 
 
-def _api_once(method: str, path: str, cfg: CloudConfig, body: Any) -> dict[str, Any]:
+def _api_once(
+    method: str, path: str, cfg: CloudConfig, body: Any, force_token: bool = False
+) -> dict[str, Any]:
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(
-        BASE_URL + path, data=data, method=method, headers=_wk_headers(path, cfg)
+        BASE_URL + path, data=data, method=method, headers=_wk_headers(path, cfg, force_token)
     )
     try:
         with urllib.request.urlopen(req, timeout=30) as resp:
@@ -175,10 +208,11 @@ def _api(method: str, path: str, cfg: CloudConfig, body: Any = None) -> dict[str
     try:
         return _api_once(method, path, cfg, body)
     except CloudAuthError:
-        if not cfg.token_file:
+        if not cfg.token_file and not cfg.token_url:
             raise
         time.sleep(0.5)
-        return _api_once(method, path, cfg, body)
+        # force_token bypasses the URL cache so we pick up a freshly refreshed token.
+        return _api_once(method, path, cfg, body, force_token=True)
 
 
 def compare(cfg: CloudConfig, missions: list[dict] | None = None, start_time: int = 0) -> dict:
