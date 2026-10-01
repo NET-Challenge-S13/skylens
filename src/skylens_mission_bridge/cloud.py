@@ -55,20 +55,35 @@ class CloudError(RuntimeError):
     """The DJI cloud rejected a request or is not configured."""
 
 
+class CloudAuthError(CloudError):
+    """The DJI cloud rejected the request for an auth/token reason (retryable)."""
+
+
 @dataclass(frozen=True)
 class CloudConfig:
-    """DJI cloud credentials and signing parameters, all from the environment."""
+    """DJI cloud credentials and signing parameters, all from the environment.
+
+    The account token expires. ``token_file`` lets an external refresher keep a
+    fresh token on disk; it is re-read on every request so a refresh takes effect
+    without restarting the bridge. ``token`` is the static fallback.
+    """
 
     token: str
     wk_key: str
     secret_id: str = "uav"
     app_info: str = "Android-SkyLens-13-KR"
+    token_file: str | None = None
 
     @classmethod
     def from_env(cls) -> CloudConfig | None:
         token = os.getenv("SKYLENS_DJI_MC_TOKEN", "").strip()
         wk_key = os.getenv("SKYLENS_DJI_WK_KEY", "").strip()
-        if not token or not wk_key:
+        token_file = os.getenv("SKYLENS_DJI_TOKEN_FILE", "").strip() or None
+        if not wk_key:
+            return None
+        # A token file counts as a configured token source even when empty now;
+        # the refresher may populate it before the first upload.
+        if not token and not token_file:
             return None
         return cls(
             token=token,
@@ -76,7 +91,19 @@ class CloudConfig:
             secret_id=os.getenv("SKYLENS_DJI_WK_SECRETID", "uav").strip() or "uav",
             app_info=os.getenv("SKYLENS_DJI_APP_INFO", "Android-SkyLens-13-KR").strip()
             or "Android-SkyLens-13-KR",
+            token_file=token_file,
         )
+
+    def resolve_token(self) -> str:
+        """Current token: the token file if it has content, else the static one."""
+        if self.token_file:
+            try:
+                value = Path(self.token_file).expanduser().read_text(encoding="utf-8").strip()
+                if value:
+                    return value
+            except OSError:
+                pass
+        return self.token
 
 
 # ── DJI request signing (x-wk-sign) ─────────────────────────────────────
@@ -100,7 +127,7 @@ def _wk_headers(path_with_query: str, cfg: CloudConfig) -> dict[str, str]:
         "x-wk-secretid": cfg.secret_id,
         "x-wk-timestamp": str(ts),
         "x-wk-sign": sign,
-        "x-mc-token": cfg.token,
+        "x-mc-token": cfg.resolve_token(),
         "x-request-id": str(uuid.uuid4()),
         "x-app-info": cfg.app_info,
         "content-type": "application/json; charset=UTF-8",
@@ -108,7 +135,15 @@ def _wk_headers(path_with_query: str, cfg: CloudConfig) -> dict[str, str]:
     }
 
 
-def _api(method: str, path: str, cfg: CloudConfig, body: Any = None) -> dict[str, Any]:
+_AUTH_HINTS = ("token", "auth", "login", "expire", "unauthor", "登录", "鉴权")
+
+
+def _looks_like_auth_error(message: str) -> bool:
+    low = message.lower()
+    return any(hint in low for hint in _AUTH_HINTS)
+
+
+def _api_once(method: str, path: str, cfg: CloudConfig, body: Any) -> dict[str, Any]:
     data = json.dumps(body).encode() if body is not None else None
     req = urllib.request.Request(
         BASE_URL + path, data=data, method=method, headers=_wk_headers(path, cfg)
@@ -117,14 +152,33 @@ def _api(method: str, path: str, cfg: CloudConfig, body: Any = None) -> dict[str
         with urllib.request.urlopen(req, timeout=30) as resp:
             parsed = json.loads(resp.read().decode("utf-8", "replace"))
     except urllib.error.HTTPError as exc:
+        if exc.code in (401, 403):
+            raise CloudAuthError(f"DJI {method} {path} -> HTTP {exc.code}") from exc
         raise CloudError(f"DJI {method} {path} -> HTTP {exc.code}") from exc
     except urllib.error.URLError as exc:
         raise CloudError(f"DJI {method} {path} unreachable: {exc.reason}") from exc
     result = parsed.get("result") if isinstance(parsed, dict) else None
     if not isinstance(result, dict) or result.get("code") != 0:
-        msg = result.get("msg") if isinstance(result, dict) else "unknown error"
+        msg = str(result.get("msg") if isinstance(result, dict) else "unknown error")
+        if _looks_like_auth_error(msg):
+            raise CloudAuthError(f"DJI {method} {path} rejected: {msg}")
         raise CloudError(f"DJI {method} {path} rejected: {msg}")
     return parsed
+
+
+def _api(method: str, path: str, cfg: CloudConfig, body: Any = None) -> dict[str, Any]:
+    """Call the DJI API; retry once on an auth error after re-reading the token.
+
+    The retry matters only when a token file is configured and an external
+    refresher has written a newer token since the first attempt.
+    """
+    try:
+        return _api_once(method, path, cfg, body)
+    except CloudAuthError:
+        if not cfg.token_file:
+            raise
+        time.sleep(0.5)
+        return _api_once(method, path, cfg, body)
 
 
 def compare(cfg: CloudConfig, missions: list[dict] | None = None, start_time: int = 0) -> dict:

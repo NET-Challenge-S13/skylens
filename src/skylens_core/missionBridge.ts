@@ -137,6 +137,52 @@ export function stationName(station: FormationMember['station']): string {
   return STATION_KO[station] ?? station;
 }
 
+export interface CloudMission {
+  uuid: string;
+  name: string;
+  waypointCount: number | null;
+  distanceM: number | null;
+}
+
+/** List the missions currently in the DJI Fly account cloud (via the bridge). */
+export async function listCloudMissions(): Promise<CloudMission[]> {
+  const endpoint = bridgeUrl();
+  let response: Response;
+  try {
+    response = await fetch(`${endpoint}/cloud/missions`, { signal: AbortSignal.timeout(30_000) });
+  } catch (error) {
+    throw new Error(
+      `Mission Bridge에 연결할 수 없습니다 (${endpoint}). npm run mission-bridge를 실행하세요. ` +
+        String(error),
+    );
+  }
+  if (!response.ok) throw new Error(await errorMessage(response));
+  const result = (await response.json()) as { missions?: CloudMission[] };
+  return result.missions ?? [];
+}
+
+/** Delete one mission from the DJI Fly account cloud. Returns true if removed. */
+export async function deleteCloudMission(missionUuid: string): Promise<boolean> {
+  const endpoint = bridgeUrl();
+  let response: Response;
+  try {
+    response = await fetch(`${endpoint}/cloud/delete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ missionUuid }),
+      signal: AbortSignal.timeout(30_000),
+    });
+  } catch (error) {
+    throw new Error(
+      `Mission Bridge에 연결할 수 없습니다 (${endpoint}). npm run mission-bridge를 실행하세요. ` +
+        String(error),
+    );
+  }
+  if (!response.ok) throw new Error(await errorMessage(response));
+  const result = (await response.json()) as { removed?: boolean };
+  return Boolean(result.removed);
+}
+
 export async function exportDjiMission(route: MissionExportRoute): Promise<MissionExportResult> {
   const endpoint = bridgeUrl();
   let response: Response;

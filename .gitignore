@@ -199,3 +199,5 @@ res/static/video/h265/
 # metadata and generated routes contain real operating coordinates.
 /config/lito-x1-template.kmz
 /output/missions/
+# Refreshed DJI account token written by scripts/dji_token_refresh.py.
+/output/.dji_token

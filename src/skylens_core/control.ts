@@ -34,6 +34,7 @@ import { createCoreLink } from './coreLink.ts';
 import { TowerViewer } from './controlview/towerViewer.ts';
 import { createTelemetryFleet } from './drones/telemetryFleet.ts';
 import { createManualLink } from './drones/manualLink.ts';
+import { createCloudModal } from './control/cloudModal.ts';
 import { createRouteModal } from './control/routeModal.ts';
 import { exportDjiMission, exportFormation, stationName } from './missionBridge.ts';
 import { createVideoPanel } from './control/videoPanel.ts';
@@ -257,10 +258,13 @@ async function main(): Promise<void> {
     areaLabel: `${CONFIG.control.defaultMap} (${scene.bbox[1].toFixed(3)}, ${scene.bbox[0].toFixed(3)})`,
   });
 
+  const cloudModal = createCloudModal();
+
   const toolbar = mount('control-toolbar');
   if (toolbar) {
     toolbar.append(
       toolbarButton('경로 계획 · Route', () => routeModal.open()),
+      toolbarButton('클라우드 미션 · Cloud', () => cloudModal.open()),
       toolbarButton('설정 · Display', () => settingsPanel.toggle()),
     );
   }
@@ -320,6 +324,7 @@ async function main(): Promise<void> {
     fleet,
     manual,
     routeModal,
+    cloudModal,
     settingsPanel,
     videoPanel,
     CONFIG,

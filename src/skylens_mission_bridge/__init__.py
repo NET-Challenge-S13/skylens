@@ -1,6 +1,7 @@
 """Local DJI Fly waypoint mission bridge for SkyLens."""
 
 from .cloud import (
+    CloudAuthError,
     CloudConfig,
     CloudError,
     CloudResult,
@@ -17,6 +18,7 @@ __all__ = [
     "build_mission",
     "CloudConfig",
     "CloudError",
+    "CloudAuthError",
     "CloudResult",
     "delete_mission",
     "list_missions",

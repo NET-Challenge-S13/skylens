@@ -173,8 +173,28 @@ Wi-Fi로 받아가게 할 수 있다. 조종기에 임무가 내려오면 조종
 설정한 뒤, 경로 전송 요청 본문에 `"deliver": "cloud"`를 넣으면 KMZ를 만든 다음 클라우드에
 올린다. 응답의 `cloud.missionUuid`로 조종기에 뜰 임무를 식별한다. 편대 3기도 각각 올라간다.
 
+관제탑 웹에서는 경로 계획 창의 **"클라우드 전송(원격 RC)"** 체크로 켜고, 툴바의
+**"클라우드 미션 · Cloud"** 버튼으로 현재 클라우드 임무를 **목록 조회·삭제**할 수 있다.
+
 클라우드 임무 파일은 raw KMZ가 아니라 **래퍼 zip**(`<uuid>.kmz` + `image/ShotSnap.json`)이어야
 DJI Fly가 연다. Bridge가 자동으로 감싸므로 여기서 신경 쓸 것은 없다.
+
+### 토큰 자동 갱신
+
+`x-mc-token`은 만료되므로 Bridge를 재시작하지 않고 갱신하는 길을 둔다.
+`SKYLENS_DJI_TOKEN_FILE`에 토큰 파일 경로를 지정하면 Bridge는 **매 요청마다 그 파일을
+다시 읽고**, 인증 오류가 나면 파일을 다시 읽어 **한 번 재시도**한다. 그 파일을 최신으로
+유지하는 것이 갱신기다.
+
+```bash
+# 로그인된 DJI Fly가 떠 있는 WSA(또는 루팅 안드로이드) + frida-server + pip install frida 필요
+python scripts/dji_token_refresh.py            # 실행 중인 앱에서 토큰을 읽어 파일에 기록
+```
+
+`scripts/dji_token_refresh.py`는 bridge의 일부가 아니라 추출 리그 도구다(frida 사용). 앱이
+스스로 갱신하는 살아있는 토큰을 그대로 읽어 파일에 쓴다. 한 번 실행하거나, 작업
+스케줄러/cron으로 주기 실행하면 Bridge가 자동으로 새 토큰을 집어쓴다. 완전 무인화는
+WSA 리그가 떠 있어야 가능하다.
 
 > 이 경로는 공개 SDK가 아니라 DJI Fly 클라우드 동기화를 관찰해 맞춘 것이다. DJI Fly/펌웨어
 > 업데이트 후에는 2점 지상 검증을 다시 한다.
@@ -242,8 +262,11 @@ DJI Fly가 임무를 읽지 못하거나 값이 다르면 비행하지 않는다
   후 DJI 클라우드에 올리고, 응답에 `"cloud": {"missionUuid": ..., "verified": true}`를 넣는다.
   클라우드 미설정 시 이 요청은 502로 거부되며 다운로드/설치 요청은 영향받지 않는다.
 - `GET /cloud/missions` 계정 클라우드의 임무 목록(`uuid`, `name`, `waypointCount`, `distanceM`).
+  관제탑 툴바 "클라우드 미션 · Cloud" 버튼이 이 결과를 보여주고 각 항목을 삭제한다.
 - `POST /cloud/delete` 본문 `{"missionUuid": "..."}` 로 해당 임무를 삭제.
 - `GET /health`의 `cloudConfigured`로 클라우드 설정 여부를 확인한다.
+- 토큰 만료 대비: `SKYLENS_DJI_TOKEN_FILE`에 토큰 파일을 두면 매 요청 재로딩하고 인증
+  오류 시 1회 재시도한다. 파일은 `scripts/dji_token_refresh.py`가 갱신한다(위 §5 참조).
 
 `POST /missions`
 
