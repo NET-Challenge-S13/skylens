@@ -157,6 +157,28 @@ Bridge는 지정된 **그 한 파일만** 교체하며, 교체 전 파일은
 macOS의 MTP 장치는 일반 파일시스템처럼 마운트되지 않는 경우가 많아 자동 설치가 어려울 수
 있다. 그런 경우 다운로드 모드 또는 Litchi Hub Bridge를 사용한다.
 
+### 선택: DJI 클라우드 원격 전달
+
+PC와 조종기가 USB로 붙어 있지 않아도, DJI Fly 계정 클라우드에 임무를 올려 원격의 RC 2가
+Wi-Fi로 받아가게 할 수 있다. 조종기에 임무가 내려오면 조종사가 열어 확인하고 비행한다.
+
+설정은 `config/mission-bridge.env.example`의 DJI 클라우드 항목 두 개를 로컬 환경에만 넣는다.
+둘 다 계정/앱 비밀값이라 **저장소에 커밋하지 않는다**. 둘 중 하나라도 없으면 이 경로는
+자동으로 꺼지고 다운로드/설치 모드만 동작한다.
+
+- `SKYLENS_DJI_MC_TOKEN`: 로그인된 DJI Fly 세션의 `x-mc-token` (만료되므로 업로드가 인증
+  오류를 내면 다시 추출한다)
+- `SKYLENS_DJI_WK_KEY`: `X-Wk-SecretId=uav` 요청 서명에 쓰는 HMAC 키
+
+설정한 뒤, 경로 전송 요청 본문에 `"deliver": "cloud"`를 넣으면 KMZ를 만든 다음 클라우드에
+올린다. 응답의 `cloud.missionUuid`로 조종기에 뜰 임무를 식별한다. 편대 3기도 각각 올라간다.
+
+클라우드 임무 파일은 raw KMZ가 아니라 **래퍼 zip**(`<uuid>.kmz` + `image/ShotSnap.json`)이어야
+DJI Fly가 연다. Bridge가 자동으로 감싸므로 여기서 신경 쓸 것은 없다.
+
+> 이 경로는 공개 SDK가 아니라 DJI Fly 클라우드 동기화를 관찰해 맞춘 것이다. DJI Fly/펌웨어
+> 업데이트 후에는 2점 지상 검증을 다시 한다.
+
 ## 6. 첫 실비행 체크리스트
 
 첫 실비행은 웹에서 이륙시키는 시험이 아니다. 조종사가 DJI Fly에서 최종 확인하고 실행한다.
@@ -188,6 +210,9 @@ DJI Fly가 임무를 읽지 못하거나 값이 다르면 비행하지 않는다
   넣으면, 계획한 경로를 편대 무게중심 트랙으로 보고 앞왼·앞오·뒤중 3개 미션을
   한 번에 만든다(정삼각형, 기본 변 10m). 예전에 엑셀로 6좌표를 손계산해 3개 미션에
   직접 입력하던 과정을 대체한다. 자세한 기하는 `formation.py` 참조
+- **DJI 클라우드 원격 전달**: `deliver:"cloud"`로 KMZ를 계정 클라우드에 올려 원격 RC 2가
+  Wi-Fi로 받게 한다. 목록(`GET /cloud/missions`)과 삭제(`POST /cloud/delete`)도 된다.
+  자세한 설정은 §5의 "DJI 클라우드 원격 전달" 참조
 
 아직 불가능:
 
@@ -211,12 +236,22 @@ DJI Fly가 임무를 읽지 못하거나 값이 다르면 비행하지 않는다
 그 기체의 KMZ `downloadUrl`을 담는다. 자동 설치는 하지 않는다(대상 파일 하나에
 3개를 설치할 수 없으므로 항상 다운로드 전용).
 
+### 클라우드 전달 API
+
+- `POST /missions` 또는 `POST /formation` 본문에 `"deliver": "cloud"`를 더하면 KMZ 생성
+  후 DJI 클라우드에 올리고, 응답에 `"cloud": {"missionUuid": ..., "verified": true}`를 넣는다.
+  클라우드 미설정 시 이 요청은 502로 거부되며 다운로드/설치 요청은 영향받지 않는다.
+- `GET /cloud/missions` 계정 클라우드의 임무 목록(`uuid`, `name`, `waypointCount`, `distanceM`).
+- `POST /cloud/delete` 본문 `{"missionUuid": "..."}` 로 해당 임무를 삭제.
+- `GET /health`의 `cloudConfigured`로 클라우드 설정 여부를 확인한다.
+
 `POST /missions`
 
 ```json
 {
   "name": "skylens-drone-1",
   "droneId": 1,
+  "deliver": "cloud",
   "loop": false,
   "flight": {
     "aglM": 30,

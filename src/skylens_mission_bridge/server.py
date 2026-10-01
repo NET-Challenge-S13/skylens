@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
 
+from cloud import CloudConfig, CloudError, delete_mission, list_missions, upload_mission_file
 from formation import build_formation
 from mission import MissionError, build_mission
 
@@ -25,6 +26,7 @@ TEMPLATE = Path(
 ).expanduser()
 OUTPUT = Path(os.getenv("SKYLENS_MISSION_OUTPUT", ROOT / "output/missions")).expanduser()
 INSTALL_TARGET = os.getenv("SKYLENS_DJI_INSTALL_TARGET", "").strip()
+CLOUD = CloudConfig.from_env()
 ALLOWED_ORIGINS = {
     value.strip()
     for value in os.getenv(
@@ -40,6 +42,19 @@ MAX_BODY = 1024 * 1024
 def _safe_name(value: Any) -> str:
     clean = re.sub(r"[^A-Za-z0-9._-]+", "-", str(value or "route")).strip("-._")
     return clean[:60] or "route"
+
+
+def _wants_cloud(payload: dict[str, Any]) -> bool:
+    return str(payload.get("deliver", "")).strip().lower() == "cloud"
+
+
+def _require_cloud() -> CloudConfig:
+    if CLOUD is None:
+        raise MissionError(
+            "cloud delivery requested but not configured: set SKYLENS_DJI_MC_TOKEN and "
+            "SKYLENS_DJI_WK_KEY"
+        )
+    return CLOUD
 
 
 def _install(source: Path) -> tuple[bool, str | None]:
@@ -104,6 +119,35 @@ class Handler(BaseHTTPRequestHandler):
                     "template": str(TEMPLATE),
                     "output": str(OUTPUT),
                     "installConfigured": bool(INSTALL_TARGET),
+                    "cloudConfigured": CLOUD is not None,
+                },
+            )
+            return
+        if parsed.path == "/cloud/missions":
+            if CLOUD is None:
+                self._json(
+                    HTTPStatus.SERVICE_UNAVAILABLE,
+                    {"ok": False, "error": "cloud not configured"},
+                )
+                return
+            try:
+                items = list_missions(CLOUD)
+            except CloudError as exc:
+                self._json(HTTPStatus.BAD_GATEWAY, {"ok": False, "error": str(exc)})
+                return
+            self._json(
+                HTTPStatus.OK,
+                {
+                    "ok": True,
+                    "missions": [
+                        {
+                            "uuid": it.get("uuid"),
+                            "name": it.get("name"),
+                            "waypointCount": it.get("point_num"),
+                            "distanceM": it.get("distance"),
+                        }
+                        for it in items
+                    ],
                 },
             )
             return
@@ -127,7 +171,7 @@ class Handler(BaseHTTPRequestHandler):
         self._json(HTTPStatus.NOT_FOUND, {"ok": False, "error": "not found"})
 
     def do_POST(self) -> None:  # noqa: N802
-        if self.path not in ("/missions", "/formation"):
+        if self.path not in ("/missions", "/formation", "/cloud/delete"):
             self._json(HTTPStatus.NOT_FOUND, {"ok": False, "error": "not found"})
             return
         if not self._origin_allowed():
@@ -140,6 +184,9 @@ class Handler(BaseHTTPRequestHandler):
             payload = json.loads(self.rfile.read(length))
             if not isinstance(payload, dict):
                 raise MissionError("request body must be a JSON object")
+            if self.path == "/cloud/delete":
+                self._handle_cloud_delete(payload)
+                return
             name = _safe_name(payload.get("name"))
             stamp = time.strftime("%Y%m%d-%H%M%S")
             if self.path == "/formation":
@@ -148,54 +195,67 @@ class Handler(BaseHTTPRequestHandler):
                 self._handle_single(payload, name, stamp)
         except (MissionError, json.JSONDecodeError) as exc:
             self._json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": str(exc)})
+        except CloudError as exc:  # DJI cloud rejected or unreachable
+            self._json(HTTPStatus.BAD_GATEWAY, {"ok": False, "error": str(exc)})
         except Exception as exc:  # keep localhost service alive, but surface the failure
             print(f"[mission-bridge] unexpected error: {exc}", file=sys.stderr)
             self._json(HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "error": "internal error"})
+
+    def _handle_cloud_delete(self, payload: dict[str, Any]) -> None:
+        mission_uuid = str(payload.get("missionUuid") or payload.get("uuid") or "").strip()
+        if not mission_uuid:
+            raise MissionError("missionUuid is required")
+        removed = delete_mission(_require_cloud(), mission_uuid)
+        self._json(HTTPStatus.OK, {"ok": True, "missionUuid": mission_uuid, "removed": removed})
 
     def _handle_single(self, payload: dict[str, Any], name: str, stamp: str) -> None:
         output_path = OUTPUT / f"{stamp}-{name}.kmz"
         result = build_mission(payload, TEMPLATE, output_path)
         installed, target = _install(result.path)
-        self._json(
-            HTTPStatus.CREATED,
-            {
-                "ok": True,
+        body = {
+            "ok": True,
+            "fileName": result.path.name,
+            "downloadUrl": f"http://{HOST}:{PORT}/missions/{result.path.name}",
+            "sha256": result.sha256,
+            "waypointCount": result.waypoint_count,
+            "routeDistanceM": round(result.route_distance_m, 1),
+            "takeoffAltMsl": round(result.takeoff_alt_msl, 1),
+            "installed": installed,
+            "installTarget": target,
+            "warnings": list(result.warnings),
+        }
+        if _wants_cloud(payload):
+            cloud = upload_mission_file(
+                _require_cloud(), result.path, result.path.stem, result.route_distance_m
+            )
+            body["cloud"] = {"missionUuid": cloud.mission_uuid, "verified": cloud.verified}
+        self._json(HTTPStatus.CREATED, body)
+
+    def _handle_formation(self, payload: dict[str, Any], name: str, stamp: str) -> None:
+        # Three files to three aircraft: auto-install (one configured target)
+        # cannot mean three things, so a formation is always download-only.
+        members = build_formation(payload, TEMPLATE, OUTPUT, name, stamp)
+        want_cloud = _wants_cloud(payload)
+        cfg = _require_cloud() if want_cloud else None
+        rows = []
+        for station, result in members:
+            row = {
+                "station": station,
                 "fileName": result.path.name,
                 "downloadUrl": f"http://{HOST}:{PORT}/missions/{result.path.name}",
                 "sha256": result.sha256,
                 "waypointCount": result.waypoint_count,
                 "routeDistanceM": round(result.route_distance_m, 1),
                 "takeoffAltMsl": round(result.takeoff_alt_msl, 1),
-                "installed": installed,
-                "installTarget": target,
                 "warnings": list(result.warnings),
-            },
-        )
-
-    def _handle_formation(self, payload: dict[str, Any], name: str, stamp: str) -> None:
-        # Three files to three aircraft: auto-install (one configured target)
-        # cannot mean three things, so a formation is always download-only.
-        members = build_formation(payload, TEMPLATE, OUTPUT, name, stamp)
-        self._json(
-            HTTPStatus.CREATED,
-            {
-                "ok": True,
-                "installed": False,
-                "members": [
-                    {
-                        "station": station,
-                        "fileName": result.path.name,
-                        "downloadUrl": f"http://{HOST}:{PORT}/missions/{result.path.name}",
-                        "sha256": result.sha256,
-                        "waypointCount": result.waypoint_count,
-                        "routeDistanceM": round(result.route_distance_m, 1),
-                        "takeoffAltMsl": round(result.takeoff_alt_msl, 1),
-                        "warnings": list(result.warnings),
-                    }
-                    for station, result in members
-                ],
-            },
-        )
+            }
+            if cfg is not None:
+                cloud = upload_mission_file(
+                    cfg, result.path, result.path.stem, result.route_distance_m
+                )
+                row["cloud"] = {"missionUuid": cloud.mission_uuid, "verified": cloud.verified}
+            rows.append(row)
+        self._json(HTTPStatus.CREATED, {"ok": True, "installed": False, "members": rows})
 
     def log_message(self, fmt: str, *args: object) -> None:
         print(f"[mission-bridge] {self.address_string()} {fmt % args}")
@@ -214,6 +274,13 @@ def main() -> None:
         print(f"[mission-bridge] install target: {INSTALL_TARGET}")
     else:
         print("[mission-bridge] install target: not configured (download-only mode)")
+    if CLOUD is not None:
+        print("[mission-bridge] DJI cloud: configured (deliver:'cloud' enabled)")
+    else:
+        print(
+            "[mission-bridge] DJI cloud: not configured "
+            "(set SKYLENS_DJI_MC_TOKEN + SKYLENS_DJI_WK_KEY)"
+        )
     try:
         server.serve_forever()
     except KeyboardInterrupt:
