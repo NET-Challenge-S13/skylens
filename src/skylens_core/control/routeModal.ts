@@ -32,6 +32,12 @@ export interface AssignedRoute {
    * mission for the centre aircraft, as before.
    */
   formation: { spacingM: number } | null;
+  /**
+   * When true, also push the generated KMZ to the DJI Fly account cloud so a
+   * remote RC 2 pulls it over the air (the bridge still returns a download).
+   * Requires the bridge to be configured with DJI cloud credentials.
+   */
+  cloud: boolean;
 }
 
 export interface RouteModalOptions {
@@ -143,6 +149,7 @@ export function createRouteModal(opts: RouteModalOptions): RouteModal {
   /** Generate a three-aircraft formation (front-left / front-right / rear-centre)
    *  around the planned track, instead of one mission for the centre aircraft. */
   let formationOn = false;
+  let cloudOn = false;
   /** Equilateral-triangle side, metres. Default matches the hand-built missions. */
   let spacingM = 10;
   let spanM = SPANS[1];
@@ -290,7 +297,22 @@ export function createRouteModal(opts: RouteModalOptions): RouteModal {
   });
   formWrap.append(formInput, formText, spacingInput, spacingUnit);
 
-  toolbar.append(spanGroup, altWrap, loopWrap, formWrap);
+  // Cloud delivery: also upload the KMZ to the DJI Fly account cloud so a
+  // remote RC 2 pulls it over Wi-Fi instead of a USB file copy.
+  const cloudWrap = document.createElement('label');
+  cloudWrap.className = 'route-modal__loop';
+  const cloudInput = document.createElement('input');
+  cloudInput.type = 'checkbox';
+  cloudInput.checked = cloudOn;
+  const cloudText = document.createElement('span');
+  cloudText.textContent = '클라우드 전송(원격 RC)';
+  cloudInput.title = 'DJI Fly 계정 클라우드에 올려 원격 RC 2가 받게 한다 (Bridge에 클라우드 설정 필요)';
+  cloudInput.addEventListener('change', () => {
+    cloudOn = cloudInput.checked;
+  });
+  cloudWrap.append(cloudInput, cloudText);
+
+  toolbar.append(spanGroup, altWrap, loopWrap, formWrap, cloudWrap);
 
   // map canvas
   const mapWrap = document.createElement('div');
@@ -616,6 +638,7 @@ export function createRouteModal(opts: RouteModalOptions): RouteModal {
       loop,
       aglM: agl,
       formation: formationOn ? { spacingM } : null,
+      cloud: cloudOn,
     });
     close();
   });

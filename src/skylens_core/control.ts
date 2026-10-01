@@ -180,7 +180,7 @@ async function main(): Promise<void> {
     // camera must not change who the route belongs to.
     getLeaderId: () =>
       fleet.drones().find((d) => d.station === 'center')?.id ?? state.activeDroneId,
-    onAssign: ({ droneId, waypoints, loop, aglM, formation }) => {
+    onAssign: ({ droneId, waypoints, loop, aglM, formation, cloud }) => {
       const sent = core.send({ kind: 'assign-route', droneId, waypoints, loop });
       showToast(
         sent
@@ -189,12 +189,14 @@ async function main(): Promise<void> {
         sent ? 'info' : 'danger',
       );
       if (formation) {
-        void exportFormation({ droneId, waypoints, loop, aglM, spacingM: formation.spacingM })
+        void exportFormation({ droneId, waypoints, loop, aglM, spacingM: formation.spacingM, cloud })
           .then((members) => {
             const warned = members.reduce((n, m) => n + m.warnings.length, 0);
             const list = members.map((m) => stationName(m.station)).join(' · ');
+            const uploaded = members.filter((m) => m.cloud).length;
+            const cloudNote = uploaded > 0 ? ` · 클라우드 ${uploaded}기 업로드` : '';
             showToast(
-              `편대 KMZ ${members.length}개 다운로드됨 · ${list}` +
+              `편대 KMZ ${members.length}개 다운로드됨 · ${list}${cloudNote}` +
                 (warned > 0 ? ` · 확인 ${warned}건` : ''),
               'info',
             );
@@ -206,11 +208,12 @@ async function main(): Promise<void> {
           });
         return;
       }
-      void exportDjiMission({ droneId, waypoints, loop, aglM })
+      void exportDjiMission({ droneId, waypoints, loop, aglM, cloud })
         .then((mission) => {
           const delivered = mission.installed ? 'DJI Fly 임무에 설치됨' : 'KMZ 다운로드됨';
+          const cloudNote = mission.cloud ? ' · 클라우드 업로드됨(원격 RC)' : '';
           const warning = mission.warnings.length > 0 ? ` · 확인 ${mission.warnings.length}건` : '';
-          showToast(`${delivered} · ${mission.waypointCount} WP${warning}`, 'info');
+          showToast(`${delivered}${cloudNote} · ${mission.waypointCount} WP${warning}`, 'info');
           for (const line of mission.warnings) console.warn(`[mission] ${line}`);
         })
         .catch((error) => {

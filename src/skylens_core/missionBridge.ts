@@ -12,6 +12,14 @@ export interface MissionExportRoute {
   loop: boolean;
   /** Operator-entered height above ground from the route planner. */
   aglM: number;
+  /** Also upload to the DJI Fly account cloud for remote RC pickup. */
+  cloud?: boolean;
+}
+
+/** Cloud upload outcome, present only when cloud delivery was requested. */
+export interface CloudDelivery {
+  missionUuid: string;
+  verified: boolean;
 }
 
 export interface MissionExportResult {
@@ -23,6 +31,7 @@ export interface MissionExportResult {
   installed: boolean;
   installTarget: string | null;
   warnings: string[];
+  cloud?: CloudDelivery;
 }
 
 function bridgeUrl(): string {
@@ -67,6 +76,7 @@ export interface FormationMember {
   routeDistanceM: number;
   takeoffAltMsl: number;
   warnings: string[];
+  cloud?: CloudDelivery;
 }
 
 const STATION_KO: Record<FormationMember['station'], string> = {
@@ -101,8 +111,9 @@ export async function exportFormation(
           rthHeightM: Math.max(30, route.aglM),
         },
         formation: { spacingM: route.spacingM },
+        deliver: route.cloud ? 'cloud' : undefined,
       }),
-      signal: AbortSignal.timeout(15_000),
+      signal: AbortSignal.timeout(route.cloud ? 90_000 : 15_000),
     });
   } catch (error) {
     throw new Error(
@@ -144,8 +155,10 @@ export async function exportDjiMission(route: MissionExportRoute): Promise<Missi
           gimbalPitchDeg: -30,
           rthHeightM: Math.max(30, route.aglM),
         },
+        deliver: route.cloud ? 'cloud' : undefined,
       }),
-      signal: AbortSignal.timeout(10_000),
+      // Cloud upload (STS + S3 + verify) takes longer than a local build.
+      signal: AbortSignal.timeout(route.cloud ? 90_000 : 10_000),
     });
   } catch (error) {
     throw new Error(
