@@ -40,6 +40,36 @@ function bridgeUrl(): string {
   return (override || 'http://127.0.0.1:8091').replace(/\/+$/, '');
 }
 
+export interface BridgeHealth {
+  ok: boolean;
+  templateReady: boolean;
+  /** True only when the bridge has DJI cloud credentials; gates the cloud toggle. */
+  cloudConfigured: boolean;
+}
+
+/**
+ * Ask the bridge what it can do right now. Used to disable the route planner's
+ * cloud toggle when the bridge has no DJI credentials, so the operator cannot
+ * pick a delivery mode that will fail after the KMZ is already built. Any
+ * failure (bridge down, old bridge with no /health) is reported as "not
+ * available" rather than thrown: the planner still works for local KMZ.
+ */
+export async function bridgeHealth(): Promise<BridgeHealth> {
+  const fallback: BridgeHealth = { ok: false, templateReady: false, cloudConfigured: false };
+  try {
+    const res = await fetch(`${bridgeUrl()}/health`, { signal: AbortSignal.timeout(4000) });
+    if (!res.ok) return fallback;
+    const body = (await res.json()) as Partial<BridgeHealth>;
+    return {
+      ok: Boolean(body.ok),
+      templateReady: Boolean(body.templateReady),
+      cloudConfigured: Boolean(body.cloudConfigured),
+    };
+  } catch {
+    return fallback;
+  }
+}
+
 async function errorMessage(response: Response): Promise<string> {
   try {
     const body = (await response.json()) as { error?: unknown };

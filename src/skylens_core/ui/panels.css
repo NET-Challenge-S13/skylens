@@ -175,6 +175,11 @@
   cursor: pointer;
 }
 
+.route-modal__loop.is-disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .route-modal__spacing {
   width: 52px;
   margin-left: 2px;

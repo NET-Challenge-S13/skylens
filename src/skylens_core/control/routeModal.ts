@@ -63,6 +63,13 @@ export interface RouteModal {
   open(): void;
   close(): void;
   /**
+   * Enable or disable the "cloud delivery" toggle. The bridge rejects a cloud
+   * upload it has no credentials for AFTER building the KMZ, which loses the
+   * local file too, so the planner hides the option when the bridge reports it
+   * is not configured (GET /health → cloudConfigured). Called on every open.
+   */
+  setCloudAvailable(available: boolean): void;
+  /**
    * Where the map should look when this browser has no memory of its own. The
    * core answers this (it knows where the operations centre is), and the answer
    * arrives after the modal is built — so it is handed over rather than passed
@@ -658,6 +665,24 @@ export function createRouteModal(opts: RouteModalOptions): RouteModal {
       center = { ...gps };
       loadSatellite();
       draw();
+    },
+
+    setCloudAvailable(available: boolean): void {
+      cloudInput.disabled = !available;
+      cloudWrap.classList.toggle('is-disabled', !available);
+      if (!available) {
+        // Clear the selection too: an operator who ticked it before the bridge
+        // state was known must not keep a choice the bridge will reject.
+        cloudOn = false;
+        cloudInput.checked = false;
+        cloudText.textContent = '클라우드 전송 (설정 필요)';
+        cloudInput.title =
+          'Bridge에 DJI 클라우드 자격이 없어 비활성화됨 (SKYLENS_DJI_MC_TOKEN + SKYLENS_DJI_WK_KEY)';
+      } else {
+        cloudText.textContent = '클라우드 전송(원격 RC)';
+        cloudInput.title =
+          'DJI Fly 계정 클라우드에 올려 원격 RC 2가 받게 한다 (Bridge에 클라우드 설정 필요)';
+      }
     },
 
     open(): void {

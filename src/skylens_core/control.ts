@@ -36,7 +36,7 @@ import { createTelemetryFleet } from './drones/telemetryFleet.ts';
 import { createManualLink } from './drones/manualLink.ts';
 import { createCloudModal } from './control/cloudModal.ts';
 import { createRouteModal } from './control/routeModal.ts';
-import { exportDjiMission, exportFormation, stationName } from './missionBridge.ts';
+import { bridgeHealth, exportDjiMission, exportFormation, stationName } from './missionBridge.ts';
 import { createVideoPanel } from './control/videoPanel.ts';
 import { createSettingsPanel } from './ui/settingsPanel.ts';
 import { createMissionPanel } from './ui/missionPanel.ts';
@@ -263,7 +263,12 @@ async function main(): Promise<void> {
   const toolbar = mount('control-toolbar');
   if (toolbar) {
     toolbar.append(
-      toolbarButton('경로 계획 · Route', () => routeModal.open()),
+      toolbarButton('경로 계획 · Route', () => {
+        // Reflect the bridge's current cloud capability before showing the
+        // planner, so the cloud toggle is only offered when it can succeed.
+        void bridgeHealth().then((h) => routeModal.setCloudAvailable(h.cloudConfigured));
+        routeModal.open();
+      }),
       toolbarButton('클라우드 미션 · Cloud', () => cloudModal.open()),
       toolbarButton('설정 · Display', () => settingsPanel.toggle()),
     );
