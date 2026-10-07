@@ -34,7 +34,9 @@ import { createCoreLink } from './coreLink.ts';
 import { TowerViewer } from './controlview/towerViewer.ts';
 import { createTelemetryFleet } from './drones/telemetryFleet.ts';
 import { createManualLink } from './drones/manualLink.ts';
+import { createCloudModal } from './control/cloudModal.ts';
 import { createRouteModal } from './control/routeModal.ts';
+import { bridgeHealth, exportDjiMission, exportFormation, stationName } from './missionBridge.ts';
 import { createVideoPanel } from './control/videoPanel.ts';
 import { createSettingsPanel } from './ui/settingsPanel.ts';
 import { createMissionPanel } from './ui/missionPanel.ts';
@@ -179,7 +181,7 @@ async function main(): Promise<void> {
     // camera must not change who the route belongs to.
     getLeaderId: () =>
       fleet.drones().find((d) => d.station === 'center')?.id ?? state.activeDroneId,
-    onAssign: ({ droneId, waypoints, loop }) => {
+    onAssign: ({ droneId, waypoints, loop, aglM, formation, cloud }) => {
       const sent = core.send({ kind: 'assign-route', droneId, waypoints, loop });
       showToast(
         sent
@@ -187,6 +189,37 @@ async function main(): Promise<void> {
           : '코어에 연결되어 있지 않아 경로를 전송하지 못했습니다',
         sent ? 'info' : 'danger',
       );
+      if (formation) {
+        void exportFormation({ droneId, waypoints, loop, aglM, spacingM: formation.spacingM, cloud })
+          .then((members) => {
+            const warned = members.reduce((n, m) => n + m.warnings.length, 0);
+            const list = members.map((m) => stationName(m.station)).join(' · ');
+            const uploaded = members.filter((m) => m.cloud).length;
+            const cloudNote = uploaded > 0 ? ` · 클라우드 ${uploaded}기 업로드` : '';
+            showToast(
+              `편대 KMZ ${members.length}개 다운로드됨 · ${list}${cloudNote}` +
+                (warned > 0 ? ` · 확인 ${warned}건` : ''),
+              'info',
+            );
+            for (const m of members)
+              for (const line of m.warnings) console.warn(`[mission ${m.station}] ${line}`);
+          })
+          .catch((error) => {
+            showToast(`편대 KMZ 생성 실패 · ${String(error)}`, 'danger');
+          });
+        return;
+      }
+      void exportDjiMission({ droneId, waypoints, loop, aglM, cloud })
+        .then((mission) => {
+          const delivered = mission.installed ? 'DJI Fly 임무에 설치됨' : 'KMZ 다운로드됨';
+          const cloudNote = mission.cloud ? ' · 클라우드 업로드됨(원격 RC)' : '';
+          const warning = mission.warnings.length > 0 ? ` · 확인 ${mission.warnings.length}건` : '';
+          showToast(`${delivered}${cloudNote} · ${mission.waypointCount} WP${warning}`, 'info');
+          for (const line of mission.warnings) console.warn(`[mission] ${line}`);
+        })
+        .catch((error) => {
+          showToast(`DJI 임무 생성 실패 · ${String(error)}`, 'danger');
+        });
     },
   });
 
@@ -225,10 +258,18 @@ async function main(): Promise<void> {
     areaLabel: `${CONFIG.control.defaultMap} (${scene.bbox[1].toFixed(3)}, ${scene.bbox[0].toFixed(3)})`,
   });
 
+  const cloudModal = createCloudModal();
+
   const toolbar = mount('control-toolbar');
   if (toolbar) {
     toolbar.append(
-      toolbarButton('경로 계획 · Route', () => routeModal.open()),
+      toolbarButton('경로 계획 · Route', () => {
+        // Reflect the bridge's current cloud capability before showing the
+        // planner, so the cloud toggle is only offered when it can succeed.
+        void bridgeHealth().then((h) => routeModal.setCloudAvailable(h.cloudConfigured));
+        routeModal.open();
+      }),
+      toolbarButton('클라우드 미션 · Cloud', () => cloudModal.open()),
       toolbarButton('설정 · Display', () => settingsPanel.toggle()),
     );
   }
@@ -288,6 +329,7 @@ async function main(): Promise<void> {
     fleet,
     manual,
     routeModal,
+    cloudModal,
     settingsPanel,
     videoPanel,
     CONFIG,

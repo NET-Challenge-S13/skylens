@@ -22,6 +22,22 @@ export interface AssignedRoute {
    *  Sent EXPLICITLY on the wire: the core defaults a missing `loop` to true,
    *  but it should never have to guess what the operator meant. */
   loop: boolean;
+  /** Height above local ground selected by the operator. DJI Fly needs this
+   *  to translate SkyLens absolute GPS altitude into takeoff-relative height. */
+  aglM: number;
+  /**
+   * When set, the planned route is the formation CENTROID track, and three DJI
+   * Fly missions are generated around it — front-left / front-right / rear-centre
+   * of an equilateral triangle of side `spacingM` metres. Null means a single
+   * mission for the centre aircraft, as before.
+   */
+  formation: { spacingM: number } | null;
+  /**
+   * When true, also push the generated KMZ to the DJI Fly account cloud so a
+   * remote RC 2 pulls it over the air (the bridge still returns a download).
+   * Requires the bridge to be configured with DJI cloud credentials.
+   */
+  cloud: boolean;
 }
 
 export interface RouteModalOptions {
@@ -46,6 +62,13 @@ export interface RouteModalOptions {
 export interface RouteModal {
   open(): void;
   close(): void;
+  /**
+   * Enable or disable the "cloud delivery" toggle. The bridge rejects a cloud
+   * upload it has no credentials for AFTER building the KMZ, which loses the
+   * local file too, so the planner hides the option when the bridge reports it
+   * is not configured (GET /health → cloudConfigured). Called on every open.
+   */
+  setCloudAvailable(available: boolean): void;
   /**
    * Where the map should look when this browser has no memory of its own. The
    * core answers this (it knows where the operations centre is), and the answer
@@ -130,6 +153,12 @@ export function createRouteModal(opts: RouteModalOptions): RouteModal {
   const cosLatAt = (lat: number): number => Math.cos((lat * Math.PI) / 180) || 1;
   let waypoints: Waypoint[] = [];
   let loop = true;
+  /** Generate a three-aircraft formation (front-left / front-right / rear-centre)
+   *  around the planned track, instead of one mission for the centre aircraft. */
+  let formationOn = false;
+  let cloudOn = false;
+  /** Equilateral-triangle side, metres. Default matches the hand-built missions. */
+  let spacingM = 10;
   let spanM = SPANS[1];
   /** Height above the ground, metres. Absolute altitude is derived per
    *  waypoint from the terrain under it. */
@@ -246,7 +275,51 @@ export function createRouteModal(opts: RouteModalOptions): RouteModal {
   });
   loopWrap.append(loopInput, loopText);
 
-  toolbar.append(spanGroup, altWrap, loopWrap);
+  // Formation: one planned track -> three offset DJI Fly missions.
+  const formWrap = document.createElement('label');
+  formWrap.className = 'route-modal__loop';
+  const formInput = document.createElement('input');
+  formInput.type = 'checkbox';
+  formInput.checked = formationOn;
+  const formText = document.createElement('span');
+  formText.textContent = '편대 3기 KMZ';
+  const spacingInput = document.createElement('input');
+  spacingInput.type = 'number';
+  spacingInput.min = '1';
+  spacingInput.max = '100';
+  spacingInput.step = '0.5';
+  spacingInput.value = String(spacingM);
+  spacingInput.className = 'route-modal__spacing';
+  spacingInput.title = '정삼각형 한 변 (m) · 앞왼·앞오·뒤중';
+  spacingInput.disabled = !formationOn;
+  const spacingUnit = document.createElement('span');
+  spacingUnit.textContent = 'm';
+  formInput.addEventListener('change', () => {
+    formationOn = formInput.checked;
+    spacingInput.disabled = !formationOn;
+  });
+  spacingInput.addEventListener('input', () => {
+    const v = parseFloat(spacingInput.value);
+    if (Number.isFinite(v) && v > 0) spacingM = v;
+  });
+  formWrap.append(formInput, formText, spacingInput, spacingUnit);
+
+  // Cloud delivery: also upload the KMZ to the DJI Fly account cloud so a
+  // remote RC 2 pulls it over Wi-Fi instead of a USB file copy.
+  const cloudWrap = document.createElement('label');
+  cloudWrap.className = 'route-modal__loop';
+  const cloudInput = document.createElement('input');
+  cloudInput.type = 'checkbox';
+  cloudInput.checked = cloudOn;
+  const cloudText = document.createElement('span');
+  cloudText.textContent = '클라우드 전송(원격 RC)';
+  cloudInput.title = 'DJI Fly 계정 클라우드에 올려 원격 RC 2가 받게 한다 (Bridge에 클라우드 설정 필요)';
+  cloudInput.addEventListener('change', () => {
+    cloudOn = cloudInput.checked;
+  });
+  cloudWrap.append(cloudInput, cloudText);
+
+  toolbar.append(spanGroup, altWrap, loopWrap, formWrap, cloudWrap);
 
   // map canvas
   const mapWrap = document.createElement('div');
@@ -566,7 +639,14 @@ export function createRouteModal(opts: RouteModalOptions): RouteModal {
       hint.classList.add('is-warn');
       return;
     }
-    opts.onAssign({ droneId: opts.getLeaderId(), waypoints: [...waypoints], loop });
+    opts.onAssign({
+      droneId: opts.getLeaderId(),
+      waypoints: [...waypoints],
+      loop,
+      aglM: agl,
+      formation: formationOn ? { spacingM } : null,
+      cloud: cloudOn,
+    });
     close();
   });
 
@@ -585,6 +665,24 @@ export function createRouteModal(opts: RouteModalOptions): RouteModal {
       center = { ...gps };
       loadSatellite();
       draw();
+    },
+
+    setCloudAvailable(available: boolean): void {
+      cloudInput.disabled = !available;
+      cloudWrap.classList.toggle('is-disabled', !available);
+      if (!available) {
+        // Clear the selection too: an operator who ticked it before the bridge
+        // state was known must not keep a choice the bridge will reject.
+        cloudOn = false;
+        cloudInput.checked = false;
+        cloudText.textContent = '클라우드 전송 (설정 필요)';
+        cloudInput.title =
+          'Bridge에 DJI 클라우드 자격이 없어 비활성화됨 (SKYLENS_DJI_MC_TOKEN + SKYLENS_DJI_WK_KEY)';
+      } else {
+        cloudText.textContent = '클라우드 전송(원격 RC)';
+        cloudInput.title =
+          'DJI Fly 계정 클라우드에 올려 원격 RC 2가 받게 한다 (Bridge에 클라우드 설정 필요)';
+      }
     },
 
     open(): void {
