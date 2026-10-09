@@ -23,6 +23,7 @@ import type {
   DroneTelemetry,
   LinkStatus,
   MissionStatus,
+  PointChunk,
   ServerStatus,
   SplatChunk,
   ViewerMessage,
@@ -55,6 +56,8 @@ type Cb<T> = (v: T) => void;
 
 export interface RelayClient {
   onSplatChunk(cb: Cb<SplatChunk>): void;
+  /** Point layer segments (protocol.ts PointChunk). */
+  onPointChunk(cb: Cb<PointChunk>): void;
   onDetection(cb: Cb<DetectionResult>): void;
   /** The track the formation was given. The board draws it so the aircraft,
    *  the findings and the reconstruction can be read against the plan instead
@@ -109,6 +112,7 @@ function emptyServerStatus(): ServerStatus {
 
 export function createRelayClient(url = resolveRelayUrl()): RelayClient {
   const chunkCbs: Cb<SplatChunk>[] = [];
+  const pointCbs: Cb<PointChunk>[] = [];
   const detCbs: Cb<DetectionResult>[] = [];
   const teleCbs: Cb<DroneTelemetry>[] = [];
   const routeCbs: Cb<AssignRoute>[] = [];
@@ -174,6 +178,11 @@ export function createRelayClient(url = resolveRelayUrl()): RelayClient {
         for (const cb of chunkCbs) cb(msg);
         publish();
         break;
+      case 'point-chunk':
+        status.receiving = true;
+        for (const cb of pointCbs) cb(msg);
+        publish();
+        break;
       case 'detection':
         detections += 1;
         status.receiving = true;
@@ -235,6 +244,7 @@ export function createRelayClient(url = resolveRelayUrl()): RelayClient {
 
   return {
     onSplatChunk: (cb) => void chunkCbs.push(cb),
+    onPointChunk: (cb) => void pointCbs.push(cb),
     onDetection: (cb) => void detCbs.push(cb),
     onRoute: (cb) => void routeCbs.push(cb),
     onTelemetry: (cb) => void teleCbs.push(cb),

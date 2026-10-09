@@ -203,3 +203,6 @@ res/static/video/h265/
 /output/.dji_token
 # DJI cloud signing key read by scripts/run-mission-bridge.ps1.
 /config/.dji_wk_key
+
+# Point-layer demo assets, staged from the capture drive by `npm run demo:points` (~110 MB)
+res/static/demo/points/
