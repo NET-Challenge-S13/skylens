@@ -1,0 +1,114 @@
+// WebSocket protocol between skylens_core and its peers. Every WebSocket frame is
+// one binary-encoded Envelope.
+//
+//   ws /uplink   drone (or demo) -> core      Uplink
+//   ws /viewer   core -> screens              Viewer events; screens -> core: Control
+//
+// Chunks reuse skylens.model.v1.Chunk unchanged, so the core forwards what the
+// model server streamed without re-encoding the payload.
+syntax = "proto3";
+
+package skylens.viewer.v1;
+
+import "skylens/model/v1/model.proto";
+
+option go_package = "github.com/NET-Challenge-S13/skylens/src/skylens_core/gen/skylens/viewer/v1;viewerv1";
+
+enum ComponentId {
+  COMPONENT_ID_UNSPECIFIED = 0;
+  COMPONENT_ID_DRONE = 1;
+  COMPONENT_ID_CORE = 2;
+  COMPONENT_ID_CLIENT = 3;
+  COMPONENT_ID_MODEL = 4;
+  COMPONENT_ID_DEMO = 5;
+}
+
+message Envelope {
+  uint64 seq = 1;          // monotonic per sender, so a receiver can spot gaps
+  int64 origin_ts_ms = 2;  // unix ms at the origin, propagated unchanged
+  ComponentId from = 3;
+  oneof body {
+    // uplink: drone -> core
+    DroneHello drone_hello = 10;
+    skylens.model.v1.DroneTelemetry telemetry = 11;
+    // control: control tower -> core
+    AssignRoute assign_route = 20;
+    ManualControl manual_control = 21;
+    // viewer: core -> screens (telemetry and assign_route above also go this way)
+    MissionStatus mission_status = 30;
+    skylens.model.v1.Chunk chunk = 31;
+    CameraFeed camera_feed = 32;
+    LinkStatus link_status = 33;
+    ServerStatus server_status = 34;
+  }
+}
+
+// ---- uplink -----------------------------------------------------------------
+
+// The only signal that a drone has arrived. Telemetry alone does not count.
+message DroneHello {
+  uint32 drone_id = 1;
+  skylens.model.v1.DroneStation station = 2;
+  string model = 3; // model/firmware string for the operator panel
+}
+
+// ---- control ----------------------------------------------------------------
+
+message AssignRoute {
+  uint32 drone_id = 1;
+  repeated skylens.model.v1.Gps waypoints = 2;
+  bool loop = 3; // fly back and forth instead of stopping at the last waypoint
+}
+
+message ManualControl {
+  uint32 drone_id = 1;
+  double forward = 2; // -1..1
+  double yaw = 3;     // -1..1
+  double climb = 4;   // -1..1
+}
+
+// ---- viewer -----------------------------------------------------------------
+
+enum MissionPhase {
+  MISSION_PHASE_UNSPECIFIED = 0;
+  MISSION_PHASE_IDLE = 1;
+  MISSION_PHASE_ASSIGNED = 2;
+  MISSION_PHASE_AWAITING_DRONE = 3;
+  MISSION_PHASE_ACTIVE = 4;
+}
+
+message MissionStatus {
+  MissionPhase phase = 1;
+  string message = 2;            // operator-facing line, already localized
+  uint32 drones_online = 3;
+  optional double eta_seconds = 4; // set while the phase is time-bound
+}
+
+// Live video itself goes over WHEP; this only tells the screen where to pull it.
+message CameraFeed {
+  uint32 drone_id = 1;
+  skylens.model.v1.DroneStation station = 2;
+  string whep_url = 3;
+}
+
+message LinkStatus {
+  string hop = 1;                  // e.g. "proxy->core"
+  bool connected = 2;
+  optional double latency_ms = 3;
+  optional double mbps = 4;
+}
+
+message SegmentStatus {
+  uint32 index = 1;
+  skylens.model.v1.Level level = 2; // highest level delivered; unspecified = processing
+}
+
+message ServerStatus {
+  bool connected = 1;
+  bool receiving = 2;
+  uint64 chunks = 3;
+  uint64 detections = 4;
+  uint64 last_seq = 5;
+  optional double latency_ms = 6;
+  repeated SegmentStatus segments = 7;
+}

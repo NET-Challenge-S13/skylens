@@ -1,0 +1,25 @@
+[package]
+name = "skylens-shared"
+description = "Shared contracts: protocol messages and GPS/ENU geometry"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+path = "lib.rs"
+
+[features]
+default = []
+# tonic service stubs (ModelService client/server). Messages are always available.
+grpc = ["dep:tonic", "dep:tonic-prost", "tonic/transport", "tonic/router"]
+
+[dependencies]
+prost.workspace = true
+tonic = { workspace = true, optional = true }
+tonic-prost = { workspace = true, optional = true }
+
+[build-dependencies]
+protox.workspace = true
+tonic-prost-build.workspace = true

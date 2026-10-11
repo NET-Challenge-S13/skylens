@@ -1,0 +1,3 @@
+[env]
+# libtorch flavour downloaded by tch (download-libtorch). cu126 still ships sm_70 kernels for the V100 host.
+TORCH_CUDA_VERSION = "cu126"

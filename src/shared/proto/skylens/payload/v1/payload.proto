@@ -1,0 +1,48 @@
+// Encodings of Chunk.payload (see skylens/model/v1/model.proto).
+//
+// The core never decodes these. Producers (skylens_model, the core's terrain
+// feed) encode them and viewers (skylens_client) decode them. CHUNK_KIND_POINTS,
+// CHUNK_KIND_TERRAIN and CHUNK_KIND_BUILDINGS carry pointblitz chunk bytes
+// (pointblitz-io chunk format v2) and have no message here.
+syntax = "proto3";
+
+package skylens.payload.v1;
+
+import "skylens/model/v1/model.proto";
+
+option go_package = "github.com/NET-Challenge-S13/skylens/src/skylens_core/gen/skylens/payload/v1;payloadv1";
+
+// CHUNK_KIND_MESH_BLOCK: one deltamesh BlockMesh.
+// Zero triangles means the viewer removes the block.
+message MeshBlock {
+  repeated int32 id = 1;        // [x, y, z] block coordinate
+  uint32 version = 2;           // keep only if newer than what the viewer has
+  repeated float positions = 3; // x y z per vertex, absolute ENU metres
+  bytes colors = 4;             // r g b per vertex
+  repeated uint32 indices = 5;  // three per triangle, counter-clockwise from outside
+}
+
+enum DetectionCategory {
+  DETECTION_CATEGORY_UNSPECIFIED = 0;
+  DETECTION_CATEGORY_PERSON = 1;
+  DETECTION_CATEGORY_FIRE = 2;
+  DETECTION_CATEGORY_COLLAPSE = 3;
+  DETECTION_CATEGORY_ROAD_BLOCKED = 4;
+}
+
+// One fused detection: the confidence-weighted result of every frame that saw it.
+message Detection {
+  string id = 1;                                 // stable across updates
+  DetectionCategory category = 2;
+  skylens.model.v1.Gps gps = 3;                  // point for people, centroid for hazard zones
+  double confidence = 4;                         // after inter-frame interpolation
+  string label = 5;
+  uint32 segment = 6;                            // the board shows it once this segment has arrived
+  repeated skylens.model.v1.Gps outline = 7;     // hazard zone outline; empty for people
+  uint32 frames = 8;                             // frames that contributed
+}
+
+// CHUNK_KIND_DETECTIONS and DetectJobResult.detections.
+message DetectionBatch {
+  repeated Detection detections = 1;
+}

@@ -1,146 +1,119 @@
-# skylens_gateway — KOREN 외부망 진입점
+# 브리지 서버 설치 (175.126.98.44)
 
-드론이 KOREN 내부망으로 들어오는 **첫 홉**이다. 두 가지 모드로 동작하며
-(`COMPONENTS.md` §3.2), 어느 모드에서도 **페이로드를 해석하거나 바꾸지 않는다**.
-게이트웨이는 번역기가 아니라 전송로다.
+이 폴더를 통째로 서버에 올리고 스크립트 하나 실행하면 끝난다. 기존 서비스(WireGuard 등)는 건드리지 않는다.
 
-```
-[relay ]  드론 ──ws──> 게이트웨이 ──ws──> 프록시 ──> 코어
-[webrtc]  드론 ──시그널링만── 게이트웨이
-             └──────── 직결 ────────> 프록시 ──> 코어
-```
+## 이 서버가 하는 일
 
----
+KOREN은 등록된 IP만 들어갈 수 있는 폐쇄망이라 지휘관 브라우저도, 현장 드론 게이트웨이도 직접 못 들어간다. 이 서버가 **밖에서 대신 받아주는 창구**다.
 
-## 1. 모드
-
-| 모드 | `SKYLENS_GATEWAY_MODE` | 드론 접속 경로 | 하는 일 |
-|---|---|---|---|
-| 릴레이 (기본) | `relay` | `ws://<host>:8081/uplink` | `Envelope<UplinkMessage>`를 프록시 `/ingress`로 그대로 넘긴다 |
-| 홀펀칭 | `webrtc` | `ws://<host>:8081/signal` | SDP/ICE만 중계한다. **미디어는 한 바이트도 지나가지 않는다** |
-
-값이 둘 중 하나가 아니면 경고를 찍고 `relay`로 떨어진다.
-한 프로세스는 한 모드만 연다 — 모드에 맞지 않는 경로로 오는 업그레이드 요청은 거절한다.
-
-### relay 모드에서 프레임에 하는 유일한 일
-
-`Envelope`에 **홉 스탬프**(`path[]`, `src/skylens_gateway/types.ts`)를 덧붙인다.
-`seq` · `originTs` · `from` · `payload`는 건드리지 않으므로, 코어는 이걸 평범한
-`Envelope`로 읽고 `path`는 홉별 지연을 계산할 때만 보면 된다.
-
-`path`와 시그널링 프레임을 `src/shared/protocol.ts`에 넣지 않은 것은 의도다.
-둘 다 **두 컴포넌트 사이의 전송 관심사**이지 컴포넌트 공통 계약이 아니다.
-
-### webrtc 모드에서 미디어를 나르지 않는다는 것의 의미
-
-게이트웨이는 드론에게 세션 id를 주고(`signal-hello`), 드론의 offer를 프록시로 넘기고,
-프록시의 answer/ICE를 돌려주고, `signal-ready`가 오면 **빠진다**. 이후 드론은
-프록시의 `direct` 주소(`ws://…:8082/direct`)로 직접 보낸다. 이때 코어에 도착하는
-프레임의 `path`에는 `proxy` 홉만 있고 `gateway` 홉이 없다 — 이것이 미디어가
-게이트웨이를 거치지 않았다는 **증거**이며 드릴이 실제로 확인하는 항목이다.
-
----
-
-## 2. 백프레셔 — 드론은 절대 막지 않는다
-
-프록시가 죽어 있어도 드론의 비행은 계속된다. 그래서 상류 링크(`upstream.ts`)는:
-
-1. 잠깐 버퍼링한다 (`SKYLENS_GATEWAY_QUEUE`, 기본 256프레임)
-2. 큐가 차면 **가장 오래된 것부터 버리고** 개수를 센다 (`droppedOverflow`)
-3. 큐에 있어도 `SKYLENS_GATEWAY_QUEUE_AGE_MS`(기본 5초)보다 오래된 프레임은 버린다
-   (`droppedStale`) — 낡은 텔레메트리는 없느니만 못하다
-4. 버린 사실을 로그와 `/health` 양쪽에 보고한다
-5. 상류가 돌아오면 **버퍼를 먼저 비운 뒤** 새 프레임을 보낸다 (순서 보존)
-
-비디오는 `uri`로 참조만 하고 바이트를 싣지 않으므로 프레임 하나가 작게 유지되고,
-이 드롭 정책이 의미 있는 밸브로 동작한다.
-
-실제 관측(프록시를 내린 채 21프레임 전송, 큐 5로 축소):
-
-```
-[gateway] upstream backpressure: queue full (5), dropped oldest — 1 total
-/health → "queued":5, "sent":0, "droppedOverflow":23, "lastError":"connect ECONNREFUSED …"
-```
-
-드론 쪽은 21프레임을 모두 보내고 정상 종료했다 — **한 번도 막히지 않았다**.
-
----
-
-## 3. 환경변수
-
-| 변수 | 기본값 | 설명 |
+| 역할 | 무엇을 | 양 |
 |---|---|---|
-| `SKYLENS_GATEWAY_MODE` | `relay` | `relay` \| `webrtc` |
-| `SKYLENS_GATEWAY_PORT` | `8081` | HTTP + WebSocket 포트 |
-| `SKYLENS_GATEWAY_HOST` | `0.0.0.0` | 바인드 주소 |
-| `SKYLENS_PROXY_URL` | `ws://127.0.0.1:8082` | 프록시 기준 주소 (아래 둘의 기본값을 여기서 유도) |
-| `SKYLENS_PROXY_INGRESS_URL` | `<PROXY_URL>/ingress` | relay 모드 상류 |
-| `SKYLENS_PROXY_SIGNAL_URL` | `<PROXY_URL>/signal` | webrtc 모드 제어 채널 |
-| `SKYLENS_GATEWAY_QUEUE` | `256` | 상류가 죽었을 때 버틸 프레임 수 |
-| `SKYLENS_GATEWAY_QUEUE_AGE_MS` | `5000` | 이보다 오래된 대기 프레임은 폐기 |
-| `SKYLENS_GATEWAY_RECONNECT_MS` | `1000` | 상류 재접속 간격 |
-| `SKYLENS_GATEWAY_PING_MS` | `2000` | 상류 ping 주기(지연 측정) |
-| `SKYLENS_GATEWAY_STATUS_MS` | `1000` | `LinkStatus` 발행 주기 |
+| 시그널링 프록시 | 브라우저의 WebRTC 주소 교환을 대전으로 전달 (SSH 터널 경유) | 몇 KB |
+| 현황판·업링크 중계 | `/viewer`(현황판 WebSocket)와 `/uplink`를 터널 20882로 대전 프록시에 넘긴다 | 실측 없음 |
+| 드론 영상 수신 | 게이트웨이의 SRT 영상을 받아두면 대전이 당겨감 | 15~33 Mbps, 1부 |
+| 현황판 호스팅 | 지휘관이 여는 현황판은 **정적 파일**이다. 빌드 산출물을 `WEB_DIR`에 두면 nginx가 그대로 서빙한다 (서버 프로세스 없음) | 작음 |
 
----
+**영상 배포는 하지 않는다.** 지휘관 30명에게 나가는 영상은 KOREN 대전이 직접 쏜다. 그래서 이 서버 회선이 빨라야 할 필요가 없다.
 
-## 4. 엔드포인트
+## 설치 순서: 대전 키 등록이 먼저다
 
-| 경로 | 설명 |
+브리지 터널은 두 포워드(`20889→10889`, `20882→8082`)를 한 SSH 연결에 싣는다. 대전에 키가 아직 `permitopen 8082`를 허용하지 않은 채 브리지 터널이 올라가면, `ExitOnForwardFailure=yes` 때문에 **SSH 연결 자체가 끊기고 WHEP(20889)까지 같이 죽는다.** 그래서 순서는 이렇다.
+
+1. 브리지에서 `sudo ./setup-bridge.sh` 를 한 번 돌려 공개키를 받는다 (이 단계에서 터널은 대전 키 등록 전이라 어차피 붙지 않는다).
+2. 공개키를 정준모에게 보내고, 대전에서 `register-bridge-key.sh`로 `permitopen 10889·8082`가 등록됐다는 답을 받는다.
+3. 브리지에서 `./check-bridge.sh` 로 `20889`·`20882` 두 포트가 열렸는지 본다.
+
+이미 옛 권한(10889만)으로 등록된 키는 `register-bridge-key.sh`를 다시 돌리면 권한 줄이 갱신된다. 그 뒤에 브리지를 재설치한다.
+
+## 실행 순서
+
+```bash
+# 1) 이 폴더를 서버로 복사
+git clone -b develop https://github.com/NET-Challenge-S13/skylens.git
+cd skylens/src/skylens_gateway
+
+# 2) 설정: 80 이 이미 쓰이면 HTTP_PORT 를 고친다. 현황판 파일 위치는 WEB_DIR. 그 외는 그대로.
+cp bridge.env.example bridge.env
+nano bridge.env
+
+# 3) 설치 (WEB_DIR 생성, nginx·터널·MediaMTX 설정)
+chmod +x *.sh
+sudo ./setup-bridge.sh
+
+# 4) 현황판 파일 복사: 빌드 산출물 전체를 WEB_DIR에 둔다. 진입 파일은 status.html
+sudo cp -r <현황판 빌드 산출물>/. /opt/skylens/web/
+
+# 5) 점검
+./check-bridge.sh
+```
+
+설치가 끝나면 화면에 **공개키 한 줄**과 **SRT publish 비밀번호**가 출력된다. **공개키를 정준모에게 보내면** 대전에 등록되고 터널이 자동으로 붙는다. 위 순서의 1·2단계가 이것이다.
+
+## 경로와 포트
+
+nginx(:80) 한 곳에서 네 갈래로 나뉜다.
+
+| 경로 | 어디로 간다 | 비고 |
+|---|---|---|
+| `/` | `WEB_DIR`(기본 `/opt/skylens/web`)의 정적 파일 | 현황판. `status.html`이 진입. 프록시 없음 |
+| `/viewer` | `127.0.0.1:20882` → 대전 프록시 `:8082` → 코어 `/viewer` | 현황판 WebSocket. 읽기 1시간 타임아웃 |
+| `/uplink` | `127.0.0.1:20882` → 대전 프록시 `:8082` → 코어 `/uplink` | 업링크 WebSocket. 읽기 1시간 타임아웃 |
+| `/live/` | `127.0.0.1:20889` → 대전 MediaMTX `:10889` | WHEP 시그널링 |
+| `/healthz` | `127.0.0.1:20889` | 터널 생존 확인 |
+
+터널 입구는 브리지 로컬에만 열린다(`127.0.0.1:20889`, `127.0.0.1:20882`). 대전 프록시 `:8082`는 브리지 밖에서 직접 닿지 않는다.
+
+설치가 끝나면 열어야 하는 것은 아래 두 포트뿐이다. 나머지 `20889`·`20882`는 로컬 전용이다.
+
+## 열어야 하는 포트 (두 개)
+
+밖에서 이 서버로 들어오는 포트. 공유기 뒤면 둘 다 포트포워딩.
+
+| 포트 | 프로토콜 | 누가 들어오나 |
+|---|---|---|
+| 80 (HTTP_PORT) | TCP | 지휘관 브라우저 |
+| 10890 (SRT_PORT) | UDP | 드론 게이트웨이, 그리고 대전(영상을 당겨감) |
+
+SSH 는 열 필요 없다 — 대전 쪽 터널은 **이 서버가 대전으로** 건다(175 는 KOREN 등록 IP 라 대전 SSH 에 들어갈 수 있다).
+
+## 무엇이 설치되나
+
+| 항목 | 위치 |
 |---|---|
-| `ws /uplink` | 드론 접속 (relay 모드에서만 열린다) |
-| `ws /signal` | 드론 시그널링 (webrtc 모드에서만 열린다) |
-| `GET /health` | 모드 · 업타임 · 상류 상태 · 카운터 |
+| 터널 키 | `/etc/skylens/tunnel_key(.pub)` — `skytunnel` 계정(셸 없음) 소유 |
+| 터널 서비스 | systemd `daejeon-tunnel`: `autossh -L 127.0.0.1:20889:127.0.0.1:10889 -L 127.0.0.1:20882:127.0.0.1:8082 ubuntu@116.89.187.181 -p 26022`. 끊기면 자동 재연결 |
+| nginx 사이트 | `/etc/nginx/sites-available/skylens`: `/` → `WEB_DIR` 정적 파일, `/viewer`·`/uplink` → `:20882`(터널), `/live/` → `:20889`(터널) |
+| 현황판 정적 파일 | `WEB_DIR` (기본 `/opt/skylens/web`). 설치 시 디렉터리만 만들고, 파일은 직접 복사한다 |
+| MediaMTX | `/opt/mediamtx/`, systemd `mediamtx`, `mediamtx` 계정 |
+| ufw 규칙 | ufw가 **켜져 있을 때만** 80/tcp, 10890/udp 추가 |
 
-`/health`의 `counters.framesAccepted`는 **드롭되지 않고 상류 링크에 넘어간** 프레임 수다
-(큐에 들어간 것도 포함). 실제로 소켓에 써진 수는 `upstream.sent`를 본다.
+대전 쪽에서는 이 키를 `restrict,permitopen="127.0.0.1:10889",permitopen="127.0.0.1:8082"` 로 등록하므로, 키가 유출돼도 대전의 10889(WHEP)와 8082(프록시) 외에는 아무것도 못 한다.
 
-## 5. LinkStatus
+## 현황판 갱신
 
-게이트웨이는 자기가 소유한 홉만 보고한다.
-
-- relay: `hop: "drone→gateway"`, `mode: "relay"`, `mbps` 측정값 포함
-- webrtc: `hop: "drone→gateway (signalling only)"`, `mbps: null`
-  — 미디어가 이 홉을 지나지 않으므로 보고할 비트레이트가 **없다**
-
----
-
-## 6. 실행
+현황판은 정적 파일이라 서버를 재시작할 필요가 없다. 새 빌드 산출물을 `WEB_DIR`에 덮어쓰면 바로 반영된다.
 
 ```bash
-# 릴레이 모드 (기본)
-npx tsx src/skylens_gateway/index.ts
-
-# 홀펀칭 모드
-SKYLENS_GATEWAY_MODE=webrtc npx tsx src/skylens_gateway/index.ts
+sudo cp -r <새 빌드 산출물>/. /opt/skylens/web/
 ```
 
-Windows PowerShell:
-
-```powershell
-$env:SKYLENS_GATEWAY_MODE='webrtc'; npx tsx src/skylens_gateway/index.ts
-```
-
-### 검증용 하네스
-
-하네스는 `src/test/` 아래에 있다 (컴포넌트 디렉터리에는 런타임 코드만 둔다).
+## 되돌리기
 
 ```bash
-npx tsx src/test/gateway/fakeDrone.ts                        # relay 경유
-npx tsx src/test/gateway/fakeDrone.ts ws://127.0.0.1:8082/direct   # 프록시 직결
-npx tsx src/test/gateway/fakeDroneWebrtc.ts                  # 시그널링 후 직결
-
-npx tsx src/test/proxy/pipelineDrill.ts    # 게이트웨이+프록시 5단계 드릴
-npx tsx src/test/proxy/liveCoreCheck.ts    # 실제 코어 상대 통합 드릴
+sudo systemctl disable --now mediamtx daejeon-tunnel
+sudo rm -f /etc/systemd/system/mediamtx.service /etc/systemd/system/daejeon-tunnel.service \
+           /etc/nginx/sites-enabled/skylens /etc/nginx/sites-available/skylens
+sudo systemctl daemon-reload
+sudo nginx -t && sudo systemctl reload nginx
+sudo userdel skytunnel; sudo userdel mediamtx; sudo rm -rf /opt/mediamtx /etc/skylens /opt/skylens
 ```
 
----
+## 막히면
 
-## 7. 한계 (이번 단계)
-
-- 실제 WebRTC 피어 연결은 만들지 않는다. Node에 내장 구현이 없고 네이티브 의존
-  (node-datachannel 등)을 끌어들이지 않기로 했다(`COMPONENTS.md` §8과 같은 판단).
-  시그널링 계약은 진짜 형태 그대로 두고, `signal-ready`가 건네는 `direct` 주소만
-  프록시의 WebSocket이 대신한다. 나중에 갈아끼울 때 바뀌는 곳은 프록시의
-  응답 함수 하나뿐이다.
-- 인증·TLS 없음. KOREN 등록 IP 안이라는 전제.
+- `check-bridge.sh`에서 `127.0.0.1:20889 없음` + `Permission denied` — 정상. 공개키가 아직 대전에 등록되지 않은 것. 보내고 기다리면 된다.
+- `127.0.0.1:20882 없음` 인데 `20889`는 열림. 대전 키의 `permitopen`에 8082가 없다. 대전에서 `register-bridge-key.sh`를 다시 돌린다.
+- `20889`·`20882` 둘 다 없음, 로그에 `administratively prohibited` 또는 `open failed`. 대전 키가 옛 권한이라 8082 포워드가 거부된 것. 위 "설치 순서"를 따른다.
+- `대전 SSH 도달 불가` — 이 서버 IP 가 KOREN 에 등록돼 있는지 확인(`175.126.98.44` 여야 함).
+- `nginx -t` 실패 — 포트 충돌. `bridge.env` 의 `HTTP_PORT` 를 바꾸고 재실행.
+- `/` 가 404. `WEB_DIR`에 현황판 파일이 없거나 `status.html`이 빠진 것. 4단계 복사를 확인한다.
+- `/viewer` 연결 실패. `check-bridge.sh`의 "대전 프록시 터널" 항목을 본다. 프록시(`:8082`)가 대전에서 떠 있는지도 확인한다.

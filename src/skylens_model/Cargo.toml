@@ -1,0 +1,45 @@
+[package]
+name = "skylens-model"
+description = "Compute server: live reconstruction, meshing and UNet inference"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+path = "lib.rs"
+
+[[bin]]
+name = "skylens-model"
+path = "main.rs"
+
+[dependencies]
+skylens-shared = { workspace = true, features = ["grpc"] }
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tokio.workspace = true
+axum.workspace = true
+tonic = { workspace = true, features = ["transport", "router"] }
+prost.workspace = true
+cumulus3d-cli.workspace = true
+deltamesh.workspace = true
+pointblitz-io.workspace = true
+tch.workspace = true
+uuid = { version = "1", features = ["v4"] }
+tokio-stream = "0.1"
+# datasets / cache: image decode + JPEG/PNG encode (no OpenCV)
+# SIGINT/SIGTERM hook for GracefulInterruptCallback
+ctrlc = { version = "3", features = ["termination"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "tiff"] }
+# Types cumulus3d-cli exposes in its events (Reconstruction, PointCloud, Vec3); same git revision as cumulus3d-cli.
+cumulus3d-core = { git = "https://github.com/AH100-1/cumulus3d", rev = "b9f4a9bda714fa31fc0fd395f821114b64fd2c1f" }
+
+[features]
+default = []
+# deltamesh GpuMesher (wgpu) when EngineConfig::gpu is set; without it meshing stays on the CPU.
+gpu-mesh = ["deltamesh/gpu"]

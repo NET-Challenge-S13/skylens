@@ -184,50 +184,50 @@
                 <tr>
                   <th scope="row"><code>skylens_drone</code></th>
                   <td>현장</td>
-                  <td>촬영 영상을 H.265로 잘라 보내고, 자기 위치와 자세를 같이 올려요</td>
-                  <td>Tauri</td>
+                  <td>관제탑 경로를 DJI Fly 웨이포인트 임무로 바꿔 기체에 넘겨요</td>
+                  <td>Rust</td>
                 </tr>
                 <tr>
                   <th scope="row"><code>skylens_gateway</code></th>
                   <td>KOREN 외부망</td>
-                  <td>연구망으로 들어가는 문이에요. 중계(relay)와 직결 주선(webrtc) 두 모드가 있어요</td>
-                  <td>Node · TS</td>
+                  <td>연구망으로 들어가는 문이에요. 받은 요청을 대전으로 넘기고, 드론 영상을 받아 둬요</td>
+                  <td>nginx 설정</td>
                 </tr>
                 <tr>
                   <th scope="row"><code>skylens_proxy</code></th>
                   <td>KOREN 내부망</td>
                   <td>접속 경로를 이중화해요. 한쪽이 죽어도 서비스가 이어져요</td>
-                  <td>Node · TS</td>
+                  <td>nginx 설정</td>
                 </tr>
                 <tr>
                   <th scope="row"><code>skylens_core</code></th>
                   <td>KOREN 내부망</td>
                   <td>관제탑을 서빙하고, 데이터를 전부 들고 있고, 잡을 발행하고, 결과를 배포해요</td>
-                  <td>Node · TS · Vite</td>
+                  <td>Go</td>
                 </tr>
                 <tr>
                   <th scope="row"><code>skylens_model</code></th>
                   <td>KOREN 내부망</td>
-                  <td>연산 API예요. 3D 복원과 탐지 추론이 여기서 돌아요</td>
-                  <td>Python · FastAPI</td>
+                  <td>연산 서버예요. 3D 복원과 탐지 추론이 여기서 돌아요</td>
+                  <td>Rust (학습은 Python)</td>
                 </tr>
                 <tr>
                   <th scope="row"><code>skylens_client</code></th>
                   <td>KOREN 외부망</td>
-                  <td>현황판 웹서버 겸 WebRTC 시그널링 중계예요</td>
-                  <td>Node · TS · Vite</td>
+                  <td>관제탑·현황판 화면이에요. 웹과 데스크톱이 같은 HTML/CSS를 써요</td>
+                  <td>Rust · HTML/CSS</td>
                 </tr>
                 <tr>
                   <th scope="row"><code>shared</code></th>
                   <td>없음</td>
                   <td>프로토콜·좌표 변환·공통 타입. 배포하는 게 아니라 함께 쓰는 라이브러리예요</td>
-                  <td>TS 라이브러리</td>
+                  <td>Rust 라이브러리</td>
                 </tr>
                 <tr>
                   <th scope="row"><code>demo</code></th>
                   <td>없음</td>
                   <td>위 컴포넌트를 전부 조립해서 데모 모드로 띄우는 런처예요</td>
-                  <td>Node · TS</td>
+                  <td>Rust</td>
                 </tr>
               </tbody>
             </table>
