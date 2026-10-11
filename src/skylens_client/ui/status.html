@@ -1,65 +1,22 @@
 <!doctype html>
-<html lang="ko">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<html lang="ko"><head>
+    <meta charset="UTF-8">
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>SkyLens · 현황판 - 실시간 3D 복원</title>
-    <!-- The Rust app inlines these two stylesheets before Blitz parses the page. -->
-    <link rel="stylesheet" href="theme.css" />
-    <link rel="stylesheet" href="status.css" />
+    <link rel="stylesheet" href="../../shared/viewer/ui/fonts.css" />
+    <link rel="stylesheet" href="../../shared/viewer/ui/style.css" />
+    <link rel="stylesheet" href="status-panels.css" />
   </head>
-  <body>
+<body>
     <section class="pane pane--status pane--full">
-      <!-- 3D view: a segment shows up only once its chunks have arrived. -->
-      <object id="view3d" class="view3d"></object>
+      <canvas id="status-view"></canvas>
+      <div id="overlay-status" class="overlay"><div class="detect-card"><div class="detect-card__kicker"></div><div class="detect-card__label"></div><div class="detect-card__conf"></div><div class="detect-card__bar"><span></span></div><button class="detect-card__btn" type="button">탐지 확인</button></div><div class="cam-state">CAM · SYNCED</div><div class="splat-loading is-visible" id="board-waiting">코어 연결됨 · 첫 구간 복원 대기 중</div></div>
+      <div id="net-status" class="net-badge"><span class="net-badge__dot" style="background: rgb(57, 217, 138);"></span><span>코어 연결됨 · 데이터 대기</span></div>
+      <div id="server-status" class="sl-surface sl-surface--panel server-status"><span class="server-status__dot" data-state="connected"></span><div class="server-status__body"><span class="server-status__text">서버 · 연결됨</span><span class="server-status__detail">청크 0 · 탐지 0 · 0ms</span><span class="server-status__detail">코어 연결됨 · 데이터 대기</span></div><div class="server-status__ladder"></div></div>
+      <div id="minimap" class="sl-surface sl-surface--frame"><canvas class="minimap__canvas" width="198" height="198" style="width: 198px; height: 198px;"></canvas></div>
+    <div class="sl-surface sl-surface--chip pane-label pane-label--status"><span class="sl-dot"></span><span class="sl-surface__label">현황판 · 실시간 3D 복원</span></div><button type="button" id="point-toggle" class="point-toggle is-on" aria-pressed="true"><span class="point-toggle__label">점 · 고도색</span><span class="point-toggle__meta">수신 대기</span></button></section>
+    <div id="toast-root"></div>
+  
 
-      <div class="sl-surface sl-surface--chip pane-label pane-label--status">
-        <span class="sl-dot"></span><span class="sl-surface__label">현황판 · 실시간 3D 복원</span>
-      </div>
-
-      <!-- Data path health: this screen to the core, plus the worst hop the core reports -->
-      <div id="net-status" class="net-badge">
-        <span id="net-dot" class="net-badge__dot" data-state="warn"></span>
-        <span id="net-text">코어 연결 중</span>
-      </div>
-
-      <!-- Server panel with the per-segment level ladder -->
-      <div id="server-status" class="sl-surface sl-surface--panel server-status">
-        <span id="server-dot" class="server-status__dot" data-state="waiting"></span>
-        <div class="server-status__body">
-          <span id="server-text" class="server-status__text">서버 · 대기 중</span>
-          <span id="server-detail" class="server-status__detail">청크 0 · 탐지 0</span>
-          <span id="server-link" class="server-status__detail">코어에 연결하는 중입니다</span>
-        </div>
-        <div id="server-ladder" class="server-status__ladder is-empty"></div>
-      </div>
-
-      <div id="detect-legend" class="sl-surface detect-legend">
-        <span class="detect-legend__item"><span class="detect-legend__dot detect-legend__dot--person"></span><span id="legend-person">생존자 0</span></span>
-        <span class="detect-legend__item"><span class="detect-legend__dot detect-legend__dot--danger"></span><span id="legend-danger">위험구역 0</span></span>
-      </div>
-
-      <!-- Latest revealed detection -->
-      <div id="detect-card" class="detect-card">
-        <div class="detect-card__kicker"><span class="detect-card__kicker-dot"></span><span id="detect-kicker">생존자 감지</span></div>
-        <div id="detect-label" class="detect-card__label"></div>
-        <div id="detect-conf" class="detect-card__conf"></div>
-        <div class="detect-card__bar"><span id="detect-fill" class="detect-card__fill"></span></div>
-        <button type="button" class="detect-card__btn" data-action="close-detection">탐지 확인</button>
-      </div>
-
-      <!-- Camera panel: WHEP URL from camera_feed (video played outside Blitz) -->
-      <div id="video-panel" class="sl-surface sl-surface--frame video-panel status-camera">
-        <div class="video-panel__frame"></div>
-        <div class="video-panel__label"><span class="video-panel__rec"></span><span id="video-label">CENTER CAM</span></div>
-        <div class="video-panel__body">
-          <span id="video-state">영상 대기</span>
-          <span id="video-url" class="video-panel__url"></span>
-        </div>
-        <div id="video-overlay" class="video-panel__overlay">NO SIGNAL</div>
-      </div>
-
-      <div id="toast-root"></div>
-    </section>
-  </body>
-</html>
+</body></html>
