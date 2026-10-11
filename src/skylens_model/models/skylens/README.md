@@ -7,6 +7,66 @@
 상위 문서와의 관계는 [`../../CLAUDE.md`](../../CLAUDE.md)의 문서 지도를 따른다.
 이 문서는 `docs/ARCHITECTURE.md`의 3-Tier 중 **Core HPC의 3DGS 복원 부분**을 구현한다.
 
+> 지금 이 폴더의 코드는 cumulus3d 기반 라이브 복원 엔진(§0)이다.
+> §1, §3 ~ §5의 3DGS 기록은 측정 근거로 남긴다.
+
+---
+
+## 0. 라이브 복원 엔진 (Rust)
+
+COLMAP·gsplat 파이프라인은 `mod.rs`의 `Engine`으로 대체됐다.
+`route_gen.py`(DJI 웨이포인트 KMZ 생성)는 촬영 계획 도구라 엔진이 쓰지 않아 옮기지 않았고,
+`split_segments.py`·`align_scene.py`가 하던 구간 자르기와 좌표 맞추기는
+cumulus3d의 구간(zone)과 GPS ENU 정렬이 대신한다.
+
+```
+FrameSet(gRPC) → Assembler(카메라 모으기) → LiveFrameSet → ReconNode.compose
+  ├─ on_frame 훅 → 큐(최대 24장) → UNet → 관측(축소 확률 격자 + 사람 점)
+  └─ 이벤트 ZonePreview / ZoneRefined
+       ├─ 점: pointblitz 청크 v2 (정제본은 성긴 점부터)
+       ├─ 메시: deltamesh ingest(구간, Preview|Refined) → extract → 바뀐 블록만 MeshBlock
+       └─ 탐지 융합: 등록 포즈로 투영 → 프레임 간 confidence 가중 → DetectionBatch
+  → ChunkLog(sequence 부여, 재생 기록) → SubscribeChunks
+```
+
+| 항목 | 결정 |
+|---|---|
+| ENU 원점 | 모든 프레임 묶음 맨 앞에 `.skylens-anchor` GPS 기록(앵커 좌표)을 넣는다. cumulus3d는 첫 GPS 기록을 원점으로 고정하므로 모든 구간이 앵커 기준 ENU 미터(x 동, y 북, z 위)로 나온다 |
+| 조정 정책 | append-only. 늦게 오거나 고쳐진 묶음은 무시한다. deltamesh 정제본은 구간당 한 번만 넣을 수 있고, 이미 내보낸 구간을 되감지 않기 위해서다 |
+| 카메라가 따로 오는 묶음 | 같은 키의 push를 모아 모든 카메라가 차면 선언한다. 대기 중인 묶음은 최대 64개 |
+| 미리보기 좌표계 | 구간 0과, 정제본이 채택된 뒤의 미리보기만 GPS 정렬이다. 정렬되지 않은 미리보기는 내보내지 않고 정제본을 기다린다 |
+| 조밀화 | CUDA가 필요하다. `gpu = false`면 구간 모델의 희소 점을 대신 쓴다 |
+| 메시 GPU | `gpu-mesh` 기능을 켜고 빌드하면 `GpuMesher`, 아니면 CPU `SdfMesher` |
+| `push` | 위치 하나를 처리하는 동안 막힌다. 비동기 서버에서는 blocking 스레드에서 부른다 |
+| 청크 재생 | 블록은 최신 버전, 탐지는 구간별 최신 묶음, 점은 구간별 최신 세대만 남긴다 |
+
+### 0.1 탐지 융합 (`fusion.rs`)
+
+- 구간 점을 동·북 1 m 칸으로 묶고 칸 중심을 프레임마다 투영한다. 포즈는 구간 모델의 등록 포즈다.
+  `FrameRegistered`의 포즈는 체인 좌표계라 정제본이 채택되기 전에는 ENU가 아닐 수 있어서 쓰지 않는다.
+- 위험구역: 투영된 픽셀의 클래스 확률을 그 픽셀의 최대 확률로 가중해 더한다. 가중 평균에서 가장 높은
+  클래스가 0.5 이상이고 2프레임 이상이 본 칸만 위험구역이다. 같은 클래스로 맞닿은 칸(8방향)이 한 구역이고,
+  외곽선은 칸 모서리의 볼록 껍질이다.
+- 사람: 사람 점을 가장 가까운 칸 투영에 붙이고 2 m 안의 기존 사람과 합친다. 그 위치를 볼 수 있었던 프레임은
+  검출 여부와 관계없이 모두 센다. confidence는 점수 합을 본 프레임 수로 나눈 값이고,
+  2프레임 이상 검출되고 0.4 이상일 때 보고한다. 한 프레임의 오검출은 지도에 찍히지 않는다.
+- id는 갱신과 정제본 교체에도 유지된다. 겹치는 이전 구역, 2 m 안의 이전 사람의 id를 물려받는다.
+- 가림은 따지지 않는다. 항공 시점에서는 칸 중심 투영으로 충분하다고 보고 단순화했다.
+- UNet이 밀리면 오래된 프레임부터 버린다. 융합이 프레임 사이를 보간하므로 빠진 프레임은 프레임 수만 줄인다.
+
+### 0.2 잡 API (`jobs.rs`, `sources.rs`)
+
+- `steps`가 7,000 미만이면 미리보기, 이상이면 정제본이다. 옛 코어 사다리(1,000 / 7,000 / 30,000 스텝)에서
+  7,000 스텝이 "실용 품질"이었던 것을 경계로 삼았다.
+- `uri`는 로컬 경로다(`file://` 접두어 허용). 폴더면 안의 jpg·png, 이미지 파일이면 한 장,
+  그 밖의 파일은 영상으로 보고 `ffmpeg`로 초당 2장을 뽑는다(`SKYLENS_FFMPEG`로 실행 파일 지정).
+  소스 i가 카메라 i(left, center, right)다.
+- 프레임의 GPS는 소스의 `poses`에서 같은 상대 위치를 고르고, 없으면 `track`을 보간한다.
+- 잡마다 별도 노드를 띄워 구간 하나(`zones(위치 수, 0)`)로 돌린다. 위치는 최대 120개로 고르게 솎는다.
+- 결과 PLY는 `<work_dir>/results/`에 쓰고 `url`은 `/results/<파일>`이다.
+  좌표가 이미 앵커 기준 ENU라 `align`은 항등이고, `anchorFrame`은 앵커에서 만든 id다.
+- 탐지 잡도 포즈와 표면이 필요하므로 미리보기 복원을 같이 돌리고 라이브와 같은 융합을 쓴다.
+
 ---
 
 ## 1. 이 파이프라인이 하는 일
@@ -58,37 +118,21 @@
 
 ```
 src/skylens_model/models/skylens/
-├─ README.md            # 이 문서 — 설계 결정과 근거
-├─ INSTALL.md           # COLMAP·gsplat 설치, 밟았던 함정 10건
-├─ RESULTS.md           # 실험 5건 측정값 전체
-├─ __init__.py
-├─ colmap_io.py         # COLMAP 바이너리 모델 읽기/쓰기 (공용)
-├─ ckpt_to_ply.py       # 체크포인트 → 표준 3DGS PLY
-├─ subset_model.py      # 촬영본 단위로 모델 부분집합 추출
-├─ pose_noise.py        # 포즈에 통제된 오차 주입
-├─ route_gen.py         # 촬영 경로를 DJI 웨이포인트(KMZ)로 출력
-└─ scripts/             # RESULTS.md 를 만든 스크립트 원본
+├─ README.md     # 이 문서. §0 라이브 엔진, §1 이후는 이전 3DGS 방식의 결정과 근거
+├─ INSTALL.md    # (이전 방식) COLMAP·gsplat 설치, 밟았던 함정 10건
+├─ RESULTS.md    # (이전 방식) 실험 5건 측정값 전체
+├─ mod.rs        # Engine: 노드 선언, push, subscribe, 잡
+├─ frames.rs     # FrameSet → LiveFrameSet, 카메라 모으기, 앵커 GPS 기록
+├─ live.rs       # 탐지 워커, 이벤트 전달, 청크 소비자, 정제본 수거
+├─ recon.rs      # cumulus3d 결과 → 점·카메라 뷰
+├─ fusion.rs     # 탐지 투영과 프레임 간 융합 (순수 계산, 단위 테스트)
+├─ chunks.rs     # 청크 인코딩, sequence, 재생 기록
+├─ jobs.rs       # 잡 실행, steps → 수준
+└─ sources.rs    # uri → 프레임 (폴더·이미지·ffmpeg)
 ```
 
-`scripts/` 는 실제로 돌린 것을 **손대지 않고** 넣은 것이라 경로가 하드코딩돼 있다.
-어떤 스크립트가 어떤 실험을 만들었는지는 [`scripts/README.md`](scripts/README.md) 에 있다.
-
-### 형제 패키지 `skylensnet` 과의 차이
-
-같은 `models/` 아래 있지만 성격이 다르다.
-`skylensnet` 은 가중치를 학습해 두고 추론하는 신경망이라
-`configuration_*.py` / `modeling_*.py` 구조를 따르지만,
-3DGS 는 **장면마다 처음부터 도는 최적화**라 사전학습 체크포인트가 없다 (§1).
-그래서 여기에는 모델 클래스가 없고 파이프라인과 도구만 있다.
-
-파이썬 도구는 모듈로 실행한다.
-
-```bash
-python3 -m skylens_model.models.skylens.ckpt_to_ply --ckpt ... --out ... --light
-python3 -m skylens_model.models.skylens.subset_model --src ... --dst ... --keep cam2037
-python3 -m skylens_model.models.skylens.pose_noise  --src ... --dst ... --rot-deg 0.3
-python3 -m skylens_model.models.skylens.route_gen   --center 36.7695,126.9316 --heading 90
-```
+이전 방식의 Python 도구(`colmap_io.py`, `ckpt_to_ply.py`, `subset_model.py`, `pose_noise.py`,
+`route_gen.py` 등)와 `RESULTS.md` 를 만든 `scripts/` 는 지웠다. git 기록에 남아 있다.
 
 산출물은 저장소 안에 두지 않는다. `.gitignore` 가 `data/` 와 `*.pt` 를 막고 있지만,
 수 GB 짜리는 작업 트리 밖에 두는 편이 사고를 원천 차단한다.
@@ -230,7 +274,8 @@ CloudCompare나 MeshLab은 앞 세 속성만 읽고 나머지를 버려서 점�
 웨이포인트 KMZ를 프로그램으로 생성하는 방식이 현실적이다.
 단 그 가치는 정확한 포즈 제공이 아니라 (§4.1에서 봤듯 GPS 정밀도로는 어림없다)
 **좋은 촬영 배치를 매번 똑같이 재현**하는 데 있다.
-`route_gen.py` 가 정삼각형 세 꼭짓점에서 출발하는 평행 직선 경로 3개를 KMZ 로 뽑는다.
+`route_gen.py` 가 정삼각형 세 꼭짓점에서 출발하는 평행 직선 경로 3개를 KMZ 로 뽑는다
+(엔진 전환 때 지웠고 git 기록에 남아 있다).
 한 대뿐이므로 한 번에 한 leg 씩, 세 번 나눠 난다.
 
 기종 enum 값은 **문서로 알 수 없다.** DJI 가 공개한 WPML 명세는 기업용 5기종
