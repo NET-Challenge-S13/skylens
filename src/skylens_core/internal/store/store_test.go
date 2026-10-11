@@ -143,11 +143,30 @@ func TestTerrainNewestPerCellAndReplayOrder(t *testing.T) {
 	s.Put(&modelv1.Chunk{Kind: terrain, BlockId: []int32{1, 1}, Payload: []byte("t1new")})
 	s.Put(&modelv1.Chunk{Kind: terrain, BlockId: []int32{2, 1}, Payload: []byte("t2")})
 	sameTags(t, s.Chunks(), "t1new", "t2", "b", "p")
+	// Status boards never get the base map.
+	sameTags(t, s.ModelChunks(), "p")
 
 	// Terrain never moves the model resume point.
 	if got := s.LastModelSequence(); got != 1 {
 		t.Fatalf("resume point %d", got)
 	}
+}
+
+func TestRefinedCellReplacesRingCellButNotTheOtherWay(t *testing.T) {
+	s := New(Options{})
+	if !s.Put(&modelv1.Chunk{Kind: terrain, Level: preview, BlockId: []int32{1, 0, 0}, Version: 1, Payload: []byte("ring")}) {
+		t.Fatal("ring cell rejected")
+	}
+	if !s.Put(&modelv1.Chunk{Kind: terrain, Level: refined, BlockId: []int32{1, 0, 0}, Version: 1, Payload: []byte("fine")}) {
+		t.Fatal("refined cell rejected")
+	}
+	if s.Put(&modelv1.Chunk{Kind: terrain, Level: preview, BlockId: []int32{1, 0, 0}, Version: 1, Payload: []byte("ring again")}) {
+		t.Fatal("a ring cell replaced a refined one")
+	}
+	if s.Put(&modelv1.Chunk{Kind: terrain, Level: refined, BlockId: []int32{1, 0, 0}, Version: 0, Payload: []byte("old")}) {
+		t.Fatal("an older version replaced a newer one")
+	}
+	sameTags(t, s.Chunks(), "fine")
 }
 
 func TestResumePointAndCounters(t *testing.T) {

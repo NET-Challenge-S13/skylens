@@ -14,8 +14,10 @@
 //     empty payload means is the model's business; the newest is kept as is.
 //   - detections: appended in arrival order (a viewer replays them in the same
 //     order it would have seen them live), capped per segment.
-//   - terrain / buildings: produced by the core's terrain feed; one per
-//     (kind, segment, level, block id), the newest version wins.
+//   - terrain / buildings: the control tower's base map, produced by the
+//     core's terrain feed; one per (kind, block id). A refined cell replaces
+//     a preview (ring) cell and is never replaced by one; within a level the
+//     newest version wins. Status boards never get these (ModelChunks).
 //
 // Rejected chunks must not reach viewers either: Put reports whether the chunk
 // was accepted so the caller only broadcasts accepted ones.
@@ -229,33 +231,52 @@ func (s *Store) putDetectionLocked(c *modelv1.Chunk) bool {
 	return true
 }
 
+// putTerrainLocked keeps one chunk per (kind, cell). A finer level replaces a
+// coarser one (a ring cell the area grew over) and is never replaced by it;
+// within a level the newest version wins.
 func (s *Store) putTerrainLocked(c *modelv1.Chunk) bool {
-	k := fmt.Sprintf("%d/%d/%d/%v", c.GetKind(), c.GetSegment(), c.GetLevel(), c.GetBlockId())
-	if old, ok := s.terrain.get(k); ok && c.GetVersion() < old.GetVersion() {
-		return false
+	k := fmt.Sprintf("%d/%v", c.GetKind(), c.GetBlockId())
+	if old, ok := s.terrain.get(k); ok {
+		if c.GetLevel() < old.GetLevel() ||
+			(c.GetLevel() == old.GetLevel() && c.GetVersion() < old.GetVersion()) {
+			return false
+		}
 	}
 	s.terrain.put(k, c)
 	return true
 }
 
+// IsBaseMap reports whether a chunk kind is part of the control tower's base
+// map (terrain and buildings), which status boards never receive.
+func IsBaseMap(k modelv1.ChunkKind) bool {
+	return k == modelv1.ChunkKind_CHUNK_KIND_TERRAIN || k == modelv1.ChunkKind_CHUNK_KIND_BUILDINGS
+}
+
 // Chunks returns every kept chunk in replay order: terrain and buildings
 // first (the ground under everything), then points by segment, mesh blocks,
-// and detections last in arrival order.
-func (s *Store) Chunks() []*modelv1.Chunk {
+// and detections last in arrival order. This is the control tower's replay.
+func (s *Store) Chunks() []*modelv1.Chunk { return s.chunks(true) }
+
+// ModelChunks is Chunks without the base map: the status boards' replay.
+func (s *Store) ModelChunks() []*modelv1.Chunk { return s.chunks(false) }
+
+func (s *Store) chunks(baseMap bool) []*modelv1.Chunk {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	var out []*modelv1.Chunk
-	s.terrain.each(func(c *modelv1.Chunk) {
-		if c.GetKind() == modelv1.ChunkKind_CHUNK_KIND_TERRAIN {
-			out = append(out, c)
-		}
-	})
-	s.terrain.each(func(c *modelv1.Chunk) {
-		if c.GetKind() == modelv1.ChunkKind_CHUNK_KIND_BUILDINGS {
-			out = append(out, c)
-		}
-	})
+	if baseMap {
+		s.terrain.each(func(c *modelv1.Chunk) {
+			if c.GetKind() == modelv1.ChunkKind_CHUNK_KIND_TERRAIN {
+				out = append(out, c)
+			}
+		})
+		s.terrain.each(func(c *modelv1.Chunk) {
+			if c.GetKind() == modelv1.ChunkKind_CHUNK_KIND_BUILDINGS {
+				out = append(out, c)
+			}
+		})
+	}
 	segs := make([]uint32, 0, len(s.points))
 	for k := range s.points {
 		segs = append(segs, k)

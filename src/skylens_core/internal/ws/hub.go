@@ -1,5 +1,5 @@
-// Package ws carries viewerv1.Envelope frames over WebSocket (ws /uplink and
-// ws /viewer). Every frame is one binary-encoded Envelope.
+// Package ws carries viewerv1.Envelope frames over WebSocket (ws /uplink,
+// ws /control and ws /viewer). Every frame is one binary-encoded Envelope.
 //
 // A Hub fans frames out to its peers. Each envelope is encoded once; the
 // per-peer sequence number (Envelope.seq, "monotonic per sender so a receiver
