@@ -281,12 +281,12 @@ pointblitz는 서버에서 헤드리스로 그려 영상으로 보내는 모드�
 | 0 | 루트 JS/TS 설정 제거, Rust 워크스페이스·Go 모듈·빈 crate 세팅 | 완료 |
 | 0' | 코어↔모델 gRPC 계약(`model.proto`) 작성 | 완료 (protox 컴파일 확인) |
 | 1 | 폴더 재배치: `skylens_infra` 해체, `skylens_mission_bridge` → `skylens_drone`, TS 코드 → `legacy/`, Tauri 드론 앱 삭제 | 완료 |
-| 2 | `shared`: 프로토콜·좌표계 Rust 포팅 + `geo.py`와 수치 일치 테스트 | 대기 |
-| 3 | `skylens_drone`: Python 테스트를 Rust로 먼저 옮기고 Mission Bridge 포팅 | 대기 |
-| 4 | `skylens_core`: Go 서버(업링크·뷰어 소켓·보관·스케줄·정적 서빙) + gRPC 클라이언트 + 지형·건물 pointblitz 청크 증분 제공 | 대기 |
-| 5 | `skylens_model`: REST·gRPC 골격 → cumulus3d 라이브 복원 → deltamesh → UNet 훅·보간 | 대기 |
-| 6 | `skylens_client`: HTML/CSS 추출 → Blitz + pointblitz (네이티브·wasm 같은 코드) → pointblitz 메시 렌더 경로 | 대기 |
-| 7 | 게이트웨이 nginx를 새 경로에 맞춤(현황판 정적 서빙·업링크·뷰어), 터널 포트 추가 | 대기 |
+| 2 | `shared`: proto 계약(model · viewer · payload) + 좌표계 Rust 포팅 | 완료 |
+| 3 | `skylens_drone`: Mission Bridge Rust 포팅 + 코어 업링크 | 코드 완료 (테스트 57개 통과, 실기체 미검증) |
+| 4 | `skylens_core`: Go 서버 + gRPC 클라이언트 + 지형·건물 pointblitz 청크 | 코드 완료 (go test 통과) |
+| 5 | `skylens_model`: REST·gRPC + cumulus3d 라이브 복원 + deltamesh + UNet(tch) 훅·보간 | 코드 완료 (테스트 179개 통과, 실데이터 미검증) |
+| 6 | `skylens_client`: Blitz + pointblitz 화면 + 메시 렌더 경로 | 코드 완료 (테스트 63개 통과, 화면 확인 중). 점·메시 가림 처리는 pointblitz 패치 대기 |
+| 7 | 게이트웨이 nginx 경로·터널 8082 | 완료 |
 | 8 | `demo`: 엔드 투 엔드 런처 | 대기 |
 | 9 | `legacy/` 전부 삭제 | 대기 |
 

@@ -80,7 +80,8 @@ pub fn recolor_in_place(layer: Layer, mode: DisplayMode, bytes: &mut [u8]) {
     let Some(stride) = stride(bytes) else {
         return;
     };
-    let body = &mut bytes[HEADER_LEN.min(bytes.len())..];
+    let start = HEADER_LEN.min(bytes.len());
+    let body = &mut bytes[start..];
     for point in body.chunks_exact_mut(stride) {
         if stride == 12 {
             let [r, g, b] = f([point[8], point[9], point[10]]);
