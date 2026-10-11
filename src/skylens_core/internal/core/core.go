@@ -541,7 +541,7 @@ func (c *Core) ServerStatus() *viewerv1.ServerStatus {
 	s := &viewerv1.ServerStatus{
 		Connected:  c.modelUp,
 		Receiving:  receiving,
-		Chunks:     cnt.Accepted,
+		Chunks:     cnt.Model, // the base map is not reconstruction; boards never see it
 		Detections: cnt.Detections,
 		LastSeq:    cnt.LastModelSeq,
 	}

@@ -76,6 +76,7 @@ func (o *ordered) each(f func(*modelv1.Chunk)) {
 // Counters is a snapshot of the chunk counters.
 type Counters struct {
 	Accepted     uint64 // chunks accepted from any producer
+	Model        uint64 // accepted reconstruction chunks (points, mesh blocks, detections): what a board counts
 	Rejected     uint64 // stale chunks dropped by the replacement rules
 	Detections   uint64 // detection chunks accepted
 	LastModelSeq uint64 // highest model chunk sequence stored (resume point)
@@ -167,6 +168,9 @@ func (s *Store) Put(c *modelv1.Chunk) bool {
 		return false
 	}
 	s.counters.Accepted++
+	if IsModelKind(c.GetKind()) {
+		s.counters.Model++
+	}
 	s.counters.LastChunkAt = time.Now()
 	if c.GetKind() == modelv1.ChunkKind_CHUNK_KIND_POINTS || c.GetKind() == modelv1.ChunkKind_CHUNK_KIND_MESH_BLOCK {
 		if cur, seen := s.segLevel[c.GetSegment()]; !seen || c.GetLevel() > cur {
