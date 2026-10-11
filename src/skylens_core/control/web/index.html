@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SkyLens · 관제탑</title>
+    <link rel="icon" type="image/png" href="favicon.png" />
+    <style>
+      html,
+      body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #0a1128;
+      }
+      /* Blitz draws the whole tower (panels and 3D view) into this one canvas.
+         Its size comes from here, not from winit (see blitz examples/wasm_hello). */
+      #skylens {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+      }
+      #skylens-error {
+        position: fixed;
+        top: 16px;
+        left: 16px;
+        color: #ff5252;
+        font: 13px monospace;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="skylens"></canvas>
+    <script type="module">
+      import init from './pkg/skylens_control.js';
+      // The wasm start function reads ?core=, ?display=, ?missionBridge= and opens ws /control.
+      init().catch((e) => {
+        const p = document.createElement('div');
+        p.id = 'skylens-error';
+        p.textContent = `관제탑을 시작하지 못했습니다: ${e}`;
+        document.body.appendChild(p);
+      });
+    </script>
+  </body>
+</html>
