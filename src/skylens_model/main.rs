@@ -1,5 +1,5 @@
-//! Compute server. Serves the same endpoints as `app.py` on port 8100.
+//! Compute server. REST on 8100 (same endpoints as app.py), gRPC on 8101.
 
-fn main() {
-    println!("skylens-model: not implemented yet");
+fn main() -> anyhow::Result<()> {
+    skylens_model::app::main()
 }

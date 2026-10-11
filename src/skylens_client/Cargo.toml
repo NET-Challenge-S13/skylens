@@ -7,5 +7,23 @@ rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
+
 [lib]
 path = "lib.rs"
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]
+skylens-shared.workspace = true
+prost.workspace = true
+anyhow.workspace = true
+pointblitz.workspace = true
+wgpu.workspace = true
+blitz-dom.workspace = true
+blitz-html.workspace = true
+blitz-paint.workspace = true
+blitz-traits.workspace = true
+anyrender.workspace = true
+anyrender_vello.workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+blitz-shell.workspace = true

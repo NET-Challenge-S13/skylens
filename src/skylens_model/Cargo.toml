@@ -13,3 +13,20 @@ path = "lib.rs"
 [[bin]]
 name = "skylens-model"
 path = "main.rs"
+
+[dependencies]
+skylens-shared = { workspace = true, features = ["grpc"] }
+anyhow.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+tokio.workspace = true
+axum.workspace = true
+tonic = { workspace = true, features = ["transport", "router"] }
+prost.workspace = true
+cumulus3d-cli.workspace = true
+deltamesh.workspace = true
+pointblitz-io.workspace = true
+tch.workspace = true

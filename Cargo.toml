@@ -48,9 +48,16 @@ tch = "0.26"
 
 # rendering and UI (skylens_client)
 pointblitz = "0.2"
-blitz-dom = "=0.3.0-beta.2"
-blitz-html = "=0.3.0-beta.2"
-blitz-shell = "=0.3.0-beta.2"
+pointblitz-io = "0.2"
+# Blitz from git: the 0.3.0-beta.2 release renders with wgpu 29, pointblitz 0.2 needs wgpu 30.
+blitz-dom = { git = "https://github.com/DioxusLabs/blitz", rev = "45496d9288b063719ebeae4e0761273f7881b3d7" }
+blitz-html = { git = "https://github.com/DioxusLabs/blitz", rev = "45496d9288b063719ebeae4e0761273f7881b3d7" }
+blitz-paint = { git = "https://github.com/DioxusLabs/blitz", rev = "45496d9288b063719ebeae4e0761273f7881b3d7" }
+blitz-shell = { git = "https://github.com/DioxusLabs/blitz", rev = "45496d9288b063719ebeae4e0761273f7881b3d7" }
+blitz-traits = { git = "https://github.com/DioxusLabs/blitz", rev = "45496d9288b063719ebeae4e0761273f7881b3d7" }
+anyrender = "0.14"
+anyrender_vello = "0.15"
+wgpu = "30"
 
 [profile.release]
 codegen-units = 1
