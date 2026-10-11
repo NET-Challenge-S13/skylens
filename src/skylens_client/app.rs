@@ -358,6 +358,12 @@ impl ScreenApp for StatusApp {
             dom.mount_widget(canvas, MinimapWidget::boxed(self.map.clone()));
         }
         self.badge = NetBadge::mount(dom, "net-status");
+        if dom.find("minimap").is_some() {
+            // The legacy CSS puts the link badge and the minimap at the same top-right corner
+            // (both `right: 16px`), so the 200 px minimap covered the badge. Seat the badge to
+            // the minimap's left instead: 16 px margin + 200 px minimap + 8 px gap.
+            dom.set_style("net-status", "right", "224px");
+        }
         self.card = Card::bind(dom);
         self.loading = LoadingScreen::mount(dom, LOADING_TITLE);
         if let Some(l) = &mut self.loading {
