@@ -155,6 +155,27 @@ impl Headless {
         scene: &Scene,
     ) -> Vec<u8> {
         self.render(device, queue, camera, scene);
+        self.read_back(device, queue)
+    }
+
+    /// SkyLens: records a caller-built frame into the capture targets (colour `CAPTURE_FORMAT`,
+    /// depth `DEPTH_FORMAT`), e.g. `layers::begin_pass` plus meshes, points and lines, waits for
+    /// the GPU and returns the pixels like `capture`.
+    pub fn capture_with(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        record: impl FnOnce(&mut wgpu::CommandEncoder, &wgpu::TextureView, &wgpu::TextureView),
+    ) -> Vec<u8> {
+        let mut encoder = device.create_command_encoder(&Default::default());
+        let cv = self.color.create_view(&Default::default());
+        let dv = self.depth.create_view(&Default::default());
+        record(&mut encoder, &cv, &dv);
+        queue.submit([encoder.finish()]);
+        self.read_back(device, queue)
+    }
+
+    fn read_back(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) -> Vec<u8> {
         let mut encoder = device.create_command_encoder(&Default::default());
         encoder.copy_texture_to_buffer(
             self.color.as_image_copy(),
