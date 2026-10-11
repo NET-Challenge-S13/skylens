@@ -47,6 +47,10 @@ path = "src/lib.rs"
 name = "render"
 path = "tests/render.rs"
 
+[[test]]
+name = "layers"
+path = "tests/layers.rs"
+
 [dependencies.bytemuck]
 version = "1.25"
 features = ["derive"]
