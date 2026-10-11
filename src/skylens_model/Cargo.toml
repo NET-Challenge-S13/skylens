@@ -1,0 +1,15 @@
+[package]
+name = "skylens-model"
+description = "Compute server: live reconstruction, meshing and UNet inference"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+path = "lib.rs"
+
+[[bin]]
+name = "skylens-model"
+path = "main.rs"

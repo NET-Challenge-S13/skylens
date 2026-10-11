@@ -59,26 +59,20 @@ SkyLens는 여러 대의 드론이 재난 현장을 분할 탐색하며 보낸 �
 
 ## 빠른 시작
 
+> **스택 전환 중.** TypeScript 프로토타입을 Rust(드론·모델 서버·클라이언트·데모)와 Go(코어)로 다시 짓고 있습니다. 게이트웨이·프록시는 nginx 설정만 남습니다. 컴포넌트별 진행 상태는 [COMPONENTS.md §10](docs/COMPONENTS.md)에 있고, 옮겨지기 전 코드는 각 컴포넌트의 `legacy/`에 참고용으로만 남아 있습니다. 아래 쿼리 옵션·조작법은 TS 프로토타입 기준입니다.
+
 ```bash
-npm install
-npm run demo         # 파이프라인 전체를 데모 모드로 기동
+cargo build --workspace                 # Rust: shared · drone · model · client · demo · test
+(cd src/skylens_core && go build ./...) # Go 코어
+uv sync && uv run pytest                # Python: UNet 학습 코드
 ```
-
-| 화면 | 접속 주소 |
-|---|---|
-| 관제탑 | `http://localhost:8080/res/static/control.html` |
-| 현황판 | `http://localhost:8090/res/static/status.html` |
-| 드론 패널 | `http://localhost:5173/src/skylens_drone/index.html` |
-
-관제탑에서 경로를 지정하면 **태스크 지정 완료 → 드론 연결 대기(약 10초) → 주행 시작**으로 이어지고, 드론이 구간을 지날 때마다 현황판이 딜레이 패턴으로 갱신됩니다. 자세한 시나리오는 [demo/README.md](src/demo/README.md).
 
 | 명령어 | 설명 |
 |---|---|
-| `npm run demo` | 데모 런처 (전 컴포넌트 조립) |
-| `npm run dev` | Vite 개발 서버만 |
-| `npm run core` / `client` / `gateway` / `proxy` / `drone` / `model` | 컴포넌트 개별 기동 |
-| `npm run build` | 타입체크 + 멀티페이지 빌드 |
-| `npm test` | Playwright E2E |
+| `cargo test --workspace` | Rust 테스트 |
+| `cargo clippy --workspace --all-targets` | Rust 린트 |
+| `cargo run -p skylens-demo` | 데모 런처 (이행 중) |
+| `go test ./...` (`src/skylens_core`) | Go 테스트 |
 
 ### 주요 쿼리 옵션
 `?demo` 자동 데모 · `?room=<이름>` P2P 방 · `?splat=off|demo|cdn|light|<url>` 스플랫 자산 · `?delay=off` 딜레이 패턴 끄고 단일 장면으로 · `?reveal=on/off` 스플랫 reveal 마스크 · `?spin=off` 카메라 자동회전 끔 · `?up=<preset|euler>` 스플랫 방향 · `?level=on` PCA 자동 레벨링.
@@ -151,28 +145,30 @@ EOF
 컴포넌트 경계와 책임은 [COMPONENTS.md](docs/COMPONENTS.md)가 단일 출처입니다.
 
 ```
-res/static/           # 정적 html 셸: index · control · status
+Cargo.toml                         # Rust 워크스페이스 (1.99 이상)
+go.work                            # Go 워크스페이스
+pyproject.toml                     # Python (UNet 학습 · 데이터셋)
+res/static/                        # 데모 자산 (영상 · 이미지 · 구간 자산)
 src/
-├─ shared/            # 컴포넌트 공통 계약: protocol · geo · types (DOM·Three 없음)
-│  ├─ viewer/         # 두 화면이 함께 쓰는 브라우저 층 (씬 소스 · 스토어 · 설정)
-│  └─ net/            # WebRTC 트랜스포트
-├─ skylens_drone/     # Tauri 드론 클라이언트: 비행 · H.265 슬라이스 전송
-├─ skylens_gateway/   # KOREN 진입점 (relay | webrtc 홀펀칭)
-├─ skylens_proxy/     # KOREN 내부 다중 경로 + 페일오버
-├─ skylens_core/      # 관제탑 UI + server/(오케스트레이터 · 인메모리 스토어 · 배포)
-├─ skylens_model/     # FastAPI 연산 API + 모델 · 3DGS 복원 파이프라인
-├─ skylens_client/    # 현황판 UI + server/(웹서버 · WebRTC 중계)
-└─ demo/             # 데모 런처
-src/test/             # 모든 테스트와 검증 하네스가 여기 모입니다
+├─ shared/            # Rust 공통 계약: 프로토콜 · 좌표계
+├─ skylens_drone/     # Rust Mission Bridge: GPS 경로 → DJI Fly KMZ · 편대 · 클라우드 업로드
+├─ skylens_gateway/   # 브리지 nginx · MediaMTX SRT 수신 · 설치 스크립트
+├─ skylens_proxy/     # 대전 nginx: KOREN 내부망 다중 경로
+├─ skylens_core/      # Go 코어: 관제탑 웹 · 보관 · 오케스트레이션 · 배포
+│  └─ deploy/         # 대전 MediaMTX · KOREN 배치 문서
+├─ skylens_model/     # Rust 연산 서버(cumulus3d · deltamesh · UNet 추론) + Python 학습 코드
+├─ skylens_client/    # 관제탑·현황판 공용 UI: HTML/CSS를 Blitz로 그림 + pointblitz (웹 · 네이티브)
+├─ test/              # 컴포넌트 경계 테스트 + pytest
+└─ demo/              # 엔드 투 엔드 데모 런처
 ```
 
 | 포트 | 컴포넌트 |
 |---:|---|
-| 8080 | 코어 (`ws /uplink`, `ws /viewer`, 관제탑 서빙) |
-| 8081 · 8082 | 게이트웨이 · 프록시 |
-| 8090 | 현황판 웹서버 + WebRTC 중계 |
-| 8100 | 모델 API |
-| 5173 | Vite (두 화면의 개발 모드 원본) |
+| 80 | 게이트웨이 nginx (현황판 웹 · `/live/` WHEP) |
+| 8080 | 코어 (`ws /uplink`, `ws /viewer`, 관제탑 웹) |
+| 8082 | 프록시 nginx |
+| 8091 | 드론 Mission Bridge |
+| 8100 · 8101 | 모델 서버 (REST · gRPC) |
 
 ---
 
@@ -197,7 +193,7 @@ src/test/             # 모든 테스트와 검증 하네스가 여기 모입니
 ---
 
 ## 기술 스택
-**Three.js** · **@mkkellogg/gaussian-splats-3d** · **TypeScript** · **Vite** · **PeerJS/WebRTC** · **Playwright** · **Python**(모델) · **AWS Terrain Tiles** · **VWorld**(위성/건물)
+**Rust** · **Go** · **nginx** · **MediaMTX** · [cumulus3d](https://github.com/AH100-1/cumulus3d)(라이브 점군) · [deltamesh](https://crates.io/crates/deltamesh)(증분 메시) · [pointblitz](https://github.com/i3months/pointblitz)(렌더링) · [Blitz](https://github.com/DioxusLabs/blitz)(네이티브 UI) · **Python**(UNet 학습) · **AWS Terrain Tiles** · **VWorld**(위성/건물)
 
 ---
 

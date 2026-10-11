@@ -1,0 +1,57 @@
+[workspace]
+resolver = "3"
+members = [
+    "src/shared",
+    "src/skylens_drone",
+    "src/skylens_model",
+    "src/skylens_client",
+    "src/demo",
+    "src/test",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+license = "MIT"
+publish = false
+
+# Members opt into these with `foo.workspace = true`. Entries nobody uses are not resolved.
+[workspace.dependencies]
+skylens-shared = { path = "src/shared" }
+
+# common
+anyhow = "1"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# servers (skylens_model, skylens_drone, demo)
+tokio = { version = "1", features = ["full"] }
+axum = { version = "0.8", features = ["ws"] }
+
+# gRPC between skylens_core (Go) and skylens_model (Rust); contract in src/shared/proto
+tonic = { version = "0.14", default-features = false, features = ["codegen"] }
+prost = "0.14"
+tonic-prost = "0.14"
+tonic-prost-build = "0.14"
+protox = "0.10" # pure-Rust protobuf compiler, so builds do not need protoc
+
+# reconstruction: live CompositionHost input is only on the git head, not in the 0.3.1 release
+cumulus3d-cli = { git = "https://github.com/AH100-1/cumulus3d", rev = "b9f4a9bda714fa31fc0fd395f821114b64fd2c1f" }
+deltamesh = "0.1"
+
+# UNet inference links libtorch. tch 0.26 expects libtorch 2.13 (LIBTORCH_USE_PYTORCH=1 reuses the venv torch).
+tch = "0.26"
+
+# rendering and UI (skylens_client)
+pointblitz = "0.2"
+blitz-dom = "=0.3.0-beta.2"
+blitz-html = "=0.3.0-beta.2"
+blitz-shell = "=0.3.0-beta.2"
+
+[profile.release]
+codegen-units = 1
+lto = "thin"

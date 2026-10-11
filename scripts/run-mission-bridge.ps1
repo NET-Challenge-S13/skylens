@@ -41,4 +41,4 @@ if (-not (Test-Path $env:SKYLENS_DJI_TOKEN_FILE)) {
   Write-Warning "no token at $($env:SKYLENS_DJI_TOKEN_FILE). Cloud delivery stays disabled until one is written."
 }
 
-python src/skylens_mission_bridge/server.py
+python src/skylens_drone/legacy/mission_bridge/server.py

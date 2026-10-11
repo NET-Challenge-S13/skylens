@@ -1,0 +1,11 @@
+[package]
+name = "skylens-client"
+description = "Status board and control tower UI: shared HTML/CSS on pointblitz, web and native"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+path = "lib.rs"

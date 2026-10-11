@@ -15,101 +15,99 @@ related: "[[INTENT.md]], [[COMPONENTS.md]], [[ARCHITECTURE.md]], [[NETWORK_ARCHI
 
 ## 1. 파이프라인
 
-> 드론이 보낸 영상이 게이트웨이·프록시를 거쳐 코어에 모이고, 코어가 모델 API에 잡을 발행해 받은 결과를 두 화면으로 내보낸다.
+> 기체 영상이 브리지를 거쳐 대전 코어에 모이고, 코어가 판교 모델 서버에 프레임을 넘겨 받은 증분 청크를 두 화면으로 내보낸다.
 
 ```
-드론 ─▶ 게이트웨이 ─▶ 프록시 ─▶ 코어 ─▶ 모델 API
-                                 │       └─▶ 복원 결과 · 탐지 마커
-                                 ├─▶ 관제탑 (코어가 직접 서빙, ws /viewer 직결)
-                                 └─▶ 클라이언트 릴레이 ─▶ 현황판
+관제탑 ─제어─▶ 코어 ─▶ 드론(Mission Bridge) ─▶ DJI 클라우드 ─▶ 기체
+기체 ─SRT─▶ 게이트웨이(브리지) ◀─당김─ 코어(대전 MediaMTX) ─WHEP─▶ 현황판 라이브 영상
+                                     └─gRPC 프레임─▶ 모델(판교) ─gRPC 증분 청크─▶ 코어
+코어 ─▶ 관제탑 (코어가 직접 서빙, ws /viewer 직결)
+코어 ─▶ 프록시 ─▶ 게이트웨이 ─▶ 현황판
 ```
 
-제어는 반대 방향으로만 흐른다: 관제탑 → 코어(`assign-route`, `manual-control`). 배포는 코어 → 릴레이 → 현황판 단방향이고, 현황판에서 코어로 가는 경로는 의도적으로 없다.
+제어는 관제탑 → 코어 한 방향이다. 현황판에서 코어로 가는 제어 경로는 의도적으로 없다.
 
 ## 2. 컴포넌트 경계
 
-> 저장소는 망 위치를 따라 8개 컴포넌트로 갈라지고, 각 컴포넌트는 `src/` 아래 한 디렉터리를 차지한다.
+> 저장소는 망 위치를 따라 컴포넌트로 갈라지고, 각 컴포넌트는 `src/` 아래 한 디렉터리를 차지한다. 연산과 화면은 Rust, 코어는 Go, 전달 서버는 nginx 설정이다.
 
 | 컴포넌트 | 망 위치 | 책임 | 스택 |
 |---|---|---|---|
-| `skylens_drone` | 현장 | 촬영 영상을 H.265 세그먼트로 잘라 전송 + 텔레메트리 | Tauri (Rust 셸 + TS UI) |
-| `skylens_gateway` | KOREN 외부망 | 내부망 진입점. `relay` / `webrtc` 2모드 | Node + TS |
-| `skylens_proxy` | KOREN 내부망 | 이중화·다중화된 접속 경로. 코어로 전달 | Node + TS |
-| `skylens_core` | KOREN 내부망 | 관제탑 서빙 + 전체 데이터 보관 + 잡 오케스트레이션 + 배포 | Node + TS / Vite |
-| `skylens_model` | KOREN 내부망 | 연산 API. 3DGS 복원 + 탐지 추론 | Python · FastAPI |
-| `skylens_client` | KOREN 외부망 | 현황판 웹서버 + WebRTC 시그널링 중계 | Node + TS / Vite |
-| `shared` | 해당 없음 | 컴포넌트 공통 계약. 배포 단위가 아닌 의존 라이브러리 | TS 라이브러리 |
-| `demo` | 해당 없음 | 컴포넌트를 조립해 모킹 모드로 기동하는 런처 | Node + TS |
+| `skylens_drone` | 현장 | GPS 경로 → DJI Fly KMZ 임무, 편대 3기 전개, DJI 클라우드 업로드 | Rust |
+| `skylens_gateway` | KOREN 외부망 (브리지) | 외부 진입. 현황판 웹·WHEP 시그널링·드론 SRT 수신 | nginx + MediaMTX |
+| `skylens_proxy` | KOREN 내부망 (대전) | 코어 경로 이중화 | nginx |
+| `skylens_core` | KOREN 내부망 (대전) | 관제탑 웹 서빙 + 전체 데이터 보관 + 잡 오케스트레이션 + 배포 + 라이브 영상 원점 | Go + MediaMTX |
+| `skylens_model` | KOREN 내부망 (판교) | 라이브 점군(cumulus3d) + UNet 프레임 훅 + 메시 보정(deltamesh) | Rust 서버 + Python 학습 |
+| `skylens_client` | 화면 | 관제탑·현황판 공용 UI. HTML/CSS 한 벌, 렌더링은 pointblitz, 네이티브는 Blitz | Rust + HTML/CSS |
+| `shared` | 해당 없음 | Rust 공통 계약(프로토콜·좌표계) | Rust 라이브러리 |
+| `test` | 해당 없음 | 컴포넌트 경계 테스트 (TDD) | Rust + pytest |
+| `demo` | 해당 없음 | 전 컴포넌트를 띄우는 엔드 투 엔드 런처 | Rust |
 
-경계와 각 책임의 자세한 내용은 [COMPONENTS.md](COMPONENTS.md)가 갖는다.
-
-### 2.1 shared의 2층 구조
-
-> 순수층은 DOM·Three 의존이 없어 Node·브라우저·Tauri 어디서나 import 되고, 브라우저 전용 코드는 그 아래 하위 디렉터리로 내린다.
-
-- 순수층: `geo.ts` · `protocol.ts` · `types.ts`
-- `viewer/`: 두 웹 UI가 함께 쓰는 브라우저 층(씬 소스·스토어·설정·공용 위젯)
-- `net/`: WebRTC 트랜스포트
+경계와 각 책임의 자세한 내용, 그리고 컴포넌트별 이행 상태는 [COMPONENTS.md](COMPONENTS.md)가 갖는다. 옮겨지기 전 코드는 각 컴포넌트의 `legacy/`에 있고 빌드되지 않는다.
 
 ## 3. 통신 프로토콜
 
-> 모든 메시지는 `Envelope`로 감싼 태그드 유니온이고, 정의는 `src/shared/protocol.ts` 한 곳에만 있다.
+> 코어↔모델은 gRPC, 코어↔드론·화면은 protobuf를 싣는 WebSocket이다. 계약은 `src/shared/proto` 하나이고, 코어는 청크 내용을 풀지 않고 메타데이터만 읽는다.
 
 | 방향 | 타입 | 메시지 |
 |---|---|---|
-| 업링크 (드론→코어) | `UplinkMessage` | `drone-hello` · `telemetry` · `video-segment` |
+| 업링크 (드론→코어) | `UplinkMessage` | `drone-hello` · `telemetry` |
 | 제어 (관제탑→코어) | `ControlMessage` | `assign-route` · `manual-control` |
-| 뷰어 (코어→화면) | `ViewerMessage` | `mission-status` · `splat-chunk` · `point-chunk` · `camera-feed` · `detection` · `link-status` · `server-status` |
-| 잡 (코어↔모델) | 해당 없음 | `ReconJobRequest` · `DetectJobRequest` → `JobStatus` → `recon-result` · `detect-result` |
+| 뷰어 (코어→화면) | `ViewerMessage` | `assign-route` · `mission-status` · `point-chunk` · `mesh-block` · `detection` · `telemetry` · `camera-feed` · `link-status` · `server-status` |
+| 잡 (코어↔모델, gRPC) | `ModelService` | `SubmitRecon` · `SubmitDetect` · `GetJob` · `Health` (REST와 같은 잡 API) |
+| 라이브 (코어↔모델, gRPC) | `ModelService` | `PushFrames`(프레임 묶음 스트림) · `SubscribeChunks`(증분 청크 스트림) |
 
 - 미션 단계는 `idle → assigned → awaiting-drone → active` 네 값이다.
-- 코어→클라이언트 배포는 현재 **WebSocket**이다. 코어는 `Distributor` 인터페이스 뒤에서 밀고, 브라우저를 향한 WebRTC 중계와 시그널링은 `skylens_client`가 세운다. 클라이언트 간 P2P 재분배가 붙을 자리도 이 시그널링이다.
+- 코어↔모델 계약은 `src/shared/proto/skylens/model/v1/model.proto` 하나다. Rust는 tonic/prost, Go는 같은 파일에서 생성한 코드를 쓴다.
+- 청크(`Chunk`)는 라우팅 메타데이터(종류·구간·수준·블록 id·version·세대)와 불투명한 `payload`로 되어 있다. 코어는 메타데이터만 읽고 `payload`는 그대로 보관·전달한다. `payload` 인코딩은 `shared`가 정하고 화면이 푼다.
+- 모델 서버는 `app.py`와 같은 REST 네 엔드포인트도 그대로 연다. 코어는 gRPC만 쓴다.
+- `ws /uplink`·`ws /viewer`의 모든 프레임은 바이너리 `skylens.viewer.v1.Envelope` 하나다. 청크는 모델이 준 `Chunk`를 그대로 싣는다.
+- `payload` 인코딩: 메시 블록·탐지 결과는 `skylens/payload/v1/payload.proto`, 점·지형·건물은 pointblitz 청크 포맷 v2.
+- 영상 자체는 이 프로토콜을 타지 않는다. SRT(진입)와 WHEP(배포)로 따로 간다.
 
 ## 4. 좌표계
 
 > 실세계 GPS가 1급 좌표계이고, 씬 좌표로의 변환은 렌더 경계에서만 일어난다.
 
-- `GeoAnchor`(기준 GPS, `CONFIG.geo.anchor`)를 원점으로 하는 **로컬 ENU(동/북/상) 미터** 프레임. 1 unit = 1 m.
-- 드론 경로는 GPS로 지정 → ENU → 씬. 탐지 결과도 GPS로 수신 → 씬 좌표로 변환해 마커 배치.
-- 각 스플랫 청크는 명시적 align transform(pos/rot/scale, 선택적 GPS anchor)을 갖고 공통 ENU 프레임에 정렬된다.
-- 구현은 `src/skylens_core/geo.ts`와 `src/skylens_model/utils/geo.py` **두 벌**이다. 같은 수식의 두 구현이므로 한쪽만 고치지 않는다.
+- `GeoAnchor`(기준 GPS)를 원점으로 하는 **로컬 ENU(동/북/상) 미터** 프레임. 1 unit = 1 m.
+- 드론 경로는 GPS로 지정 → ENU → 씬. 탐지 결과도 GPS로 받아 씬 좌표로 바꿔 마커를 둔다.
+- 점군은 cumulus3d가 GPS로 정렬한 ENU 좌표로 나오고, 모든 구간이 같은 원점을 쓴다(고정 ENU 원점).
+- 구현은 `src/shared`(Rust)와 `src/skylens_model/utils/geo.py`(Python) **두 벌**이다. 같은 수식의 두 구현이므로 한쪽만 고치지 않는다.
 
-## 5. 딜레이 패턴 복원
+## 5. 점진적 복원
 
-> 구간마다 낮은 학습 스텝의 결과를 먼저 확정해 내보내고 뒤이어 정제한다. 스케줄 결정권은 코어에만 있다.
+> 구간마다 미리보기를 먼저 내보내고 정제본으로 교체한다. 스케줄 결정권은 코어에만 있다.
 
-| 수준 | 학습 스텝 | 지휘관이 확인 가능한 것 |
-|---|---:|---|
-| 1 | 250 | 형상 윤곽만 식별 |
-| 2 | 1,000 | 공간 구조 식별 가능 |
-| 3 | 3,500 | 표면 형성 |
-| 4 | 7,000 | 진입 동선 판단이 가능한 실용 품질 |
+| 수준 | 출처 | 화면에서 하는 일 |
+|---|---|---|
+| 미리보기 (preview) | cumulus3d `ZonePreview` | 점을 덧붙인다. 메시는 deltamesh `Level::Preview` |
+| 정제 (refined) | cumulus3d `ZoneRefined` | 같은 구간을 세대째 교체한다. 메시는 `Level::Refined`가 미리보기를 정확히 대체 |
 
-- **트리거는 시간이 아니라 드론의 이동량이다.** 드론이 한 구간을 통과하면 그 구간의 수준 1이 확정되고 이후 수준이 뒤따른다.
-- 새 수준이 도착하면 같은 구간의 낮은 수준을 **교체**한다(누적하지 않음). 이미 추월당한 수준은 건너뛴다.
-- 클라이언트는 도착한 것을 받을 뿐이다. 클라이언트가 타이머로 스스로 단계를 진행시키지 않는다.
-- 타이밍 값은 `CONFIG.delayPattern`(구간 주기·수준별 지연)에 있다.
+- **트리거는 시간이 아니라 들어온 프레임이다.** 구간(zone)에 프레임이 차면 그 구간의 미리보기가 나오고 정제본이 뒤따른다.
+- 메시는 바뀐 블록만 나가고, 블록마다 `version`이 있어 화면은 더 새 버전만 받는다. 삼각형이 0개인 블록은 지우라는 뜻이다.
+- 정제본은 성긴 점부터 보내 첫 반영을 빠르게 한다.
+- 화면은 도착한 것을 받을 뿐이다. 화면이 타이머로 스스로 단계를 진행시키지 않는다.
 
 ## 6. 관제탑 화면
 
-> VWorld 실지형 한 갈래로 통합했고, 좌표는 GPS를 직접 쓴다.
+> 코어가 웹으로 서빙하고 코어의 `ws /viewer`에 직결한다. 좌표는 GPS를 직접 쓴다.
 
+- 패널·위젯은 `skylens_client`의 HTML/CSS를 Blitz가 그리고, 3D 뷰는 pointblitz다.
 - 건물 표시는 별도 씬이 아니라 표시 옵션이다: **점 / 검정 텍스처(기본값) / 실사 항공뷰**.
-- 지형 메시는 AWS Terrain Tiles DEM(한국 약 30m급), 위성 드레이프는 VWorld WMTS, 3D 건물은 VWorld WFS `lt_c_bldginfo` 폴리곤을 지붕까지 프리즘으로 렌더한다.
-- 월드 스트리밍: 드론 반경 내 미로드 셀을 가까운 순으로 로드하고, 씬 주변에 3배 저해상 배경 지형 링을 둔다.
+- 지형은 AWS Terrain Tiles DEM(한국 약 30m급), 위성 드레이프는 VWorld WMTS, 3D 건물은 VWorld WFS `lt_c_bldginfo` 폴리곤이다. 코어가 이것을 pointblitz 청크로 바꿔 화면이 보는 영역부터 증분으로 내보내고, 화면은 복원 결과와 같은 pointblitz로 그린다.
 - 기준 씬은 대전(충남대~카이스트 일대, 약 3km, 약 6,191동).
-- 조작: 경로 계획 모달에서 GPS 웨이포인트를 추가해 배정. 방향키 수동 조향, Q/E 고도, 1/2/3·Tab 드론 전환, Space 일시정지.
-- VWorld 키는 저장소 **부모 폴더**의 `.env.vworld`에서 읽고 Vite dev 프록시가 서버측에서만 주입한다. 프론트엔드 번들에 노출되지 않는다. 키가 없으면 지형·건물 없이 기존 씬만 동작한다.
+- 조작: 경로 계획 모달에서 GPS 웨이포인트를 추가해 배정한다. 배정된 경로는 `skylens_drone`이 KMZ 임무로 바꾼다.
+- VWorld 키는 저장소 **부모 폴더**의 `.env.vworld`에서 코어가 읽어 서버측에서만 주입한다. 화면 번들에 노출되지 않는다. 키가 없으면 지형·건물 없이 동작한다.
 
 ## 7. 현황판 화면
 
 > 구간 청크가 도착해야 그 구간이 보인다. "보인다 = 복원되어 도착했다"가 하나의 진실이다.
 
-- 노출(reveal)은 드론 궤적이 아니라 **도착 기준**이다.
-- 탐지 마커도 해당 구간이 복원돼야 표시된다.
+- UI 프레임워크는 Blitz다. 웹(wasm, WebGPU 우선·WebGL2 폴백)과 데스크톱 네이티브가 같은 Rust 코드로 Blitz + pointblitz를 쓰고, 같은 HTML/CSS와 같은 청크를 받는다. Android/iOS는 후순위다.
+- 노출(reveal)은 드론 궤적이 아니라 **도착 기준**이다. 탐지 마커도 해당 구간이 복원돼야 표시된다.
+- 라이브 영상은 대전 MediaMTX에서 WHEP로 직접 받는다.
 - 좌측 상단 서버 패널에 구간별 현재 수준이 뜬다.
-- 데모 자산이 없으면 단일 장면 스트림으로 자동 폴백한다.
-- **점 레이어**(점 + 고도색)는 메인 화면 아래에 작게 뜨는 참고용 패널이며, 별도 씬과 카메라로 그려 메인 화면에 영향을 주지 않는다. `point-chunk`를 구간 단위로 받는다. 수준 1은 초벌(그 구간의 새 영역만), 수준 2는 정밀본이고, 높은 수준이 오면 같은 구간의 낮은 수준을 교체한다. 좌표는 청크의 GPS anchor 기준 ENU 미터이며 화면에서만 씬 축으로 바꾼다. 색은 화면에 올라온 점의 높이 1~99 백분위 범위로 칠하고, 빈 곳을 채우거나 보간하지 않는다. 구간 교체는 `statusview/segmentSlots.ts` 한 곳이 맡는다.
+- 파이프라인이 없으면 없다고 표시한다(`PipelineUnavailable`).
 
 ## 8. AI 모델
 
@@ -131,97 +129,102 @@ related: "[[INTENT.md]], [[COMPONENTS.md]], [[ARCHITECTURE.md]], [[NETWORK_ARCHI
 - 사람 헤드는 히트맵 stem 위에 서브픽셀 오프셋 헤드를 둔다. 검출 중심은 `(셀 + 예측 오프셋) × stride` 다. 근거: experiment/tiles-offset-head (#43).
 - 사람 검출은 실제 추론 방식으로 평가한다. LLVIP 전체 프레임과 VisDrone · SARD 원본 스케일 타일의 검출을 한 precision-recall 로 합산하고(`pooled_target`), 지표는 점수 0.05 이상 검출로, F1 은 임계값 0.3 으로 잰다. **판정하는 네 지표는 전부 점 기준이다**(정밀도 0.5 이상에서 재현율 · 최저 임계값 재현율 · F1@0.3 · 점 AP). 박스 mAP@50 과 mAP@50:95 는 계속 계산하고 보고하지만 통과 여부를 정하지 않는다(`REFERENCE_TARGETS`). 근거: experiment/point-ap-primary (#73). 점 매칭 반경은 `max(8px, 0.15 × 박스 높이)` 이고 고정 8px 결과도 함께 적는다. 오프셋이 없는 모델의 중심은 `(셀 + 0.5) × stride` 다. 구현은 `scripts/eval_deploy.py`. 근거: experiment/eval-decode-fix (#44), experiment/eval-size-relative-match (#52).
 - 학습은 5 에폭 이상으로 판정한다. road_blocked 는 cross-entropy 단독에서 3 에폭 이후에야 나타난다. 근거: experiment/balanced-5ep (#29).
+- **학습은 Python, 추론은 Rust다.** 학습 코드의 각 `.py` 옆에 같은 이름의 `.rs`를 둔다. Rust 추론은 PyTorch와 같은 libtorch를 `tch`로 링크한다.
 - 설계 결정과 그 근거의 단일 출처는 `src/skylens_model/README.md`다. 상위 문서와 어긋나면 모델 문서가 우선한다.
 
-## 9. 2D→3D 투영
+## 9. 2D→3D 투영과 프레임 간 보간
 
-> Depth Map 레이캐스팅(핀홀 역투영)으로 2D 탐지 결과를 세계좌표 마커로 바꾼다.
+> UNet은 복원 노드의 프레임 훅으로 붙고, 프레임마다의 결과를 등록된 포즈로 점군에 투영해 confidence 가중으로 합친다.
 
-드론 포즈(extrinsics)와 깊이만 있으면 되고, 별도의 3D 탐지 모델을 두지 않는다. 산출은 Core HPC(`skylens_model`)에서 하고 코어는 GPS 좌표로 받는다.
+- 훅은 cumulus3d `on_frame`이다. 위치 계산 전에 디코딩된 RGB를 받고 별도 큐에서 돌아 복원을 막지 않는다.
+- 투영은 복원이 등록한 카메라 포즈와 점군 깊이로 한다. 별도의 3D 탐지 모델을 두지 않는다.
+- 한 지점을 본 여러 프레임의 위험구역 확률·사람 점을 confidence로 가중해 보간한 뒤 최종 지도(ENU)에 정렬한다. 한 프레임의 오검출이 바로 찍히지 않는다.
+- 산출은 `skylens_model`이 하고 코어는 GPS 좌표로 받는다.
 
-## 10. 3DGS 복원 파이프라인
+## 10. 3D 복원 파이프라인
 
-> 프레임 추출 → COLMAP SfM → gsplat 학습 3단계이고, 특징점은 ALIKED를 쓴다.
+> cumulus3d `CompositionHost`의 라이브 입력으로 점군을 키우고, deltamesh가 구간 점군을 블록 메시로 보정해 바뀐 블록만 내보낸다.
 
-- COLMAP 4.1(ALIKED + LightGlue 내장). 실내 저텍스처 장면에서 기본 SIFT는 촬영본을 여러 모델로 쪼갠다.
-- 전수 매칭을 쓴다.
-- 내부 파라미터를 명시하고 자기보정을 함께 건다.
-- 점진적 출력으로 첫 화면을 약 30초에 낸다.
-- 전송용 경량 PLY를 따로 낸다.
-- 구간 분할은 장면의 주축(복도 촬영이면 드론 진행 방향)을 기준 파일의 분위수로 잘라 **모든 수준에 동일하게** 적용한다. 같은 구간 번호는 항상 같은 공간 조각을 가리킨다.
-- 설계 근거는 `src/skylens_model/models/skylens/README.md`, 측정값은 `RESULTS.md`, 설치는 `INSTALL.md`가 갖는다.
+- 잡 요청의 `steps`는 `app.py`와 스키마를 같게 두려고 남긴 필드이고, 값으로 미리보기/정제 수준을 고른다. 대응은 `skylens_model`이 정한다.
+- 노드는 `ReconNode::declare()`로 선언하고 `CompositionHost`가 id로 들고 있는다. 프레임 묶음(`LiveFrameSet`, 키는 `FrameKey(드론, 순번, 개정)`)을 `compose`하면 새 묶음만 한 번 들어가고, 재선언은 무시되며, 카메라가 빠진 묶음은 기다린다.
+- 늦게 오거나 고쳐진 프레임은 노드의 reconcile 정책(append-only / replay window / zone invalidation / strict)을 따른다.
+- 구간은 `zones(span, overlap)`으로 나눈다. 같은 구간 번호는 항상 같은 공간 조각을 가리킨다.
+- 메시는 deltamesh `SdfMesher`(GPU는 `GpuMesher`, 프로세스당 장치 하나)다. 기본 0.2 m 복셀, 32³ 블록. 경계 정점이 이웃 블록과 비트 단위로 같아 균열 없이 이어진다.
+- 렌더링은 pointblitz다. 점 청크는 16비트 위치(포맷 v2)이고 파싱은 메인 스레드 밖에서 한다. 메시 블록은 pointblitz에 더한 메시 렌더 경로가 그리고, 법선은 클라이언트에서 계산한다.
+- cumulus3d는 GitHub 리비전을 고정해 쓴다(라이브 입력이 crates.io 0.3.1 릴리스에 없다).
+- 이전 복원 방식(COLMAP·gsplat)의 측정 기록은 `src/skylens_model/models/skylens/RESULTS.md`에 근거로 남는다.
 
 ## 11. 데모 모드
 
-> 컴포넌트는 전부 실제 코드이고, 한 대의 머신에서 재현할 수 없는 두 가지만 바뀐다.
+> 컴포넌트는 전부 실제 코드이고, 한 대의 머신에서 재현할 수 없는 기체만 바뀐다.
 
 | | 실운영 | 데모 |
 |---|---|---|
-| 드론 촬영 | 기체 카메라 → H.265 실시간 인코딩 | `res/static/video/h265`의 사전 인코딩 영상 |
-| 3D 복원 | Core HPC에서 gsplat 학습 | `res/static/demo`의 사전 제작 구간×수준 자산 |
-| 점 구간 | 복원 노드가 구간마다 초벌·정밀본 전송(전송 방식 미정) | 코어가 `res/static/demo/points`의 촬영본을 미션 active 이후 일정 간격으로 재생 |
+| 촬영 | 기체 카메라 → SRT | `res/static/video`의 촬영 영상을 SRT로 송출 |
+| 비행 | DJI Fly 웨이포인트 | 촬영본에 기록된 GPS·포즈 재생 |
 
-나머지는 전부 실제 경로다. 화면은 도착한 것만 그리고, 파이프라인이 없으면 **없다고 표시**한다(`PipelineUnavailable`). 시뮬레이션으로 메우지 않는다.
+복원·탐지·메시·배포는 데모에서도 실제 경로다. 파이프라인이 없으면 **없다고 표시**한다(`PipelineUnavailable`). 시뮬레이션으로 메우지 않는다.
 
-시나리오: 정지 상태 → 관제탑 경로 지정("태스크 지정 완료") → 드론 연결 대기(10초) → "드론 연결됨", 주행 시작 → 지정 경로 왕복 → 이동량에 따라 현황판 갱신.
+시나리오: 정지 상태 → 관제탑 경로 지정("태스크 지정 완료") → 드론 연결 대기 → "드론 연결됨", 프레임 수신 시작 → 구간마다 미리보기 후 정제본 교체 → 위험구역·사람 표시.
 
 드론의 "도착"은 `drone-hello`로만 판정한다. 드론은 이동 중에도 텔레메트리를 보내므로, 텔레메트리를 접속으로 세면 연결 대기 단계가 사라진다.
 
 ## 12. 배포 (KOREN 실회선)
 
-> 브리지·대전·판교 세 호스트에 컴포넌트를 얹고, 스플랫 경로와 라이브 영상 경로를 분리한다.
+> 브리지·대전·판교 세 호스트에 컴포넌트를 얹고, 3D·마커 경로와 라이브 영상 경로를 분리한다.
 
-| 호스트 | 망 | 올라가는 컴포넌트 | 추가로 도는 것 |
-|---|---|---|---|
-| 브리지 `175.126.98.44` | KOREN 외부망 · 등록 IP | `skylens_gateway` :8081 · `skylens_client` :8090 | nginx :80 · MediaMTX SRT :10890 · 대전행 SSH 터널(autossh) |
-| 대전 `116.89.187.181` | KOREN 내부망 | `skylens_proxy` :8082 · `skylens_core` :8080 | MediaMTX WHEP :10889 / ICE :10189 |
-| 판교 `10.246.246.9` | KOREN 내부망 · V100 | `skylens_model` :8100 | 대전과 터널로만 통신 |
+| 호스트 | 망 | 올라가는 것 |
+|---|---|---|
+| 브리지 `175.126.98.44` | KOREN 외부망 · 등록 IP | `skylens_gateway`: nginx :80 · MediaMTX SRT :10890 · 대전행 SSH 터널(autossh) |
+| 대전 `116.89.187.181` | KOREN 내부망 | `skylens_proxy` nginx :8082 · `skylens_core` :8080 · MediaMTX WHEP :10889 / ICE :10189 |
+| 판교 `10.246.246.9` | KOREN 내부망 · V100 | `skylens_model` :8100 (대전과 터널로만 통신) |
 
-- 스플랫·마커는 §1의 경로를 그대로 탄다. **라이브 영상은 대전이 현황판에 WebRTC(WHEP)로 직접 쏜다.** 영상은 캐시가 안 되고 접속자 수만큼 대역이 필요해 브리지가 나르면 브리지 회선이 상한이 된다. 대전 출구는 4스트림 2,618 Mbps 실측.
-- 진입은 SRT, 배포는 WebRTC. MediaMTX가 SRT 수신과 WHEP 송출을 모두 내장이라 영상 서버 코드가 0줄이다.
-- 브리지가 대전으로 SSH 터널(`-L 127.0.0.1:20889:127.0.0.1:10889`)을 건다. 대전에는 브리지 키를 `restrict,permitopen="127.0.0.1:10889"`로 등록해 키가 새도 그 포트 외에는 못 쓰게 한다.
+- **라이브 영상은 대전이 현황판에 WebRTC(WHEP)로 직접 쏜다.** 영상은 캐시가 안 되고 접속자 수만큼 대역이 필요해 브리지가 나르면 브리지 회선이 상한이 된다. 대전 출구는 4스트림 2,618 Mbps 실측.
+- 진입은 SRT, 배포는 WebRTC. MediaMTX가 둘 다 내장이라 영상 서버 코드가 0줄이다.
+- 브리지가 대전으로 SSH 터널 둘(`-L 127.0.0.1:20889:127.0.0.1:10889` WHEP, `-L 127.0.0.1:20882:127.0.0.1:8082` 프록시)을 건다. 대전에는 브리지 키를 `restrict,permitopen="127.0.0.1:10889",permitopen="127.0.0.1:8082"`로 등록해 키가 새도 그 두 포트 외에는 못 쓰게 한다.
 - 서버 측 STUN·TURN을 두지 않는다. 대전·판교는 공인 IP 직결이라 자기 주소를 알고, 단말은 구글 공개 STUN을 쓴다.
-- 자세한 설정과 근거는 `src/skylens_infra/README.md`.
+- 자세한 설정과 근거는 `src/skylens_core/deploy/README.md`, 브리지 설치는 `src/skylens_gateway/README.md`, 다중 경로는 `src/skylens_proxy/README.md`.
 
 ## 13. 포트 맵
 
-> 컴포넌트 포트는 8080~8100 대역이고, 밖으로 노출되는 건 브리지의 80 · 8081 · 10890뿐이다.
+> 밖으로 노출되는 건 브리지의 80 · 10890뿐이다.
 
 | 컴포넌트 | 포트 | 엔드포인트 |
 |---|---:|---|
-| `skylens_core` | 8080 | `ws /uplink` · `ws /viewer` · `GET /health` · 관제탑 서빙 |
-| `skylens_gateway` | 8081 | 드론 접속 · `GET /health` |
-| `skylens_proxy` | 8082 | 게이트웨이/드론 접속 · `GET /health` |
-| `skylens_client` | 8090 | 현황판 서빙 · WebRTC 시그널링 · `GET /health` |
-| `skylens_model` | 8100 | `POST /recon/jobs` · `POST /detect/jobs` · `GET /jobs/{id}` · `GET /health` |
-| Vite 개발 서버 | 5173 | 두 웹 UI의 개발 모드 원본 |
+| `skylens_core` | 8080 | `ws /uplink` · `ws /viewer` · `GET /health` · 관제탑 웹 |
+| `skylens_proxy` | 8082 | 코어로 넘김 · `GET /health` · `GET /core/health` |
+| `skylens_gateway` | 80 | `/` 현황판 웹 · `/live/` WHEP · `/healthz` |
+| `skylens_drone` | 8091 | `/health` · `/missions` · `/formation` · `/cloud/*` |
+| `skylens_model` | 8100 | REST `POST /recon/jobs` · `POST /detect/jobs` · `GET /jobs/{id}` · `GET /health` (`app.py`와 같음) |
+| `skylens_model` | 8101 | gRPC `skylens.model.v1.ModelService` (코어가 쓰는 쪽) |
 
 ## 14. 저장과 내구성
 
-> 이번 단계에는 DB가 없다. 코어가 세그먼트·복원 결과·마커·텔레메트리를 인메모리로 들고 있고, 세션이 끝나면 사라진다.
+> 이번 단계에는 DB가 없다. 코어가 프레임 메타·청크·마커·텔레메트리를 인메모리로 들고 있고, 세션이 끝나면 사라진다.
 
-- 프록시는 코어 장애 시 대기 경로로 전환하고 복구되면 돌아온다.
-- 모델 API가 없으면 코어가 잡을 재제출한다.
-- 코어가 없으면 현황판은 마지막 상태를 유지한다.
+- 프록시는 코어 선호 경로가 죽으면 대기 경로로 넘기고, 일정 시간 뒤 선호 경로를 다시 시도한다. 열린 소켓은 옮기지 않으므로 드론·화면이 재접속한다.
+- 모델 서버가 없으면 코어가 잡을 재제출한다.
+- 코어가 없으면 화면은 마지막 상태를 유지한다.
 
 ## 15. 빌드와 테스트
 
-> TypeScript는 npm, Python은 uv로 관리한다.
+> Rust는 cargo 워크스페이스, Go는 go.work, Python은 uv로 관리한다.
 
 | 명령 | 하는 일 |
 |---|---|
-| `npm run demo` | 전 컴포넌트를 데모 모드로 조립 기동 |
-| `npm run dev` | Vite 개발 서버만 |
-| `npm run core` / `client` / `gateway` / `proxy` / `drone` / `model` | 컴포넌트 개별 기동 |
-| `npm run build` | `tsc` 타입체크 + 멀티페이지 빌드 |
-| `npm test` | Playwright E2E |
-| `uv sync` / `uv run pytest` | Python 의존성 설치 / 테스트 |
+| `cargo build --workspace` / `cargo test --workspace` | Rust 빌드 / 테스트 |
+| `cargo clippy --workspace --all-targets` | Rust 린트 |
+| `go build ./...` / `go test ./...` (`src/skylens_core`) | Go 코어 빌드 / 테스트 |
+| `uv sync` / `uv run pytest` | Python 의존성 설치 / 학습 코드 테스트 |
 | `uv run ruff check src/` | Python 린트 (line-length 100, target py311) |
 
-- Python 3.11 이상 3.14 미만. `.python-version`은 3.13.
-- torch·torchvision은 PyPI가 아니라 CUDA 12.8 인덱스에서 받는다(`[tool.uv.sources]`).
-- `pyproject.toml`은 자동 탐색 대신 `packages = ["src/skylens_model"]`로 파이썬 패키지를 명시한다.
-- 정적 html 셸(`index` · `control` · `status`)은 `res/static/`에 모여 있고, 접속 URL은 `/res/static/{control,status}.html`이다. `/`는 랜딩을 자동 서빙하지 않는다.
+- gRPC 코드 생성: Rust는 protox(순수 Rust)로 컴파일해 protoc가 필요 없고, Go는 `protoc-gen-go`·`protoc-gen-go-grpc`로 `src/skylens_core/gen/`에 생성한다.
+- Rust는 1.99 이상 stable이 필요하다(루트 `Cargo.toml`의 `rust-version`). 웹 빌드에는 `wasm32-unknown-unknown` 타깃. 공용 의존성 버전은 `[workspace.dependencies]`에 있다.
+- UNet 추론은 `tch` 0.26(libtorch 2.13). `LIBTORCH_USE_PYTORCH=1`로 venv의 PyTorch libtorch를 링크한다.
+- 테스트를 먼저 쓴다. 단위 테스트는 코드 옆(Rust `#[cfg(test)]`, Go `_test.go`), 컴포넌트 경계 테스트는 `src/test/`.
+- Python 3.11 이상 3.14 미만. `.python-version`은 3.13. torch·torchvision은 CUDA 12.8 인덱스에서 받는다(`[tool.uv.sources]`).
+- `pyproject.toml`은 `packages = ["src/skylens_model"]`로 파이썬 패키지를 명시한다. 같은 폴더의 `.rs` 파일은 Rust crate `skylens-model`에 속한다.
+- nginx 설정은 배치 호스트에서 `nginx -t`로 검사한다. 개발 머신에는 nginx가 없어도 된다.
 
 ## 16. 브랜치와 연구 기록
 
