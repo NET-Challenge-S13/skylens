@@ -114,7 +114,7 @@ func TestParseSite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if a := ul.Anchor; a.GetLat() != (36.985+37.0)/2 || a.GetLon() != (129.39+129.41)/2 {
+	if a := ul.Anchor; math.Abs(a.GetLat()-36.9925) > 1e-9 || math.Abs(a.GetLon()-129.4) > 1e-9 {
 		t.Fatalf("preset anchor %v", a)
 	}
 
