@@ -2,8 +2,11 @@
 # SkyLens 브리지 설치 — 175.126.98.44 (Ubuntu 20.04+, amd64)
 #
 # 이 서버가 맡는 일:
-#   1. nginx 가 브라우저 요청을 받는다          (:HTTP_PORT → / 는 client:8090, /live/ 는 대전 WHEP)
-#   2. 대전 VM 으로 SSH 터널을 건다             (로컬 :20889 → 대전 :10889, autossh 로 상시 유지)
+#   1. nginx 가 브라우저 요청을 받는다          (:HTTP_PORT → / 는 WEB_DIR 정적 현황판,
+#                                              /viewer · /uplink 는 터널 :20882 → 대전 프록시,
+#                                              /live/ 는 터널 :20889 → 대전 WHEP)
+#   2. 대전 VM 으로 SSH 터널을 건다             (로컬 :20889 → 대전 :10889, 로컬 :20882 → 대전 프록시 :8082,
+#                                              autossh 로 상시 유지)
 #   3. MediaMTX 가 드론 게이트웨이의 SRT 영상을 받아둔다 (:SRT_PORT/udp)
 #
 # 터널 방향: 이 서버 → 대전. 175 는 KOREN 등록 IP 라 대전 SSH(26022)에 들어갈 수 있다.
@@ -27,6 +30,7 @@ DAEJEON_HOST=116.89.187.181
 DAEJEON_PORT=26022
 DAEJEON_USER=ubuntu
 MEDIAMTX_VERSION=v1.21.0
+WEB_DIR=/opt/skylens/web
 if [ -f bridge.env ]; then
   # shellcheck disable=SC1091
   . ./bridge.env
@@ -40,6 +44,7 @@ fi
 
 TUNNEL_USER=skytunnel
 TUNNEL_PORT=20889
+PROXY_TUNNEL_PORT=20882
 TUNNEL_DIR=/etc/skylens
 TUNNEL_KEY="$TUNNEL_DIR/tunnel_key"
 
@@ -55,7 +60,7 @@ apt-get install -y -qq nginx curl ca-certificates autossh openssh-client >/dev/n
 ok "nginx, curl, autossh"
 
 # ---------- 1. 대전으로 가는 터널 ----------
-step "대전 터널 ($TUNNEL_USER: 로컬 :$TUNNEL_PORT → $DAEJEON_HOST:10889)"
+step "대전 터널 ($TUNNEL_USER: 로컬 :$TUNNEL_PORT → $DAEJEON_HOST:10889, 로컬 :$PROXY_TUNNEL_PORT → :8082)"
 id "$TUNNEL_USER" >/dev/null 2>&1 || useradd -r -M -s /usr/sbin/nologin "$TUNNEL_USER"
 install -d -m 0750 -o "$TUNNEL_USER" -g "$TUNNEL_USER" "$TUNNEL_DIR"
 if [ ! -f "$TUNNEL_KEY" ]; then
@@ -85,6 +90,7 @@ ExecStart=/usr/bin/autossh -M 0 -N \\
   -o ExitOnForwardFailure=yes \\
   -o BatchMode=yes \\
   -L 127.0.0.1:$TUNNEL_PORT:127.0.0.1:10889 \\
+  -L 127.0.0.1:$PROXY_TUNNEL_PORT:127.0.0.1:8082 \\
   -p $DAEJEON_PORT $DAEJEON_USER@$DAEJEON_HOST
 Restart=always
 RestartSec=10
@@ -98,8 +104,16 @@ systemctl restart daejeon-tunnel
 ok "daejeon-tunnel 서비스 등록 (대전에 키가 등록될 때까지 재시도 상태로 대기)"
 
 # ---------- 2. nginx ----------
+step "현황판 정적 파일 ($WEB_DIR)"
+install -d -m 0755 "$WEB_DIR"
+if [ -n "$(ls -A "$WEB_DIR" 2>/dev/null)" ]; then
+  ok "현황판 파일 있음"
+else
+  warn "현황판 파일 없음. 빌드 산출물(status.html 포함)을 $WEB_DIR 에 복사하세요"
+fi
+
 step "nginx (:$HTTP_PORT)"
-sed "s/__HTTP_PORT__/$HTTP_PORT/g" nginx-skylens.conf > /etc/nginx/sites-available/skylens
+sed -e "s/__HTTP_PORT__/$HTTP_PORT/g" -e "s|__WEB_DIR__|$WEB_DIR|g" nginx-skylens.conf > /etc/nginx/sites-available/skylens
 ln -sf /etc/nginx/sites-available/skylens /etc/nginx/sites-enabled/skylens
 if [ -L /etc/nginx/sites-enabled/default ] && \
    grep -q "Default server configuration" /etc/nginx/sites-available/default 2>/dev/null && \
@@ -172,7 +186,8 @@ cat <<SUMMARY
  브리지 설치 완료
 ============================================================
  공인 IP           : $PUB_IP
- 브라우저 주소     : http://$PUB_IP:$HTTP_PORT/live/drone
+ 현황판 주소      : http://$PUB_IP:$HTTP_PORT/   (파일은 $WEB_DIR)
+ 라이브 주소       : http://$PUB_IP:$HTTP_PORT/live/drone
  SRT 수신          : srt://$PUB_IP:$SRT_PORT?streamid=publish:drone:drone:<PASS>
  SRT publish 비번  : $PUBLISH_PASS$([ "$GENERATED_PASS" = 1 ] && printf '   (자동 생성 — bridge.env 에 적어두세요)')
 

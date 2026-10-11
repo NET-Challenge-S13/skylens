@@ -4,8 +4,10 @@ set -u
 cd "$(dirname "$(readlink -f "$0")")"
 
 HTTP_PORT=80; SRT_PORT=10890; DAEJEON_HOST=116.89.187.181; DAEJEON_PORT=26022
+WEB_DIR=/opt/skylens/web
 [ -f bridge.env ] && . ./bridge.env
 TUNNEL_PORT=20889
+PROXY_TUNNEL_PORT=20882
 
 pass() { printf '  \033[32m✓\033[0m %s\n' "$*"; }
 fail() { printf '  \033[31m✗\033[0m %s\n' "$*"; }
@@ -40,6 +42,25 @@ else
 fi
 if command -v nc >/dev/null; then
   nc -z -w 3 "$DAEJEON_HOST" "$DAEJEON_PORT" 2>/dev/null && pass "대전 SSH $DAEJEON_HOST:$DAEJEON_PORT 도달" || fail "대전 SSH 도달 불가 — 이 서버 IP 가 KOREN 에 등록돼 있는지 확인"
+fi
+
+echo "== 대전 프록시 터널 (/viewer · /uplink) =="
+if ss -tln 2>/dev/null | grep -qE "127\.0\.0\.1:$PROXY_TUNNEL_PORT\b"; then
+  body=$(curl -s -m 3 "http://127.0.0.1:$PROXY_TUNNEL_PORT/health" || true)
+  if printf '%s' "$body" | grep -q 'skylens_proxy'; then
+    pass "127.0.0.1:$PROXY_TUNNEL_PORT → 대전 프록시(:8082) /health 응답"
+  else
+    fail "터널은 열렸는데 대전 프록시 /health 응답 없음. 대전 키의 permitopen 에 8082 가 있는지 확인"
+  fi
+else
+  info "127.0.0.1:$PROXY_TUNNEL_PORT 없음. 대전 키에 permitopen 8082 가 등록됐는지 확인 (register-bridge-key.sh)"
+fi
+
+echo "== 현황판 정적 파일 =="
+if [ -n "$(ls -A "$WEB_DIR" 2>/dev/null)" ]; then
+  pass "$WEB_DIR 에 파일 있음"
+else
+  fail "$WEB_DIR 비어 있음. 현황판 빌드 산출물을 복사하세요"
 fi
 
 echo "== 방화벽 =="
