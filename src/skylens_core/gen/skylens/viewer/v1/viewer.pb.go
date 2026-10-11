@@ -585,8 +585,14 @@ type Site struct {
 	Imagery       bool                   `protobuf:"varint,7,opt,name=imagery,proto3" json:"imagery,omitempty"`     // satellite imagery available (VWorld key present)
 	Buildings     bool                   `protobuf:"varint,8,opt,name=buildings,proto3" json:"buildings,omitempty"` // building footprints available
 	BuildingCount uint32                 `protobuf:"varint,9,opt,name=building_count,json=buildingCount,proto3" json:"building_count,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	// Base map progress for the control tower's loading screen (the legacy tower
+	// showed the scene only once all of it had loaded).
+	BaseMapReady      bool   `protobuf:"varint,10,opt,name=base_map_ready,json=baseMapReady,proto3" json:"base_map_ready,omitempty"`                  // no base map stream is running
+	BaseMapCells      uint32 `protobuf:"varint,11,opt,name=base_map_cells,json=baseMapCells,proto3" json:"base_map_cells,omitempty"`                  // terrain cells sent so far
+	BaseMapCellsTotal uint32 `protobuf:"varint,12,opt,name=base_map_cells_total,json=baseMapCellsTotal,proto3" json:"base_map_cells_total,omitempty"` // cells sent plus cells the running stream still owes
+	BaseMapChunks     uint32 `protobuf:"varint,13,opt,name=base_map_chunks,json=baseMapChunks,proto3" json:"base_map_chunks,omitempty"`               // terrain + building chunks the core holds (what a full replay delivers)
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *Site) Reset() {
@@ -678,6 +684,34 @@ func (x *Site) GetBuildings() bool {
 func (x *Site) GetBuildingCount() uint32 {
 	if x != nil {
 		return x.BuildingCount
+	}
+	return 0
+}
+
+func (x *Site) GetBaseMapReady() bool {
+	if x != nil {
+		return x.BaseMapReady
+	}
+	return false
+}
+
+func (x *Site) GetBaseMapCells() uint32 {
+	if x != nil {
+		return x.BaseMapCells
+	}
+	return 0
+}
+
+func (x *Site) GetBaseMapCellsTotal() uint32 {
+	if x != nil {
+		return x.BaseMapCellsTotal
+	}
+	return 0
+}
+
+func (x *Site) GetBaseMapChunks() uint32 {
+	if x != nil {
+		return x.BaseMapChunks
 	}
 	return 0
 }
@@ -1061,7 +1095,7 @@ const file_skylens_viewer_v1_viewer_proto_rawDesc = "" +
 	"\bdrone_id\x18\x01 \x01(\rR\adroneId\x12\x18\n" +
 	"\aforward\x18\x02 \x01(\x01R\aforward\x12\x10\n" +
 	"\x03yaw\x18\x03 \x01(\x01R\x03yaw\x12\x14\n" +
-	"\x05climb\x18\x04 \x01(\x01R\x05climb\"\x8c\x02\n" +
+	"\x05climb\x18\x04 \x01(\x01R\x05climb\"\xb1\x03\n" +
 	"\x04Site\x12-\n" +
 	"\x06anchor\x18\x01 \x01(\v2\x15.skylens.model.v1.GpsR\x06anchor\x12\x17\n" +
 	"\amin_lat\x18\x02 \x01(\x01R\x06minLat\x12\x17\n" +
@@ -1071,7 +1105,12 @@ const file_skylens_viewer_v1_viewer_proto_rawDesc = "" +
 	"\x04name\x18\x06 \x01(\tR\x04name\x12\x18\n" +
 	"\aimagery\x18\a \x01(\bR\aimagery\x12\x1c\n" +
 	"\tbuildings\x18\b \x01(\bR\tbuildings\x12%\n" +
-	"\x0ebuilding_count\x18\t \x01(\rR\rbuildingCount\"\xbb\x01\n" +
+	"\x0ebuilding_count\x18\t \x01(\rR\rbuildingCount\x12$\n" +
+	"\x0ebase_map_ready\x18\n" +
+	" \x01(\bR\fbaseMapReady\x12$\n" +
+	"\x0ebase_map_cells\x18\v \x01(\rR\fbaseMapCells\x12/\n" +
+	"\x14base_map_cells_total\x18\f \x01(\rR\x11baseMapCellsTotal\x12&\n" +
+	"\x0fbase_map_chunks\x18\r \x01(\rR\rbaseMapChunks\"\xbb\x01\n" +
 	"\rMissionStatus\x125\n" +
 	"\x05phase\x18\x01 \x01(\x0e2\x1f.skylens.viewer.v1.MissionPhaseR\x05phase\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\x12#\n" +

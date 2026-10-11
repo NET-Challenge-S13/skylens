@@ -39,7 +39,17 @@ func (c *Core) Site() *viewerv1.Site {
 		if c.baseMapOn() {
 			out.Buildings = st.Buildings
 			out.BuildingCount = uint32(st.BuildingCount)
+			c.mu.Lock()
+			streams := c.baseMapStreams
+			c.mu.Unlock()
+			out.BaseMapReady = streams == 0 && !st.Streaming
+			out.BaseMapCells = uint32(st.Cells)
+			out.BaseMapCellsTotal = uint32(st.Cells + st.Pending)
+			out.BaseMapChunks = uint32(c.Store.BaseMapCount())
 		}
+	}
+	if !c.baseMapOn() {
+		out.BaseMapReady = true
 	}
 	return out
 }
@@ -162,6 +172,7 @@ func (c *Core) streamTerrain(area terrain.Area, center *modelv1.Gps) {
 	}
 	ctx, cancel := context.WithCancel(c.ctx)
 	c.terrainCancel = cancel
+	c.baseMapStreams++
 	c.mu.Unlock()
 
 	ch := c.terrain.Stream(ctx, area, center)
@@ -173,6 +184,7 @@ func (c *Core) streamTerrain(area terrain.Area, center *modelv1.Gps) {
 		}
 		c.mu.Lock()
 		c.terrainChunks += uint64(n)
+		c.baseMapStreams--
 		c.mu.Unlock()
 		if ctx.Err() == nil {
 			log.Printf("[core] base map stream done: %d chunk(s)", n)

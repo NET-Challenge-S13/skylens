@@ -125,6 +125,7 @@ mod tests {
             imagery: true,
             buildings: true,
             building_count: 6191,
+            ..Default::default()
         }
     }
 

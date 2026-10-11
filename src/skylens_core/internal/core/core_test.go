@@ -240,7 +240,8 @@ func TestBaseMapAtStartupGoesToTheControlTowerOnly(t *testing.T) {
 
 	// No route needed: the site area streams as soon as the core starts.
 	c.StartBaseMap()
-	waitUntil(t, "base map sent", func() bool { return control.Backlog() == 2 })
+	// Two cells, then the Site again: the base map is now ready, with its counts.
+	waitUntil(t, "base map sent", func() bool { return control.Backlog() == 3 })
 	areas, centers := ter.calls()
 	if len(areas) != 1 || areas[0] != c.SiteArea() {
 		t.Fatalf("streamed areas %+v, want the site %+v", areas, c.SiteArea())

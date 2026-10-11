@@ -84,6 +84,9 @@ type Status struct {
 	BuildingCount int
 	// Cells is the number of cells whose terrain was sent.
 	Cells int
+	// Streaming: a stream is running; Pending is how many of its cells are not done yet.
+	Streaming bool
+	Pending   int
 }
 
 type probeState int
@@ -118,6 +121,9 @@ type Feed struct {
 	wfsOK   bool
 	wfsFail bool
 	sent    map[cellKey]*sentCell
+	// streams running and their cells still to deliver (loading progress).
+	streams int
+	owed    int
 }
 
 // cellWorkers is how many cells are built at once; output order stays
@@ -154,6 +160,8 @@ func (f *Feed) Status() Status {
 		}
 		st.BuildingCount += c.buildingCount
 	}
+	st.Streaming = f.streams > 0
+	st.Pending = f.owed
 	return st
 }
 
@@ -212,6 +220,17 @@ func (f *Feed) run(ctx context.Context, area Area, center *modelv1.Gps, out chan
 	if len(jobs) == 0 {
 		return
 	}
+	f.mu.Lock()
+	f.streams++
+	f.owed += len(jobs)
+	f.mu.Unlock()
+	left := len(jobs)
+	defer func() {
+		f.mu.Lock()
+		f.streams--
+		f.owed -= left
+		f.mu.Unlock()
+	}()
 
 	s := &session{
 		feed:   f,
@@ -285,6 +304,10 @@ func (f *Feed) run(ctx context.Context, area Area, center *modelv1.Gps, out chan
 		if r.buildingsDone {
 			f.markBuildings(j, r.buildingCount)
 		}
+		f.mu.Lock()
+		f.owed--
+		f.mu.Unlock()
+		left--
 		<-sem
 	}
 }
