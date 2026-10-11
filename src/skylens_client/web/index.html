@@ -3,10 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <!-- Which screen this page shows; ?screen=control|status overrides it.
-         build-web.sh writes control.html and status.html with this set. -->
-    <meta name="skylens-screen" content="status" />
-    <title>SkyLens</title>
+    <title>SkyLens · 현황판 - 실시간 3D 복원</title>
     <link rel="icon" type="image/png" href="favicon.png" />
     <style>
       html,
@@ -15,9 +12,9 @@
         width: 100%;
         height: 100%;
         overflow: hidden;
-        background: #05070a;
+        background: #0d0f14;
       }
-      /* Blitz draws the whole UI (panels and 3D view) into this one canvas.
+      /* Blitz draws the whole board (panels and 3D views) into this one canvas.
          Its size comes from here, not from winit (see blitz examples/wasm_hello). */
       #skylens {
         display: block;
@@ -37,11 +34,11 @@
     <canvas id="skylens"></canvas>
     <script type="module">
       import init from './pkg/skylens_client.js';
-      // The wasm start function reads ?core=, ?screen=, ?anchor= and opens ws /viewer.
+      // The wasm start function reads ?core= and ?points= and opens ws /viewer.
       init().catch((e) => {
         const p = document.createElement('div');
         p.id = 'skylens-error';
-        p.textContent = `SkyLens 클라이언트를 시작하지 못했습니다: ${e}`;
+        p.textContent = `현황판을 시작하지 못했습니다: ${e}`;
         document.body.appendChild(p);
       });
     </script>

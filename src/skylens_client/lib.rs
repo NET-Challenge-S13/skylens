@@ -1,59 +1,51 @@
-//! UI logic shared by the web (wasm) and native (blitz) clients.
+//! Status board (현황판) for field commanders outside KOREN: the legacy TypeScript board's HTML and
+//! CSS, unchanged, drawn by Blitz, with the reconstruction view on pointblitz. Web (wasm) and
+//! native share all of it; only the entry points differ.
 //!
-//! Both screens (관제탑 control tower, 현황판 status board) are one HTML/CSS file
-//! each under `ui/`, parsed and drawn by Blitz on web and native alike. The 3D
-//! view is a Blitz custom widget that renders pointblitz chunks and the mesh pass
-//! into a wgpu texture. Everything above the entry points is one code base:
+//! The board connects read-only to the core's `ws /viewer` (through the gateway), takes the
+//! `Site` anchor as its ENU origin, and shows only what has been reconstructed and has arrived.
 //!
-//! - [`protocol`]: `ws /viewer` envelopes and chunk payload decoding
-//! - [`state`]: the reducer from viewer events to screen state
-//! - [`chunks`]: chunk replacement rules (preview, refined, generation, mesh version)
-//! - [`views`]: state to text/HTML fragments
-//! - [`app`]: the Blitz document, DOM binding, clicks and keys
-//! - [`view3d`]: the 3D widget (pointblitz + [`mesh::MeshPass`] + markers)
-//! - [`link`]: WebSocket with reconnect (tokio-tungstenite native, browser WebSocket on web)
+//! - [`app`]: the Blitz screen (link, DOM writes as in `ui/DOM.md`)
+//! - [`board`]: what the board knows, shared by the DOM side and the two 3D views
+//! - [`scene`] / [`inset`]: the main reconstruction view and the point panel's view
+//! - [`follow`], [`reveal`], [`markers`], [`points`]: camera rules, arrival fade, detection
+//!   markers, point chunk reading (pure, tested)
+//! - [`minimap`], [`card`], [`panels`]: the minimap widget, the detection card, panel text
 
 pub mod app;
-pub mod camera;
-pub mod chunks;
-pub mod display;
-pub mod link;
-pub mod mesh;
-pub mod protocol;
-pub mod state;
-pub mod view3d;
-pub mod views;
+pub mod board;
+pub mod card;
+pub mod follow;
+pub mod inset;
+pub mod markers;
+pub mod minimap;
+pub mod panels;
+pub mod points;
+pub mod reveal;
+pub mod scene;
 
+// The versions skylens-viewer builds against.
+pub(crate) use skylens_viewer::{anyrender, glam, peniko, pointblitz};
+
+pub use app::{Options, StatusApp, parse_args};
+
+/// Opens the board in a native window and runs until it closes.
 #[cfg(not(target_arch = "wasm32"))]
-pub mod native;
-#[cfg(target_arch = "wasm32")]
-pub mod web;
-
-pub use app::{Config, Screen, SkylensDocument};
-
-/// Wall-clock milliseconds since the Unix epoch.
-#[cfg(not(target_arch = "wasm32"))]
-pub fn now_ms() -> f64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs_f64() * 1000.0)
-        .unwrap_or(0.0)
+pub fn run_native(opts: &Options) -> anyhow::Result<()> {
+    skylens_viewer::log(&format!("[skylens-client] 현황판 · core {}", opts.core_url));
+    let doc = StatusApp::document(opts);
+    skylens_viewer::shell::run_native(doc, skylens_viewer::WindowOptions::new(app::WINDOW_TITLE))
 }
 
-/// Wall-clock milliseconds since the Unix epoch.
+/// Web entry: draws the board into `<canvas id="skylens">`. The core is `?core=` or the page's own
+/// origin (the gateway proxies `/viewer`); `?points=off` starts the point panel closed.
 #[cfg(target_arch = "wasm32")]
-pub fn now_ms() -> f64 {
-    js_sys::Date::now()
-}
-
-/// Diagnostics: stderr on native, the browser console on web.
-#[cfg(not(target_arch = "wasm32"))]
-pub fn log(msg: &str) {
-    eprintln!("{msg}");
-}
-
-/// Diagnostics: stderr on native, the browser console on web.
-#[cfg(target_arch = "wasm32")]
-pub fn log(msg: &str) {
-    web_sys::console::log_1(&msg.into());
+#[wasm_bindgen::prelude::wasm_bindgen(start)]
+pub fn start() -> Result<(), wasm_bindgen::JsValue> {
+    let opts = Options {
+        core_url: skylens_viewer::shell::page_core_url(skylens_viewer::link::VIEWER_PATH),
+        points_on: skylens_viewer::shell::query_param("points").as_deref() != Some("off"),
+    };
+    skylens_viewer::log(&format!("[skylens] 현황판 · core {}", opts.core_url));
+    skylens_viewer::shell::run_web(StatusApp::document(&opts), "skylens")
 }

@@ -1,20 +1,20 @@
-//! Native window of a SkyLens screen.
+//! Native window of the status board.
 //!
-//!     skylens-client --screen control --core ws://127.0.0.1:8080/viewer
-//!     skylens-client --screen status  --core core.local:8080 --anchor 36.3685,127.3475,30
+//!     skylens-client --core ws://127.0.0.1:8080/viewer
+//!     skylens-client --core gateway.local:8080 --points off
 //!
 //! The web build has no binary; see build-web.sh.
 
 #[cfg(not(target_arch = "wasm32"))]
 fn main() -> std::process::ExitCode {
-    let cfg = match skylens_client::Config::from_args(std::env::args().skip(1)) {
-        Ok(cfg) => cfg,
+    let opts = match skylens_client::parse_args(std::env::args().skip(1)) {
+        Ok(o) => o,
         Err(msg) => {
             eprintln!("{msg}");
             return std::process::ExitCode::from(2);
         }
     };
-    match skylens_client::native::run(cfg) {
+    match skylens_client::run_native(&opts) {
         Ok(()) => std::process::ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("skylens-client: {e:#}");
