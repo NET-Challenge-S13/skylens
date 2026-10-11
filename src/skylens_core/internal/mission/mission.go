@@ -31,10 +31,10 @@ import (
 
 // Operator-facing lines, already localized (MissionStatus.message).
 var messages = map[viewerv1.MissionPhase]string{
-	viewerv1.MissionPhase_MISSION_PHASE_IDLE:           "대기 중. 관제탑에서 경로를 지정하십시오",
+	viewerv1.MissionPhase_MISSION_PHASE_IDLE:           "대기 중 — 관제탑에서 경로를 지정하십시오",
 	viewerv1.MissionPhase_MISSION_PHASE_ASSIGNED:       "태스크 지정 완료",
 	viewerv1.MissionPhase_MISSION_PHASE_AWAITING_DRONE: "드론이 현장에 도착해 연결되면 작업이 시작됩니다",
-	viewerv1.MissionPhase_MISSION_PHASE_ACTIVE:         "드론 연결됨, 임무 수행 중",
+	viewerv1.MissionPhase_MISSION_PHASE_ACTIVE:         "드론 연결됨 — 임무 수행 중",
 }
 
 // Message returns the operator line for a phase.

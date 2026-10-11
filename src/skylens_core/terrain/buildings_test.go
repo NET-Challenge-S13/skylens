@@ -75,63 +75,28 @@ func TestWFSQueryIsLatLonAndCacheNameIsKeyFree(t *testing.T) {
 	}
 }
 
-func TestPointInPolygon(t *testing.T) {
-	sq := [][2]float64{{0, 0}, {10, 0}, {10, 10}, {0, 10}}
-	if !pointInPolygon(5, 5, sq) || pointInPolygon(15, 5, sq) || pointInPolygon(-1, -1, sq) {
-		t.Fatal("square test failed")
+func TestOutlineIsClosedAndCounterClockwise(t *testing.T) {
+	ccw := [][2]float64{{0, 0}, {10, 0}, {10, 4}, {4, 4}, {4, 10}, {0, 10}}
+	got := outline(ccw)
+	want := []float64{0, 0, 10, 0, 10, 4, 4, 4, 4, 10, 0, 10, 0, 0}
+	if len(got) != len(want) {
+		t.Fatalf("outline %v, want %v", got, want)
 	}
-	// An L shape: the notch is outside.
-	l := [][2]float64{{0, 0}, {10, 0}, {10, 4}, {4, 4}, {4, 10}, {0, 10}}
-	if pointInPolygon(7, 7, l) || !pointInPolygon(2, 7, l) {
-		t.Fatal("L test failed")
-	}
-}
-
-func TestSampleBuildingSpansBaseToRoof(t *testing.T) {
-	ring := [][2]float64{{100, 100}, {120, 100}, {120, 110}, {100, 110}}
-	var pts []Point
-	noDrape := func(e, n float64) ([3]uint8, bool) { return groundRGB, false }
-	sampleBuilding(ring, 70, 85, fineProfile, StyleBlack, noDrape, func(p Point) { pts = append(pts, p) })
-	if len(pts) == 0 {
-		t.Fatal("no points")
-	}
-	minU, maxU := math.Inf(1), math.Inf(-1)
-	roof, edge := 0, 0
-	for _, p := range pts {
-		u := float64(p.Pos[2])
-		minU, maxU = math.Min(minU, u), math.Max(maxU, u)
-		if p.Pos[0] < 100-1e-3 || p.Pos[0] > 120+1e-3 || p.Pos[1] < 100-1e-3 || p.Pos[1] > 110+1e-3 {
-			t.Fatalf("point outside the footprint: %v", p.Pos)
-		}
-		switch p.Color {
-		case blackRoof:
-			roof++
-		case blackEdge:
-			edge++
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("outline %v, want %v", got, want)
 		}
 	}
-	if minU != 70 || maxU != 85 {
-		t.Errorf("u range %g..%g, want 70..85", minU, maxU)
-	}
-	// 20 m x 10 m at a 2 m grid: 10 x 5 roof points.
-	if roof != 50 {
-		t.Errorf("%d roof points, want 50", roof)
-	}
-	if edge == 0 {
-		t.Error("no linework points")
-	}
-}
-
-func TestSampleBuildingTinyFootprintStillHasARoof(t *testing.T) {
-	ring := [][2]float64{{0.1, 0.1}, {0.6, 0.1}, {0.6, 0.6}}
-	var roof int
-	noDrape := func(e, n float64) ([3]uint8, bool) { return groundRGB, false }
-	sampleBuilding(ring, 0, 6, fineProfile, StyleBlack, noDrape, func(p Point) {
-		if p.Color == blackRoof {
-			roof++
+	// A clockwise ring is reversed.
+	cw := [][2]float64{{0, 0}, {0, 10}, {10, 10}, {10, 0}}
+	got = outline(cw)
+	want = []float64{10, 0, 10, 10, 0, 10, 0, 0, 10, 0}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("clockwise outline %v, want %v", got, want)
 		}
-	})
-	if roof != 1 {
-		t.Fatalf("%d roof points, want 1 (the centroid)", roof)
+	}
+	if signedArea(got) <= 0 {
+		t.Fatalf("outline %v is not counter-clockwise", got)
 	}
 }

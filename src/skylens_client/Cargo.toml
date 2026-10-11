@@ -1,19 +1,18 @@
 [package]
 build = "build.rs"
 name = "skylens-client"
-description = "Status board and control tower UI: shared HTML/CSS on pointblitz, web and native"
+description = "Status board (현황판): the legacy board's HTML/CSS on Blitz with a pointblitz reconstruction view, web and native"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 publish.workspace = true
 
-
 [lib]
 path = "lib.rs"
 crate-type = ["rlib", "cdylib"]
 
-# Native window: `skylens-client --screen control|status --core ws://host:8080/viewer`.
+# Native window: `skylens-client --core ws://host:8080/viewer`.
 # On wasm32 this target compiles to an empty main; build the web bundle with build-web.sh.
 [[bin]]
 name = "skylens-client"
@@ -21,64 +20,20 @@ path = "main.rs"
 
 [dependencies]
 skylens-shared.workspace = true
+skylens-viewer.workspace = true
 prost.workspace = true
 anyhow.workspace = true
-pointblitz.workspace = true
-wgpu.workspace = true
-anyrender.workspace = true
-# Same versions blitz and pointblitz resolve to (see Cargo.lock).
-glam = "0.34"
-peniko = "0.6"
-wgpu_context = "0.10"
-keyboard-types = "0.7"
-winit = "=0.31.0-beta.3"
+# Glyph lookup for the minimap's scale label (the same version vello and parley use).
+skrifa = "0.44"
 
-# Native: Blitz with its default features (system fonts, accessibility, clipboard).
+# The minimap is a Blitz custom widget, so the board needs the Widget trait itself.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-# Decodes the embedded window icon (res/icon/skylens-256.png).
-image = { version = "0.25", default-features = false, features = ["png"] }
 blitz-dom = { workspace = true, features = ["custom-widget"] }
-blitz-html.workspace = true
-blitz-paint = { workspace = true, features = ["custom-widget"] }
-blitz-traits.workspace = true
-blitz-shell = { workspace = true, features = ["custom-widget"] }
-anyrender_vello.workspace = true
-tokio.workspace = true
-tokio-tungstenite = "0.29"
-futures-util = { version = "0.3", default-features = false, features = ["std", "sink"] }
 
-# Web: the same Blitz revision without the desktop-only features (system fonts,
-# clipboard, file dialogs), like Blitz's own examples/wasm_hello. Declared directly
-# instead of `workspace = true` because the workspace entry turns default features on.
+# Web: the same Blitz revision without the desktop-only features, as in skylens-viewer.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 blitz-dom = { git = "https://github.com/DioxusLabs/blitz", rev = "45496d9288b063719ebeae4e0761273f7881b3d7", default-features = false, features = ["woff", "custom-widget"] }
-blitz-html = { git = "https://github.com/DioxusLabs/blitz", rev = "45496d9288b063719ebeae4e0761273f7881b3d7", default-features = false }
-blitz-paint = { git = "https://github.com/DioxusLabs/blitz", rev = "45496d9288b063719ebeae4e0761273f7881b3d7", default-features = false, features = ["custom-widget"] }
-blitz-traits = { git = "https://github.com/DioxusLabs/blitz", rev = "45496d9288b063719ebeae4e0761273f7881b3d7", default-features = false }
-blitz-shell = { git = "https://github.com/DioxusLabs/blitz", rev = "45496d9288b063719ebeae4e0761273f7881b3d7", default-features = false, features = ["custom-widget"] }
-# vello_hybrid runs on WebGPU and on WebGL2; `webgl` adds the GL backend to wgpu so the
-# browser falls back to WebGL2 when navigator.gpu is missing.
-anyrender_vello_hybrid = { version = "0.11", features = ["webgl"] }
 wasm-bindgen = "0.2"
-wasm-bindgen-futures = "0.4"
-js-sys = "0.3"
-web-sys = { version = "0.3", features = [
-    "BinaryType",
-    "CloseEvent",
-    "CssStyleDeclaration",
-    "Document",
-    "Element",
-    "Event",
-    "HtmlCanvasElement",
-    "HtmlElement",
-    "Location",
-    "MessageEvent",
-    "Response",
-    "UrlSearchParams",
-    "WebSocket",
-    "Window",
-    "console",
-] }
 
 [build-dependencies]
 # Embeds res/icon/skylens.ico into the Windows executable.

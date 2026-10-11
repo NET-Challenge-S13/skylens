@@ -21,7 +21,7 @@ related: "[[INTENT.md]], [[COMPONENTS.md]], [[ARCHITECTURE.md]], [[NETWORK_ARCHI
 관제탑 ─제어─▶ 코어 ─▶ 드론(Mission Bridge) ─▶ DJI 클라우드 ─▶ 기체
 기체 ─SRT─▶ 게이트웨이(브리지) ◀─당김─ 코어(대전 MediaMTX) ─WHEP─▶ 현황판 라이브 영상
                                      └─gRPC 프레임─▶ 모델(판교) ─gRPC 증분 청크─▶ 코어
-코어 ─▶ 관제탑 (코어가 직접 서빙, ws /viewer 직결)
+코어 ─▶ 관제탑 (코어가 직접 서빙, ws /control 직결, 제어는 이 소켓으로만)
 코어 ─▶ 프록시 ─▶ 게이트웨이 ─▶ 현황판
 ```
 
@@ -36,10 +36,10 @@ related: "[[INTENT.md]], [[COMPONENTS.md]], [[ARCHITECTURE.md]], [[NETWORK_ARCHI
 | `skylens_drone` | 현장 | GPS 경로 → DJI Fly KMZ 임무, 편대 3기 전개, DJI 클라우드 업로드 | Rust |
 | `skylens_gateway` | KOREN 외부망 (브리지) | 외부 진입. 현황판 웹·WHEP 시그널링·드론 SRT 수신 | nginx + MediaMTX |
 | `skylens_proxy` | KOREN 내부망 (대전) | 코어 경로 이중화 | nginx |
-| `skylens_core` | KOREN 내부망 (대전) | 관제탑 웹 서빙 + 전체 데이터 보관 + 잡 오케스트레이션 + 배포 + 라이브 영상 원점 | Go + MediaMTX |
+| `skylens_core` | KOREN 내부망 (대전) | 코어 서버(보관 + 오케스트레이션 + 배포 + 라이브 영상 원점)와 관제탑 화면(코어가 웹으로 제공) | Go 서버 + Rust 관제탑 + MediaMTX |
 | `skylens_model` | KOREN 내부망 (판교) | 라이브 점군(cumulus3d) + UNet 프레임 훅 + 메시 보정(deltamesh) | Rust 서버 + Python 학습 |
-| `skylens_client` | 화면 | 관제탑·현황판 공용 UI. HTML/CSS 한 벌, 렌더링은 pointblitz, 네이티브는 Blitz | Rust + HTML/CSS |
-| `shared` | 해당 없음 | Rust 공통 계약(프로토콜·좌표계) | Rust 라이브러리 |
+| `skylens_client` | KOREN 외부망 (지휘관 단말) | 현황판 화면. 복원된 것만 보이고 제어 경로가 없다 | Rust + 이전 HTML/CSS |
+| `shared` | 해당 없음 | 공통 계약(proto · 좌표계)과 두 화면 공용 층(`viewer/`) | Rust 라이브러리 |
 | `test` | 해당 없음 | 컴포넌트 경계 테스트 (TDD) | Rust + pytest |
 | `demo` | 해당 없음 | 전 컴포넌트를 띄우는 엔드 투 엔드 런처 | Rust |
 
@@ -90,9 +90,12 @@ related: "[[INTENT.md]], [[COMPONENTS.md]], [[ARCHITECTURE.md]], [[NETWORK_ARCHI
 
 ## 6. 관제탑 화면
 
-> 코어가 웹으로 서빙하고 코어의 `ws /viewer`에 직결한다. 좌표는 GPS를 직접 쓴다.
+> 관제탑은 코어의 화면이다. 코어가 웹으로 서빙하고 `ws /control`에 직결한다. 화면은 이전 TS 관제탑과 같다.
 
-- 패널·위젯은 `skylens_client`의 HTML/CSS를 Blitz가 그리고, 3D 뷰는 pointblitz다.
+- 코드는 `src/skylens_core/control/`이다. 패널·위젯은 이전 HTML/CSS를 그대로 Blitz가 그리고, 3D 뷰는 pointblitz다.
+- 지형은 위성 사진을 드레이프한 면, 건물은 음영 프리즘과 모서리선, 드론은 와이어프레임 팔면체와 궤적, 경로는 금색 선과 지상 패드다. 드론이 없으면 개요 회전, 있으면 선택한 드론을 쫓는 카메라다.
+- 경로 계획은 위성 지도 클릭이고, 고도는 지면 기준(AGL)이며 DEM으로 절대 고도로 바꿔 보낸다.
+- 바탕 지도는 접속 직후 작전 구역(`GET /site`)부터 받는다. 기준점(ENU 원점)은 코어가 정하고 화면은 그것을 따른다.
 - 건물 표시는 별도 씬이 아니라 표시 옵션이다: **점 / 검정 텍스처(기본값) / 실사 항공뷰**.
 - 지형은 AWS Terrain Tiles DEM(한국 약 30m급), 위성 드레이프는 VWorld WMTS, 3D 건물은 VWorld WFS `lt_c_bldginfo` 폴리곤이다. 코어가 이것을 pointblitz 청크로 바꿔 화면이 보는 영역부터 증분으로 내보내고, 화면은 복원 결과와 같은 pointblitz로 그린다.
 - 기준 씬은 대전(충남대~카이스트 일대, 약 3km, 약 6,191동).
@@ -103,7 +106,8 @@ related: "[[INTENT.md]], [[COMPONENTS.md]], [[ARCHITECTURE.md]], [[NETWORK_ARCHI
 
 > 구간 청크가 도착해야 그 구간이 보인다. "보인다 = 복원되어 도착했다"가 하나의 진실이다.
 
-- UI 프레임워크는 Blitz다. 웹(wasm, WebGPU 우선·WebGL2 폴백)과 데스크톱 네이티브가 같은 Rust 코드로 Blitz + pointblitz를 쓰고, 같은 HTML/CSS와 같은 청크를 받는다. Android/iOS는 후순위다.
+- 코드는 `src/skylens_client/`이다. 이전 HTML/CSS를 Blitz로 그대로 그리고, 웹(wasm)과 데스크톱 네이티브가 같은 코드다. Android/iOS는 후순위다.
+- 코어의 `ws /viewer`(읽기 전용)로 받는다. 바탕 지도는 받지 않는다.
 - 노출(reveal)은 드론 궤적이 아니라 **도착 기준**이다. 탐지 마커도 해당 구간이 복원돼야 표시된다.
 - 라이브 영상은 대전 MediaMTX에서 WHEP로 직접 받는다.
 - 좌측 상단 서버 패널에 구간별 현재 수준이 뜬다.
@@ -191,7 +195,7 @@ related: "[[INTENT.md]], [[COMPONENTS.md]], [[ARCHITECTURE.md]], [[NETWORK_ARCHI
 
 | 컴포넌트 | 포트 | 엔드포인트 |
 |---|---:|---|
-| `skylens_core` | 8080 | `ws /uplink` · `ws /viewer` · `GET /health` · 관제탑 웹 |
+| `skylens_core` | 8080 | `ws /uplink` · `ws /control` · `ws /viewer` · `GET /site` · `GET /vworld/*` · `GET /health` · 관제탑 웹 |
 | `skylens_proxy` | 8082 | 코어로 넘김 · `GET /health` · `GET /core/health` |
 | `skylens_gateway` | 80 | `/` 현황판 웹 · `/live/` WHEP · `/healthz` |
 | `skylens_drone` | 8091 | `/health` · `/missions` · `/formation` · `/cloud/*` |

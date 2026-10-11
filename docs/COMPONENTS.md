@@ -19,10 +19,10 @@ links: "[[ARCHITECTURE]] · [[NETWORK_ARCHITECTURE]] · [[SPEC]]"
 | `skylens_drone` | 현장 | Mission Bridge. 관제탑 GPS 경로를 DJI Fly 웨이포인트 임무(KMZ)로 바꾸고, 편대 3기로 펼치고, DJI 클라우드로 올린다 | Rust |
 | `skylens_gateway` | KOREN **외부망** (브리지) | 외부 진입 창구. 현황판 웹·시그널링·드론 업링크를 받아 터널로 대전에 넘긴다. MediaMTX가 드론 SRT 영상을 받아 둔다 | nginx 설정 + MediaMTX |
 | `skylens_proxy` | KOREN **내부망** (대전) | 코어로 가는 다중 경로. 선호 경로가 죽으면 대기 경로로 넘긴다 | nginx 설정 |
-| `skylens_core` | KOREN **내부망** (대전) | 관제탑 웹 서빙 + 데이터 전체 보관 + 작업 오케스트레이션 + 배포. 라이브 영상 원점(MediaMTX WHEP)도 여기 | Go + MediaMTX |
+| `skylens_core` | KOREN **내부망** (대전) | 코어 서버(데이터 전체 보관 + 작업 오케스트레이션 + 배포, Go)와 **관제탑 화면**(코어가 웹으로 제공, Rust + 이전 HTML/CSS). 라이브 영상 원점(MediaMTX WHEP)도 여기 | Go 서버 + Rust 관제탑 + MediaMTX |
 | `skylens_model` | KOREN **내부망** (판교) | 연산 서버. 라이브 프레임 입력으로 점군을 키우고(cumulus3d), UNet을 프레임 훅으로 붙이고, 메시로 보정해(deltamesh) 증분으로 내보낸다 | Rust 서버 + Python 학습 코드 |
-| `skylens_client` | 화면 | 관제탑·현황판 공용 UI. HTML/CSS 한 벌을 웹과 데스크톱 네이티브가 같이 쓰고 렌더링은 pointblitz | Rust (wasm / blitz) + HTML/CSS |
-| `shared` | 해당 없음 | Rust 컴포넌트 공통 계약(프로토콜·좌표계). 배포 단위가 아닌 의존 라이브러리 | Rust 라이브러리 |
+| `skylens_client` | KOREN **외부망** (지휘관 단말) | **현황판 화면**. 이전 HTML/CSS를 Blitz로 그대로 그리고 렌더링은 pointblitz. 웹·데스크톱 네이티브(이후 Android/iOS)가 같은 코드를 쓴다. 제어 경로가 없다 | Rust + 이전 HTML/CSS |
+| `shared` | 해당 없음 | 공통 계약(proto · 좌표계, `skylens-shared`)과 두 화면 공용 층(`viewer/`, `skylens-viewer`: 공용 CSS · 위젯 · 코어 연결 · 청크 저장소 · pointblitz 3D 뷰). 배포 단위가 아닌 의존 라이브러리 | Rust 라이브러리 |
 | `test` | 해당 없음 | 컴포넌트를 가로지르는 테스트. 테스트를 먼저 쓰고 구현한다(TDD) | Rust (+ Python 학습 테스트) |
 | `demo` | 해당 없음 | 전 컴포넌트를 실제로 띄워 엔드 투 엔드로 돌리는 데모 런처 | Rust |
 
@@ -85,12 +85,12 @@ KOREN은 등록 IP 외 인바운드를 막고, 브리지 → 대전은 SSH 하�
 
 시스템의 중심. 다섯 가지를 한다.
 
-1. **관제탑 웹 서빙.** `skylens_client`가 빌드한 관제탑 페이지(HTML/CSS + wasm)를 내보낸다. 관제탑은 코어의 `ws /viewer`에 직결한다.
+1. **관제탑 화면.** 관제탑 화면 코드는 코어에 있다(`src/skylens_core/control/`, Rust crate `skylens-control`). 코어 서버가 그 웹 빌드를 서빙하고, 같은 코드는 데스크톱 네이티브 창으로도 뜬다. 관제탑은 코어의 `ws /control`에 직결하고, 제어(경로 배정·수동 조종)는 이 소켓으로만 들어온다. 관제탑에만 바탕 지도(지형·건물)가 간다.
 2. **데이터 전체 보관.** 프레임 메타·텔레메트리·증분 청크·탐지 마커. 이번 단계는 DB 없이 인메모리이고 세션이 끝나면 사라진다.
 3. **작업 오케스트레이션.** 대전 MediaMTX에서 프레임을 꺼내 모델 서버에 gRPC(`PushFrames`)로 넘기고, 모델이 낸 증분 청크를 gRPC(`SubscribeChunks`)로 받아 보관한다. 미리보기(preview)·정제(refined) 순서의 스케줄 결정권은 **코어에만** 있다.
 
 코어는 **청크 내용을 풀지 않는다.** 점·메시 블록·탐지 결과는 `payload` 바이트 그대로 보관하고 화면에 넘긴다. 코어가 읽는 것은 옆에 붙은 라우팅 메타데이터(종류·구간·수준·블록 id·version·세대)뿐이다.
-4. **배포.** 청크·마커·미션 상태를 화면들로 민다. 새 화면이 붙으면 보관분을 먼저 재생한다.
+4. **배포.** 청크·마커·미션 상태를 화면들로 민다. 새 화면이 붙으면 보관분을 먼저 재생한다. 현황판은 `ws /viewer`(읽기 전용)로 받고, 이 소켓으로 들어온 제어 메시지는 버린다.
 5. **라이브 영상 원점.** `deploy/`의 MediaMTX가 브리지 SRT를 당겨 WHEP로 쏜다. 영상 서버 코드는 0줄이다.
 
 ### 3.5 `skylens_model` (Rust 서버 · 판교)
@@ -107,22 +107,21 @@ UNet 쪽 규칙:
 - **파일마다 짝이 되는 `.rs`를 같은 폴더에 둔다.** `modeling_skylensnet.py` 옆에 `modeling_skylensnet.rs`가 있는 식이다. Rust 쪽은 추론에 필요한 만큼을 옮기고, **PyTorch와 같은 libtorch를 `tch`로 링크**해 학습과 같은 연산을 그대로 쓴다.
 - 3DGS 구현(`models/skylens/`의 COLMAP·gsplat 파이프라인)은 쓰지 않는다. 같은 폴더에서 cumulus3d 기반 Rust 구현으로 대체한다. 측정 기록(`RESULTS.md`)은 근거 자료로 남긴다.
 
-### 3.6 `skylens_client` (Rust + HTML/CSS)
+### 3.6 `skylens_client` (Rust + 이전 HTML/CSS)
 
-관제탑과 현황판이 같이 쓰는 UI 컴포넌트다.
+외부망 지휘관이 보는 **현황판**이다. 이전 `skylens_client`의 현황판 화면(`status.ts` · `statusview/` · `ui/`)을 옮긴 것이고, 이전의 웹서버·WebRTC 중계는 게이트웨이 nginx로 갔다.
 
-- **HTML/CSS가 원본이다.** 예전에 three.js 위에 띄우던 패널·위젯은 마크업과 스타일만 남기고, 웹과 네이티브가 같은 파일을 읽는다.
-- **렌더링은 pointblitz.** three.js는 버린다. 점군은 pointblitz 청크로 받고, 미리보기는 점을 덧붙이고 정제본은 세대째 교체한다. 첫 화면을 빨리 내기 위해 정제본은 성긴 것부터 보낸다.
-- **메시는 pointblitz에 메시 렌더 경로를 더해 그린다.** pointblitz는 점 렌더러라 deltamesh `BlockMesh`(정점·색·삼각형 인덱스)를 그리는 패스를 새로 붙인다. 블록 id로 버퍼를 관리하고, 더 새 `version`만 올리며, 삼각형 0개 블록은 내린다. 법선은 블록이 주지 않으므로 클라이언트에서 계산한다.
-- **UI 프레임워크는 Blitz다.** 웹과 데스크톱 네이티브 모두 Blitz(`blitz-dom`·`blitz-html`)가 같은 HTML/CSS를 그대로 읽어 그리고, 이벤트도 Blitz DOM에서 Rust로 처리한다. 3D 뷰 자리에는 pointblitz의 wgpu 출력을 끼운다.
-- **웹:** 같은 Rust 코드를 wasm으로 빌드한다(Blitz + pointblitz-web, WebGPU 우선·WebGL2 폴백). 코어(관제탑)와 브리지 nginx(현황판)가 서빙한다.
-- **데스크톱 네이티브:** 같은 Rust 코드를 `blitz-shell` 창으로 띄운다(pointblitz, Vulkan / DX12 / Metal).
-- **Android/iOS는 후순위.** 네이티브 경로가 굳은 뒤에 본다.
-- UI 상태와 이벤트 처리는 Blitz 위의 Rust 한 벌(`lib.rs`)이다. 웹과 네이티브가 갈리는 곳은 창·캔버스를 여는 진입점뿐이다.
+- 복원되어 도착한 것만 보인다. 바탕 지도(지형·건물)는 없다.
+- 코어의 `ws /viewer`(게이트웨이 → 프록시 경유)로 받기만 하고 제어 경로는 없다.
+- 이전 패널을 그대로 갖는다: 서버 패널과 구간별 수준 사다리, 미니맵, 점·고도색 토글과 인셋, 대기 배너, 카메라 상태 칩, 탐지 카드.
+- 웹(wasm)과 데스크톱 네이티브가 같은 코드이고, Android/iOS는 그 뒤다. 웹 빌드는 게이트웨이 nginx가 서빙한다.
 
 ### 3.7 `shared` (Rust)
 
-프로토콜 메시지와 GPS↔ENU 좌표 변환. 드론·모델·클라이언트·데모·테스트가 같이 쓴다.
+두 crate로 나뉜다.
+
+- `skylens-shared`(`src/shared/`): 프로토콜과 GPS↔ENU 좌표 변환. 드론·모델·화면·데모·테스트가 같이 쓴다. 화면 의존성이 없다.
+- `skylens-viewer`(`src/shared/viewer/`): 관제탑과 현황판이 같이 쓰는 화면 층. 이전 `shared/viewer/`에 해당한다. 공용 CSS(`style.css` 원본), 공용 위젯(패널 라벨 · 토스트 · 로딩 화면 · 탐지 카드), 코어 연결과 재접속, 청크 저장소, Blitz 문서 뼈대, pointblitz 3D 뷰와 카메라.
 
 - **코어↔모델 계약은 `proto/`의 protobuf다.** Rust는 tonic/prost(protox로 컴파일해 protoc가 필요 없다), Go는 같은 `.proto`에서 생성한 코드를 쓴다. 필드를 바꾸면 `.proto` 하나만 고친다.
 - 청크 `payload`(점·메시 블록·탐지 결과)의 인코딩은 `shared`가 정하고 화면이 푼다. 코어는 이 인코딩을 몰라도 된다.
@@ -147,6 +146,13 @@ UNet 쪽 규칙:
 
 복원·탐지·메시·배포는 데모에서도 실제 경로를 탄다. 파이프라인이 없으면 없다고 표시하고 시뮬레이션으로 메우지 않는다.
 
+### 3.10 화면 이식 원칙 (관제탑 · 현황판 공통)
+
+- **화면은 이전 TypeScript 화면과 같아야 한다.** 패널 배치, 문구, 색, 폰트, 애니메이션, 키 조작, 3D 모습까지 같다. 바뀌는 것은 렌더러(three.js → pointblitz)와 언어(TS → Rust)뿐이다.
+- **HTML/CSS는 이전 것을 그대로 쓴다.** CSS 파일(`style.css` · `panels.css` · `control.css` · `status-panels.css`)은 수정하지 않고 가져온다. 이전 화면은 HTML 셸이 비어 있고 TS가 런타임에 DOM을 만들었으므로, 이전 앱이 실제로 만든 DOM을 상태별로 떠 와서(`.worktrees/legacy-dom/`) 같은 태그·id·class 구조를 Blitz에 넘긴다. Rust는 마크업을 새로 짓지 않고 값과 class만 바꾼다.
+- **3D 뷰는 three.js 캔버스가 있던 자리에 pointblitz를 끼운다.** 이전 three.js 장면의 모습(지형 면과 위성 드레이프, 음영 프리즘 건물과 모서리선, 와이어프레임 드론과 궤적, 경로와 지상 패드, 안개와 배경색, 카메라 동작)을 pointblitz 패치(`third_party/pointblitz`)로 재현한다.
+- 폰트(Oswald · Barlow · IBM Plex Mono · Noto Sans KR)는 앱에 포함해 웹과 네이티브가 같은 글꼴을 쓴다.
+
 ---
 
 ## 4. 시나리오
@@ -168,18 +174,21 @@ UNet 쪽 규칙:
 ## 5. 디렉터리 구조
 
 ```
-Cargo.toml              Rust 워크스페이스 (shared · drone · model · client · demo · test)
+Cargo.toml              Rust 워크스페이스 (shared · shared/viewer · drone · model · core/control · client · demo · test)
+third_party/pointblitz/ pointblitz 패치본 ([patch.crates-io], 패스 안 그리기 · 메시 · 텍스처 · 선 · 안개)
 go.work                 Go 워크스페이스 (skylens_core)
 pyproject.toml          Python (UNet 학습 · 데이터셋)
 src/
-├─ shared/              Rust 공통 계약 (lib.rs) + proto/ (코어↔모델 gRPC 계약)
+├─ shared/              공통 계약 crate (lib.rs) + proto/ (gRPC · WebSocket 계약)
+│  └─ viewer/           두 화면 공용 층 crate (공용 CSS · 위젯 · 연결 · 3D 뷰)
 ├─ skylens_drone/       Rust Mission Bridge (main.rs)
 ├─ skylens_gateway/     브리지 nginx · MediaMTX · 설치 스크립트
 ├─ skylens_proxy/       대전 nginx 다중 경로
-├─ skylens_core/        Go 서버 (go.mod · main.go)
+├─ skylens_core/        Go 코어 서버 (go.mod · main.go · internal/ · terrain/)
+│  ├─ control/          관제탑 화면 crate (이전 HTML/CSS + Rust, 웹 · 네이티브)
 │  └─ deploy/           대전 MediaMTX · 설치 스크립트 · KOREN 배치 문서
 ├─ skylens_model/       Rust 서버(lib.rs · main.rs) + Python 학습 코드, 같은 폴더에 .py/.rs 짝
-├─ skylens_client/      Rust UI(lib.rs) + HTML/CSS
+├─ skylens_client/      현황판 화면 crate (이전 HTML/CSS + Rust, 웹 · 네이티브)
 ├─ test/                경계 테스트 crate + pytest
 └─ demo/                Rust 데모 런처
 res/static/             데모 자산 (영상 · 이미지 · 구간 자산)
@@ -196,7 +205,7 @@ res/static/             데모 자산 (영상 · 이미지 · 구간 자산)
 | 패널·위젯 | Blitz가 HTML/CSS를 그대로 그림 (wasm) | Blitz가 같은 HTML/CSS를 그림 |
 | 3D 뷰 | pointblitz-web (WebGPU / WebGL2) | pointblitz (Vulkan / DX12 / Metal) |
 | 상태·이벤트 | Blitz DOM 위 Rust → wasm | Blitz DOM 위 Rust 네이티브 |
-| 받는 것 | 코어가 미는 증분 청크 (복원 결과 + 지형·건물) | 같은 청크 |
+| 받는 것 | 코어가 미는 증분 청크. 관제탑은 지형·건물 포함, 현황판은 복원 결과만 | 같은 청크 |
 
 pointblitz는 서버에서 헤드리스로 그려 영상으로 보내는 모드도 있다. GPU가 약한 단말을 위한 대안으로 남겨 둔다.
 
@@ -206,7 +215,7 @@ pointblitz는 서버에서 헤드리스로 그려 영상으로 보내는 모드�
 
 | 컴포넌트 | 호스트 | 포트 | 엔드포인트 |
 |---|---|---:|---|
-| `skylens_core` | 대전 | 8080 | `ws /uplink` · `ws /viewer` · `GET /health` · 관제탑 웹 |
+| `skylens_core` | 대전 | 8080 | `ws /uplink`(드론) · `ws /control`(관제탑, 제어 가능) · `ws /viewer`(현황판, 읽기 전용) · `GET /site` · `GET /vworld/*`(키를 서버에서 붙이는 VWorld 프록시) · `GET /health` · 관제탑 웹 |
 | `skylens_proxy` | 대전 | 8082 | 코어로 넘김 · `GET /health` · `GET /core/health` |
 | `skylens_gateway` | 브리지 | 80 | `/` 현황판 웹 · `/live/` WHEP · `/healthz` |
 | `skylens_gateway` MediaMTX | 브리지 | 10890/udp | 드론 SRT 수신 |
@@ -265,7 +274,7 @@ pointblitz는 서버에서 헤드리스로 그려 영상으로 보내는 모드�
 
 **HTML/CSS를 원본으로 삼고 Blitz로 그린다.** Blitz가 HTML/CSS를 그대로 그리므로 웹과 네이티브가 UI를 두 벌 만들지 않는다. 웹에서도 브라우저 DOM이 아니라 Blitz를 쓰므로 이벤트 처리 코드도 한 벌이다.
 
-**관제탑 지형·건물도 pointblitz로 그리고 서버가 증분으로 준다.** three.js를 버리므로 지형(AWS Terrain Tiles DEM)·위성 드레이프(VWorld WMTS)·건물(VWorld WFS)도 복원 결과와 같은 렌더러를 쓴다. 코어가 지형·건물 데이터를 pointblitz 청크로 바꿔 화면이 보는 영역부터 증분으로 내보내고, 화면은 복원 청크와 같은 경로로 받는다.
+**관제탑 지형·건물도 pointblitz로 그리고 서버가 증분으로 준다.** three.js를 버리므로 지형(AWS Terrain Tiles DEM)·위성 드레이프(VWorld WMTS)·건물(VWorld WFS)도 같은 렌더러를 쓴다. 코어는 셀마다 지형 타일(DEM 격자 + 위성 영상)과 건물 외곽선·높이를 원본 그대로 보내고, 모습(색 보정·압출·모서리선·표시 옵션)은 관제탑이 이전 three.js와 같은 규칙으로 만든다. 접속 직후 작전 구역부터 보내므로 관제탑은 처음부터 지도가 보인다.
 
 ### 열린 결정
 
@@ -285,7 +294,8 @@ pointblitz는 서버에서 헤드리스로 그려 영상으로 보내는 모드�
 | 3 | `skylens_drone`: Mission Bridge Rust 포팅 + 코어 업링크 | 코드 완료 (테스트 57개 통과, 실기체 미검증) |
 | 4 | `skylens_core`: Go 서버 + gRPC 클라이언트 + 지형·건물 pointblitz 청크 | 코드 완료 (go test 통과) |
 | 5 | `skylens_model`: REST·gRPC + cumulus3d 라이브 복원 + deltamesh + UNet(tch) 훅·보간 | 코드 완료 (테스트 179개 통과, 실데이터 미검증) |
-| 6 | `skylens_client`: Blitz + pointblitz 화면 + 메시 렌더 경로 | 코드 완료 (테스트 63개 통과, 화면 확인 중). 점·메시 가림 처리는 pointblitz 패치 대기 |
+| 6 | 화면: 1차 이식은 이전 화면과 달라 다시 한다. 관제탑은 `skylens_core/control`, 현황판은 `skylens_client`, 공용 층은 `shared/viewer`로 나누고 이전 HTML/CSS·DOM을 그대로 쓴다(§3.10) | 재작업 중 |
+| 6' | pointblitz 패치(`third_party/pointblitz`): 패스 안 그리기 · 메시 · 텍스처 · 선 · 안개 · 배경색 | 재작업 중 |
 | 7 | 게이트웨이 nginx 경로·터널 8082 | 완료 |
 | 8 | `demo`: 엔드 투 엔드 런처 | 대기 |
 | 9 | `legacy/` 전부 삭제 | 대기 |

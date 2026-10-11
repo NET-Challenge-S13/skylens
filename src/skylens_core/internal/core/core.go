@@ -1,7 +1,17 @@
-// Package core wires the core's parts together: uplink and viewer sockets,
-// the mission state machine, the in-memory store, the model server streams,
-// the frame pipeline and the terrain feed. It is an I/O server; it never
-// decodes chunk payloads (COMPONENTS.md §3.4, §9).
+// Package core wires the core's parts together: the uplink and the two screen
+// sockets, the mission state machine, the in-memory store, the model server
+// streams, the frame pipeline and the base map feed. It is an I/O server; it
+// never decodes chunk payloads (COMPONENTS.md §3.4, §9).
+//
+// Screens come in two kinds:
+//
+//	ws /control  the control tower: everything plus the base map (terrain and
+//	             buildings); the only socket whose assign_route and
+//	             manual_control are accepted
+//	ws /viewer   status boards (through the gateway): read-only, never the
+//	             base map; anything they send is dropped and logged
+//
+// Both get the Site first on connect, then the replay, then live updates.
 package core
 
 import (
@@ -36,7 +46,8 @@ const (
 
 // TerrainStreamer is what the core needs from terrain.Feed.
 type TerrainStreamer interface {
-	Stream(ctx context.Context, area terrain.Area, center *modelv1.Gps, style terrain.Style) <-chan *modelv1.Chunk
+	Stream(ctx context.Context, area terrain.Area, center *modelv1.Gps) <-chan *modelv1.Chunk
+	Status() terrain.Status
 }
 
 // Options assemble a Core.
@@ -44,9 +55,9 @@ type Options struct {
 	Config config.Config
 	// Model is the model server; nil runs without one (tests).
 	Model modelclient.API
-	// NewTerrain builds the terrain feed once the anchor is known; nil turns
-	// terrain off.
-	NewTerrain func(anchor *modelv1.Gps) TerrainStreamer
+	// Terrain is the base map feed, anchored at Config.Site.Anchor. Nil (or
+	// Config.Terrain false) runs without a base map.
+	Terrain TerrainStreamer
 	// Frames builds the frame source of a drone; nil means frames only come
 	// in through InjectFrame.
 	Frames frames.Factory
@@ -56,14 +67,15 @@ type Options struct {
 
 // Core is the running server state.
 type Core struct {
-	cfg        config.Config
-	model      modelclient.API
-	newTerrain func(*modelv1.Gps) TerrainStreamer
+	cfg     config.Config
+	model   modelclient.API
+	terrain TerrainStreamer
 
-	Store   *store.Store
-	Mission *mission.Mission
-	Viewers *ws.Hub
-	Uplinks *ws.Hub
+	Store    *store.Store
+	Mission  *mission.Mission
+	Controls *ws.Hub // ws /control: the control tower
+	Viewers  *ws.Hub // ws /viewer: status boards, read-only
+	Uplinks  *ws.Hub
 
 	frames  *frames.Manager
 	grouper *frames.Grouper
@@ -76,9 +88,10 @@ type Core struct {
 
 	mu            sync.Mutex
 	owners        map[uint32]*ws.Peer // drone id -> uplink that said hello
-	terrainFeed   TerrainStreamer
+	terrainArea   terrain.Area        // everything streamed so far (site + routes)
 	terrainCancel context.CancelFunc
 	terrainChunks uint64
+	lastSite      *viewerv1.Site // last Site broadcast, to send changes only
 	lastUplinkAt  time.Time
 	lastFrameAt   time.Time
 	framesIn      uint64
@@ -88,27 +101,29 @@ type Core struct {
 	healthErr     string
 }
 
-// New builds a core. Call Run to start its loops.
+// New builds a core. Call Run to start its loops (and the base map).
 func New(opts Options) *Core {
 	ctx, cancel := context.WithCancel(context.Background())
 	c := &Core{
-		cfg:        opts.Config,
-		model:      opts.Model,
-		newTerrain: opts.NewTerrain,
-		Store:      store.New(store.Options{DetectionsPerSegment: opts.Config.DetectionsPerSegment}),
-		Viewers:    ws.NewHub(viewerv1.ComponentId_COMPONENT_ID_CORE),
-		Uplinks:    ws.NewHub(viewerv1.ComponentId_COMPONENT_ID_CORE),
-		ctx:        ctx,
-		cancel:     cancel,
-		start:      time.Now(),
-		owners:     map[uint32]*ws.Peer{},
+		cfg:      opts.Config,
+		model:    opts.Model,
+		terrain:  opts.Terrain,
+		Store:    store.New(store.Options{DetectionsPerSegment: opts.Config.DetectionsPerSegment}),
+		Controls: ws.NewHub(viewerv1.ComponentId_COMPONENT_ID_CORE),
+		Viewers:  ws.NewHub(viewerv1.ComponentId_COMPONENT_ID_CORE),
+		Uplinks:  ws.NewHub(viewerv1.ComponentId_COMPONENT_ID_CORE),
+		ctx:      ctx,
+		cancel:   cancel,
+		start:    time.Now(),
+		owners:   map[uint32]*ws.Peer{},
 	}
+	c.lastSite = c.Site()
 	c.Mission = mission.New(mission.Options{
 		AssignedHold: opts.Config.AssignedHold,
 		DroneETA:     opts.Config.DroneETA,
 		Clock:        opts.Clock,
 		OnChange: func(s *viewerv1.MissionStatus) {
-			c.Viewers.Broadcast(missionEnv(s))
+			c.broadcast(missionEnv(s))
 		},
 	})
 
@@ -141,8 +156,11 @@ func New(opts Options) *Core {
 	return c
 }
 
-// Run starts the background loops and blocks until ctx is done.
+// Run starts the base map stream and the background loops, and blocks until
+// ctx is done.
 func (c *Core) Run(ctx context.Context) {
+	c.StartBaseMap()
+
 	var wg sync.WaitGroup
 	spawn := func(f func(context.Context)) {
 		wg.Add(1)
@@ -201,31 +219,63 @@ func serverEnv(s *viewerv1.ServerStatus) *viewerv1.Envelope {
 	return &viewerv1.Envelope{Body: &viewerv1.Envelope_ServerStatus{ServerStatus: s}}
 }
 
+func siteEnv(s *viewerv1.Site) *viewerv1.Envelope {
+	return &viewerv1.Envelope{Body: &viewerv1.Envelope_Site{Site: s}}
+}
+
+// ---- fan-out to screens -----------------------------------------------------------
+
+// publish runs mutate once and sends what it returns to both screen sockets.
+// It holds both hub locks (control first, always), so a screen attaching on
+// either socket sees the update exactly once, in its replay or live.
+func (c *Core) publish(mutate func() []*viewerv1.Envelope) {
+	c.Controls.Publish(func() []*viewerv1.Envelope {
+		var envs []*viewerv1.Envelope
+		c.Viewers.Publish(func() []*viewerv1.Envelope {
+			envs = mutate()
+			return envs
+		})
+		return envs
+	})
+}
+
+// broadcast sends envelopes to every screen.
+func (c *Core) broadcast(envs ...*viewerv1.Envelope) {
+	c.publish(func() []*viewerv1.Envelope { return envs })
+}
+
 // ---- chunks --------------------------------------------------------------------
 
 // PutChunk stores a chunk (from the model or the terrain feed) and forwards it
-// to viewers if the replacement rules kept it.
+// to the screens if the replacement rules kept it. Base map chunks go to the
+// control tower only.
 func (c *Core) PutChunk(ch *modelv1.Chunk) {
-	c.Viewers.Publish(func() []*viewerv1.Envelope {
+	keep := func() []*viewerv1.Envelope {
 		if !c.Store.Put(ch) {
 			return nil
 		}
 		return []*viewerv1.Envelope{chunkEnv(ch)}
-	})
+	}
+	if store.IsBaseMap(ch.GetKind()) {
+		c.Controls.Publish(keep)
+		return
+	}
+	c.publish(keep)
 }
 
-// ---- viewer side ---------------------------------------------------------------
+// ---- screen sockets --------------------------------------------------------------
 
-// ViewerHandler serves ws /viewer.
+// ControlHandler serves ws /control (the control tower).
+func (c *Core) ControlHandler() ws.Handler { return controlHandler{c} }
+
+// ViewerHandler serves ws /viewer (status boards, read-only).
 func (c *Core) ViewerHandler() ws.Handler { return viewerHandler{c} }
 
-type viewerHandler struct{ c *Core }
-
-// Snapshot replays the current state in the order a screen would have
-// received it live: mission, links, route, drones, video, the world, status.
-func (h viewerHandler) Snapshot(*ws.Peer) []*viewerv1.Envelope {
-	c := h.c
-	out := []*viewerv1.Envelope{missionEnv(c.Mission.Status())}
+// snapshot replays the current state in the order a screen would have
+// received it live: the site, mission, links, route, drones, video, the
+// world, status. baseMap adds terrain and buildings (control tower only).
+func (c *Core) snapshot(baseMap bool) []*viewerv1.Envelope {
+	out := []*viewerv1.Envelope{siteEnv(c.Site()), missionEnv(c.Mission.Status())}
 	for _, l := range c.Store.Links() {
 		out = append(out, linkEnv(l))
 	}
@@ -238,16 +288,23 @@ func (h viewerHandler) Snapshot(*ws.Peer) []*viewerv1.Envelope {
 	for _, f := range c.Store.CameraFeeds() {
 		out = append(out, feedEnv(f))
 	}
-	for _, ch := range c.Store.Chunks() {
+	chunks := c.Store.ModelChunks()
+	if baseMap {
+		chunks = c.Store.Chunks()
+	}
+	for _, ch := range chunks {
 		out = append(out, chunkEnv(ch))
 	}
 	return append(out, serverEnv(c.ServerStatus()))
 }
 
-func (h viewerHandler) Attached(*ws.Peer) {}
-func (h viewerHandler) Detached(*ws.Peer) {}
+type controlHandler struct{ c *Core }
 
-func (h viewerHandler) Message(p *ws.Peer, env *viewerv1.Envelope) {
+func (h controlHandler) Snapshot(*ws.Peer) []*viewerv1.Envelope { return h.c.snapshot(true) }
+func (h controlHandler) Attached(*ws.Peer)                      {}
+func (h controlHandler) Detached(*ws.Peer)                      {}
+
+func (h controlHandler) Message(p *ws.Peer, env *viewerv1.Envelope) {
 	c := h.c
 	switch body := env.GetBody().(type) {
 	case *viewerv1.Envelope_AssignRoute:
@@ -261,22 +318,34 @@ func (h viewerHandler) Message(p *ws.Peer, env *viewerv1.Envelope) {
 		}
 		c.Uplinks.Broadcast(env)
 	default:
-		log.Printf("[core] viewer peer %d sent %T; screens only send assign_route and manual_control", p.ID, body)
+		log.Printf("[core] control peer %d sent %T; the control tower sends assign_route and manual_control", p.ID, body)
 	}
 }
 
-// AssignRoute handles an assign_route from the control tower. from may be nil.
+type viewerHandler struct{ c *Core }
+
+func (h viewerHandler) Snapshot(*ws.Peer) []*viewerv1.Envelope { return h.c.snapshot(false) }
+func (h viewerHandler) Attached(*ws.Peer)                      {}
+func (h viewerHandler) Detached(*ws.Peer)                      {}
+
+// Message drops everything: status boards have no control path.
+func (h viewerHandler) Message(p *ws.Peer, env *viewerv1.Envelope) {
+	log.Printf("[core] viewer peer %d (%s) sent %T; dropped, status boards are read-only", p.ID, p.Remote, env.GetBody())
+}
+
+// AssignRoute handles an assign_route from the control tower. from (a
+// control peer) may be nil.
 func (c *Core) AssignRoute(env *viewerv1.Envelope, from *ws.Peer) {
 	r := env.GetAssignRoute()
 	if len(r.GetWaypoints()) < 2 {
 		log.Printf("[core] assign_route ignored: %d waypoint(s)", len(r.GetWaypoints()))
 		if from != nil {
-			c.Viewers.Send(from, missionEnv(c.Mission.Status()))
+			c.Controls.Send(from, missionEnv(c.Mission.Status()))
 		}
 		return
 	}
 	// Screens draw the line so the operator sees what the fleet was given.
-	c.Viewers.Publish(func() []*viewerv1.Envelope {
+	c.publish(func() []*viewerv1.Envelope {
 		c.Store.SetRoute(r)
 		return []*viewerv1.Envelope{env}
 	})
@@ -288,7 +357,7 @@ func (c *Core) AssignRoute(env *viewerv1.Envelope, from *ws.Peer) {
 		c.Uplinks.Broadcast(env)
 	}
 	c.Mission.RouteAssigned()
-	c.startTerrain(r)
+	c.extendBaseMap(r.GetWaypoints())
 }
 
 // ---- uplink side ---------------------------------------------------------------
@@ -345,13 +414,13 @@ func (h uplinkHandler) Message(p *ws.Peer, env *viewerv1.Envelope) {
 		// Never an arrival: a drone still flying to the site sends telemetry
 		// too, and counting it would skip the waiting phase.
 		t := body.Telemetry
-		c.Viewers.Publish(func() []*viewerv1.Envelope {
+		c.publish(func() []*viewerv1.Envelope {
 			c.Store.PutTelemetry(t)
 			return []*viewerv1.Envelope{env}
 		})
 	case *viewerv1.Envelope_LinkStatus:
 		l := body.LinkStatus
-		c.Viewers.Publish(func() []*viewerv1.Envelope {
+		c.publish(func() []*viewerv1.Envelope {
 			if !c.Store.PutLink(l) {
 				return nil
 			}
@@ -392,7 +461,7 @@ func (c *Core) DroneHello(h *viewerv1.DroneHello, from *ws.Peer) {
 		Station: h.GetStation(),
 		WhepUrl: config.Expand(c.cfg.WHEPBase, id, station, path),
 	}
-	c.Viewers.Publish(func() []*viewerv1.Envelope {
+	c.publish(func() []*viewerv1.Envelope {
 		c.Store.PutCameraFeed(feed)
 		return []*viewerv1.Envelope{feedEnv(feed)}
 	})
@@ -446,81 +515,6 @@ func FrameFactory(cfg config.Config) frames.Factory {
 	}
 }
 
-// ---- terrain ---------------------------------------------------------------------
-
-// TerrainStyle maps the config value to terrain.Style.
-func TerrainStyle(s string) terrain.Style {
-	switch s {
-	case "aerial":
-		return terrain.StyleAerial
-	case "points":
-		return terrain.StylePoints
-	}
-	return terrain.StyleBlack
-}
-
-// RouteArea is the bounding box of the waypoints grown by margin metres.
-func RouteArea(wps []*modelv1.Gps, marginM float64) terrain.Area {
-	if len(wps) == 0 {
-		return terrain.Area{}
-	}
-	a := terrain.Area{MinLat: 90, MinLon: 180, MaxLat: -90, MaxLon: -180}
-	for _, w := range wps {
-		a.MinLat = math.Min(a.MinLat, w.GetLat())
-		a.MaxLat = math.Max(a.MaxLat, w.GetLat())
-		a.MinLon = math.Min(a.MinLon, w.GetLon())
-		a.MaxLon = math.Max(a.MaxLon, w.GetLon())
-	}
-	const mPerDegLat = 111_320.0
-	midLat := (a.MinLat + a.MaxLat) / 2
-	dLat := marginM / mPerDegLat
-	dLon := marginM / (mPerDegLat * math.Max(math.Cos(midLat*math.Pi/180), 1e-6))
-	a.MinLat, a.MaxLat = math.Max(-90, a.MinLat-dLat), math.Min(90, a.MaxLat+dLat)
-	a.MinLon, a.MaxLon = math.Max(-180, a.MinLon-dLon), math.Min(180, a.MaxLon+dLon)
-	return a
-}
-
-// startTerrain streams the ground under a new route. The feed is built once,
-// with the configured anchor or the first route's first waypoint, so every
-// chunk of the session shares one ENU frame. A new route cancels the previous
-// stream; cells already stored stay.
-func (c *Core) startTerrain(r *viewerv1.AssignRoute) {
-	if c.newTerrain == nil || !c.cfg.Terrain {
-		return
-	}
-	wps := r.GetWaypoints()
-	c.mu.Lock()
-	if c.terrainFeed == nil {
-		anchor := c.cfg.Anchor
-		if anchor == nil {
-			anchor = proto.Clone(wps[0]).(*modelv1.Gps)
-		}
-		log.Printf("[core] terrain anchor %.6f, %.6f, %.1f", anchor.GetLat(), anchor.GetLon(), anchor.GetAlt())
-		c.terrainFeed = c.newTerrain(anchor)
-	}
-	if c.terrainCancel != nil {
-		c.terrainCancel()
-	}
-	ctx, cancel := context.WithCancel(c.ctx)
-	c.terrainCancel = cancel
-	feed := c.terrainFeed
-	c.mu.Unlock()
-
-	area := RouteArea(wps, c.cfg.TerrainMargin)
-	ch := feed.Stream(ctx, area, wps[0], TerrainStyle(c.cfg.TerrainStyle))
-	go func() {
-		n := 0
-		for chunk := range ch {
-			c.PutChunk(chunk)
-			n++
-		}
-		c.mu.Lock()
-		c.terrainChunks += uint64(n)
-		c.mu.Unlock()
-		log.Printf("[core] terrain stream ended after %d chunk(s)", n)
-	}()
-}
-
 // ---- status ----------------------------------------------------------------------
 
 func (c *Core) setLink(hop string, up bool, err error) {
@@ -530,7 +524,7 @@ func (c *Core) setLink(hop string, up bool, err error) {
 		log.Printf("[core] %s down: %v", hop, err)
 	}
 	l := &viewerv1.LinkStatus{Hop: hop, Connected: up}
-	c.Viewers.Publish(func() []*viewerv1.Envelope {
+	c.publish(func() []*viewerv1.Envelope {
 		if !c.Store.PutLink(l) {
 			return nil
 		}
@@ -547,7 +541,7 @@ func (c *Core) ServerStatus() *viewerv1.ServerStatus {
 	s := &viewerv1.ServerStatus{
 		Connected:  c.modelUp,
 		Receiving:  receiving,
-		Chunks:     cnt.Accepted,
+		Chunks:     cnt.Model, // the base map is not reconstruction; boards never see it
 		Detections: cnt.Detections,
 		LastSeq:    cnt.LastModelSeq,
 	}
@@ -577,7 +571,8 @@ func (c *Core) statusLoop(ctx context.Context) {
 			if ms := c.Mission.Status(); ms.EtaSeconds != nil {
 				envs = append(envs, missionEnv(ms))
 			}
-			c.Viewers.Broadcast(envs...)
+			c.broadcast(envs...)
+			c.PublishSiteIfChanged()
 		}
 	}
 }
@@ -627,10 +622,24 @@ func (c *Core) HealthHandler() http.Handler {
 		terrainChunks := c.terrainChunks
 		c.mu.Unlock()
 		ms := c.Mission.Status()
+		site := c.Site()
+		terrainInfo := map[string]any{
+			"enabled":   c.baseMapOn(),
+			"vworld":    c.cfg.VWorldKey != "",
+			"chunks":    terrainChunks,
+			"imagery":   site.GetImagery(),
+			"buildings": site.GetBuildings(),
+		}
+		if c.terrain != nil {
+			st := c.terrain.Status()
+			terrainInfo["cells"] = st.Cells
+			terrainInfo["building_count"] = st.BuildingCount
+		}
 		body := map[string]any{
 			"ok":         true,
 			"component":  "skylens_core",
 			"uptime_sec": int(time.Since(c.start).Seconds()),
+			"site":       siteJSON(site, c.cfg.Site.Source),
 			"mission": map[string]any{
 				"phase":         ms.GetPhase().String(),
 				"message":       ms.GetMessage(),
@@ -655,22 +664,24 @@ func (c *Core) HealthHandler() http.Handler {
 				"dropped":    ps.Dropped,
 				"redeclared": ps.Redeclare,
 			},
-			"terrain": map[string]any{
-				"enabled": c.cfg.Terrain && c.newTerrain != nil,
-				"vworld":  c.cfg.VWorldKey != "",
-				"chunks":  terrainChunks,
-			},
+			"terrain": terrainInfo,
 			"sockets": map[string]any{
-				"viewers":     c.Viewers.Len(),
-				"uplinks":     c.Uplinks.Len(),
-				"viewer_sent": c.Viewers.Sent(),
-				"uplink_sent": c.Uplinks.Sent(),
+				"controls":     c.Controls.Len(),
+				"viewers":      c.Viewers.Len(),
+				"uplinks":      c.Uplinks.Len(),
+				"control_sent": c.Controls.Sent(),
+				"viewer_sent":  c.Viewers.Sent(),
+				"uplink_sent":  c.Uplinks.Sent(),
 			},
 		}
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Cache-Control", "no-store")
-		enc := json.NewEncoder(w)
-		enc.SetIndent("", "  ")
-		_ = enc.Encode(body)
+		writeJSON(w, body)
 	})
+}
+
+func writeJSON(w http.ResponseWriter, body any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	enc := json.NewEncoder(w)
+	enc.SetIndent("", "  ")
+	_ = enc.Encode(body)
 }

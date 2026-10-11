@@ -2,6 +2,8 @@
 resolver = "3"
 members = [
     "src/shared",
+    "src/shared/viewer",
+    "src/skylens_core/control",
     "src/skylens_drone",
     "src/skylens_model",
     "src/skylens_client",
@@ -19,6 +21,7 @@ publish = false
 # Members opt into these with `foo.workspace = true`. Entries nobody uses are not resolved.
 [workspace.dependencies]
 skylens-shared = { path = "src/shared" }
+skylens-viewer = { path = "src/shared/viewer" }
 
 # common
 anyhow = "1"
@@ -63,3 +66,10 @@ wgpu = "30"
 [profile.release]
 codegen-units = 1
 lto = "thin"
+
+# pointblitz with SkyLens changes kept in-repo (third_party/pointblitz/PATCHES.md):
+# drawing into a caller-owned pass, meshes, textures, lines, fog and background colour.
+[patch.crates-io]
+pointblitz = { path = "third_party/pointblitz/pointblitz" }
+pointblitz-core = { path = "third_party/pointblitz/pointblitz-core" }
+pointblitz-io = { path = "third_party/pointblitz/pointblitz-io" }

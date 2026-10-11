@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -45,14 +46,124 @@ type Config struct {
 	// Store.
 	DetectionsPerSegment int // SKYLENS_CORE_DETECTIONS_PER_SEGMENT
 
-	// Terrain.
-	Terrain       bool         // SKYLENS_CORE_TERRAIN (default on)
-	TerrainStyle  string       // SKYLENS_CORE_TERRAIN_STYLE: black | aerial | points
-	TerrainMargin float64      // SKYLENS_CORE_TERRAIN_MARGIN_M
-	TerrainCache  string       // SKYLENS_CORE_TERRAIN_CACHE
-	Anchor        *modelv1.Gps // SKYLENS_CORE_ANCHOR "lat,lon[,alt]"; nil = first route waypoint
-	VWorldKey     string       // from .env.vworld or VWORLD_KEY; never sent to clients
-	VWorldFrom    string       // where the key came from, for the log (never the key)
+	// Operating area. Site.Anchor is the session's fixed ENU origin
+	// (SKYLENS_CORE_SITE, SKYLENS_CORE_ANCHOR).
+	Site Site
+
+	// Base map (terrain and buildings, control tower only).
+	Terrain       bool    // SKYLENS_CORE_TERRAIN (default on)
+	TerrainMargin float64 // SKYLENS_CORE_TERRAIN_MARGIN_M, around a route
+	TerrainCache  string  // SKYLENS_CORE_TERRAIN_CACHE
+	VWorldKey     string  // from .env.vworld or VWORLD_KEY; never sent to clients
+	VWorldFrom    string  // where the key came from, for the log (never the key)
+}
+
+// Site is the operating area: a lat/lon box and the anchor every ENU
+// coordinate of the session is measured from.
+type Site struct {
+	Name                           string
+	MinLat, MinLon, MaxLat, MaxLon float64
+	Anchor                         *modelv1.Gps
+	// Source says where the area came from: "default" (no SKYLENS_CORE_SITE)
+	// or "config".
+	Source string
+}
+
+// Preset is a named operating area. Bbox is [west, south, east, north] in
+// degrees, as the legacy terrainSource.ts PRESETS.
+type Preset struct {
+	Bbox [4]float64
+	// Anchor is the preset's ENU origin; nil means the box centre at
+	// sea level.
+	Anchor *modelv1.Gps
+}
+
+// DefaultSite is the preset used when SKYLENS_CORE_SITE is unset.
+const DefaultSite = "daejeon"
+
+// Presets are the legacy control tower's map presets.
+var Presets = map[string]Preset{
+	// Reference scene and demo flight area: Yuseong, Daejeon, around
+	// Chungnam National University with KAIST to the east (~3 km). The anchor
+	// is the legacy CONFIG.geo.anchor (its centre, 30 m).
+	"daejeon": {Bbox: [4]float64{127.33, 36.355, 127.365, 36.382}, Anchor: &modelv1.Gps{Lat: 36.3685, Lon: 127.3475, Alt: 30}},
+	// Gyeongbokgung, Seoul (~2.5 km), dense city blocks.
+	"seoul": {Bbox: [4]float64{126.964, 37.5555, 126.992, 37.5775}},
+	// 2022 Uljin-Samcheok wildfire area.
+	"uljin": {Bbox: [4]float64{129.22, 37.0, 129.36, 37.12}},
+	// Uljin town (~1.8 km).
+	"uljinup": {Bbox: [4]float64{129.39, 36.985, 129.41, 37.0}},
+	// 2023 Gangneung wildfire area.
+	"gangneung": {Bbox: [4]float64{128.83, 37.74, 128.93, 37.82}},
+}
+
+// ParseSite reads SKYLENS_CORE_SITE:
+//
+//	""                         the default preset (daejeon)
+//	"daejeon", "seoul", ...    a preset by name
+//	"west,south,east,north"    a custom box (anchor: its centre at sea level)
+//	"lat,lon[,alt]"            the legacy point form: a box the size of the
+//	                           default preset centred on the point, which is
+//	                           also the anchor
+func ParseSite(v string) (Site, error) {
+	v = strings.TrimSpace(v)
+	if v == "" {
+		s := presetSite(DefaultSite)
+		s.Source = "default"
+		return s, nil
+	}
+	if _, ok := Presets[strings.ToLower(v)]; ok {
+		s := presetSite(strings.ToLower(v))
+		s.Source = "config"
+		return s, nil
+	}
+	parts := strings.Split(v, ",")
+	nums := make([]float64, len(parts))
+	for i, p := range parts {
+		f, err := strconv.ParseFloat(strings.TrimSpace(p), 64)
+		if err != nil {
+			return Site{}, fmt.Errorf("%q: want a preset name, west,south,east,north or lat,lon[,alt]", v)
+		}
+		nums[i] = f
+	}
+	switch len(nums) {
+	case 4:
+		w, s, e, n := nums[0], nums[1], nums[2], nums[3]
+		if w < -180 || e > 180 || s < -90 || n > 90 || w >= e || s >= n {
+			return Site{}, fmt.Errorf("%q: not a west,south,east,north box", v)
+		}
+		return Site{
+			Name: "custom", MinLat: s, MinLon: w, MaxLat: n, MaxLon: e,
+			Anchor: &modelv1.Gps{Lat: (s + n) / 2, Lon: (w + e) / 2},
+			Source: "config",
+		}, nil
+	case 2, 3:
+		g, err := ParseGps(v)
+		if err != nil {
+			return Site{}, err
+		}
+		d := Presets[DefaultSite].Bbox
+		halfLon, halfLat := (d[2]-d[0])/2, (d[3]-d[1])/2
+		return Site{
+			Name:   "custom",
+			MinLat: math.Max(-90, g.Lat-halfLat), MinLon: math.Max(-180, g.Lon-halfLon),
+			MaxLat: math.Min(90, g.Lat+halfLat), MaxLon: math.Min(180, g.Lon+halfLon),
+			Anchor: g,
+			Source: "config",
+		}, nil
+	}
+	return Site{}, fmt.Errorf("%q: want a preset name, west,south,east,north or lat,lon[,alt]", v)
+}
+
+func presetSite(name string) Site {
+	p := Presets[name]
+	s := Site{Name: name, MinLon: p.Bbox[0], MinLat: p.Bbox[1], MaxLon: p.Bbox[2], MaxLat: p.Bbox[3]}
+	if p.Anchor != nil {
+		s.Anchor = &modelv1.Gps{Lat: p.Anchor.GetLat(), Lon: p.Anchor.GetLon(), Alt: p.Anchor.GetAlt()}
+	} else {
+		s.Anchor = &modelv1.Gps{Lat: (s.MinLat + s.MaxLat) / 2, Lon: (s.MinLon + s.MaxLon) / 2}
+	}
+	return s
 }
 
 // Load reads the configuration. getenv is os.Getenv in production. cwd is
@@ -83,7 +194,7 @@ func Load(getenv func(string) string, cwd string) (Config, error) {
 
 	c := Config{
 		Addr:      str("SKYLENS_CORE_ADDR", ":8080"),
-		WebDir:    str("SKYLENS_CORE_WEB_DIR", "src/skylens_client/dist"),
+		WebDir:    str("SKYLENS_CORE_WEB_DIR", "src/skylens_core/control/dist"),
 		ModelGRPC: str("SKYLENS_MODEL_GRPC", "127.0.0.1:8101"),
 
 		FrameSource:   strings.ToLower(str("SKYLENS_CORE_FRAME_SOURCE", "ffmpeg")),
@@ -106,7 +217,6 @@ func Load(getenv func(string) string, cwd string) (Config, error) {
 		DetectionsPerSegment: int(num("SKYLENS_CORE_DETECTIONS_PER_SEGMENT", 256)),
 
 		Terrain:       !isOff(getenv("SKYLENS_CORE_TERRAIN")),
-		TerrainStyle:  strings.ToLower(str("SKYLENS_CORE_TERRAIN_STYLE", "black")),
 		TerrainMargin: num("SKYLENS_CORE_TERRAIN_MARGIN_M", 500),
 		TerrainCache:  str("SKYLENS_CORE_TERRAIN_CACHE", defaultCache()),
 	}
@@ -116,20 +226,22 @@ func Load(getenv func(string) string, cwd string) (Config, error) {
 	default:
 		errs = append(errs, fmt.Errorf("SKYLENS_CORE_FRAME_SOURCE=%q: want ffmpeg or off", c.FrameSource))
 	}
-	switch c.TerrainStyle {
-	case "black", "aerial", "points":
-	default:
-		errs = append(errs, fmt.Errorf("SKYLENS_CORE_TERRAIN_STYLE=%q: want black, aerial or points", c.TerrainStyle))
-	}
 	if c.FrameFPS <= 0 {
 		errs = append(errs, fmt.Errorf("SKYLENS_CORE_FRAME_FPS must be positive"))
 	}
+	site, err := ParseSite(getenv("SKYLENS_CORE_SITE"))
+	if err != nil {
+		errs = append(errs, fmt.Errorf("SKYLENS_CORE_SITE: %w", err))
+		site, _ = ParseSite("")
+	}
+	c.Site = site
 	if v := strings.TrimSpace(getenv("SKYLENS_CORE_ANCHOR")); v != "" {
 		a, err := ParseGps(v)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("SKYLENS_CORE_ANCHOR: %w", err))
+		} else {
+			c.Site.Anchor = a
 		}
-		c.Anchor = a
 	}
 
 	// VWorld key: an explicit variable wins, then the key file in the

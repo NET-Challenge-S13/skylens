@@ -246,8 +246,8 @@ const (
 	ChunkKind_CHUNK_KIND_POINTS      ChunkKind = 1 // pointblitz chunk
 	ChunkKind_CHUNK_KIND_MESH_BLOCK  ChunkKind = 2 // skylens.payload.v1.MeshBlock
 	ChunkKind_CHUNK_KIND_DETECTIONS  ChunkKind = 3 // skylens.payload.v1.DetectionBatch
-	ChunkKind_CHUNK_KIND_TERRAIN     ChunkKind = 4 // pointblitz chunk, produced by the core terrain feed
-	ChunkKind_CHUNK_KIND_BUILDINGS   ChunkKind = 5 // pointblitz chunk, produced by the core terrain feed
+	ChunkKind_CHUNK_KIND_TERRAIN     ChunkKind = 4 // skylens.payload.v1.TerrainTile, from the core terrain feed (control tower only)
+	ChunkKind_CHUNK_KIND_BUILDINGS   ChunkKind = 5 // skylens.payload.v1.BuildingSet, from the core terrain feed (control tower only)
 )
 
 // Enum value maps for ChunkKind.

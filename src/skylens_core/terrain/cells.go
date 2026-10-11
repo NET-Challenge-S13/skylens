@@ -23,29 +23,33 @@ const (
 	maxRingCells = 2048
 )
 
-// profile is the sampling density of one detail level.
+// profile is the resolution of one detail level.
 type profile struct {
 	level modelv1.Level
-	// terrainStep is the terrain point spacing in metres.
-	terrainStep float64
-	// satZoom is the VWorld imagery zoom the colours come from.
+	// ring marks the coarse background ring.
+	ring bool
+	// gridStep is the spacing of the height grid in metres. The grid has a
+	// vertex on every cell edge, so neighbouring cells share their border
+	// heights and the screen can stitch them without seams.
+	gridStep float64
+	// satZoom is the VWorld imagery zoom the cell image is resampled from.
 	satZoom int
-	// roofStep, wallStep and wallRise space building points in metres.
-	roofStep, wallStep, wallRise float64
+	// imagePx is the edge of the cell image in pixels.
+	imagePx int
 }
 
 var (
-	// fineProfile is the area itself: 2 m terrain, ~1 m/px imagery (z17).
+	// fineProfile is the area itself: a 10 m height grid (the DEM is ~30 m)
+	// and a 512 px image from ~1 m/px imagery (z17), about 0.8 m per pixel.
 	fineProfile = profile{
-		level:       modelv1.Level_LEVEL_REFINED,
-		terrainStep: 2, satZoom: 17,
-		roofStep: 2, wallStep: 1.5, wallRise: 2,
+		level:    modelv1.Level_LEVEL_REFINED,
+		gridStep: 10, satZoom: 17, imagePx: 512,
 	}
-	// coarseProfile is the background ring: 8 m terrain, ~8 m/px imagery (z14).
+	// coarseProfile is the background ring: a 40 m grid and a 64 px image
+	// from ~8 m/px imagery (z14).
 	coarseProfile = profile{
-		level:       modelv1.Level_LEVEL_PREVIEW,
-		terrainStep: 8, satZoom: 14,
-		roofStep: 5, wallStep: 5, wallRise: 4,
+		level: modelv1.Level_LEVEL_PREVIEW, ring: true,
+		gridStep: 40, satZoom: 14, imagePx: 64,
 	}
 )
 
@@ -53,6 +57,8 @@ type cellJob struct {
 	x, y int
 	dist float64
 	prof *profile
+	// What the cell still needs; set by the feed from what it already sent.
+	needTerrain, needBuildings bool
 }
 
 // enuRect is an axis-aligned rectangle in local metres.

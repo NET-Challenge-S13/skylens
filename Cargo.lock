@@ -4113,8 +4113,6 @@ dependencies = [
 [[package]]
 name = "pointblitz"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8be71e8a44a9a32b57c179b972f6606ba4099b3addafa43a75fa0fc00c0a1603"
 dependencies = [
  "pointblitz-core",
  "pointblitz-io",
@@ -4123,8 +4121,6 @@ dependencies = [
 [[package]]
 name = "pointblitz-core"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bcc3ef327adb97040a07dd5830d1d84ec847003732c6846fa1152045b938d294"
 dependencies = [
  "bytemuck",
  "glam 0.34.1",
@@ -4135,8 +4131,6 @@ dependencies = [
 [[package]]
 name = "pointblitz-io"
 version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "571d769e92d7405a0f102d9055f7486608081e3631eb65f9ab5908ad19c307f8"
 
 [[package]]
 name = "polling"
@@ -5240,32 +5234,34 @@ name = "skylens-client"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "anyrender",
- "anyrender_vello",
- "anyrender_vello_hybrid",
  "blitz-dom",
- "blitz-html",
- "blitz-paint",
- "blitz-shell",
+ "prost",
+ "skrifa",
+ "skylens-shared",
+ "skylens-viewer",
+ "wasm-bindgen",
+ "winresource",
+]
+
+[[package]]
+name = "skylens-control"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "blitz-dom",
  "blitz-traits",
- "futures-util",
- "glam 0.34.1",
  "image",
  "js-sys",
- "keyboard-types 0.7.0",
- "peniko",
- "pointblitz",
  "prost",
+ "serde",
+ "serde_json",
+ "skrifa",
  "skylens-shared",
- "tokio",
- "tokio-tungstenite",
+ "skylens-viewer",
+ "ureq",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
- "wgpu",
- "wgpu_context",
- "winit",
- "winresource",
 ]
 
 [[package]]
@@ -5342,6 +5338,38 @@ dependencies = [
 [[package]]
 name = "skylens-tests"
 version = "0.1.0"
+
+[[package]]
+name = "skylens-viewer"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "anyrender",
+ "anyrender_vello",
+ "anyrender_vello_hybrid",
+ "blitz-dom",
+ "blitz-html",
+ "blitz-paint",
+ "blitz-shell",
+ "blitz-traits",
+ "futures-util",
+ "glam 0.34.1",
+ "image",
+ "js-sys",
+ "keyboard-types 0.7.0",
+ "parley",
+ "peniko",
+ "pointblitz",
+ "prost",
+ "skylens-shared",
+ "tokio",
+ "tokio-tungstenite",
+ "wasm-bindgen",
+ "web-sys",
+ "wgpu",
+ "wgpu_context",
+ "winit",
+]
 
 [[package]]
 name = "slab"
