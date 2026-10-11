@@ -68,7 +68,7 @@ func TestOverridesAndErrors(t *testing.T) {
 }
 
 func TestParseDotenv(t *testing.T) {
-	in := "# comment\n﻿VWORLD_KEY=abc-123\nVWORLD_DOMAIN=\"http://localhost:5173\"\nexport A='x y'\nB=v # trailing\nnoequals\n"
+	in := "# comment\n\ufeffVWORLD_KEY=abc-123\nVWORLD_DOMAIN=\"http://localhost:5173\"\nexport A='x y'\nB=v # trailing\nnoequals\n"
 	m, err := ParseDotenv(strings.NewReader(in))
 	if err != nil {
 		t.Fatal(err)

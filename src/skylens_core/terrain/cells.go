@@ -126,11 +126,15 @@ func newJob(x, y int, cE, cN float64, p *profile) cellJob {
 	return cellJob{x: x, y: y, dist: math.Hypot(e-cE, n-cN), prof: p}
 }
 
+// distTie is how close two cell distances must be to count as equal. Distances
+// come through a GPS round trip, so exact ties differ in the last float bits.
+const distTie = 1e-6
+
 // sortJobs orders by distance, then row, then column, so ties are stable.
 func sortJobs(js []cellJob) {
 	sort.Slice(js, func(i, j int) bool {
 		a, b := js[i], js[j]
-		if a.dist != b.dist {
+		if math.Abs(a.dist-b.dist) > distTie {
 			return a.dist < b.dist
 		}
 		if a.y != b.y {

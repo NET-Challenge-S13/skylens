@@ -175,9 +175,9 @@ type echoHandler struct {
 func (e *echoHandler) Snapshot(*Peer) []*viewerv1.Envelope {
 	return []*viewerv1.Envelope{{Body: &viewerv1.Envelope_MissionStatus{MissionStatus: &viewerv1.MissionStatus{Message: "hi"}}}}
 }
-func (e *echoHandler) Attached(*Peer)                         {}
+func (e *echoHandler) Attached(*Peer)                          {}
 func (e *echoHandler) Message(_ *Peer, env *viewerv1.Envelope) { e.got <- env }
-func (e *echoHandler) Detached(*Peer)                         {}
+func (e *echoHandler) Detached(*Peer)                          {}
 
 func TestRouteOverRealSocket(t *testing.T) {
 	h := NewHub(core)

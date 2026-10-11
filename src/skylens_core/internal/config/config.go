@@ -77,7 +77,9 @@ func Load(getenv func(string) string, cwd string) (Config, error) {
 		}
 		return f
 	}
-	ms := func(k string, def float64) time.Duration { return time.Duration(num(k, def) * float64(time.Millisecond)) }
+	ms := func(k string, def float64) time.Duration {
+		return time.Duration(num(k, def) * float64(time.Millisecond))
+	}
 
 	c := Config{
 		Addr:      str("SKYLENS_CORE_ADDR", ":8080"),
@@ -232,7 +234,7 @@ func ParseDotenv(r io.Reader) (map[string]string, error) {
 	out := map[string]string{}
 	sc := bufio.NewScanner(r)
 	for sc.Scan() {
-		line := strings.TrimSpace(strings.TrimPrefix(sc.Text(), "﻿"))
+		line := strings.TrimSpace(strings.TrimPrefix(sc.Text(), "\ufeff"))
 		if line == "" || strings.HasPrefix(line, "#") {
 			continue
 		}
