@@ -20,7 +20,10 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/protobuf/proto"
+
 	modelv1 "github.com/NET-Challenge-S13/skylens/src/skylens_core/gen/skylens/model/v1"
+	payloadv1 "github.com/NET-Challenge-S13/skylens/src/skylens_core/gen/skylens/payload/v1"
 )
 
 const testKey = "test-key-123"
@@ -110,9 +113,10 @@ func buildingAt(anchor geoPoint, e0, n0, e1, n1, height float64) string {
 		g := enuToGPS(enu{E: e, N: n}, anchor)
 		return fmt.Sprintf("[%.9f,%.9f]", g.Lon, g.Lat)
 	}
+	// Clockwise on purpose: the feed must turn it counter-clockwise.
 	return `{"type":"FeatureCollection","features":[{"type":"Feature","id":"lt_c_bldginfo.42",` +
 		`"geometry":{"type":"Polygon","coordinates":[[` +
-		c(e0, n0) + "," + c(e1, n0) + "," + c(e1, n1) + "," + c(e0, n1) + "," + c(e0, n0) +
+		c(e0, n0) + "," + c(e0, n1) + "," + c(e1, n1) + "," + c(e1, n0) + "," + c(e0, n0) +
 		`]]},"properties":{"height":` + fmt.Sprint(height) + `,"grnd_flr":5}}]}`
 }
 
@@ -152,12 +156,30 @@ func collect(t *testing.T, ch <-chan *modelv1.Chunk) []*modelv1.Chunk {
 	}
 }
 
+func decodeTile(t *testing.T, c *modelv1.Chunk) *payloadv1.TerrainTile {
+	t.Helper()
+	tile := &payloadv1.TerrainTile{}
+	if err := proto.Unmarshal(c.GetPayload(), tile); err != nil {
+		t.Fatalf("terrain payload: %v", err)
+	}
+	return tile
+}
+
+func decodeBuildings(t *testing.T, c *modelv1.Chunk) *payloadv1.BuildingSet {
+	t.Helper()
+	set := &payloadv1.BuildingSet{}
+	if err := proto.Unmarshal(c.GetPayload(), set); err != nil {
+		t.Fatalf("buildings payload: %v", err)
+	}
+	return set
+}
+
 func TestStreamWithoutKeyIsTerrainOnly(t *testing.T) {
 	maps := &fakeMaps{key: testKey, demM: 100}
 	cache := t.TempDir()
 	f := newTestFeed(t, "", maps, cache)
 	area, centre := testAreaAndCentre()
-	chunks := collect(t, f.Stream(context.Background(), area, centre, StyleBlack))
+	chunks := collect(t, f.Stream(context.Background(), area, centre))
 
 	// Four cells, nearest to the centre (in cell 0,0) first.
 	want := [][2]int32{{0, 0}, {0, -1}, {-1, 0}, {-1, -1}}
@@ -174,19 +196,27 @@ func TestStreamWithoutKeyIsTerrainOnly(t *testing.T) {
 		if len(c.BlockId) != 3 || c.BlockId[0] != want[i][0] || c.BlockId[1] != want[i][1] || c.BlockId[2] != 0 {
 			t.Fatalf("chunk %d block %v, want [%d %d 0]", i, c.BlockId, want[i][0], want[i][1])
 		}
-		pts := decodeTestPoints(t, c.Payload)
-		if len(pts) != 200*200 {
-			t.Fatalf("chunk %d has %d points, want 40000 (2 m grid)", i, len(pts))
+		tile := decodeTile(t, c)
+		if len(tile.Cell) != 2 || tile.Cell[0] != want[i][0] || tile.Cell[1] != want[i][1] {
+			t.Fatalf("chunk %d tile cell %v", i, tile.Cell)
 		}
-		x0, y0 := float32(want[i][0])*CellSizeM, float32(want[i][1])*CellSizeM
-		for _, p := range pts {
-			if p.Pos[0] < x0 || p.Pos[0] > x0+CellSizeM || p.Pos[1] < y0 || p.Pos[1] > y0+CellSizeM {
-				t.Fatalf("chunk %d point %v outside its cell", i, p.Pos)
+		e0, n0 := float64(want[i][0])*CellSizeM, float64(want[i][1])*CellSizeM
+		if tile.MinE != e0 || tile.MinN != n0 || tile.MaxE != e0+CellSizeM || tile.MaxN != n0+CellSizeM {
+			t.Fatalf("chunk %d rectangle %g,%g..%g,%g", i, tile.MinE, tile.MinN, tile.MaxE, tile.MaxN)
+		}
+		// 10 m grid with a vertex on both edges: 41 x 41.
+		if tile.Cols != 41 || tile.Rows != 41 || len(tile.Heights) != 41*41 {
+			t.Fatalf("chunk %d grid %dx%d with %d heights", i, tile.Cols, tile.Rows, len(tile.Heights))
+		}
+		for _, h := range tile.Heights {
+			// Flat DEM at 100 m, anchor at 30 m: 70 m above the anchor, with
+			// no exaggeration.
+			if math.Abs(float64(h)-70) > 0.01 {
+				t.Fatalf("chunk %d height %g, want 70", i, h)
 			}
-			// Flat DEM at 100 m, anchor at 30 m: Up is 70 m.
-			if math.Abs(float64(p.Pos[2])-70) > 0.01 {
-				t.Fatalf("chunk %d point up %g, want 70", i, p.Pos[2])
-			}
+		}
+		if len(tile.ImageryJpeg) != 0 || tile.Ring {
+			t.Errorf("chunk %d: %d image bytes without a key, ring %v", i, len(tile.ImageryJpeg), tile.Ring)
 		}
 	}
 	if n := maps.count("api.vworld.kr"); n != 0 {
@@ -195,16 +225,19 @@ func TestStreamWithoutKeyIsTerrainOnly(t *testing.T) {
 	if !fileExists(t, cache, "terrarium") {
 		t.Error("terrain tiles were not cached")
 	}
+	if st := f.Status(); st.Imagery || st.Buildings || st.BuildingCount != 0 || st.Cells != 4 {
+		t.Errorf("status without a key %+v", st)
+	}
 
 	// A second feed on the same cache does not download again.
 	before := maps.count("s3.amazonaws.com")
-	collect(t, newTestFeed(t, "", maps, cache).Stream(context.Background(), area, centre, StyleBlack))
+	collect(t, newTestFeed(t, "", maps, cache).Stream(context.Background(), area, centre))
 	if after := maps.count("s3.amazonaws.com"); after != before {
 		t.Errorf("cached run made %d new DEM requests", after-before)
 	}
 }
 
-func TestStreamWithKeyAddsBuildingsAndSatelliteColour(t *testing.T) {
+func TestStreamWithKeySendsImageAndFootprints(t *testing.T) {
 	maps := &fakeMaps{
 		key:      testKey,
 		demM:     100,
@@ -214,7 +247,7 @@ func TestStreamWithKeyAddsBuildingsAndSatelliteColour(t *testing.T) {
 	cache := t.TempDir()
 	f := newTestFeed(t, testKey, maps, cache)
 	area, centre := testAreaAndCentre()
-	chunks := collect(t, f.Stream(context.Background(), area, centre, StyleAerial))
+	chunks := collect(t, f.Stream(context.Background(), area, centre))
 
 	var terrain, blds []*modelv1.Chunk
 	for _, c := range chunks {
@@ -242,20 +275,43 @@ func TestStreamWithKeyAddsBuildingsAndSatelliteColour(t *testing.T) {
 	if chunks[0].Kind != modelv1.ChunkKind_CHUNK_KIND_TERRAIN || chunks[1].Kind != modelv1.ChunkKind_CHUNK_KIND_BUILDINGS {
 		t.Errorf("cell 0,0 order: %v then %v", chunks[0].Kind, chunks[1].Kind)
 	}
-	minU, maxU := math.Inf(1), math.Inf(-1)
-	for _, p := range decodeTestPoints(t, b.Payload) {
-		minU, maxU = math.Min(minU, float64(p.Pos[2])), math.Max(maxU, float64(p.Pos[2]))
-		if p.Pos[0] < 99.9 || p.Pos[0] > 120.1 || p.Pos[1] < 99.9 || p.Pos[1] > 110.1 {
-			t.Fatalf("building point %v outside the footprint", p.Pos)
+	set := decodeBuildings(t, b)
+	if len(set.Cell) != 2 || set.Cell[0] != 0 || set.Cell[1] != 0 || len(set.Buildings) != 1 {
+		t.Fatalf("building set %v", set)
+	}
+	bl := set.Buildings[0]
+	if bl.Id != "lt_c_bldginfo.42" || math.Abs(bl.Base-70) > 0.01 || bl.Height != 15 {
+		t.Errorf("building id %q base %g height %g, want lt_c_bldginfo.42, 70, 15", bl.Id, bl.Base, bl.Height)
+	}
+	// Closed counter-clockwise ring: 4 corners plus the repeated first one.
+	if len(bl.Outline) != 10 || bl.Outline[0] != bl.Outline[8] || bl.Outline[1] != bl.Outline[9] {
+		t.Fatalf("outline %v", bl.Outline)
+	}
+	if signedArea(bl.Outline) <= 0 {
+		t.Errorf("outline is not counter-clockwise: %v", bl.Outline)
+	}
+	for i := 0; i < len(bl.Outline); i += 2 {
+		e, n := bl.Outline[i], bl.Outline[i+1]
+		if e < 99.9 || e > 120.1 || n < 99.9 || n > 110.1 {
+			t.Fatalf("outline vertex %g,%g outside the footprint", e, n)
 		}
 	}
-	if math.Abs(minU-70) > 0.01 || math.Abs(maxU-85) > 0.01 {
-		t.Errorf("building spans %g..%g m up, want 70..85", minU, maxU)
+
+	// The image is the photograph as is: a north-up JPEG of the cell.
+	tile := decodeTile(t, terrain[0])
+	img, err := jpeg.Decode(bytes.NewReader(tile.ImageryJpeg))
+	if err != nil {
+		t.Fatalf("cell image: %v", err)
 	}
-	// Aerial terrain carries the photograph's colour (JPEG, so roughly).
-	p := decodeTestPoints(t, terrain[0].Payload)[0]
-	if absDiff(p.Color[0], 200) > 10 || absDiff(p.Color[1], 120) > 10 || absDiff(p.Color[2], 40) > 10 {
-		t.Errorf("terrain colour %v, want about (200,120,40)", p.Color)
+	if bounds := img.Bounds(); bounds.Dx() != 512 || bounds.Dy() != 512 {
+		t.Fatalf("cell image %v, want 512x512", bounds)
+	}
+	r, g, bb, _ := img.At(256, 256).RGBA()
+	if absDiff(uint8(r>>8), 200) > 10 || absDiff(uint8(g>>8), 120) > 10 || absDiff(uint8(bb>>8), 40) > 10 {
+		t.Errorf("image colour %d,%d,%d, want about (200,120,40)", r>>8, g>>8, bb>>8)
+	}
+	if st := f.Status(); !st.Imagery || !st.Buildings || st.BuildingCount != 1 || st.Cells != 4 {
+		t.Errorf("status %+v", st)
 	}
 
 	// Nothing under the cache directory may carry the key.
@@ -275,7 +331,7 @@ func TestStreamWithRejectedKeyFallsBackToTerrain(t *testing.T) {
 	cache := t.TempDir()
 	f := newTestFeed(t, "wrong-key", maps, cache)
 	area, centre := testAreaAndCentre()
-	chunks := collect(t, f.Stream(context.Background(), area, centre, StyleBlack))
+	chunks := collect(t, f.Stream(context.Background(), area, centre))
 	if len(chunks) != 4 {
 		t.Fatalf("%d chunks, want 4 terrain chunks", len(chunks))
 	}
@@ -283,10 +339,88 @@ func TestStreamWithRejectedKeyFallsBackToTerrain(t *testing.T) {
 		if c.Kind != modelv1.ChunkKind_CHUNK_KIND_TERRAIN {
 			t.Errorf("kind %v, want terrain", c.Kind)
 		}
+		if len(decodeTile(t, c).ImageryJpeg) != 0 {
+			t.Error("image sent although imagery failed")
+		}
 	}
 	// Error documents are not cached.
 	if fileExists(t, cache, "vworld-wfs") || fileExists(t, cache, "vworld-satellite") {
 		t.Error("a VWorld error document was cached")
+	}
+	if st := f.Status(); st.Imagery || st.Buildings {
+		t.Errorf("status after a rejected key %+v", st)
+	}
+}
+
+func TestLaterStreamOnlyAddsNewCells(t *testing.T) {
+	maps := &fakeMaps{key: testKey, demM: 100}
+	f := newTestFeed(t, "", maps, t.TempDir())
+	area, centre := testAreaAndCentre()
+	if n := len(collect(t, f.Stream(context.Background(), area, centre))); n != 4 {
+		t.Fatalf("first stream %d chunks", n)
+	}
+	// The same area again: nothing new.
+	if n := len(collect(t, f.Stream(context.Background(), area, centre))); n != 0 {
+		t.Fatalf("repeated stream sent %d chunks", n)
+	}
+	// Grown east by one cell: only the two new cells.
+	ne := enuToGPS(enu{E: 700, N: 300}, testAnchor)
+	grown := area
+	grown.MaxLon = ne.Lon
+	chunks := collect(t, f.Stream(context.Background(), grown, centre))
+	if len(chunks) != 2 {
+		t.Fatalf("grown stream sent %d chunks, want 2", len(chunks))
+	}
+	for _, c := range chunks {
+		if c.BlockId[0] != 1 {
+			t.Errorf("grown stream resent cell %v", c.BlockId)
+		}
+	}
+}
+
+func TestRingCellsAreCoarseAndUpgradedLater(t *testing.T) {
+	maps := &fakeMaps{key: testKey, demM: 100}
+	f := New(Config{
+		Anchor:     &modelv1.Gps{Lat: testAnchor.Lat, Lon: testAnchor.Lon, Alt: testAnchor.Alt},
+		HTTPClient: &http.Client{Transport: maps},
+	})
+	area, centre := testAreaAndCentre()
+	chunks := collect(t, f.Stream(context.Background(), area, centre))
+	// Area x3 = -900..900 m -> 36 cells, 4 of them the area.
+	if len(chunks) != 36 {
+		t.Fatalf("%d chunks, want 36", len(chunks))
+	}
+	found := false
+	for i, c := range chunks {
+		tile := decodeTile(t, c)
+		if i < 4 {
+			if tile.Ring || c.Level != modelv1.Level_LEVEL_REFINED {
+				t.Fatalf("area cell %d is ring/preview", i)
+			}
+			continue
+		}
+		if !tile.Ring || c.Level != modelv1.Level_LEVEL_PREVIEW || tile.Cols != 11 {
+			t.Fatalf("ring cell %v: ring %v level %v cols %d", c.BlockId, tile.Ring, c.Level, tile.Cols)
+		}
+		if c.BlockId[0] == 1 && c.BlockId[1] == 0 {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("ring cell 1,0 missing")
+	}
+	// Grow the area over ring cell (1,0): it comes back at full detail.
+	ne := enuToGPS(enu{E: 700, N: 300}, testAnchor)
+	grown := area
+	grown.MaxLon = ne.Lon
+	upgraded := false
+	for _, c := range collect(t, f.Stream(context.Background(), grown, centre)) {
+		if c.BlockId[0] == 1 && c.BlockId[1] == 0 {
+			upgraded = c.Level == modelv1.Level_LEVEL_REFINED && !decodeTile(t, c).Ring
+		}
+	}
+	if !upgraded {
+		t.Fatal("ring cell 1,0 was not resent at full detail")
 	}
 }
 
@@ -296,7 +430,21 @@ func TestStreamStopsOnCancel(t *testing.T) {
 	area, centre := testAreaAndCentre()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	collect(t, f.Stream(ctx, area, centre, StyleBlack))
+	collect(t, f.Stream(ctx, area, centre))
+	if st := f.Status(); st.Cells != 0 {
+		t.Fatalf("cancelled stream marked %d cells as sent", st.Cells)
+	}
+}
+
+func TestAreaUnion(t *testing.T) {
+	a := Area{MinLat: 1, MinLon: 2, MaxLat: 3, MaxLon: 4}
+	b := Area{MinLat: 0, MinLon: 3, MaxLat: 2, MaxLon: 5}
+	if got := a.Union(b); got != (Area{MinLat: 0, MinLon: 2, MaxLat: 3, MaxLon: 5}) {
+		t.Fatalf("union %+v", got)
+	}
+	if a.Union(Area{}) != a || (Area{}).Union(a) != a {
+		t.Fatal("an empty area changed the union")
+	}
 }
 
 func TestFetchErrorsNeverCarryTheKey(t *testing.T) {
@@ -339,4 +487,14 @@ func absDiff(a, b uint8) int {
 		return int(a - b)
 	}
 	return int(b - a)
+}
+
+// signedArea is the shoelace area of a closed e,n outline; positive means
+// counter-clockwise.
+func signedArea(outline []float64) float64 {
+	s := 0.0
+	for i := 0; i+3 < len(outline); i += 2 {
+		s += outline[i]*outline[i+3] - outline[i+2]*outline[i+1]
+	}
+	return s / 2
 }
