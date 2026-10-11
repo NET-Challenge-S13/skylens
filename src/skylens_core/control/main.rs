@@ -6,14 +6,14 @@
 
 #[cfg(not(target_arch = "wasm32"))]
 fn main() -> std::process::ExitCode {
-    let opts = match skylens_control::native::parse_args(std::env::args().skip(1), |k| std::env::var(k).ok()) {
+    let opts = match control_screen::native::parse_args(std::env::args().skip(1), |k| std::env::var(k).ok()) {
         Ok(o) => o,
         Err(msg) => {
             eprintln!("{msg}");
             return std::process::ExitCode::from(2);
         }
     };
-    match skylens_control::native::run(opts) {
+    match control_screen::native::run(opts) {
         Ok(()) => std::process::ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("skylens-control: {e:#}");

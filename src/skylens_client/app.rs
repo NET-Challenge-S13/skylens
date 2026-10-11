@@ -358,6 +358,15 @@ impl ScreenApp for StatusApp {
             dom.mount_widget(canvas, MinimapWidget::boxed(self.map.clone()));
         }
         self.badge = NetBadge::mount(dom, "net-status");
+        if dom.find("minimap").is_some() {
+            // The legacy CSS put the minimap top-right, where it hid the link badge (both are
+            // `right: 16px`), after it had been moved there from bottom-right because the
+            // detection card covered it. Keep it bottom-right and stack the card above it:
+            // 16 px margin + 200 px minimap + 12 px gap.
+            dom.set_style("minimap", "top", "auto");
+            dom.set_style("minimap", "bottom", "16px");
+            dom.set_style(q("#overlay-status .detect-card"), "bottom", "228px");
+        }
         self.card = Card::bind(dom);
         self.loading = LoadingScreen::mount(dom, LOADING_TITLE);
         if let Some(l) = &mut self.loading {

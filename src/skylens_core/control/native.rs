@@ -54,7 +54,7 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I, env: impl Fn(&str) ->
 /// Opens the tower window and runs until it closes.
 pub fn run(opts: Options) -> anyhow::Result<()> {
     let doc = ScreenDocument::new(&page(), ControlApp::new(opts));
-    skylens_viewer::shell::run_native(doc, WindowOptions::new("SkyLens · 관제탑"))
+    skylens_viewer::shell::run_native(doc, WindowOptions::new("SkyLens · 관제탑").with_icon(include_bytes!("../../../res/icon/control/skylens-control-256.png")))
 }
 
 #[cfg(test)]

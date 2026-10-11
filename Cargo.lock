@@ -5262,6 +5262,7 @@ dependencies = [
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
+ "winresource",
 ]
 
 [[package]]
@@ -5368,6 +5369,7 @@ dependencies = [
  "web-sys",
  "wgpu",
  "wgpu_context",
+ "windows-sys 0.61.2",
  "winit",
 ]
 

@@ -12,7 +12,6 @@ use crate::planner::{self, Planner, PlannerEvent, PlannerWidget, Waypoint};
 use crate::settings::{DisplayMode, Settings};
 use crate::slider::{Range, RangeWidget};
 use crate::storage;
-use crate::terrain;
 use crate::tower::{TowerScene, World};
 use crate::video::{Feed, Fix, VideoConfig, VideoPanel};
 use skylens_viewer::link::{LinkEvent, LinkState, LinkStatus};
@@ -32,9 +31,9 @@ pub const PANELS_CSS: &str = include_str!("ui/panels.css");
 pub const LOADING_TITLE: &str = "관제탑 · 실지형 장면 로딩";
 /// Telemetry rows re-render at 5 Hz.
 const PANEL_INTERVAL_MS: f64 = 200.0;
-/// With the area's tiles still missing, the loading screen gives up waiting after this long
-/// without a new tile (terrain off on the core, or cells that never come).
-const LOADING_IDLE_MS: f64 = 5000.0;
+/// Safety net: if the core stops sending base map progress altogether, stop waiting after this
+/// long without a new tile so the operator is never locked out.
+const LOADING_IDLE_MS: f64 = 60_000.0;
 /// Planner tile request timeout.
 const TILE_TIMEOUT_MS: u64 = 15_000;
 
@@ -71,11 +70,18 @@ pub enum HttpTag {
     CloudDelete { name: String, button: Option<NodeId> },
 }
 
+/// The legacy tower kept "관제탑 · 실지형 장면 로딩" up until the whole scene had loaded and
+/// then showed it at once. The core streams the base map cell by cell, so the loading screen
+/// follows the core's progress in `Site` and lifts only when every base map chunk is here.
 #[derive(Debug, Default)]
 struct Loading {
     site_ms: Option<f64>,
     last_tile_ms: f64,
     finished: bool,
+    /// From the latest `Site`.
+    ready: bool,
+    cells_total: u32,
+    chunks_total: u32,
 }
 
 pub struct ControlApp {
@@ -271,6 +277,9 @@ impl ControlApp {
             self.loading.site_ms = Some(now);
             self.loading.last_tile_ms = now;
         }
+        self.loading.ready = site.base_map_ready;
+        self.loading.cells_total = site.base_map_cells_total;
+        self.loading.chunks_total = site.base_map_chunks;
         if let Some(p) = self.settings_panel.as_mut() {
             p.show_site(dom, &frame);
         }
@@ -299,24 +308,21 @@ impl ControlApp {
             return;
         }
         let Some(site_ms) = self.loading.site_ms else { return };
-        let (expected, received) = {
+        let (tiles, chunks) = {
             let w = self.world.borrow();
-            let Some((lo, hi)) = w.site.as_ref().and_then(|s| s.enu_bounds()) else { return };
-            let (c0, c1) = terrain::core_cell_range(lo, hi, terrain::CORE_CELL_M);
-            let expected = ((c1[0] - c0[0] + 1) * (c1[1] - c0[1] + 1)).max(1) as usize;
-            let received = w
-                .store
-                .terrain_tiles()
-                .filter(|(c, e)| !e.tile.ring && c[0] >= c0[0] && c[0] <= c1[0] && c[1] >= c0[1] && c[1] <= c1[1])
-                .count();
-            (expected, received)
+            let tiles = w.store.terrain_tiles().count();
+            (tiles, tiles + w.store.building_sets().count())
         };
-        let pct = received as f64 / expected as f64 * 100.0;
+        // Progress over the terrain cells the core has sent or still owes; the last step waits
+        // for the buildings too.
+        let total = (self.loading.cells_total as usize).max(1);
+        let pct = (tiles as f64 / total as f64 * 100.0).min(if self.loading.ready { 100.0 } else { 99.0 });
         if let Some(l) = self.loading_screen.as_mut() {
             l.progress(dom, pct, None);
         }
-        let idle = now - self.loading.last_tile_ms.max(site_ms) > LOADING_IDLE_MS;
-        if received >= expected || idle {
+        let complete = self.loading.ready && chunks >= self.loading.chunks_total as usize;
+        let stalled = now - self.loading.last_tile_ms.max(site_ms) > LOADING_IDLE_MS;
+        if complete || stalled {
             self.loading.finished = true;
             if let Some(l) = self.loading_screen.as_mut() {
                 l.done(dom, now);

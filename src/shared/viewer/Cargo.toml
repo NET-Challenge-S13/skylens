@@ -43,6 +43,10 @@ futures-util = { version = "0.3", default-features = false, features = ["std", "
 # Web: the same Blitz revision without the desktop-only features (system fonts,
 # clipboard, file dialogs), like Blitz's own examples/wasm_hello. Declared directly
 # because the workspace entry turns default features on.
+[target.'cfg(windows)'.dependencies]
+# System icon sizes for the window and task bar icons.
+windows-sys = { version = "0.61", features = ["Win32_UI_WindowsAndMessaging"] }
+
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 blitz-dom = { git = "https://github.com/DioxusLabs/blitz", rev = "45496d9288b063719ebeae4e0761273f7881b3d7", default-features = false, features = ["woff", "custom-widget"] }
 blitz-html = { git = "https://github.com/DioxusLabs/blitz", rev = "45496d9288b063719ebeae4e0761273f7881b3d7", default-features = false }

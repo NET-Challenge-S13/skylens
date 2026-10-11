@@ -34,7 +34,7 @@ pub use app::{Options, StatusApp, parse_args};
 pub fn run_native(opts: &Options) -> anyhow::Result<()> {
     skylens_viewer::log(&format!("[skylens-client] 현황판 · core {}", opts.core_url));
     let doc = StatusApp::document(opts);
-    skylens_viewer::shell::run_native(doc, skylens_viewer::WindowOptions::new(app::WINDOW_TITLE))
+    skylens_viewer::shell::run_native(doc, skylens_viewer::WindowOptions::new(app::WINDOW_TITLE).with_icon(include_bytes!("../../res/icon/status/skylens-status-256.png")))
 }
 
 /// Web entry: draws the board into `<canvas id="skylens">`. The core is `?core=` or the page's own

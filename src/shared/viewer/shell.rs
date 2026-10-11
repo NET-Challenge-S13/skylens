@@ -43,6 +43,7 @@ pub const BUNDLED_FONTS: &[(&str, &[u8])] = &[
 ];
 
 /// The SkyLens window icon (the exe icon is embedded by each screen's build script).
+/// Fallback window icon when a screen gives none (each screen ships its own, see `WindowOptions`).
 pub const WINDOW_ICON_PNG: &[u8] = include_bytes!("../../../res/icon/skylens-256.png");
 
 /// A font context with only the bundled fonts (no system fonts, so both targets match). Generic
@@ -534,6 +535,8 @@ pub fn node_attr(doc: &BaseDocument, node: NodeId, name: &str) -> Option<String>
 #[derive(Debug, Clone, PartialEq)]
 pub struct WindowOptions {
     pub title: String,
+    /// The screen's icon (PNG, used off Windows; on Windows the exe's embedded icon is used).
+    pub icon_png: Option<&'static [u8]>,
     /// Logical size.
     pub width: f64,
     pub height: f64,
@@ -541,7 +544,13 @@ pub struct WindowOptions {
 
 impl WindowOptions {
     pub fn new(title: impl Into<String>) -> WindowOptions {
-        WindowOptions { title: title.into(), width: 1440.0, height: 900.0 }
+        WindowOptions { title: title.into(), icon_png: None, width: 1440.0, height: 900.0 }
+    }
+
+    /// The screen's own icon (PNG) for platforms other than Windows.
+    pub fn with_icon(mut self, png: &'static [u8]) -> WindowOptions {
+        self.icon_png = Some(png);
+        self
     }
 }
 
@@ -559,18 +568,51 @@ pub fn run_native(doc: impl Document, opts: WindowOptions) -> anyhow::Result<()>
     let mut application = BlitzApplication::new(proxy, receiver);
     let attributes = WindowAttributes::default()
         .with_title(opts.title)
-        .with_window_icon(window_icon())
         .with_surface_size(LogicalSize::new(opts.width, opts.height));
+    // Windows: winit turns an RGBA icon into one 256x256 HICON, which the task bar cannot scale
+    // to its own size (64 px at 200 %) and shows as a grey placeholder. Load the exe's embedded
+    // icon (resource 1, written by each screen's build.rs) at the exact system sizes instead:
+    // ICON_SMALL for the title bar, ICON_BIG (`with_taskbar_icon`) for the task bar.
+    #[cfg(windows)]
+    let attributes = {
+        let (small, big) = windows_icons();
+        attributes.with_window_icon(small).with_platform_attributes(Box::new(
+            winit::platform::windows::WindowAttributesWindows::default().with_taskbar_icon(big),
+        ))
+    };
+    #[cfg(not(windows))]
+    let attributes = attributes.with_window_icon(window_icon_from(opts.icon_png.unwrap_or(WINDOW_ICON_PNG)));
     application.add_window(WindowConfig::with_attributes(Box::new(doc), VelloWindowRenderer::new(), attributes));
     event_loop.run_app(application).map_err(|e| anyhow::anyhow!("event loop: {e}"))
 }
 
-/// The SkyLens icon for the title bar and task bar.
+/// The default SkyLens icon for the title bar and task bar.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn window_icon() -> Option<winit::icon::Icon> {
-    let rgba = image::load_from_memory(WINDOW_ICON_PNG).ok()?.into_rgba8();
+    window_icon_from(WINDOW_ICON_PNG)
+}
+
+/// A window icon from PNG bytes.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn window_icon_from(png: &[u8]) -> Option<winit::icon::Icon> {
+    let rgba = image::load_from_memory(png).ok()?.into_rgba8();
     let (w, h) = rgba.dimensions();
     winit::icon::RgbaIcon::new(rgba.into_raw(), w, h).ok().map(Into::into)
+}
+
+/// The exe's embedded icon (resource 1) at the system's small and large icon sizes.
+#[cfg(windows)]
+fn windows_icons() -> (Option<winit::icon::Icon>, Option<winit::icon::Icon>) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXICON, SM_CXSMICON};
+    use winit::dpi::PhysicalSize;
+    use winit::platform::windows::WinIcon;
+    let load = |metric| {
+        // SAFETY: GetSystemMetrics has no preconditions.
+        let px = unsafe { GetSystemMetrics(metric) }.max(16) as u32;
+        WinIcon::from_resource(1, Some(PhysicalSize::new(px, px))).ok().map(Into::into)
+    };
+    let fallback = || window_icon();
+    (load(SM_CXSMICON).or_else(fallback), load(SM_CXICON).or_else(fallback))
 }
 
 /// Draws the document into `<canvas id="{canvas_id}">` with vello_hybrid (WebGPU, else WebGL2),
