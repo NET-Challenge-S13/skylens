@@ -43,8 +43,9 @@ protox = "0.10" # pure-Rust protobuf compiler, so builds do not need protoc
 cumulus3d-cli = { git = "https://github.com/AH100-1/cumulus3d", rev = "b9f4a9bda714fa31fc0fd395f821114b64fd2c1f" }
 deltamesh = "0.1"
 
-# UNet inference links libtorch. tch 0.26 expects libtorch 2.13 (LIBTORCH_USE_PYTORCH=1 reuses the venv torch).
-tch = "0.26"
+# UNet inference links libtorch 2.13, downloaded at build time (CUDA flavour from
+# TORCH_CUDA_VERSION in .cargo/config.toml). Independent of the Python venv.
+tch = { version = "0.24", features = ["download-libtorch"] }
 
 # rendering and UI (skylens_client)
 pointblitz = "0.2"

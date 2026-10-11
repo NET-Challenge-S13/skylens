@@ -232,7 +232,7 @@ pointblitz는 서버에서 헤드리스로 그려 영상으로 보내는 모드�
 | `nginx -t` | 게이트웨이·프록시 설정 검사 (배치 호스트에서) |
 
 - Rust는 1.99 이상(stable)이 필요하다. pointblitz 0.2가 1.99를 요구하고, 루트 `Cargo.toml`의 `rust-version`이 이를 강제한다. 웹 빌드에는 `rustup target add wasm32-unknown-unknown`.
-- UNet 추론은 `tch` 0.26(libtorch 2.13)이다. `LIBTORCH_USE_PYTORCH=1`이면 venv의 PyTorch가 가진 libtorch를 그대로 링크하므로 venv의 torch도 2.13이어야 한다.
+- UNet 추론은 `tch` 0.24(libtorch 2.11)이다. libtorch는 빌드할 때 `download-libtorch`로 받아 오며 Python venv와 무관하다. CUDA 판은 `.cargo/config.toml`의 `TORCH_CUDA_VERSION`(cu126)이 정한다.
 - 공용 의존성 버전은 루트 `Cargo.toml`의 `[workspace.dependencies]` 한 곳에서 정한다.
 - cumulus3d의 `CompositionHost`는 crates.io 0.3.1 릴리스에 아직 없어 GitHub 리비전을 고정해 쓴다.
 - gRPC 코드 생성: Rust는 빌드 스크립트에서 protox로 컴파일하므로 protoc가 없어도 된다. Go는 `protoc-gen-go`·`protoc-gen-go-grpc`로 `src/skylens_core/gen/`에 생성한다.

@@ -220,7 +220,7 @@ related: "[[INTENT.md]], [[COMPONENTS.md]], [[ARCHITECTURE.md]], [[NETWORK_ARCHI
 
 - gRPC 코드 생성: Rust는 protox(순수 Rust)로 컴파일해 protoc가 필요 없고, Go는 `protoc-gen-go`·`protoc-gen-go-grpc`로 `src/skylens_core/gen/`에 생성한다.
 - Rust는 1.99 이상 stable이 필요하다(루트 `Cargo.toml`의 `rust-version`). 웹 빌드에는 `wasm32-unknown-unknown` 타깃. 공용 의존성 버전은 `[workspace.dependencies]`에 있다.
-- UNet 추론은 `tch` 0.26(libtorch 2.13). `LIBTORCH_USE_PYTORCH=1`로 venv의 PyTorch libtorch를 링크한다.
+- UNet 추론은 `tch` 0.24(libtorch 2.11). libtorch는 빌드 때 내려받고(`download-libtorch`, CUDA 판은 `.cargo/config.toml`의 `TORCH_CUDA_VERSION`) Python venv와 무관하다.
 - 테스트를 먼저 쓴다. 단위 테스트는 코드 옆(Rust `#[cfg(test)]`, Go `_test.go`), 컴포넌트 경계 테스트는 `src/test/`.
 - Python 3.11 이상 3.14 미만. `.python-version`은 3.13. torch·torchvision은 CUDA 12.8 인덱스에서 받는다(`[tool.uv.sources]`).
 - `pyproject.toml`은 `packages = ["src/skylens_model"]`로 파이썬 패키지를 명시한다. 같은 폴더의 `.rs` 파일은 Rust crate `skylens-model`에 속한다.
