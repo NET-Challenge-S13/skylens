@@ -1,4 +1,5 @@
 [package]
+build = "build.rs"
 name = "skylens-control"
 description = "Control tower screen of skylens_core: legacy HTML/CSS on Blitz, pointblitz 3D view, web and native"
 version.workspace = true
@@ -8,6 +9,9 @@ license.workspace = true
 publish.workspace = true
 
 [lib]
+# Not the package name: the bin `skylens-control` would otherwise write the same .pdb
+# on Windows (cargo warns about the collision, and it corrupted builds).
+name = "control_screen"
 path = "lib.rs"
 crate-type = ["rlib", "cdylib"]
 
@@ -65,3 +69,7 @@ web-sys = { version = "0.3", features = [
     "Window",
     "console",
 ] }
+
+[build-dependencies]
+# Embeds res/icon/skylens.ico into the Windows executable.
+winresource = "0.1"

@@ -33,7 +33,7 @@
   <body>
     <canvas id="skylens"></canvas>
     <script type="module">
-      import init from './pkg/skylens_control.js';
+      import init from './pkg/control_screen.js';
       // The wasm start function reads ?core=, ?display=, ?missionBridge= and opens ws /control.
       init().catch((e) => {
         const p = document.createElement('div');

@@ -43,7 +43,7 @@ fi
 echo "==> cargo build ($PROFILE, $TARGET)"
 cargo build --manifest-path "$ROOT/Cargo.toml" -p skylens-control --lib --target "$TARGET" --profile "$PROFILE"
 
-WASM="$TARGET_DIR/$TARGET/$PROFILE_DIR/skylens_control.wasm"
+WASM="$TARGET_DIR/$TARGET/$PROFILE_DIR/control_screen.wasm"
 if [ ! -f "$WASM" ]; then
   echo "build output not found: $WASM" >&2
   exit 1
@@ -57,12 +57,12 @@ wasm-bindgen --target web --no-typescript --out-dir "$DIST/pkg" "$WASM"
 if command -v wasm-opt >/dev/null 2>&1 && [ "$PROFILE" != "dev" ]; then
   echo "==> wasm-opt -Oz"
   wasm-opt -Oz --enable-bulk-memory --enable-nontrapping-float-to-int \
-    "$DIST/pkg/skylens_control_bg.wasm" -o "$DIST/pkg/skylens_control_bg.wasm"
+    "$DIST/pkg/control_screen_bg.wasm" -o "$DIST/pkg/control_screen_bg.wasm"
 fi
 
 echo "==> page"
 cp "$HERE/web/index.html" "$DIST/index.html"
-cp "$ROOT/res/icon/skylens-64.png" "$DIST/favicon.png"
+cp "$ROOT/res/icon/control/skylens-control-64.png" "$DIST/favicon.png"
 
 echo "done: $DIST"
 echo "  the core serves it: (cd src/skylens_core && go run .) then open http://<core>:8080/"

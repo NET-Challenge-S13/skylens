@@ -7,14 +7,14 @@
 
 #[cfg(not(target_arch = "wasm32"))]
 fn main() -> std::process::ExitCode {
-    let opts = match skylens_client::parse_args(std::env::args().skip(1)) {
+    let opts = match status_screen::parse_args(std::env::args().skip(1)) {
         Ok(o) => o,
         Err(msg) => {
             eprintln!("{msg}");
             return std::process::ExitCode::from(2);
         }
     };
-    match skylens_client::run_native(&opts) {
+    match status_screen::run_native(&opts) {
         Ok(()) => std::process::ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("skylens-client: {e:#}");

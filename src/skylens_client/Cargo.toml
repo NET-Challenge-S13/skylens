@@ -9,6 +9,9 @@ license.workspace = true
 publish.workspace = true
 
 [lib]
+# Not the package name: the bin `skylens-client` would otherwise write the same .pdb
+# on Windows (cargo warns about the collision, and it corrupted builds).
+name = "status_screen"
 path = "lib.rs"
 crate-type = ["rlib", "cdylib"]
 

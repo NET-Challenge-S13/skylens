@@ -43,7 +43,7 @@ fi
 echo "==> cargo build ($PROFILE, $TARGET)"
 cargo build --manifest-path "$ROOT/Cargo.toml" -p skylens-client --lib --target "$TARGET" --profile "$PROFILE"
 
-WASM="$TARGET_DIR/$TARGET/$PROFILE_DIR/skylens_client.wasm"
+WASM="$TARGET_DIR/$TARGET/$PROFILE_DIR/status_screen.wasm"
 if [ ! -f "$WASM" ]; then
   echo "build output not found: $WASM" >&2
   exit 1
@@ -57,13 +57,13 @@ wasm-bindgen --target web --no-typescript --out-dir "$DIST/pkg" "$WASM"
 if command -v wasm-opt >/dev/null 2>&1 && [ "$PROFILE" != "dev" ]; then
   echo "==> wasm-opt -Oz"
   wasm-opt -Oz --enable-bulk-memory --enable-nontrapping-float-to-int \
-    "$DIST/pkg/skylens_client_bg.wasm" -o "$DIST/pkg/skylens_client_bg.wasm"
+    "$DIST/pkg/status_screen_bg.wasm" -o "$DIST/pkg/status_screen_bg.wasm"
 fi
 
 echo "==> pages"
 cp "$HERE/web/index.html" "$DIST/status.html"
 cp "$HERE/web/index.html" "$DIST/index.html"
-cp "$ROOT/res/icon/skylens-64.png" "$DIST/favicon.png"
+cp "$ROOT/res/icon/status/skylens-status-64.png" "$DIST/favicon.png"
 
 echo "done: $DIST"
 echo "  serve it over HTTP (wasm cannot load from file://), e.g. python -m http.server -d \"$DIST\" 8000"
