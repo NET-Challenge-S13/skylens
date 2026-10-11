@@ -282,6 +282,7 @@ impl Store {
             return changed;
         };
         match body {
+            Body::Site(_) => {}
             Body::DroneHello(h) => {
                 let d = self.drone_entry(h.drone_id, now_ms);
                 d.hello = true;

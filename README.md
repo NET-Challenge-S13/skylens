@@ -154,10 +154,10 @@ src/
 ├─ skylens_drone/     # Rust Mission Bridge: GPS 경로 → DJI Fly KMZ · 편대 · 클라우드 업로드
 ├─ skylens_gateway/   # 브리지 nginx · MediaMTX SRT 수신 · 설치 스크립트
 ├─ skylens_proxy/     # 대전 nginx: KOREN 내부망 다중 경로
-├─ skylens_core/      # Go 코어: 관제탑 웹 · 보관 · 오케스트레이션 · 배포
+├─ skylens_core/      # Go 코어(보관 · 오케스트레이션 · 배포) + control/(관제탑 화면)
 │  └─ deploy/         # 대전 MediaMTX · KOREN 배치 문서
 ├─ skylens_model/     # Rust 연산 서버(cumulus3d · deltamesh · UNet 추론) + Python 학습 코드
-├─ skylens_client/    # 관제탑·현황판 공용 UI: HTML/CSS를 Blitz로 그림 + pointblitz (웹 · 네이티브)
+├─ skylens_client/    # 현황판 화면: 이전 HTML/CSS를 Blitz로 + pointblitz (웹 · 네이티브)
 ├─ test/              # 컴포넌트 경계 테스트 + pytest
 └─ demo/              # 엔드 투 엔드 데모 런처
 ```

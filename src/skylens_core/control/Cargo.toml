@@ -1,0 +1,16 @@
+[package]
+name = "skylens-control"
+description = "Control tower screen of skylens_core: legacy HTML/CSS on Blitz, pointblitz 3D view, web and native"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+path = "lib.rs"
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]
+skylens-shared.workspace = true
+skylens-viewer = { path = "../../shared/viewer" }

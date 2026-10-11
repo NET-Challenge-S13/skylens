@@ -1,0 +1,23 @@
+[package]
+name = "skylens-viewer"
+description = "Screen layer shared by the control tower and the status board: CSS, widgets, core link, chunk store, pointblitz 3D view"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+path = "lib.rs"
+
+[dependencies]
+skylens-shared.workspace = true
+prost.workspace = true
+anyhow.workspace = true
+pointblitz.workspace = true
+wgpu.workspace = true
+blitz-dom.workspace = true
+blitz-html.workspace = true
+blitz-paint.workspace = true
+blitz-traits.workspace = true
+anyrender.workspace = true

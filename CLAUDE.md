@@ -75,7 +75,7 @@ docs/DATASETS.md   ──→  src/skylens_model/README.md  ──→  datasets/R
 | 데이터셋 클래스 추가·수정 | `src/skylens_model/datasets/README.md` → `docs/DATASETS.md` |
 | 학습 노트북 / 학습 루프 | `src/skylens_model/README.md` §6(학습 전략) → `train.ipynb` |
 | 컴포넌트 경계·서버·프로토콜 관련 작업 | **`docs/COMPONENTS.md` 필독** → `src/shared/proto/skylens/model/v1/model.proto`(코어↔모델) · `src/shared` (예전 정의는 `src/shared/legacy/protocol.ts`) |
-| 데모·뷰어(관제탑/현황판) UI·연출 작업 | **`docs/COMPONENTS.md`** → `PROJECT.md` → `README.md` |
+| 데모·뷰어(관제탑/현황판) UI·연출 작업 | **`docs/COMPONENTS.md` §3.10(화면 이식 원칙)** → 이전 화면 DOM·캡처(`.worktrees/legacy-dom/`, 커밋 `17c4d92`) |
 | 좌표계·GPS 관련 | `README.md` 좌표계 절 → `src/shared` + `src/skylens_model/utils/geo.py` (둘 다 고칠 것) |
 | 3D 복원·촬영 계획 (`src/skylens_model/models/skylens`) | **`docs/SPEC.md` §9~10** → `docs/COMPONENTS.md` §3.5 → `models/skylens/README.md`(촬영 가이드·이전 3DGS 근거) |
 | 기획 문구·발표 자료 | `docs/INTENT.md` → `docs/ARCHITECTURE.md` |
@@ -91,13 +91,13 @@ go.work              # Go 워크스페이스 (src/skylens_core)
 pyproject.toml       # Python: UNet 학습 · 데이터셋
 res/static/          # 데모 자산 (영상 · 이미지 · demo/ 구간 자산은 생성물, 커밋하지 않음)
 src/
-├─ shared/           # Rust 공통 계약: 프로토콜 · 좌표계 + proto/(코어↔모델 gRPC 계약, Go·Rust 공용)
+├─ shared/           # 공통 계약 crate(proto · 좌표계) + viewer/(두 화면 공용 층 crate)
 ├─ skylens_drone/    # Rust Mission Bridge (예전 skylens_mission_bridge 흡수)
 ├─ skylens_gateway/  # 브리지 호스트: nginx 설정 · MediaMTX · 설치 스크립트 (코드 없음)
 ├─ skylens_proxy/    # 대전: nginx 다중 경로 설정 (코드 없음)
-├─ skylens_core/     # Go 코어 (관제탑 웹 서빙 포함) + deploy/(대전 MediaMTX · KOREN 배치 문서)
+├─ skylens_core/     # Go 코어 서버 + control/(관제탑 화면 crate, 코어가 웹으로 제공) + deploy/(대전 MediaMTX · KOREN 배치 문서)
 ├─ skylens_model/    # Rust 연산 서버 + Python 학습 코드. 같은 폴더에 .py 와 짝이 되는 .rs
-├─ skylens_client/   # 관제탑·현황판 공용 UI: HTML/CSS를 Blitz로 그림 + pointblitz (웹 wasm · 네이티브 같은 코드)
+├─ skylens_client/   # 현황판 화면 crate: 이전 HTML/CSS를 Blitz로 그대로 + pointblitz (웹 · 네이티브 같은 코드)
 ├─ test/             # 컴포넌트 경계 테스트(Rust crate) + pytest
 └─ demo/             # Rust 엔드 투 엔드 데모 런처
 docs/            # INTENT · SPEC · COMPONENTS · ARCHITECTURE · DATASETS · NETWORK_ARCHITECTURE

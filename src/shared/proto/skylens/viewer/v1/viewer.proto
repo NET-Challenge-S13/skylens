@@ -2,7 +2,8 @@
 // one binary-encoded Envelope.
 //
 //   ws /uplink   drone (or demo) -> core      Uplink
-//   ws /viewer   core -> screens              Viewer events; screens -> core: Control
+//   ws /control  core <-> control tower       Viewer events + base map; tower -> core: Control
+//   ws /viewer   core -> status boards        Viewer events only (read-only, no base map)
 //
 // Chunks reuse skylens.model.v1.Chunk unchanged, so the core forwards what the
 // model server streamed without re-encoding the payload.
@@ -40,6 +41,7 @@ message Envelope {
     CameraFeed camera_feed = 32;
     LinkStatus link_status = 33;
     ServerStatus server_status = 34;
+    Site site = 35;
   }
 }
 
@@ -68,6 +70,21 @@ message ManualControl {
 }
 
 // ---- viewer -----------------------------------------------------------------
+
+// The operating area. Sent first on every screen connection. The anchor is the
+// ENU origin of every chunk, terrain tile and detection, so screens never pick
+// their own.
+message Site {
+  skylens.model.v1.Gps anchor = 1;
+  double min_lat = 2;
+  double min_lon = 3;
+  double max_lat = 4;
+  double max_lon = 5;
+  string name = 6;          // e.g. "daejeon"
+  bool imagery = 7;         // satellite imagery available (VWorld key present)
+  bool buildings = 8;       // building footprints available
+  uint32 building_count = 9;
+}
 
 enum MissionPhase {
   MISSION_PHASE_UNSPECIFIED = 0;
