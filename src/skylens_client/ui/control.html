@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SkyLens · 관제탑</title>
+    <!-- The Rust app inlines these two stylesheets before Blitz parses the page. -->
+    <link rel="stylesheet" href="theme.css" />
+    <link rel="stylesheet" href="control.css" />
+  </head>
+  <body>
+    <section class="pane pane--control pane--full">
+      <!-- 3D view: pointblitz points (terrain, buildings, reconstruction), mesh blocks, markers. -->
+      <object id="view3d" class="view3d"></object>
+
+      <div class="sl-surface sl-surface--chip pane-label pane-label--control">
+        <span class="sl-dot"></span><span class="sl-surface__label">관제탑 · 실지형 상황도</span>
+      </div>
+
+      <!-- Mission phase + core link -->
+      <div id="mission-panel" class="sl-surface sl-surface--panel mission-panel is-stale">
+        <div id="mission-link" class="mission-panel__link is-connecting">
+          <span class="mission-panel__dot"></span>
+          <span id="mission-link-text" class="mission-panel__link-text">코어 연결 대기 중</span>
+        </div>
+        <ol class="mission-panel__steps">
+          <li id="step-idle" class="mission-panel__step">대기</li>
+          <li id="step-assigned" class="mission-panel__step">태스크 지정</li>
+          <li id="step-awaiting-drone" class="mission-panel__step">드론 연결 대기</li>
+          <li id="step-active" class="mission-panel__step">임무 수행</li>
+        </ol>
+        <div id="mission-message" class="mission-panel__message">코어에 연결하는 중입니다</div>
+        <div id="mission-sub" class="mission-panel__sub">연결되면 임무 상태와 드론 위치가 표시됩니다</div>
+      </div>
+
+      <!-- Drone list with GPS readouts; a row click selects the drone -->
+      <div id="telemetry-panel" class="sl-surface sl-surface--panel telemetry-panel">
+        <div id="telemetry-empty" class="telemetry-panel__empty">연결된 드론이 없습니다</div>
+        <ul id="telemetry-list" class="telemetry-panel__list"></ul>
+        <div class="telemetry-panel__hint">
+          1·2·3 / Tab: 드론 선택 · 화살표: 전진·선회 · Q/E: 고도 · 키를 떼면 정지 명령
+        </div>
+      </div>
+
+      <div id="control-toolbar" class="control-toolbar">
+        <button type="button" class="control-toolbar__btn" data-action="open-route">경로 계획 · Route</button>
+        <button type="button" class="control-toolbar__btn" data-action="open-settings">설정 · Display</button>
+      </div>
+
+      <div id="manual-badge" class="manual-badge is-hidden">수동 조종 중</div>
+
+      <!-- Camera panel: WHEP feed of the selected drone (played outside Blitz) -->
+      <div id="video-panel" class="sl-surface sl-surface--frame video-panel">
+        <div class="video-panel__frame"></div>
+        <div class="video-panel__label"><span class="video-panel__rec"></span><span id="video-label">CENTER CAM</span></div>
+        <div class="video-panel__body">
+          <span id="video-state">영상 대기</span>
+          <span id="video-url" class="video-panel__url"></span>
+        </div>
+        <div id="video-overlay" class="video-panel__overlay">NO SIGNAL</div>
+      </div>
+
+      <div id="toast-root"></div>
+
+      <!-- Route planner -->
+      <div id="route-overlay" class="route-modal-overlay is-hidden" data-action="close-route">
+        <div class="route-modal" data-action="none">
+          <button type="button" class="route-modal__close" data-action="close-route">×</button>
+          <div class="route-modal__title">경로 계획 · Route Planner</div>
+          <div id="route-hint" class="route-modal__hint">위도·경도·고도(m)를 입력하고 추가를 누르세요 · 목록에서 삭제할 수 있습니다</div>
+          <div class="route-modal__labels"><span>위도 lat</span><span>경도 lon</span><span>고도 alt (m)</span><span></span></div>
+          <div class="route-modal__form">
+            <input id="wp-lat" type="text" value="{{ANCHOR_LAT}}" />
+            <input id="wp-lon" type="text" value="{{ANCHOR_LON}}" />
+            <input id="wp-alt" type="text" value="{{DEFAULT_ALT}}" />
+            <button type="button" class="route-modal__btn route-modal__btn--add" data-action="add-waypoint">추가</button>
+          </div>
+          <div class="route-modal__toolbar">
+            <label class="route-modal__loop"><input id="route-loop" type="checkbox" /><span>왕복 반복</span></label>
+            <span id="route-target" class="route-modal__target">배정 대상: 연결된 드론 없음</span>
+          </div>
+          <ol id="route-list" class="route-modal__list">
+            <li class="route-modal__empty">웨이포인트가 없습니다</li>
+          </ol>
+          <div class="route-modal__actions">
+            <button type="button" class="route-modal__btn route-modal__btn--ghost" data-action="clear-route">Clear</button>
+            <button type="button" class="route-modal__btn route-modal__btn--primary" data-action="assign-route">Assign</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Display options: one scene, three ways to draw it -->
+      <div id="settings-overlay" class="settings-overlay is-hidden" data-action="close-settings">
+        <div class="sl-surface sl-surface--modal settings-panel" data-action="none">
+          <button type="button" class="settings-panel__close" data-action="close-settings">×</button>
+          <div class="settings-panel__title">설정 · Display</div>
+          <div class="settings-panel__section">건물 표시 방식</div>
+          <div class="settings-panel__options">
+            <button type="button" id="display-points" class="settings-option" data-action="set-display" data-arg="points">
+              <span class="settings-option__name">점</span>
+              <span class="settings-option__hint">VWorld 건물을 포인트로 표시</span>
+            </button>
+            <button type="button" id="display-black" class="settings-option is-active" data-action="set-display" data-arg="black">
+              <span class="settings-option__name">검정 텍스처 건물<span class="settings-option__badge">기본값</span></span>
+              <span class="settings-option__hint">건물에 검정 텍스처를 적용해 표시</span>
+            </button>
+            <button type="button" id="display-aerial" class="settings-option" data-action="set-display" data-arg="aerial">
+              <span class="settings-option__name">실사 항공뷰</span>
+              <span class="settings-option__hint">위성/항공 영상을 그대로 적용</span>
+            </button>
+          </div>
+          <dl class="settings-panel__meta">
+            <dt>기준점</dt>
+            <dd id="settings-anchor">{{ANCHOR_LABEL}}</dd>
+            <dt>지형·건물</dt>
+            <dd id="settings-terrain">코어 지형 피드 대기 중</dd>
+            <dt>3D 렌더러</dt>
+            <dd id="settings-renderer">준비 중</dd>
+          </dl>
+          <div class="settings-panel__note">표시 방식은 색만 바꿉니다. 같은 지형·건물 데이터를 다시 받지 않습니다</div>
+        </div>
+      </div>
+    </section>
+  </body>
+</html>
