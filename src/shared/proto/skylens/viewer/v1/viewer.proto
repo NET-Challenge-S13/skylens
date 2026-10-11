@@ -84,6 +84,12 @@ message Site {
   bool imagery = 7;         // satellite imagery available (VWorld key present)
   bool buildings = 8;       // building footprints available
   uint32 building_count = 9;
+  // Base map progress for the control tower's loading screen (the legacy tower
+  // showed the scene only once all of it had loaded).
+  bool base_map_ready = 10;         // no base map stream is running
+  uint32 base_map_cells = 11;       // terrain cells sent so far
+  uint32 base_map_cells_total = 12; // cells sent plus cells the running stream still owes
+  uint32 base_map_chunks = 13;      // terrain + building chunks the core holds (what a full replay delivers)
 }
 
 enum MissionPhase {

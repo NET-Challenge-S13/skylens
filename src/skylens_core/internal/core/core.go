@@ -90,15 +90,17 @@ type Core struct {
 	owners        map[uint32]*ws.Peer // drone id -> uplink that said hello
 	terrainArea   terrain.Area        // everything streamed so far (site + routes)
 	terrainCancel context.CancelFunc
-	terrainChunks uint64
-	lastSite      *viewerv1.Site // last Site broadcast, to send changes only
-	lastUplinkAt  time.Time
-	lastFrameAt   time.Time
-	framesIn      uint64
-	latencyMs     *float64
-	modelUp       bool
-	health        *modelv1.HealthResponse
-	healthErr     string
+	// baseMapStreams counts base map streams started and not finished yet.
+	baseMapStreams int
+	terrainChunks  uint64
+	lastSite       *viewerv1.Site // last Site broadcast, to send changes only
+	lastUplinkAt   time.Time
+	lastFrameAt    time.Time
+	framesIn       uint64
+	latencyMs      *float64
+	modelUp        bool
+	health         *modelv1.HealthResponse
+	healthErr      string
 }
 
 // New builds a core. Call Run to start its loops (and the base map).

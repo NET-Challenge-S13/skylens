@@ -250,6 +250,14 @@ func (s *Store) putTerrainLocked(c *modelv1.Chunk) bool {
 	return true
 }
 
+// BaseMapCount is how many base map chunks (terrain and building cells) the
+// store holds: exactly what a control tower's replay delivers.
+func (s *Store) BaseMapCount() int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return len(s.terrain.m)
+}
+
 // IsBaseMap reports whether a chunk kind is part of the control tower's base
 // map (terrain and buildings), which status boards never receive.
 func IsBaseMap(k modelv1.ChunkKind) bool {
