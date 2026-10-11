@@ -184,8 +184,10 @@ mod tests {
         let m = rasterize_fire_mask(&poly, 4, 4);
         assert_eq!(m.at(1, 1, 0), DangerClass::FIRE);
         assert_eq!(m.at(2, 2, 0), DangerClass::FIRE);
+        // cv2.fillPoly fills boundary pixels too: vertices land on pixels 1 and 3.
+        assert_eq!(m.at(3, 3, 0), DangerClass::FIRE);
         assert_eq!(m.at(0, 0, 0), DangerClass::NORMAL);
-        assert_eq!(m.at(3, 3, 0), DangerClass::NORMAL);
+        assert_eq!(m.at(0, 3, 0), DangerClass::NORMAL);
     }
 
     #[test]

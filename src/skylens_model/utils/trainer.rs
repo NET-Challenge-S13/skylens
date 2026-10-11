@@ -84,11 +84,11 @@ pub fn centernet_focal_loss(pred: &Tensor, target: &Tensor, alpha: f64, beta: f6
     let pred = pred.clamp(eps, 1.0 - eps);
 
     let pos_mask = target.eq(1.0).to_kind(Kind::Float);
-    let neg_mask = 1.0 - &pos_mask;
+    let neg_mask = 1.0f64 - &pos_mask;
 
-    let pos_loss = pred.log() * (1.0 - &pred).pow_tensor_scalar(alpha) * &pos_mask;
-    let neg_weights = (1.0 - target).pow_tensor_scalar(beta);
-    let neg_loss = (1.0 - &pred).log() * pred.pow_tensor_scalar(alpha) * neg_weights * &neg_mask;
+    let pos_loss = pred.log() * (1.0f64 - &pred).pow_tensor_scalar(alpha) * &pos_mask;
+    let neg_weights = (1.0f64 - target).pow_tensor_scalar(beta);
+    let neg_loss = (1.0f64 - &pred).log() * pred.pow_tensor_scalar(alpha) * neg_weights * &neg_mask;
 
     let num_pos = pos_mask.sum(Kind::Float);
     let pos_loss = pos_loss.sum(Kind::Float);

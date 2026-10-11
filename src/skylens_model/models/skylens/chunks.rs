@@ -307,7 +307,10 @@ mod tests {
             .filter(|c| c.kind == ChunkKind::Points as i32)
             .map(|c| (c.segment, c.generation))
             .collect();
-        assert_eq!(points, vec![(1, 0), (0, 1)]);
+        // Refined points go out coarse-first, so one generation may span several chunks.
+        assert!(points.contains(&(1, 0)), "segment 1 preview must stay: {points:?}");
+        assert!(points.contains(&(0, 1)), "segment 0 refined must arrive: {points:?}");
+        assert!(!points.contains(&(0, 0)), "segment 0 preview must be replaced: {points:?}");
     }
 
     #[test]
