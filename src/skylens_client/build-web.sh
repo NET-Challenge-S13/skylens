@@ -64,6 +64,7 @@ fi
 
 echo "==> pages"
 cp "$HERE/web/index.html" "$DIST/index.html"
+cp "$HERE/../../res/icon/skylens-64.png" "$DIST/favicon.png"
 cp "$HERE/web/index.html" "$DIST/status.html"
 sed 's/<meta name="skylens-screen" content="status" \/>/<meta name="skylens-screen" content="control" \/>/' \
   "$HERE/web/index.html" > "$DIST/control.html"

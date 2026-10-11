@@ -24,6 +24,7 @@ pub fn run(cfg: Config) -> anyhow::Result<()> {
     let mut application = BlitzApplication::new(proxy, receiver);
     let attributes = WindowAttributes::default()
         .with_title(title)
+        .with_window_icon(window_icon())
         .with_surface_size(LogicalSize::new(1440.0, 900.0));
     application.add_window(WindowConfig::with_attributes(
         Box::new(doc),
@@ -33,4 +34,12 @@ pub fn run(cfg: Config) -> anyhow::Result<()> {
     event_loop
         .run_app(application)
         .map_err(|e| anyhow::anyhow!("event loop: {e}"))
+}
+
+/// The SkyLens icon for the title bar and task bar (the exe icon is embedded by build.rs).
+fn window_icon() -> Option<winit::icon::Icon> {
+    let png = include_bytes!("../../res/icon/skylens-256.png");
+    let rgba = image::load_from_memory(png).ok()?.into_rgba8();
+    let (w, h) = rgba.dimensions();
+    winit::icon::RgbaIcon::new(rgba.into_raw(), w, h).ok().map(Into::into)
 }
