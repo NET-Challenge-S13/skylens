@@ -30,3 +30,5 @@ cumulus3d-cli.workspace = true
 deltamesh.workspace = true
 pointblitz-io.workspace = true
 tch.workspace = true
+uuid = { version = "1", features = ["v4"] }
+tokio-stream = "0.1"
