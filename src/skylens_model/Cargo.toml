@@ -30,3 +30,7 @@ cumulus3d-cli.workspace = true
 deltamesh.workspace = true
 pointblitz-io.workspace = true
 tch.workspace = true
+# datasets / cache: image decode + JPEG/PNG encode (no OpenCV)
+# SIGINT/SIGTERM hook for GracefulInterruptCallback
+ctrlc = { version = "3", features = ["termination"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "tiff"] }
