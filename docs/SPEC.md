@@ -59,7 +59,7 @@ related: "[[INTENT.md]], [[COMPONENTS.md]], [[ARCHITECTURE.md]], [[NETWORK_ARCHI
 |---|---|---|
 | 업링크 (드론→코어) | `UplinkMessage` | `drone-hello` · `telemetry` · `video-segment` |
 | 제어 (관제탑→코어) | `ControlMessage` | `assign-route` · `manual-control` |
-| 뷰어 (코어→화면) | `ViewerMessage` | `mission-status` · `splat-chunk` · `camera-feed` · `detection` · `link-status` · `server-status` |
+| 뷰어 (코어→화면) | `ViewerMessage` | `mission-status` · `splat-chunk` · `point-chunk` · `camera-feed` · `detection` · `link-status` · `server-status` |
 | 잡 (코어↔모델) | 해당 없음 | `ReconJobRequest` · `DetectJobRequest` → `JobStatus` → `recon-result` · `detect-result` |
 
 - 미션 단계는 `idle → assigned → awaiting-drone → active` 네 값이다.
@@ -109,6 +109,7 @@ related: "[[INTENT.md]], [[COMPONENTS.md]], [[ARCHITECTURE.md]], [[NETWORK_ARCHI
 - 탐지 마커도 해당 구간이 복원돼야 표시된다.
 - 좌측 상단 서버 패널에 구간별 현재 수준이 뜬다.
 - 데모 자산이 없으면 단일 장면 스트림으로 자동 폴백한다.
+- **점 레이어**(점 + 고도색)는 메인 화면 아래에 작게 뜨는 참고용 패널이며, 별도 씬과 카메라로 그려 메인 화면에 영향을 주지 않는다. `point-chunk`를 구간 단위로 받는다. 수준 1은 초벌(그 구간의 새 영역만), 수준 2는 정밀본이고, 높은 수준이 오면 같은 구간의 낮은 수준을 교체한다. 좌표는 청크의 GPS anchor 기준 ENU 미터이며 화면에서만 씬 축으로 바꾼다. 색은 화면에 올라온 점의 높이 1~99 백분위 범위로 칠하고, 빈 곳을 채우거나 보간하지 않는다. 구간 교체는 `statusview/segmentSlots.ts` 한 곳이 맡는다.
 
 ## 8. AI 모델
 
@@ -158,6 +159,7 @@ related: "[[INTENT.md]], [[COMPONENTS.md]], [[ARCHITECTURE.md]], [[NETWORK_ARCHI
 |---|---|---|
 | 드론 촬영 | 기체 카메라 → H.265 실시간 인코딩 | `res/static/video/h265`의 사전 인코딩 영상 |
 | 3D 복원 | Core HPC에서 gsplat 학습 | `res/static/demo`의 사전 제작 구간×수준 자산 |
+| 점 구간 | 복원 노드가 구간마다 초벌·정밀본 전송(전송 방식 미정) | 코어가 `res/static/demo/points`의 촬영본을 미션 active 이후 일정 간격으로 재생 |
 
 나머지는 전부 실제 경로다. 화면은 도착한 것만 그리고, 파이프라인이 없으면 **없다고 표시**한다(`PipelineUnavailable`). 시뮬레이션으로 메우지 않는다.
 

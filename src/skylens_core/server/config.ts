@@ -49,6 +49,19 @@ export interface CoreConfig {
   /** Prebuilt assets instead of training. Scheduling is IDENTICAL either way. */
   demo: boolean;
 
+  /** Point layer demo feed (pointFeed.ts). Runs only when `demo` is on and the
+   *  manifest exists (`npm run demo:points` stages it). */
+  demoPoints: {
+    manifest: string;
+    /** URL prefix the boards fetch the point files under. */
+    urlBase: string;
+    /** Gap between delay-pattern ticks. */
+    intervalMs: number;
+    /** Start when the first viewer connects instead of when the mission goes
+     *  active (repeatable recordings without flying a route). */
+    autostart: boolean;
+  };
+
   /** Route arc-length that makes one reconstruction segment, in meters. */
   segmentMeters: number;
   /** Where this core is, `lat,lon[,alt]`. Empty falls back to siteFallback. */
@@ -113,6 +126,12 @@ export function loadConfig(): CoreConfig {
     modelMaxAttempts: num('SKYLENS_CORE_MODEL_MAX_ATTEMPTS', 20),
 
     demo: bool('SKYLENS_DEMO', false),
+    demoPoints: {
+      manifest: str('SKYLENS_DEMO_POINTS_MANIFEST', 'res/static/demo/points/points.json'),
+      urlBase: str('SKYLENS_DEMO_POINTS_URL_BASE', '/res/static/demo/points').replace(/\/+$/, ''),
+      intervalMs: Math.max(200, num('SKYLENS_DEMO_POINTS_INTERVAL_MS', 4000)),
+      autostart: bool('SKYLENS_DEMO_POINTS_AUTOSTART', false),
+    },
 
     segmentMeters: num('SKYLENS_CORE_SEGMENT_METERS', 40),
     site: process.env.SKYLENS_CORE_SITE,

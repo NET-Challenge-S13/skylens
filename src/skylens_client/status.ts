@@ -18,6 +18,7 @@
 //
 //   telemetry       → drone poses (minimap + camera follow)
 //   splat-chunk     → geometry, and therefore visibility
+//   point-chunk     → the point layer (height colour), replaced per segment
 //   detection       → markers, gated on their segment's arrival
 //   mission-status  → the operator line
 //   server-status   → the delay-pattern ladder
@@ -34,7 +35,7 @@ import { state } from '../shared/viewer/store.ts';
 import { CONFIG } from '../shared/viewer/config.ts';
 import { gpsToScene } from '../shared/geo.ts';
 import { IDENTITY_ALIGN } from '../shared/protocol.ts';
-import type { DroneTelemetry } from '../shared/protocol.ts';
+import type { DroneTelemetry, PointChunk } from '../shared/protocol.ts';
 import type { DetectionRuntime } from '../shared/viewer/types.ts';
 import {
   loadScene,
@@ -50,6 +51,7 @@ import type { RelayClient } from './sources/relayClient.ts';
 import { mountMinimap } from './ui/minimap.ts';
 import { mountServerStatus } from './ui/serverStatus.ts';
 import { mountRelayBadge } from './ui/relayBadge.ts';
+import { mountPointToggle } from './ui/pointToggle.ts';
 
 function getCanvas(id: string): HTMLCanvasElement {
   const el = document.getElementById(id);
@@ -169,6 +171,19 @@ async function main(): Promise<void> {
     });
   }
 
+  // Point layer: a small panel under the main view (statusview/pointInset.ts),
+  // open by default and shown once point segments arrive. Every segment is
+  // handed over either way: closed, it is only remembered (nothing fetched);
+  // open, the newest level of each segment loads and replaces what that
+  // segment showed. ?points=off starts it closed, ?points=rgb colours by the
+  // capture's own RGB instead of height (for comparison).
+  relay.onPointChunk((chunk) => {
+    status.ingestPointChunk(chunk);
+  });
+  const pointsQ = new URLSearchParams(window.location.search).get('points');
+  if (pointsQ === 'rgb') status.setPointColorMode('rgb');
+  if (pointsQ === 'off') status.setPointLayerEnabled(false);
+
   // The plan, so the board has a fixed reference to read everything else
   // against. The core replays it to any viewer that joins (index.ts onJoin), so
   // a board opened mid-mission gets it too.
@@ -267,6 +282,7 @@ async function main(): Promise<void> {
     status.loadedChunks().map((c) => ({ segment: c.segment, position: c.center })),
   );
   mountWaitingBanner(status, relay);
+  const pointToggle = mountPointToggle(status);
   relay.start();
 
   const resize = (): void => status.resize();
@@ -288,6 +304,7 @@ async function main(): Promise<void> {
     status.update(dt);
     ui.update();
     minimap.update();
+    pointToggle.update();
     requestAnimationFrame(frame);
   };
   requestAnimationFrame(frame);
@@ -326,6 +343,27 @@ async function main(): Promise<void> {
       },
       samples(limit?: number) {
         return status.splatSamples(limit);
+      },
+    },
+    points: {
+      get stats() {
+        return status.pointStats;
+      },
+      setEnabled(on: boolean) {
+        status.setPointLayerEnabled(on);
+      },
+      frame() {
+        return status.framePoints();
+      },
+      get inset() {
+        return status.pointInsetDebug;
+      },
+      setBudget(points: number) {
+        status.setPointBudget(points);
+      },
+      /** Load measurements only: hand the layer a chunk directly. */
+      offer(chunk: PointChunk) {
+        return status.ingestPointChunk(chunk);
       },
     },
     get server() {

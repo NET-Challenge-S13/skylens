@@ -10,6 +10,7 @@ import type {
   DetectionResult,
   DroneHello,
   DroneTelemetry,
+  PointChunk,
   SegmentStatus,
   SplatChunk,
   VideoSegment,
@@ -46,6 +47,9 @@ export class Store {
   anchorFrame: string | null = null;
   /** Newest main-camera slice, replayed to a viewer that joins mid-flight. */
   cameraFeed: CameraFeed | null = null;
+  /** Point layer: the highest level delivered per segment. Its own map, not
+   *  `segments`: the point pipeline cuts the flight on its own boundaries. */
+  readonly pointChunks = new Map<number, PointChunk>();
 
   readonly counters: StoreCounters = {
     uplinkFrames: 0,
@@ -204,6 +208,20 @@ export class Store {
       .filter((s): s is SegmentRecord & { chunk: SplatChunk } => s.chunk !== null)
       .sort((a, b) => a.index - b.index)
       .map((s) => s.chunk);
+  }
+
+  /** Keep a point chunk unless that segment already has this level or higher.
+   *  False = superseded, do not send it on. */
+  putPointChunk(chunk: PointChunk): boolean {
+    const prev = this.pointChunks.get(chunk.segment);
+    if (prev && prev.level >= chunk.level) return false;
+    this.pointChunks.set(chunk.segment, chunk);
+    return true;
+  }
+
+  /** Latest point chunk per segment, oldest segment first (catch-up replay). */
+  pointChunkReplay(): PointChunk[] {
+    return [...this.pointChunks.values()].sort((a, b) => a.segment - b.segment);
   }
 
   segmentStatus(levels: number): SegmentStatus[] {

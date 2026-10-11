@@ -188,6 +188,45 @@ export interface SplatChunk {
 }
 
 /**
+ * One segment of the POINT layer: points coloured by height on the board.
+ *
+ * Same delay pattern as SplatChunk, different product. The reconstruction
+ * pipeline emits, per segment, a quick first pass (level 1, only the ground
+ * this segment adds) and then a refined pass (level 2, the whole segment). A
+ * higher level REPLACES the lower one for that segment; it is never stacked on
+ * top. Kept apart from SplatChunk on purpose: `steps` there counts gsplat
+ * training steps, which mean nothing for a point pass.
+ *
+ * FRAME. Points are local ENU metres (x east, y north, z up) about
+ * `align.anchor`, and `align`'s position/rotation/scale act in that same ENU
+ * frame. This differs from SplatChunk, whose align is in scene axes. The board
+ * converts ENU to its scene axes at render time (SPEC §4).
+ *
+ * Assumptions until the producer confirms them: positions arrive already
+ * aligned (identity rotation), and level-1 normals are estimated by the voxel
+ * pass because the pipeline's raw first-pass normals are not normals.
+ */
+export interface PointChunk {
+  kind: 'point-chunk';
+  id: string;
+  segment: number;
+  /** 1 = first pass (this segment's new ground only), 2 = refined. */
+  level: number;
+  /** No further level will arrive for this segment. */
+  final: boolean;
+  url: string;
+  bytes: number;
+  points: number;
+  /** Record layout: 27 B little endian, x y z f32 · r g b u8 · nx ny nz f32. */
+  format: 'xyz-rgb-nxyz-27';
+  /** Voxel thinning applied before sending, metres; null = none. */
+  voxel: number | null;
+  /** Point bounds in the chunk's own ENU frame, before `align`. */
+  bbox: { min: [number, number, number]; max: [number, number, number] };
+  align: SplatAlign;
+}
+
+/**
  * What the main drone camera is showing right now. Derived from the video the
  * drone is uplinking, so the control tower's MAIN CAM panel shows the actual
  * capture rather than a placeholder.
@@ -345,6 +384,7 @@ export type ViewerMessage =
   // the aircraft is following it.
   | AssignRoute
   | SplatChunk
+  | PointChunk
   | DetectionResult
   | DroneTelemetry
   | CameraFeed
@@ -366,6 +406,7 @@ export type ViewerMessage =
 export const VIEWER_MESSAGE_KINDS = [
   'assign-route',
   'splat-chunk',
+  'point-chunk',
   'detection',
   'telemetry',
   'camera-feed',

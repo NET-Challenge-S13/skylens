@@ -10,6 +10,7 @@
 // The cache is deliberately tiny and is the SAME shape as the wire — the newest
 // frame per key, never a derived model:
 //   splat-chunk    → highest level seen per segment (the delay pattern's own rule)
+//   point-chunk    → the same rule, on the point layer's own segments
 //   detection      → by id
 //   telemetry      → by droneId
 //   link-status    → by hop
@@ -25,6 +26,7 @@ import type {
   DroneTelemetry,
   LinkStatus,
   MissionStatus,
+  PointChunk,
   ServerStatus,
   SplatChunk,
   ViewerMessage,
@@ -44,6 +46,7 @@ export interface BoardCounters {
   byKind: Record<string, number>;
   cached: {
     segments: number;
+    pointSegments: number;
     detections: number;
     drones: number;
     links: number;
@@ -84,6 +87,7 @@ export function createBoardHub(peerPath: string): BoardHub {
 
   // Replay cache.
   const chunks = new Map<number, SplatChunk>();
+  const pointChunks = new Map<number, PointChunk>();
   const detections = new Map<string, DetectionResult>();
   const telemetry = new Map<number, DroneTelemetry>();
   const links = new Map<string, LinkStatus>();
@@ -135,6 +139,9 @@ export function createBoardHub(peerPath: string): BoardHub {
     for (const seg of [...chunks.keys()].sort((a, b) => a - b)) {
       out.push(chunks.get(seg)!);
     }
+    for (const seg of [...pointChunks.keys()].sort((a, b) => a - b)) {
+      out.push(pointChunks.get(seg)!);
+    }
     for (const d of detections.values()) out.push(d);
     if (serverStatus) out.push(serverStatus);
     return out;
@@ -147,6 +154,11 @@ export function createBoardHub(peerPath: string): BoardHub {
         // A superseded level must never survive in the cache, or a reloading
         // board would be handed the coarse version after the fine one.
         if (!prev || msg.level >= prev.level) chunks.set(msg.segment, msg);
+        break;
+      }
+      case 'point-chunk': {
+        const prev = pointChunks.get(msg.segment);
+        if (!prev || msg.level >= prev.level) pointChunks.set(msg.segment, msg);
         break;
       }
       case 'detection':
@@ -232,6 +244,7 @@ export function createBoardHub(peerPath: string): BoardHub {
         byKind: { ...byKind },
         cached: {
           segments: chunks.size,
+          pointSegments: pointChunks.size,
           detections: detections.size,
           drones: telemetry.size,
           links: links.size,

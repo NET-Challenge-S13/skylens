@@ -25,6 +25,7 @@ import type {
   ControlMessage,
   DetectionResult,
   LinkStatus,
+  PointChunk,
   ServerStatus,
   SplatChunk,
 } from '../../shared/protocol.ts';
@@ -35,6 +36,7 @@ import { buildLadder, topLevel } from './ladder.ts';
 import { Mission } from './mission.ts';
 import { ModelClient } from './modelClient.ts';
 import { Orchestrator } from './orchestrator.ts';
+import { PointFeed } from './pointFeed.ts';
 import { Store } from './store.ts';
 import { resolveSite, type Site } from './site.ts';
 import { mountWeb } from './web.ts';
@@ -57,6 +59,21 @@ const model = new ModelClient({
 
 const distributor = new WsDistributor();
 
+// Point layer (protocol.ts PointChunk). Live: the reconstruction node's
+// transport is not decided yet, so only the demo replays a staged capture.
+const pointFeed: PointFeed | null = cfg.demo
+  ? new PointFeed({
+      manifestPath: cfg.demoPoints.manifest,
+      urlBase: cfg.demoPoints.urlBase,
+      intervalMs: cfg.demoPoints.intervalMs,
+      emit: (chunk: PointChunk) => {
+        if (!store.putPointChunk(chunk)) return false;
+        distributor.broadcast(chunk);
+        return true;
+      },
+    })
+  : null;
+
 const mission = new Mission({
   assignedHoldMs: cfg.assignedHoldMs,
   droneEtaSeconds: cfg.droneEtaSeconds,
@@ -64,7 +81,11 @@ const mission = new Mission({
   // flying to the site is in the store (so the tower can draw it) but has
   // not arrived. See DroneRecord.announced.
   dronesOnline: () => [...store.drones.values()].filter((d) => d.announced).length,
-  onChange: (status) => distributor.broadcast(status),
+  onChange: (status) => {
+    distributor.broadcast(status);
+    // The capture is "being flown" once the mission is under way.
+    if (status.phase === 'active') pointFeed?.start('mission active');
+  },
 });
 
 const orchestrator = new Orchestrator({
@@ -131,6 +152,10 @@ function serverStatus(): ServerStatus {
 /** A viewer that joins late must not see an empty world: replay everything the
  *  core has, in the order the board would have received it live. */
 distributor.onJoin((send: ViewerSend) => {
+  // SKYLENS_DEMO_POINTS_AUTOSTART plays the capture as soon as someone is
+  // watching, without a mission; started at boot, its first ticks would go
+  // out before any viewer and the board would open on a finished picture.
+  if (cfg.demoPoints.autostart) pointFeed?.start('first viewer, SKYLENS_DEMO_POINTS_AUTOSTART');
   send(mission.status());
   for (const drone of store.drones.values()) if (drone.last) send(drone.last);
   if (store.routeWaypoints.length >= 2 && store.routeDroneId !== null) {
@@ -142,6 +167,7 @@ distributor.onJoin((send: ViewerSend) => {
     });
   }
   for (const chunk of store.chunks()) send(chunk);
+  for (const chunk of store.pointChunkReplay()) send(chunk);
   for (const det of store.detections) send(det);
   if (store.cameraFeed) send(store.cameraFeed);
   send(serverStatus());
@@ -253,6 +279,7 @@ app.get('/health', (_req, res) => {
     })),
     segments: store.segmentStatus(levels),
     jobs: orchestrator.counters(),
+    points: pointFeed?.counters() ?? { available: false, detail: 'demo mode off' },
     uplink: ingest.counters(),
     distribution: distributor.counters(),
     model: model.health(),
@@ -290,6 +317,9 @@ server.on('upgrade', (req, socket, head) => {
 ingest.start(uplinkWss);
 distributor.start(viewerWss);
 orchestrator.start();
+if (pointFeed && !pointFeed.available) {
+  console.log(`[core] point feed off: ${pointFeed.counters().detail}`);
+}
 
 // ServerStatus is a heartbeat; MissionStatus is pushed on change, plus on the
 // tick while it is time-bound so a countdown actually counts down.
@@ -321,6 +351,7 @@ function shutdown(signal: string): void {
   clearInterval(statusTimer);
   clearInterval(probeTimer);
   orchestrator.stop();
+  pointFeed?.stop();
   mission.stop();
   ingest.stop();
   distributor.stop();

@@ -28,6 +28,9 @@ import { SplatReveal } from './splatReveal.ts';
 import { CameraSync } from './cameraSync.ts';
 import { SplatScene } from './splatScene.ts';
 import type { SplatStatus } from './splatScene.ts';
+import type { PointChunk } from '../../shared/protocol.ts';
+import { PointInset } from './pointInset.ts';
+import type { PointLayer, PointColorMode } from './pointLayer.ts';
 
 const POINT_VERT = /* glsl */ `
   attribute float aReveal;
@@ -241,6 +244,12 @@ export class StatusViewer {
   private readonly history: Array<{ t: number; pos: THREE.Vector3; forward: THREE.Vector3 }> = [];
   private userDragging = false;
   private dragGraceUntil = 0;
+
+  /** Point layer (PointChunk), drawn in its own small panel under the main
+   *  view. Built on the first arrival or the first toggle. */
+  private pointInset: PointInset | null = null;
+  private pointLayerOn = true;
+  private pointMode: PointColorMode = 'height';
 
   constructor(canvas: HTMLCanvasElement, sceneData: SceneData, useSplat: boolean) {
     this.canvas = canvas;
@@ -508,6 +517,59 @@ export class StatusViewer {
     this.controls.update();
 
     this.renderer.render(this.scene, this.camera);
+    this.pointInset?.render(this.renderer, this.canvas, dt);
+  }
+
+  // -------------------------------------------------------------------------
+  // Point layer (its own panel; the main view above is not affected)
+  // -------------------------------------------------------------------------
+
+  private ensurePointInset(): PointInset {
+    if (!this.pointInset) {
+      this.pointInset = new PointInset(this.canvas.parentElement ?? document.body, {
+        geoAnchor: CONFIG.geo.anchor,
+        enabled: this.pointLayerOn,
+        mode: this.pointMode,
+      });
+    }
+    return this.pointInset;
+  }
+
+  /** A point segment arrived. While the panel is closed it is only remembered. */
+  ingestPointChunk(chunk: PointChunk): 'accepted' | 'stale' {
+    return this.ensurePointInset().offer(chunk);
+  }
+
+  /** Open or close the point panel. Closed, nothing is fetched. */
+  setPointLayerEnabled(on: boolean): void {
+    this.pointLayerOn = on;
+    this.pointInset?.setEnabled(on);
+  }
+
+  get pointLayerEnabled(): boolean {
+    return this.pointLayerOn;
+  }
+
+  setPointColorMode(mode: PointColorMode): void {
+    this.pointMode = mode;
+    this.pointInset?.setMode(mode);
+  }
+
+  /** Re-frame the panel on everything delivered. */
+  framePoints(): boolean {
+    return this.pointInset?.frame() ?? false;
+  }
+
+  get pointStats(): PointLayer['stats'] | null {
+    return this.pointInset?.layer.stats ?? null;
+  }
+
+  setPointBudget(points: number): void {
+    this.ensurePointInset().layer.setBudget(points);
+  }
+
+  get pointInsetDebug(): PointInset['debug'] | null {
+    return this.pointInset?.debug ?? null;
   }
 
   /**
@@ -908,6 +970,7 @@ export class StatusViewer {
   dispose(): void {
     this.controls.dispose();
     this.splat?.dispose();
+    this.pointInset?.dispose();
     this.pointGeom.dispose();
     (this.points.material as THREE.Material).dispose();
     for (const m of this.markers) {
