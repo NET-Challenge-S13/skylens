@@ -113,6 +113,11 @@ impl RouteModal {
         }
         if let Some(i) = m.spacing_input {
             dom.set_attr(i, "value", "10");
+            // Blitz builds a text editor for type=number but leaves it out of the intrinsic
+            // sizing it gives text inputs, so the box collapses and clips the value. Give it the
+            // browser's single-line height (the width comes from the legacy CSS).
+            dom.set_style(i, "height", "18px");
+            dom.set_style(i, "display", "inline-block");
         }
         m
     }

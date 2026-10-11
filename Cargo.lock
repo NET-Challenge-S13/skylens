@@ -5235,8 +5235,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "blitz-dom",
- "blitz-html",
- "blitz-traits",
  "prost",
  "skrifa",
  "skylens-shared",
@@ -5249,8 +5247,21 @@ dependencies = [
 name = "skylens-control"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "blitz-dom",
+ "blitz-traits",
+ "image",
+ "js-sys",
+ "prost",
+ "serde",
+ "serde_json",
+ "skrifa",
  "skylens-shared",
  "skylens-viewer",
+ "ureq",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]

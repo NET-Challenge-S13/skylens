@@ -488,11 +488,18 @@ impl<A: ScreenApp> Document for ScreenDocument<A> {
             driver.handle_ui_event(event);
         }
         let inputs = std::mem::take(&mut self.inputs);
-        {
+        let changed = {
             let mut dom = Dom::new(&mut self.inner, &mut self.cache);
             for input in &inputs {
                 self.app.input(input, &mut dom);
             }
+            dom.changed()
+        };
+        if changed {
+            // Blitz hit-tests against `paint_children`, which only a resolve rebuilds. Without
+            // this, a pointer event that arrives after we removed nodes walks a stale child list
+            // and panics on the missing node.
+            self.inner.resolve(crate::now_ms() as f64 / 1000.0);
         }
         // Pointer and wheel events may have moved the 3D camera without touching the DOM.
         self.inner.shell_provider.request_redraw();
@@ -501,9 +508,16 @@ impl<A: ScreenApp> Document for ScreenDocument<A> {
     fn poll(&mut self, task_context: Option<Context<'_>>) -> bool {
         let waker = task_context.as_ref().map(|c| c.waker());
         let mut cx = PollCx { now_ms: crate::now_ms(), waker };
-        let mut dom = Dom::new(&mut self.inner, &mut self.cache);
-        let wants = self.app.poll(&mut dom, &mut cx);
-        wants || dom.changed()
+        let (wants, changed) = {
+            let mut dom = Dom::new(&mut self.inner, &mut self.cache);
+            let wants = self.app.poll(&mut dom, &mut cx);
+            (wants, dom.changed())
+        };
+        if changed {
+            // Same reason as in `handle_ui_event`: keep the hit-test tree in step with the DOM.
+            self.inner.resolve(cx.now_ms as f64 / 1000.0);
+        }
+        wants || changed
     }
 }
 
