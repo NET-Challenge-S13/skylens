@@ -1,7 +1,5 @@
 # skylens_drone: Lito X1 Mission Bridge
 
-> **이행 중.** `skylens_drone`은 이제 이 Mission Bridge다. 아래 내용은 Python 구현(`legacy/mission_bridge/`) 기준이고, 같은 HTTP 표면(`:8091`, §8 API)을 Rust(`main.rs`)로 옮기는 중이다. 옮기기 전 테스트는 `legacy/tests/`에 있고, 포팅은 이 테스트를 Rust로 먼저 옮기는 것부터 시작한다.
-
 SkyLens 웹에서 만든 GPS 경로를 DJI Fly가 읽는 KMZ 임무로 바꾸는 로컬 서비스다.
 Lito X1은 공개 DJI SDK를 지원하지 않으므로 실시간 스틱 명령을 보내지 않는다.
 대신 기체가 공식 지원하는 **DJI Fly 웨이포인트 비행**을 사용한다.
@@ -28,7 +26,7 @@ Lito X1은 공개 DJI SDK를 지원하지 않으므로 실시간 스틱 명령�
 - 최신 DJI Fly와 기체·조종기 펌웨어
 - SkyLens를 실행할 PC와 USB 데이터 케이블
 - 비행 가능한 개방 장소, 현장 조종사, 관찰자
-- 이 저장소의 Node.js/npm과 Python 3.11 이상
+- 이 저장소의 Node.js/npm과 Rust 툴체인(`cargo`)
 
 선택:
 
@@ -38,8 +36,8 @@ Lito X1은 공개 DJI SDK를 지원하지 않으므로 실시간 스틱 명령�
 - Android Platform Tools: RC-N3에 연결할 Android 기기가 ADB 파일 전송을 허용할 때만 사용
   https://developer.android.com/tools/releases/platform-tools
 
-Litchi는 오픈소스가 아니며 SkyLens 실행에 필수도 아니다. 이 디렉터리의 Bridge는 Python
-표준 라이브러리만 사용하고, 저장소의 MIT 라이선스를 따른다.
+Litchi는 오픈소스가 아니며 SkyLens 실행에 필수도 아니다. 이 디렉터리의 Bridge는 Rust
+crate(`skylens-drone`)이고 오픈소스 의존성만 쓰며, 저장소의 MIT 라이선스를 따른다.
 
 ## 2. 최초 한 번: Lito X1 템플릿 KMZ 확보
 
@@ -75,7 +73,7 @@ RC 2는 USB-C로 PC에 직접 연결한다. RC-N3는 휴대폰의 USB-C가 조�
 저장소 루트에서:
 
 ```bash
-python src/skylens_drone/legacy/mission_bridge/server.py
+cargo run -p skylens-drone
 ```
 
 정상이면 다음과 비슷하게 표시된다.
@@ -96,6 +94,18 @@ curl http://127.0.0.1:8091/health
 `templateReady`가 `true`여야 한다. 템플릿이 없으면 Bridge는 살아 있지만 KMZ 생성을
 거부한다. M30 같은 임의의 기본값으로 대신 생성하지 않는다.
 
+기본 경로(`config/lito-x1-template.kmz`, `output/missions`)는 저장소 루트 기준이다.
+`SKYLENS_DJI_TEMPLATE_KMZ`, `SKYLENS_MISSION_OUTPUT`, `SKYLENS_MISSION_HOST`,
+`SKYLENS_MISSION_PORT`로 바꿀 수 있다(`config/mission-bridge.env.example` 참조).
+
+예전 Windows 실행 스크립트(`scripts/run-mission-bridge.ps1`)가 해 주던 기본값은 Bridge가 직접
+적용한다. `SKYLENS_DJI_WK_KEY`가 없으면 `config/.dji_wk_key`에서 서명 키를 읽고,
+`SKYLENS_DJI_TOKEN_FILE`이 없으면 `output/.dji_token`을 토큰 파일로 쓴다. 두 파일 모두
+gitignore 대상이고, 키와 토큰 값은 로그에 남기지 않는다.
+
+테스트는 `cargo test -p skylens-drone`이다. Python 구현의 테스트(`legacy/tests/`)를 옮긴
+것과 편대 기하·SigV4 서명 벡터, HTTP 표면, 코어 업링크 테스트가 들어 있다.
+
 ## 4. SkyLens 실행과 임무 생성
 
 터미널을 각각 열어 실행한다.
@@ -103,7 +113,7 @@ curl http://127.0.0.1:8091/health
 ```bash
 npm run dev
 npm run core
-python src/skylens_drone/legacy/mission_bridge/server.py
+cargo run -p skylens-drone
 ```
 
 관제 화면을 열고 `경로 계획 · Route`에서:
@@ -151,7 +161,7 @@ Bridge는 별도 이륙점 고도가 없으면 첫 웨이포인트의 지면고�
 
 ```bash
 export SKYLENS_DJI_INSTALL_TARGET='/exact/path/to/SKYLENS_TARGET.kmz'
-python src/skylens_drone/legacy/mission_bridge/server.py
+cargo run -p skylens-drone
 ```
 
 Bridge는 지정된 **그 한 파일만** 교체하며, 교체 전 파일은
@@ -171,6 +181,7 @@ Wi-Fi로 받아가게 할 수 있다. 조종기에 임무가 내려오면 조종
 - `SKYLENS_DJI_MC_TOKEN`: 로그인된 DJI Fly 세션의 `x-mc-token` (만료되므로 업로드가 인증
   오류를 내면 다시 추출한다)
 - `SKYLENS_DJI_WK_KEY`: `X-Wk-SecretId=uav` 요청 서명에 쓰는 HMAC 키
+  (없으면 `config/.dji_wk_key` 파일을 읽는다)
 
 설정한 뒤, 경로 전송 요청 본문에 `"deliver": "cloud"`를 넣으면 KMZ를 만든 다음 클라우드에
 올린다. 응답의 `cloud.missionUuid`로 조종기에 뜰 임무를 식별한다. 편대 3기도 각각 올라간다.
@@ -224,6 +235,29 @@ KMZ 생성·다운로드·로컬 전달, 그리고 **클라우드 업로드 자�
 > 이 경로는 공개 SDK가 아니라 DJI Fly 클라우드 동기화를 관찰해 맞춘 것이다. DJI Fly/펌웨어
 > 업데이트 후에는 2점 지상 검증을 다시 한다.
 
+### 선택: 코어 업링크
+
+`SKYLENS_CORE_UPLINK`(예: `ws://127.0.0.1:8082/uplink`)를 지정하면 Bridge가 코어의
+`ws /uplink`에 WebSocket 클라이언트로 붙는다. 모든 프레임은 바이너리
+`skylens.viewer.v1.Envelope` 하나다(`src/shared/proto/skylens/viewer/v1/viewer.proto`).
+
+- 연결되면 편대 스테이션마다 `drone_hello`를 하나씩 보낸다. 코어는 이것만 드론 도착으로 센다.
+- `assign_route`를 받으면 `POST /formation`과 같은 코드로 편대 3기 KMZ를 만들고, 클라우드
+  전달이 설정돼 있으면 각각 올린다. 비행 파라미터는 Bridge 기본값(지면 기준 30m, 2m/s,
+  이륙점 고도는 첫 웨이포인트로 추정)이다.
+- 코어는 새 업링크마다 현재 경로를 다시 보낸다. 직전에 임무로 만든 경로와 같으면 다시
+  만들지 않는다. 생성에 실패한 경로는 다음 재전송 때 다시 시도한다.
+- 소켓이 끊기면 지수 백오프(0.5초에서 10초까지)로 다시 붙는다. 코어 앞의 프록시는 장애
+  전환 때 열린 소켓을 옮기지 않으므로, 끊김이 곧 장애 전환 신호다.
+- Lito X1은 SDK가 없어 실시간 텔레메트리를 보내지 않는다. `manual_control`은 무시한다.
+
+| 변수 | 기본값 | 뜻 |
+|---|---|---|
+| `SKYLENS_CORE_UPLINK` | 없음(업링크 끔) | 코어 업링크 주소 |
+| `SKYLENS_UPLINK_STATIONS` | `left=1,center=2,right=3` | `스테이션=드론ID` 목록. ID를 빼면 순번 |
+| `SKYLENS_FORMATION_SPACING_M` | `10` | 코어 경로로 만드는 편대의 정삼각형 한 변(m) |
+| `SKYLENS_UPLINK_MODEL` | `DJI Lito X1 (DJI Fly waypoint mission)` | `drone_hello`의 기체 문자열 |
+
 ## 6. 첫 실비행 체크리스트
 
 첫 실비행은 웹에서 이륙시키는 시험이 아니다. 조종사가 DJI Fly에서 최종 확인하고 실행한다.
@@ -275,7 +309,7 @@ DJI Fly가 임무를 읽지 못하거나 값이 다르면 비행하지 않는다
 
 ## 8. API
 
-`POST /formation` — 계획 경로 하나를 편대 3기 미션으로 팬아웃. 요청은 아래
+`POST /formation`: 계획 경로 하나를 편대 3기 미션으로 팬아웃. 요청은 아래
 `POST /missions` 본문에 `"formation": {"spacingM": 10}`을 더한 형태다(단, `droneId`는
 무시). 응답은 `members` 배열로, 각 항목이 `station`(`left`|`right`|`center`)과
 그 기체의 KMZ `downloadUrl`을 담는다. 자동 설치는 하지 않는다(대상 파일 하나에
@@ -285,7 +319,8 @@ DJI Fly가 임무를 읽지 못하거나 값이 다르면 비행하지 않는다
 
 - `POST /missions` 또는 `POST /formation` 본문에 `"deliver": "cloud"`를 더하면 KMZ 생성
   후 DJI 클라우드에 올리고, 응답에 `"cloud": {"missionUuid": ..., "verified": true}`를 넣는다.
-  클라우드 미설정 시 이 요청은 502로 거부되며 다운로드/설치 요청은 영향받지 않는다.
+  클라우드 미설정 시 이 요청은 400으로 거부되며 다운로드/설치 요청은 영향받지 않는다.
+  DJI 클라우드가 거부하거나 닿지 않으면 502다.
 - `GET /cloud/missions` 계정 클라우드의 임무 목록(`uuid`, `name`, `waypointCount`, `distanceM`).
   관제탑 툴바 "클라우드 미션 · Cloud" 버튼이 이 결과를 보여주고 각 항목을 삭제한다.
 - `POST /cloud/delete` 본문 `{"missionUuid": "..."}` 로 해당 임무를 삭제.
