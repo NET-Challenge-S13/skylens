@@ -2,7 +2,7 @@
 // one binary-encoded Envelope.
 //
 //   ws /uplink   drone (or demo) -> core      Uplink
-//   ws /control  core <-> control tower       Viewer events + base map; tower -> core: Control
+//   ws /control  core <-> control tower       Viewer events + base map + planned route; tower -> core: Control
 //   ws /viewer   core -> status boards        Viewer events only (read-only, no base map)
 //
 // Chunks reuse skylens.model.v1.Chunk unchanged, so the core forwards what the
@@ -162,6 +162,7 @@ type Envelope struct {
 	//	*Envelope_LinkStatus
 	//	*Envelope_ServerStatus
 	//	*Envelope_Site
+	//	*Envelope_PlannedRoute
 	Body          isEnvelope_Body `protobuf_oneof:"body"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -315,6 +316,15 @@ func (x *Envelope) GetSite() *Site {
 	return nil
 }
 
+func (x *Envelope) GetPlannedRoute() *PlannedRoute {
+	if x != nil {
+		if x, ok := x.Body.(*Envelope_PlannedRoute); ok {
+			return x.PlannedRoute
+		}
+	}
+	return nil
+}
+
 type isEnvelope_Body interface {
 	isEnvelope_Body()
 }
@@ -362,6 +372,11 @@ type Envelope_Site struct {
 	Site *Site `protobuf:"bytes,35,opt,name=site,proto3,oneof"`
 }
 
+type Envelope_PlannedRoute struct {
+	// control tower only: core -> /control, never to /viewer or /uplink
+	PlannedRoute *PlannedRoute `protobuf:"bytes,36,opt,name=planned_route,json=plannedRoute,proto3,oneof"`
+}
+
 func (*Envelope_DroneHello) isEnvelope_Body() {}
 
 func (*Envelope_Telemetry) isEnvelope_Body() {}
@@ -381,6 +396,8 @@ func (*Envelope_LinkStatus) isEnvelope_Body() {}
 func (*Envelope_ServerStatus) isEnvelope_Body() {}
 
 func (*Envelope_Site) isEnvelope_Body() {}
+
+func (*Envelope_PlannedRoute) isEnvelope_Body() {}
 
 // The only signal that a drone has arrived. Telemetry alone does not count.
 type DroneHello struct {
@@ -503,6 +520,70 @@ func (x *AssignRoute) GetLoop() bool {
 	return false
 }
 
+// A route prepared before the session (the demo's recorded flight line), not
+// assigned yet. The core sends it to every control tower that connects while no
+// route has been assigned; the tower loads it into an empty route planner so the
+// operator only presses assign. Never sent to status boards or uplinks.
+type PlannedRoute struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	DroneId       uint32                 `protobuf:"varint,1,opt,name=drone_id,json=droneId,proto3" json:"drone_id,omitempty"`
+	Waypoints     []*v1.Gps              `protobuf:"bytes,2,rep,name=waypoints,proto3" json:"waypoints,omitempty"`
+	Loop          bool                   `protobuf:"varint,3,opt,name=loop,proto3" json:"loop,omitempty"` // same meaning as AssignRoute.loop
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PlannedRoute) Reset() {
+	*x = PlannedRoute{}
+	mi := &file_skylens_viewer_v1_viewer_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PlannedRoute) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PlannedRoute) ProtoMessage() {}
+
+func (x *PlannedRoute) ProtoReflect() protoreflect.Message {
+	mi := &file_skylens_viewer_v1_viewer_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PlannedRoute.ProtoReflect.Descriptor instead.
+func (*PlannedRoute) Descriptor() ([]byte, []int) {
+	return file_skylens_viewer_v1_viewer_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *PlannedRoute) GetDroneId() uint32 {
+	if x != nil {
+		return x.DroneId
+	}
+	return 0
+}
+
+func (x *PlannedRoute) GetWaypoints() []*v1.Gps {
+	if x != nil {
+		return x.Waypoints
+	}
+	return nil
+}
+
+func (x *PlannedRoute) GetLoop() bool {
+	if x != nil {
+		return x.Loop
+	}
+	return false
+}
+
 type ManualControl struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	DroneId       uint32                 `protobuf:"varint,1,opt,name=drone_id,json=droneId,proto3" json:"drone_id,omitempty"`
@@ -515,7 +596,7 @@ type ManualControl struct {
 
 func (x *ManualControl) Reset() {
 	*x = ManualControl{}
-	mi := &file_skylens_viewer_v1_viewer_proto_msgTypes[3]
+	mi := &file_skylens_viewer_v1_viewer_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -527,7 +608,7 @@ func (x *ManualControl) String() string {
 func (*ManualControl) ProtoMessage() {}
 
 func (x *ManualControl) ProtoReflect() protoreflect.Message {
-	mi := &file_skylens_viewer_v1_viewer_proto_msgTypes[3]
+	mi := &file_skylens_viewer_v1_viewer_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -540,7 +621,7 @@ func (x *ManualControl) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ManualControl.ProtoReflect.Descriptor instead.
 func (*ManualControl) Descriptor() ([]byte, []int) {
-	return file_skylens_viewer_v1_viewer_proto_rawDescGZIP(), []int{3}
+	return file_skylens_viewer_v1_viewer_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *ManualControl) GetDroneId() uint32 {
@@ -597,7 +678,7 @@ type Site struct {
 
 func (x *Site) Reset() {
 	*x = Site{}
-	mi := &file_skylens_viewer_v1_viewer_proto_msgTypes[4]
+	mi := &file_skylens_viewer_v1_viewer_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -609,7 +690,7 @@ func (x *Site) String() string {
 func (*Site) ProtoMessage() {}
 
 func (x *Site) ProtoReflect() protoreflect.Message {
-	mi := &file_skylens_viewer_v1_viewer_proto_msgTypes[4]
+	mi := &file_skylens_viewer_v1_viewer_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -622,7 +703,7 @@ func (x *Site) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Site.ProtoReflect.Descriptor instead.
 func (*Site) Descriptor() ([]byte, []int) {
-	return file_skylens_viewer_v1_viewer_proto_rawDescGZIP(), []int{4}
+	return file_skylens_viewer_v1_viewer_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *Site) GetAnchor() *v1.Gps {
@@ -728,7 +809,7 @@ type MissionStatus struct {
 
 func (x *MissionStatus) Reset() {
 	*x = MissionStatus{}
-	mi := &file_skylens_viewer_v1_viewer_proto_msgTypes[5]
+	mi := &file_skylens_viewer_v1_viewer_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -740,7 +821,7 @@ func (x *MissionStatus) String() string {
 func (*MissionStatus) ProtoMessage() {}
 
 func (x *MissionStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_skylens_viewer_v1_viewer_proto_msgTypes[5]
+	mi := &file_skylens_viewer_v1_viewer_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -753,7 +834,7 @@ func (x *MissionStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use MissionStatus.ProtoReflect.Descriptor instead.
 func (*MissionStatus) Descriptor() ([]byte, []int) {
-	return file_skylens_viewer_v1_viewer_proto_rawDescGZIP(), []int{5}
+	return file_skylens_viewer_v1_viewer_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *MissionStatus) GetPhase() MissionPhase {
@@ -796,7 +877,7 @@ type CameraFeed struct {
 
 func (x *CameraFeed) Reset() {
 	*x = CameraFeed{}
-	mi := &file_skylens_viewer_v1_viewer_proto_msgTypes[6]
+	mi := &file_skylens_viewer_v1_viewer_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -808,7 +889,7 @@ func (x *CameraFeed) String() string {
 func (*CameraFeed) ProtoMessage() {}
 
 func (x *CameraFeed) ProtoReflect() protoreflect.Message {
-	mi := &file_skylens_viewer_v1_viewer_proto_msgTypes[6]
+	mi := &file_skylens_viewer_v1_viewer_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -821,7 +902,7 @@ func (x *CameraFeed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CameraFeed.ProtoReflect.Descriptor instead.
 func (*CameraFeed) Descriptor() ([]byte, []int) {
-	return file_skylens_viewer_v1_viewer_proto_rawDescGZIP(), []int{6}
+	return file_skylens_viewer_v1_viewer_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *CameraFeed) GetDroneId() uint32 {
@@ -857,7 +938,7 @@ type LinkStatus struct {
 
 func (x *LinkStatus) Reset() {
 	*x = LinkStatus{}
-	mi := &file_skylens_viewer_v1_viewer_proto_msgTypes[7]
+	mi := &file_skylens_viewer_v1_viewer_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -869,7 +950,7 @@ func (x *LinkStatus) String() string {
 func (*LinkStatus) ProtoMessage() {}
 
 func (x *LinkStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_skylens_viewer_v1_viewer_proto_msgTypes[7]
+	mi := &file_skylens_viewer_v1_viewer_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -882,7 +963,7 @@ func (x *LinkStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LinkStatus.ProtoReflect.Descriptor instead.
 func (*LinkStatus) Descriptor() ([]byte, []int) {
-	return file_skylens_viewer_v1_viewer_proto_rawDescGZIP(), []int{7}
+	return file_skylens_viewer_v1_viewer_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *LinkStatus) GetHop() string {
@@ -923,7 +1004,7 @@ type SegmentStatus struct {
 
 func (x *SegmentStatus) Reset() {
 	*x = SegmentStatus{}
-	mi := &file_skylens_viewer_v1_viewer_proto_msgTypes[8]
+	mi := &file_skylens_viewer_v1_viewer_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -935,7 +1016,7 @@ func (x *SegmentStatus) String() string {
 func (*SegmentStatus) ProtoMessage() {}
 
 func (x *SegmentStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_skylens_viewer_v1_viewer_proto_msgTypes[8]
+	mi := &file_skylens_viewer_v1_viewer_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -948,7 +1029,7 @@ func (x *SegmentStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SegmentStatus.ProtoReflect.Descriptor instead.
 func (*SegmentStatus) Descriptor() ([]byte, []int) {
-	return file_skylens_viewer_v1_viewer_proto_rawDescGZIP(), []int{8}
+	return file_skylens_viewer_v1_viewer_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *SegmentStatus) GetIndex() uint32 {
@@ -980,7 +1061,7 @@ type ServerStatus struct {
 
 func (x *ServerStatus) Reset() {
 	*x = ServerStatus{}
-	mi := &file_skylens_viewer_v1_viewer_proto_msgTypes[9]
+	mi := &file_skylens_viewer_v1_viewer_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -992,7 +1073,7 @@ func (x *ServerStatus) String() string {
 func (*ServerStatus) ProtoMessage() {}
 
 func (x *ServerStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_skylens_viewer_v1_viewer_proto_msgTypes[9]
+	mi := &file_skylens_viewer_v1_viewer_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1005,7 +1086,7 @@ func (x *ServerStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ServerStatus.ProtoReflect.Descriptor instead.
 func (*ServerStatus) Descriptor() ([]byte, []int) {
-	return file_skylens_viewer_v1_viewer_proto_rawDescGZIP(), []int{9}
+	return file_skylens_viewer_v1_viewer_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *ServerStatus) GetConnected() bool {
@@ -1061,7 +1142,7 @@ var File_skylens_viewer_v1_viewer_proto protoreflect.FileDescriptor
 
 const file_skylens_viewer_v1_viewer_proto_rawDesc = "" +
 	"\n" +
-	"\x1eskylens/viewer/v1/viewer.proto\x12\x11skylens.viewer.v1\x1a\x1cskylens/model/v1/model.proto\"\x85\x06\n" +
+	"\x1eskylens/viewer/v1/viewer.proto\x12\x11skylens.viewer.v1\x1a\x1cskylens/model/v1/model.proto\"\xcd\x06\n" +
 	"\bEnvelope\x12\x10\n" +
 	"\x03seq\x18\x01 \x01(\x04R\x03seq\x12 \n" +
 	"\forigin_ts_ms\x18\x02 \x01(\x03R\n" +
@@ -1080,7 +1161,8 @@ const file_skylens_viewer_v1_viewer_proto_rawDesc = "" +
 	"\vlink_status\x18! \x01(\v2\x1d.skylens.viewer.v1.LinkStatusH\x00R\n" +
 	"linkStatus\x12F\n" +
 	"\rserver_status\x18\" \x01(\v2\x1f.skylens.viewer.v1.ServerStatusH\x00R\fserverStatus\x12-\n" +
-	"\x04site\x18# \x01(\v2\x17.skylens.viewer.v1.SiteH\x00R\x04siteB\x06\n" +
+	"\x04site\x18# \x01(\v2\x17.skylens.viewer.v1.SiteH\x00R\x04site\x12F\n" +
+	"\rplanned_route\x18$ \x01(\v2\x1f.skylens.viewer.v1.PlannedRouteH\x00R\fplannedRouteB\x06\n" +
 	"\x04body\"w\n" +
 	"\n" +
 	"DroneHello\x12\x19\n" +
@@ -1088,6 +1170,10 @@ const file_skylens_viewer_v1_viewer_proto_rawDesc = "" +
 	"\astation\x18\x02 \x01(\x0e2\x1e.skylens.model.v1.DroneStationR\astation\x12\x14\n" +
 	"\x05model\x18\x03 \x01(\tR\x05model\"q\n" +
 	"\vAssignRoute\x12\x19\n" +
+	"\bdrone_id\x18\x01 \x01(\rR\adroneId\x123\n" +
+	"\twaypoints\x18\x02 \x03(\v2\x15.skylens.model.v1.GpsR\twaypoints\x12\x12\n" +
+	"\x04loop\x18\x03 \x01(\bR\x04loop\"r\n" +
+	"\fPlannedRoute\x12\x19\n" +
 	"\bdrone_id\x18\x01 \x01(\rR\adroneId\x123\n" +
 	"\twaypoints\x18\x02 \x03(\v2\x15.skylens.model.v1.GpsR\twaypoints\x12\x12\n" +
 	"\x04loop\x18\x03 \x01(\bR\x04loop\"l\n" +
@@ -1174,50 +1260,53 @@ func file_skylens_viewer_v1_viewer_proto_rawDescGZIP() []byte {
 }
 
 var file_skylens_viewer_v1_viewer_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_skylens_viewer_v1_viewer_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_skylens_viewer_v1_viewer_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_skylens_viewer_v1_viewer_proto_goTypes = []any{
 	(ComponentId)(0),          // 0: skylens.viewer.v1.ComponentId
 	(MissionPhase)(0),         // 1: skylens.viewer.v1.MissionPhase
 	(*Envelope)(nil),          // 2: skylens.viewer.v1.Envelope
 	(*DroneHello)(nil),        // 3: skylens.viewer.v1.DroneHello
 	(*AssignRoute)(nil),       // 4: skylens.viewer.v1.AssignRoute
-	(*ManualControl)(nil),     // 5: skylens.viewer.v1.ManualControl
-	(*Site)(nil),              // 6: skylens.viewer.v1.Site
-	(*MissionStatus)(nil),     // 7: skylens.viewer.v1.MissionStatus
-	(*CameraFeed)(nil),        // 8: skylens.viewer.v1.CameraFeed
-	(*LinkStatus)(nil),        // 9: skylens.viewer.v1.LinkStatus
-	(*SegmentStatus)(nil),     // 10: skylens.viewer.v1.SegmentStatus
-	(*ServerStatus)(nil),      // 11: skylens.viewer.v1.ServerStatus
-	(*v1.DroneTelemetry)(nil), // 12: skylens.model.v1.DroneTelemetry
-	(*v1.Chunk)(nil),          // 13: skylens.model.v1.Chunk
-	(v1.DroneStation)(0),      // 14: skylens.model.v1.DroneStation
-	(*v1.Gps)(nil),            // 15: skylens.model.v1.Gps
-	(v1.Level)(0),             // 16: skylens.model.v1.Level
+	(*PlannedRoute)(nil),      // 5: skylens.viewer.v1.PlannedRoute
+	(*ManualControl)(nil),     // 6: skylens.viewer.v1.ManualControl
+	(*Site)(nil),              // 7: skylens.viewer.v1.Site
+	(*MissionStatus)(nil),     // 8: skylens.viewer.v1.MissionStatus
+	(*CameraFeed)(nil),        // 9: skylens.viewer.v1.CameraFeed
+	(*LinkStatus)(nil),        // 10: skylens.viewer.v1.LinkStatus
+	(*SegmentStatus)(nil),     // 11: skylens.viewer.v1.SegmentStatus
+	(*ServerStatus)(nil),      // 12: skylens.viewer.v1.ServerStatus
+	(*v1.DroneTelemetry)(nil), // 13: skylens.model.v1.DroneTelemetry
+	(*v1.Chunk)(nil),          // 14: skylens.model.v1.Chunk
+	(v1.DroneStation)(0),      // 15: skylens.model.v1.DroneStation
+	(*v1.Gps)(nil),            // 16: skylens.model.v1.Gps
+	(v1.Level)(0),             // 17: skylens.model.v1.Level
 }
 var file_skylens_viewer_v1_viewer_proto_depIdxs = []int32{
 	0,  // 0: skylens.viewer.v1.Envelope.from:type_name -> skylens.viewer.v1.ComponentId
 	3,  // 1: skylens.viewer.v1.Envelope.drone_hello:type_name -> skylens.viewer.v1.DroneHello
-	12, // 2: skylens.viewer.v1.Envelope.telemetry:type_name -> skylens.model.v1.DroneTelemetry
+	13, // 2: skylens.viewer.v1.Envelope.telemetry:type_name -> skylens.model.v1.DroneTelemetry
 	4,  // 3: skylens.viewer.v1.Envelope.assign_route:type_name -> skylens.viewer.v1.AssignRoute
-	5,  // 4: skylens.viewer.v1.Envelope.manual_control:type_name -> skylens.viewer.v1.ManualControl
-	7,  // 5: skylens.viewer.v1.Envelope.mission_status:type_name -> skylens.viewer.v1.MissionStatus
-	13, // 6: skylens.viewer.v1.Envelope.chunk:type_name -> skylens.model.v1.Chunk
-	8,  // 7: skylens.viewer.v1.Envelope.camera_feed:type_name -> skylens.viewer.v1.CameraFeed
-	9,  // 8: skylens.viewer.v1.Envelope.link_status:type_name -> skylens.viewer.v1.LinkStatus
-	11, // 9: skylens.viewer.v1.Envelope.server_status:type_name -> skylens.viewer.v1.ServerStatus
-	6,  // 10: skylens.viewer.v1.Envelope.site:type_name -> skylens.viewer.v1.Site
-	14, // 11: skylens.viewer.v1.DroneHello.station:type_name -> skylens.model.v1.DroneStation
-	15, // 12: skylens.viewer.v1.AssignRoute.waypoints:type_name -> skylens.model.v1.Gps
-	15, // 13: skylens.viewer.v1.Site.anchor:type_name -> skylens.model.v1.Gps
-	1,  // 14: skylens.viewer.v1.MissionStatus.phase:type_name -> skylens.viewer.v1.MissionPhase
-	14, // 15: skylens.viewer.v1.CameraFeed.station:type_name -> skylens.model.v1.DroneStation
-	16, // 16: skylens.viewer.v1.SegmentStatus.level:type_name -> skylens.model.v1.Level
-	10, // 17: skylens.viewer.v1.ServerStatus.segments:type_name -> skylens.viewer.v1.SegmentStatus
-	18, // [18:18] is the sub-list for method output_type
-	18, // [18:18] is the sub-list for method input_type
-	18, // [18:18] is the sub-list for extension type_name
-	18, // [18:18] is the sub-list for extension extendee
-	0,  // [0:18] is the sub-list for field type_name
+	6,  // 4: skylens.viewer.v1.Envelope.manual_control:type_name -> skylens.viewer.v1.ManualControl
+	8,  // 5: skylens.viewer.v1.Envelope.mission_status:type_name -> skylens.viewer.v1.MissionStatus
+	14, // 6: skylens.viewer.v1.Envelope.chunk:type_name -> skylens.model.v1.Chunk
+	9,  // 7: skylens.viewer.v1.Envelope.camera_feed:type_name -> skylens.viewer.v1.CameraFeed
+	10, // 8: skylens.viewer.v1.Envelope.link_status:type_name -> skylens.viewer.v1.LinkStatus
+	12, // 9: skylens.viewer.v1.Envelope.server_status:type_name -> skylens.viewer.v1.ServerStatus
+	7,  // 10: skylens.viewer.v1.Envelope.site:type_name -> skylens.viewer.v1.Site
+	5,  // 11: skylens.viewer.v1.Envelope.planned_route:type_name -> skylens.viewer.v1.PlannedRoute
+	15, // 12: skylens.viewer.v1.DroneHello.station:type_name -> skylens.model.v1.DroneStation
+	16, // 13: skylens.viewer.v1.AssignRoute.waypoints:type_name -> skylens.model.v1.Gps
+	16, // 14: skylens.viewer.v1.PlannedRoute.waypoints:type_name -> skylens.model.v1.Gps
+	16, // 15: skylens.viewer.v1.Site.anchor:type_name -> skylens.model.v1.Gps
+	1,  // 16: skylens.viewer.v1.MissionStatus.phase:type_name -> skylens.viewer.v1.MissionPhase
+	15, // 17: skylens.viewer.v1.CameraFeed.station:type_name -> skylens.model.v1.DroneStation
+	17, // 18: skylens.viewer.v1.SegmentStatus.level:type_name -> skylens.model.v1.Level
+	11, // 19: skylens.viewer.v1.ServerStatus.segments:type_name -> skylens.viewer.v1.SegmentStatus
+	20, // [20:20] is the sub-list for method output_type
+	20, // [20:20] is the sub-list for method input_type
+	20, // [20:20] is the sub-list for extension type_name
+	20, // [20:20] is the sub-list for extension extendee
+	0,  // [0:20] is the sub-list for field type_name
 }
 
 func init() { file_skylens_viewer_v1_viewer_proto_init() }
@@ -1236,17 +1325,18 @@ func file_skylens_viewer_v1_viewer_proto_init() {
 		(*Envelope_LinkStatus)(nil),
 		(*Envelope_ServerStatus)(nil),
 		(*Envelope_Site)(nil),
+		(*Envelope_PlannedRoute)(nil),
 	}
-	file_skylens_viewer_v1_viewer_proto_msgTypes[5].OneofWrappers = []any{}
-	file_skylens_viewer_v1_viewer_proto_msgTypes[7].OneofWrappers = []any{}
-	file_skylens_viewer_v1_viewer_proto_msgTypes[9].OneofWrappers = []any{}
+	file_skylens_viewer_v1_viewer_proto_msgTypes[6].OneofWrappers = []any{}
+	file_skylens_viewer_v1_viewer_proto_msgTypes[8].OneofWrappers = []any{}
+	file_skylens_viewer_v1_viewer_proto_msgTypes[10].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_skylens_viewer_v1_viewer_proto_rawDesc), len(file_skylens_viewer_v1_viewer_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   10,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

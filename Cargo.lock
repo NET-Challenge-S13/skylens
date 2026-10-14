@@ -5268,6 +5268,21 @@ dependencies = [
 [[package]]
 name = "skylens-demo"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "futures-util",
+ "image",
+ "prost",
+ "serde",
+ "serde_json",
+ "skylens-shared",
+ "tokio",
+ "tokio-tungstenite",
+ "ureq",
+ "windows-sys 0.61.2",
+ "zip",
+]
 
 [[package]]
 name = "skylens-drone"
@@ -5323,6 +5338,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
