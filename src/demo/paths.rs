@@ -45,9 +45,44 @@ pub fn exe(name: &str) -> String {
     format!("{name}{}", std::env::consts::EXE_SUFFIX)
 }
 
-/// `res/static/video/demo_<station>.mp4`.
-pub fn footage(repo: &Path, drone: &Drone) -> PathBuf {
-    repo.join("res").join("static").join("video").join(format!("demo_{}.mp4", drone.name))
+/// `<repo>/data`: where the footage zip is extracted (git-ignored).
+pub fn data_dir(repo: &Path) -> PathBuf {
+    repo.join("data")
+}
+
+/// `<repo>/data/demo`: the recorded footage, its flight record and camera estimate.
+pub fn demo_dir(repo: &Path) -> PathBuf {
+    data_dir(repo).join("demo")
+}
+
+/// `data/demo/track.json`: the flight record of every view.
+pub fn track_file(repo: &Path) -> PathBuf {
+    demo_dir(repo).join("track.json")
+}
+
+/// `data/demo/camera.json`: the camera estimate (optional).
+pub fn camera_file(repo: &Path) -> PathBuf {
+    demo_dir(repo).join("camera.json")
+}
+
+/// The clip a drone publishes: `data/demo/<station>.mp4` (the recorded flight), or with
+/// `--synthetic` the old `res/static/video/demo_<station>.mp4`.
+pub fn footage(repo: &Path, drone: &Drone, synthetic: bool) -> PathBuf {
+    if synthetic {
+        repo.join("res").join("static").join("video").join(format!("demo_{}.mp4", drone.name))
+    } else {
+        demo_dir(repo).join(format!("{}.mp4", drone.name))
+    }
+}
+
+/// What the recorded-flight demo needs on disk; missing any of it triggers the download.
+pub fn recorded_files(repo: &Path) -> Vec<PathBuf> {
+    FORMATION.iter().map(|d| footage(repo, d, false)).chain([track_file(repo)]).collect()
+}
+
+/// `<target>/demo/planned-route.json`, written for the core.
+pub fn planned_route_file(run_dir: &Path) -> PathBuf {
+    run_dir.join("planned-route.json")
 }
 
 /// The MediaMTX path a drone publishes to and the core reads (`drone{id}`).
@@ -205,8 +240,22 @@ paths:
     #[test]
     fn footage_and_stream_templates() {
         let repo = Path::new("/repo");
-        assert_eq!(footage(repo, &FORMATION[0]), Path::new("/repo/res/static/video/demo_left.mp4"));
-        assert_eq!(footage(repo, &FORMATION[2]), Path::new("/repo/res/static/video/demo_right.mp4"));
+        assert_eq!(footage(repo, &FORMATION[0], false), Path::new("/repo/data/demo/left.mp4"));
+        assert_eq!(footage(repo, &FORMATION[1], false), Path::new("/repo/data/demo/center.mp4"));
+        assert_eq!(footage(repo, &FORMATION[0], true), Path::new("/repo/res/static/video/demo_left.mp4"));
+        assert_eq!(footage(repo, &FORMATION[2], true), Path::new("/repo/res/static/video/demo_right.mp4"));
+        assert_eq!(track_file(repo), Path::new("/repo/data/demo/track.json"));
+        assert_eq!(camera_file(repo), Path::new("/repo/data/demo/camera.json"));
+        assert_eq!(
+            recorded_files(repo),
+            vec![
+                PathBuf::from("/repo/data/demo/left.mp4"),
+                PathBuf::from("/repo/data/demo/center.mp4"),
+                PathBuf::from("/repo/data/demo/right.mp4"),
+                PathBuf::from("/repo/data/demo/track.json"),
+            ]
+        );
+        assert_eq!(planned_route_file(Path::new("/repo/target/demo")), Path::new("/repo/target/demo/planned-route.json"));
         assert_eq!(stream_path(&FORMATION[1]), "drone2");
         assert_eq!(
             srt_publish_url(10890, &FORMATION[2]),

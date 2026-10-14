@@ -172,6 +172,8 @@ func typeName(v any) string {
 		return "ManualControl"
 	case *viewerv1.Envelope_DroneHello:
 		return "DroneHello"
+	case *viewerv1.Envelope_PlannedRoute:
+		return "PlannedRoute"
 	}
 	return "?"
 }
@@ -264,6 +266,50 @@ func TestBaseMapAtStartupGoesToTheControlTowerOnly(t *testing.T) {
 	}
 	if k := kinds(drain(t, attach(c.Viewers, c.ViewerHandler()))); strings.Join(k, ",") != "Site,MissionStatus,ServerStatus" {
 		t.Fatalf("late viewer replay %v", k)
+	}
+}
+
+func TestPlannedRouteGoesToControlTowersUntilAssigned(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.PlannedRoute = &viewerv1.PlannedRoute{
+		DroneId: 2,
+		Waypoints: []*modelv1.Gps{
+			{Lat: 36.3657, Lon: 127.3422, Alt: 95},
+			{Lat: 36.3651, Lon: 127.3424, Alt: 95},
+		},
+		Loop: true,
+	}
+	c := New(Options{Config: cfg, Clock: &manualClock{}})
+	defer c.Close()
+
+	// Right after the site, on the control socket only.
+	control := drain(t, attach(c.Controls, c.ControlHandler()))
+	if k := strings.Join(kinds(control), ","); k != "Site,PlannedRoute,MissionStatus,ServerStatus" {
+		t.Fatalf("control replay %v", k)
+	}
+	p := control[1].GetPlannedRoute()
+	if p.GetDroneId() != 2 || !p.GetLoop() || len(p.GetWaypoints()) != 2 || p.GetWaypoints()[0].GetAlt() != 95 {
+		t.Fatalf("planned route %v", p)
+	}
+	if k := strings.Join(kinds(drain(t, attach(c.Viewers, c.ViewerHandler()))), ","); k != "Site,MissionStatus,ServerStatus" {
+		t.Fatalf("viewer replay %v", k)
+	}
+	uplink := attach(c.Uplinks, c.UplinkHandler())
+	if got := drain(t, uplink); len(got) != 0 {
+		t.Fatalf("uplink got %v", kinds(got))
+	}
+
+	// Once a route is assigned, a tower that connects gets that route instead.
+	c.ControlHandler().Message(attach(c.Controls, c.ControlHandler()), route())
+	if c.PlannedRoute() != nil {
+		t.Fatal("planned route still offered after an assignment")
+	}
+	late := drain(t, attach(c.Controls, c.ControlHandler()))
+	if has(late, "PlannedRoute") || !has(late, "AssignRoute") {
+		t.Fatalf("late control replay %v", kinds(late))
+	}
+	if up := drain(t, uplink); has(up, "PlannedRoute") {
+		t.Fatalf("uplink got the planned route: %v", kinds(up))
 	}
 }
 

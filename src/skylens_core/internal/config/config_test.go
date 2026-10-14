@@ -168,6 +168,55 @@ func TestVWorldKeyFromParentOfRepo(t *testing.T) {
 	}
 }
 
+func TestPlannedRoute(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "planned-route.json")
+	body := `{"drone_id": 2, "loop": true, "waypoints": [
+		{"lat": 36.3657, "lon": 127.3422, "alt": 95.5},
+		{"lat": 36.3651, "lon": 127.3424, "alt": 95.5}]}`
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	c, err := Load(env(map[string]string{"SKYLENS_CORE_PLANNED_ROUTE": path}), "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := c.PlannedRoute
+	if r == nil || c.PlannedRouteFrom != path {
+		t.Fatalf("planned route %v from %q", r, c.PlannedRouteFrom)
+	}
+	if r.GetDroneId() != 2 || !r.GetLoop() || len(r.GetWaypoints()) != 2 {
+		t.Fatalf("planned route %v", r)
+	}
+	if w := r.GetWaypoints()[1]; w.GetLat() != 36.3651 || w.GetLon() != 127.3424 || w.GetAlt() != 95.5 {
+		t.Fatalf("second waypoint %v", w)
+	}
+
+	// Unset: no route, no error.
+	c, err = Load(env(nil), "")
+	if err != nil || c.PlannedRoute != nil {
+		t.Fatalf("unset: %v, %v", c.PlannedRoute, err)
+	}
+
+	// A missing file is a configuration error that names the variable.
+	_, err = Load(env(map[string]string{"SKYLENS_CORE_PLANNED_ROUTE": filepath.Join(dir, "nope.json")}), "")
+	if err == nil || !strings.Contains(err.Error(), "SKYLENS_CORE_PLANNED_ROUTE") {
+		t.Fatalf("missing file: %v", err)
+	}
+
+	for _, bad := range []string{
+		`not json`,
+		`{"waypoints": [{"lat": 36.1, "lon": 127.1}]}`,
+		`{"waypoints": [{"lat": 36.1, "lon": 127.1}, {"lon": 127.2}]}`,
+		`{"waypoints": [{"lat": 36.1, "lon": 127.1}, {"lat": 95, "lon": 127.2}]}`,
+		`{"waypoints": [{"lat": 36.1, "lon": 127.1}, {"lat": 36.2, "lon": 181}]}`,
+	} {
+		if _, err := ParsePlannedRoute(strings.NewReader(bad)); err == nil {
+			t.Errorf("%s accepted", bad)
+		}
+	}
+}
+
 func TestExpand(t *testing.T) {
 	got := Expand("srt://127.0.0.1:10890?streamid=read:{path}", 2, "left", Expand("drone{id}-{station}", 2, "left", ""))
 	if got != "srt://127.0.0.1:10890?streamid=read:drone2-left" {

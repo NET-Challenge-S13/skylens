@@ -153,6 +153,31 @@ impl Planner {
         self.dirty = true;
     }
 
+    /// Loads a route the core prepared (`PlannedRoute`) into an empty planner, so the operator
+    /// only presses assign. The operator's own points always win: with any waypoint already
+    /// placed, or fewer than two planned ones, nothing changes. When the route lies outside the
+    /// current view the map moves to its centre (without pinning, so the core's site may still
+    /// recentre it). Returns whether the route was loaded.
+    pub fn load_planned(&mut self, waypoints: &[model::Gps], looped: bool) -> bool {
+        if !self.waypoints.is_empty() || waypoints.len() < 2 {
+            return false;
+        }
+        self.waypoints = waypoints.iter().map(|g| Waypoint { lat: g.lat, lon: g.lon, alt: g.alt }).collect();
+        self.looped = looped;
+        let b = self.bounds();
+        let inside = self.waypoints.iter().all(|w| w.lon >= b.west && w.lon <= b.east && w.lat >= b.south && w.lat <= b.north);
+        if !inside {
+            let (mut lo, mut hi) = ((f64::MAX, f64::MAX), (f64::MIN, f64::MIN));
+            for w in &self.waypoints {
+                lo = (lo.0.min(w.lat), lo.1.min(w.lon));
+                hi = (hi.0.max(w.lat), hi.1.max(w.lon));
+            }
+            self.center = Waypoint { lat: (lo.0 + hi.0) / 2.0, lon: (lo.1 + hi.1) / 2.0, alt: self.center.alt };
+        }
+        self.dirty = true;
+        true
+    }
+
     pub fn bounds(&self) -> Bounds {
         bounds(self.center.lat, self.center.lon, self.span_m)
     }
@@ -474,6 +499,39 @@ mod tests {
         assert!((x - 100.0).abs() < 1e-9 && (y - 300.0).abs() < 1e-9);
         let b = p.bounds();
         assert!(((b.north - b.south) * M_PER_DEG - 600.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn planned_route_fills_an_empty_planner_only() {
+        let route = [
+            model::Gps { lat: 36.3657, lon: 127.3422, alt: 95.0 },
+            model::Gps { lat: 36.3651, lon: 127.3424, alt: 95.0 },
+        ];
+        // Far from the default centre: the map moves to the route.
+        let mut p = planner();
+        p.looped = true;
+        assert!(p.load_planned(&route, false));
+        assert_eq!(p.waypoints.len(), 2);
+        assert_eq!(p.waypoints[1], Waypoint { lat: 36.3651, lon: 127.3424, alt: 95.0 });
+        assert!(!p.looped);
+        assert!((p.center.lat - 36.3654).abs() < 1e-9 && (p.center.lon - 127.3423).abs() < 1e-9);
+        assert!(!p.pinned);
+
+        // The operator's own points win.
+        let mut p = planner();
+        p.waypoints.push(Waypoint { lat: 36.3685, lon: 127.3475, alt: 90.0 });
+        assert!(!p.load_planned(&route, true));
+        assert_eq!(p.waypoints.len(), 1);
+
+        // A single point is not a route.
+        let mut p = planner();
+        assert!(!p.load_planned(&route[..1], true));
+        assert!(p.waypoints.is_empty());
+
+        // Inside the view: the map stays where it is.
+        let mut p = Planner::new(Waypoint { lat: 36.3655, lon: 127.3424, alt: 50.0 }, true);
+        assert!(p.load_planned(&route, true));
+        assert_eq!(p.center, Waypoint { lat: 36.3655, lon: 127.3424, alt: 50.0 });
     }
 
     #[test]

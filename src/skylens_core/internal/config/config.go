@@ -4,6 +4,7 @@ package config
 
 import (
 	"bufio"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	modelv1 "github.com/NET-Challenge-S13/skylens/src/skylens_core/gen/skylens/model/v1"
+	viewerv1 "github.com/NET-Challenge-S13/skylens/src/skylens_core/gen/skylens/viewer/v1"
 )
 
 // Config is every tunable of the core.
@@ -57,6 +59,13 @@ type Config struct {
 	TerrainCache  string  // SKYLENS_CORE_TERRAIN_CACHE
 	VWorldKey     string  // from .env.vworld or VWORLD_KEY; never sent to clients
 	VWorldFrom    string  // where the key came from, for the log (never the key)
+
+	// PlannedRoute is a route prepared before the session (the demo's
+	// recorded flight line), read from the JSON file SKYLENS_CORE_PLANNED_ROUTE
+	// names. Nil when unset. The control tower gets it until a route is
+	// assigned.
+	PlannedRoute     *viewerv1.PlannedRoute
+	PlannedRouteFrom string // the file it came from, for the log
 }
 
 // Site is the operating area: a lat/lon box and the anchor every ENU
@@ -246,6 +255,15 @@ func Load(getenv func(string) string, cwd string) (Config, error) {
 		}
 	}
 
+	if path := strings.TrimSpace(getenv("SKYLENS_CORE_PLANNED_ROUTE")); path != "" {
+		r, err := LoadPlannedRoute(path)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("SKYLENS_CORE_PLANNED_ROUTE: %w", err))
+		} else {
+			c.PlannedRoute, c.PlannedRouteFrom = r, path
+		}
+	}
+
 	// VWorld key: an explicit variable wins, then the key file in the
 	// repository's parent directory (SPEC §6).
 	if k := strings.TrimSpace(getenv("VWORLD_KEY")); k != "" {
@@ -303,6 +321,61 @@ func ParseGps(s string) (*modelv1.Gps, error) {
 		return nil, fmt.Errorf("%q: out of range", s)
 	}
 	return &modelv1.Gps{Lat: v[0], Lon: v[1], Alt: v[2]}, nil
+}
+
+// plannedRouteFile is the JSON shape of SKYLENS_CORE_PLANNED_ROUTE:
+//
+//	{"drone_id": 2, "loop": true,
+//	 "waypoints": [{"lat": 36.36, "lon": 127.34, "alt": 95.8}, ...]}
+//
+// alt is absolute (metres, the same as Gps.alt everywhere else).
+type plannedRouteFile struct {
+	DroneID   uint32 `json:"drone_id"`
+	Loop      bool   `json:"loop"`
+	Waypoints []struct {
+		Lat *float64 `json:"lat"`
+		Lon *float64 `json:"lon"`
+		Alt float64  `json:"alt"`
+	} `json:"waypoints"`
+}
+
+// ParsePlannedRoute reads a planned route. It needs at least two waypoints,
+// each with a lat and lon in range.
+func ParsePlannedRoute(r io.Reader) (*viewerv1.PlannedRoute, error) {
+	var f plannedRouteFile
+	dec := json.NewDecoder(r)
+	if err := dec.Decode(&f); err != nil {
+		return nil, fmt.Errorf("not a planned route: %w", err)
+	}
+	if len(f.Waypoints) < 2 {
+		return nil, fmt.Errorf("%d waypoint(s), want at least 2", len(f.Waypoints))
+	}
+	out := &viewerv1.PlannedRoute{DroneId: f.DroneID, Loop: f.Loop}
+	for i, w := range f.Waypoints {
+		if w.Lat == nil || w.Lon == nil {
+			return nil, fmt.Errorf("waypoint %d: lat and lon are required", i+1)
+		}
+		lat, lon := *w.Lat, *w.Lon
+		if math.IsNaN(lat) || math.IsNaN(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180 {
+			return nil, fmt.Errorf("waypoint %d: %v,%v out of range", i+1, lat, lon)
+		}
+		out.Waypoints = append(out.Waypoints, &modelv1.Gps{Lat: lat, Lon: lon, Alt: w.Alt})
+	}
+	return out, nil
+}
+
+// LoadPlannedRoute reads a planned route file.
+func LoadPlannedRoute(path string) (*viewerv1.PlannedRoute, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	r, err := ParsePlannedRoute(f)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	return r, nil
 }
 
 // FindRepoRoot walks up from dir to the directory holding go.work (the

@@ -54,10 +54,12 @@ related: "[[INTENT.md]], [[COMPONENTS.md]], [[ARCHITECTURE.md]], [[NETWORK_ARCHI
 | 업링크 (드론→코어) | `UplinkMessage` | `drone-hello` · `telemetry` |
 | 제어 (관제탑→코어) | `ControlMessage` | `assign-route` · `manual-control` |
 | 뷰어 (코어→화면) | `ViewerMessage` | `assign-route` · `mission-status` · `point-chunk` · `mesh-block` · `detection` · `telemetry` · `camera-feed` · `link-status` · `server-status` |
+| 관제탑 전용 (코어→관제탑) | `ViewerMessage` | `planned-route`(미리 계획된 경로, 배정 전까지) · 바탕 지도(지형·건물 청크) |
 | 잡 (코어↔모델, gRPC) | `ModelService` | `SubmitRecon` · `SubmitDetect` · `GetJob` · `Health` (REST와 같은 잡 API) |
 | 라이브 (코어↔모델, gRPC) | `ModelService` | `PushFrames`(프레임 묶음 스트림) · `SubscribeChunks`(증분 청크 스트림) |
 
 - 미션 단계는 `idle → assigned → awaiting-drone → active` 네 값이다.
+- `planned-route`는 배정이 아니다. 코어가 `SKYLENS_CORE_PLANNED_ROUTE` 파일에서 읽어, 아직 경로가 배정되지 않았으면 관제탑이 붙을 때 작전 구역 바로 다음에 보낸다. 관제탑은 경로 계획이 비어 있을 때만 그 지점을 채우고, 운용자가 배정을 눌러야 `assign-route`가 나간다.
 - 코어↔모델 계약은 `src/shared/proto/skylens/model/v1/model.proto` 하나다. Rust는 tonic/prost, Go는 같은 파일에서 생성한 코드를 쓴다.
 - 청크(`Chunk`)는 라우팅 메타데이터(종류·구간·수준·블록 id·version·세대)와 불투명한 `payload`로 되어 있다. 코어는 메타데이터만 읽고 `payload`는 그대로 보관·전달한다. `payload` 인코딩은 `shared`가 정하고 화면이 푼다.
 - 모델 서버는 `app.py`와 같은 REST 네 엔드포인트도 그대로 연다. 코어는 gRPC만 쓴다.
@@ -164,12 +166,13 @@ related: "[[INTENT.md]], [[COMPONENTS.md]], [[ARCHITECTURE.md]], [[NETWORK_ARCHI
 
 | | 실운영 | 데모 |
 |---|---|---|
-| 촬영 | 기체 카메라 → SRT | `res/static/video`의 촬영 영상을 SRT로 송출 |
-| 비행 | DJI Fly 웨이포인트 | 촬영본에 기록된 GPS·포즈 재생 |
+| 촬영 | 기체 카메라 → SRT | 실제 촬영본(`data/demo`, 릴리스 `demo-footage-v1`에서 자동으로 받는다)을 SRT로 송출 |
+| 비행 | DJI Fly 웨이포인트 | 촬영본에 기록된 GPS·고도·방위를 영상과 맞춰 재생 |
+| 경로 계획 | 운용자가 지도에서 지정 | 촬영 경로가 관제탑 경로 계획에 미리 들어가 있다(`planned-route`). 운용자는 배정만 누른다 |
 
 복원·탐지·메시·배포는 데모에서도 실제 경로다. 파이프라인이 없으면 **없다고 표시**한다(`PipelineUnavailable`). 시뮬레이션으로 메우지 않는다.
 
-시나리오: 정지 상태 → 관제탑 경로 지정("태스크 지정 완료") → 드론 연결 대기 → "드론 연결됨", 프레임 수신 시작 → 구간마다 미리보기 후 정제본 교체 → 위험구역·사람 표시.
+시나리오: 정지 상태 → 관제탑 경로 배정("태스크 지정 완료") → 드론 연결 대기 → "드론 연결됨", 프레임 수신 시작 → 구간마다 미리보기 후 정제본 교체 → 위험구역·사람 표시.
 
 드론의 "도착"은 `drone-hello`로만 판정한다. 드론은 이동 중에도 텔레메트리를 보내므로, 텔레메트리를 접속으로 세면 연결 대기 단계가 사라진다.
 

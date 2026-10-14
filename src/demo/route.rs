@@ -1,10 +1,10 @@
-//! Where the simulated formation is at a given moment.
+//! Where the synthetic formation is at a given moment (`--synthetic`, and
+//! `--follow-route`). The recorded flight is replayed by `footage.rs` instead.
 //!
-//! The footage carries no GPS, so the telemetry the demo sends is the GPS
-//! source of the whole pipeline. By default the formation flies a fixed track
-//! east-north-east of the site anchor (the setup verified end to end) and
-//! restarts it from the top when it reaches the end, the way the footage loops.
-//! With `--follow-route` it flies the operator's waypoints back and forth.
+//! The old clips carry no GPS, so with `--synthetic` the formation flies a
+//! fixed track east-north-east of the site anchor and restarts it from the top
+//! when it reaches the end, the way the footage loops. With `--follow-route` it
+//! flies the operator's waypoints back and forth.
 //!
 //! All maths is in local ENU metres around the site anchor; [`to_gps`] converts
 //! with the shared GPS<->ENU formula.
@@ -178,11 +178,11 @@ pub fn approach_pose(path: &Path, t: f64, duration: f64) -> Pose {
     Pose { e: e0 - ue * back, n: n0 - un * back, heading_deg: heading, speed }
 }
 
-/// GPS of one station, given the formation centre.
-pub fn to_gps(pose: &Pose, station: DroneStation, anchor: Gps) -> Gps {
+/// GPS of one station at absolute altitude `alt`, given the formation centre.
+pub fn to_gps(pose: &Pose, station: DroneStation, anchor: Gps, alt: f64) -> Gps {
     let (oe, on) = station_offset(station, pose.heading_deg, SPACING_M);
     let g = geo::enu_to_gps(Enu { e: pose.e + oe, n: pose.n + on, u: 0.0 }, anchor);
-    Gps { lat: g.lat, lon: g.lon, alt: ALTITUDE_M }
+    Gps { lat: g.lat, lon: g.lon, alt }
 }
 
 /// The footage track as waypoints, for `--auto`.
@@ -314,8 +314,8 @@ mod tests {
     #[test]
     fn stations_spread_across_the_track_at_altitude() {
         let pose = Path::footage_track().pose_at(0.0, SPEED_MPS);
-        let l = to_gps(&pose, DroneStation::Left, SITE_ANCHOR);
-        let r = to_gps(&pose, DroneStation::Right, SITE_ANCHOR);
+        let l = to_gps(&pose, DroneStation::Left, SITE_ANCHOR, ALTITUDE_M);
+        let r = to_gps(&pose, DroneStation::Right, SITE_ANCHOR, ALTITUDE_M);
         let le = geo::gps_to_enu(l, SITE_ANCHOR);
         let re = geo::gps_to_enu(r, SITE_ANCHOR);
         assert!(((le.e - re.e).hypot(le.n - re.n) - 2.0 * SPACING_M).abs() < 1e-3);
