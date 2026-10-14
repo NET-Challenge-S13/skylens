@@ -77,3 +77,4 @@ lto = "thin"
 pointblitz = { path = "third_party/pointblitz/pointblitz" }
 pointblitz-core = { path = "third_party/pointblitz/pointblitz-core" }
 pointblitz-io = { path = "third_party/pointblitz/pointblitz-io" }
+deltamesh = { path = "third_party/deltamesh" }

@@ -44,6 +44,7 @@ cumulus3d-core = { git = "https://github.com/AH100-1/cumulus3d", rev = "b9f4a9bd
 windows-sys = { version = "0.61", features = ["Win32_System_LibraryLoader"] }
 
 [features]
-default = []
+default = ["gpu-mesh"]
 # deltamesh GpuMesher (wgpu) when EngineConfig::gpu is set; without it meshing stays on the CPU.
+# Falls back to the CPU mesher at run time when no GPU adapter is found.
 gpu-mesh = ["deltamesh/gpu"]
