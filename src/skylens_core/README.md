@@ -11,15 +11,20 @@
 | `GET /vworld/wmts/{z}/{y}/{x}.jpeg` | 경로 계획 지도의 위성 타일. 키는 서버에서 붙이고 디스크 캐시를 거친다 |
 | `GET /vworld/wfs?...` | VWorld WFS 그대로(키·`domain`은 서버에서 붙이고, 클라이언트가 보낸 키는 버린다). 이전 Vite 프록시와 같은 경로 |
 | `ws /uplink` | 드론(또는 데모)이 `drone_hello`·`telemetry`를 올린다. 코어는 `assign_route`·`manual_control`을 내려보낸다 |
-| `ws /control` | 관제탑. 모든 것과 바탕 지도(지형·건물)를 받는다. `assign_route`·`manual_control`은 이 소켓으로만 받는다 |
+| `ws /control` | 관제탑. 모든 것과 바탕 지도(지형·건물)를 받고, 경로가 배정되기 전이면 미리 계획된 경로(`planned_route`)도 받는다. `assign_route`·`manual_control`은 이 소켓으로만 받는다 |
 | `ws /viewer` | 현황판(게이트웨이 nginx 경유). 읽기 전용이고 바탕 지도는 보내지 않는다. 이 소켓으로 들어온 메시지는 버리고 로그만 남긴다 |
 | `/` | 관제탑 웹 빌드 정적 서빙(`SKYLENS_CORE_WEB_DIR`) |
 
 모든 WebSocket 프레임은 바이너리 `skylens.viewer.v1.Envelope` 하나다. `seq`는 소켓마다 1부터 센다. 두 화면 소켓은 붙자마자 `Site`를 먼저 받고, 이어서 보관분 재생, 그다음 실시간을 받는다.
 
 - **작전 구역(Site):** `SKYLENS_CORE_SITE`가 정하고, 기본은 이전 관제탑의 대전 프리셋(서 127.33, 남 36.355, 동 127.365, 북 36.382)이다. 기준점(ENU 원점)은 프리셋의 기준점(대전은 이전 `CONFIG.geo.anchor`와 같은 36.3685, 127.3475, 30 m)이고 `SKYLENS_CORE_ANCHOR`로 바꿀 수 있다. 기준점은 세션 동안 고정이고 지형·건물·화면이 그리는 모든 것의 원점이다. 경로가 기준점을 옮기지 않는다. `imagery`·`buildings`·`building_count`는 지금 낼 수 있는 것과 보낸 양을 따르고, 값이 바뀌면 상태 주기(`SKYLENS_CORE_STATUS_MS`)마다 두 화면에 `Site`를 다시 보낸다.
+- **미리 계획된 경로:** `SKYLENS_CORE_PLANNED_ROUTE`가 JSON 파일을 가리키면 시작할 때 읽어 둔다. 아직 아무 경로도 배정되지 않았으면 관제탑이 붙을 때마다 `Site` 바로 다음에 `planned_route`로 보낸다. 배정이 아니라서 미션 단계도 드론도 그대로이고, 관제탑이 비어 있는 경로 계획에 지점을 채워 운용자는 배정만 누르면 된다. 한 번 배정되면 더는 보내지 않고 배정된 경로를 재생한다. 현황판(`/viewer`)과 드론(`/uplink`)에는 가지 않는다. 데모 런처가 촬영 경로로 이 파일을 만든다.
+  ```json
+  {"drone_id": 2, "loop": true, "waypoints": [{"lat": 36.3657, "lon": 127.3422, "alt": 95.5}, {"lat": 36.3651, "lon": 127.3424, "alt": 95.5}]}
+  ```
+  `alt`는 다른 모든 `Gps.alt`처럼 절대 고도(m)다. 지점이 둘 미만이거나 위경도가 범위 밖이면 설정 오류로 시작하지 않는다.
 - **미션:** `idle → assigned → awaiting-drone → active`. 경로 지정 뒤 `SKYLENS_CORE_ASSIGNED_HOLD_MS` 동안 "태스크 지정 완료"를 보여 주고 드론 대기로 넘어간다. **드론 도착은 `drone_hello`로만 판정**하고 텔레메트리는 세지 않는다. 마지막 드론의 업링크가 끊기면 다시 대기로 돌아간다.
-- **보관(인메모리):** 정제본은 같은 구간의 미리보기와 이전 세대를 대체하고, 메시 블록은 더 높은 `version`만 받고, 탐지 결과는 도착 순서대로 쌓는다(구간당 상한). 지형·건물은 셀마다 하나를 두고, 정밀 셀이 같은 자리의 외곽 링 셀을 대체한다(반대로는 대체하지 않는다). 버려진 청크는 화면에도 보내지 않는다. 새 화면은 현재 상태(작전 구역 → 미션 → 링크 → 경로 → 텔레메트리 → 영상 위치 → 지형·건물(관제탑만) → 점 → 메시 → 탐지 → 서버 상태)를 먼저 받고 이어서 실시간을 받는다.
+- **보관(인메모리):** 정제본은 같은 구간의 미리보기와 이전 세대를 대체하고, 메시 블록은 더 높은 `version`만 받고, 탐지 결과는 도착 순서대로 쌓는다(구간당 상한). 지형·건물은 셀마다 하나를 두고, 정밀 셀이 같은 자리의 외곽 링 셀을 대체한다(반대로는 대체하지 않는다). 버려진 청크는 화면에도 보내지 않는다. 새 화면은 현재 상태(작전 구역 → 미리 계획된 경로(관제탑만, 배정 전) → 미션 → 링크 → 경로 → 텔레메트리 → 영상 위치 → 지형·건물(관제탑만) → 점 → 메시 → 탐지 → 서버 상태)를 먼저 받고 이어서 실시간을 받는다.
 - **모델 서버(gRPC :8101):** `SubscribeChunks`를 늘 열어 두고, 다시 붙을 때 `after_sequence`를 마지막으로 보관한 시퀀스로 준다. `PushFrames`는 모델이 없는 동안 묶음을 큐에 쌓아 두고, 다시 붙으면 최근에 보낸 묶음을 다시 선언한다(이미 받은 묶음의 재선언은 모델 쪽에서 무시된다).
 - **프레임:** 드론이 hello하면 대전 MediaMTX의 그 드론 경로를 `ffmpeg`로 읽어 JPEG를 뽑고, 같은 순간의 편대 카메라 프레임을 `FrameSet (source_id, sequence, revision)`으로 묶는다. 늦게 온 카메라가 있으면 같은 시퀀스를 다음 revision으로 다시 보낸다. 프레임 소스는 `frames.Source` 인터페이스라 데모나 테스트가 직접 넣을 수도 있다.
 - **영상 위치:** hello마다 `camera_feed`로 WHEP 주소(기본 `/live/drone<id>/whep`)를 알린다. 영상 자체는 MediaMTX가 보낸다.
@@ -51,6 +56,7 @@
 | `SKYLENS_CORE_DETECTIONS_PER_SEGMENT` | `256` | 구간당 보관하는 탐지 청크 상한 |
 | `SKYLENS_CORE_SITE` | `daejeon` | 작전 구역. 프리셋 이름(`daejeon`·`seoul`·`uljin`·`uljinup`·`gangneung`), `서,남,동,북` 상자, 또는 이전 형식 `lat,lon[,alt]`(그 점이 기준점이고 대전 프리셋 크기의 상자를 둘러친다) |
 | `SKYLENS_CORE_ANCHOR` | 프리셋의 기준점 | ENU 기준점 `lat,lon[,alt]`. 대전은 36.3685, 127.3475, 30 m. 기준점이 따로 없는 프리셋·상자는 상자 중심, 고도 0 |
+| `SKYLENS_CORE_PLANNED_ROUTE` | 없음 | 미리 계획된 경로 JSON 파일. 경로가 배정되기 전까지 관제탑에 `planned_route`로 보낸다 |
 | `SKYLENS_CORE_TERRAIN` | 켜짐 | `off`면 바탕 지도(지형·건물)를 내지 않는다. `/vworld` 프록시는 그대로 돈다 |
 | `SKYLENS_CORE_TERRAIN_MARGIN_M` | `500` | 경로 경계 상자에 더하는 여백(m) |
 | `SKYLENS_CORE_TERRAIN_CACHE` | 사용자 캐시 폴더 | 지형 타일·위성 타일·건물 응답 캐시(`/vworld` 프록시도 같이 쓴다) |

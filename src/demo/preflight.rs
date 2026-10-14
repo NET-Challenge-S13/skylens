@@ -10,7 +10,7 @@ use crate::paths::{self, FORMATION, exe};
 #[derive(Debug, Clone)]
 pub struct Plan {
     pub repo: PathBuf,
-    /// Generated files of this run (MediaMTX config): `<target>/demo`.
+    /// Generated files of this run (MediaMTX config, planned route): `<target>/demo`.
     pub run_dir: PathBuf,
     pub footage: Vec<PathBuf>,
     pub mediamtx: PathBuf,
@@ -49,14 +49,20 @@ pub fn resolve(o: &Options, repo: &Path) -> (Option<Plan>, Findings) {
     let mut f = Findings::default();
     let target = paths::target_dir(repo, std::env::var("CARGO_TARGET_DIR").ok().as_deref());
 
-    // footage
-    let footage: Vec<PathBuf> = FORMATION.iter().map(|d| paths::footage(repo, d)).collect();
-    let missing: Vec<String> = footage.iter().filter(|p| !p.is_file()).map(|p| rel(repo, p)).collect();
+    // footage (the recorded flight was fetched before this, when it could be)
+    let footage: Vec<PathBuf> = FORMATION.iter().map(|d| paths::footage(repo, d, o.synthetic)).collect();
+    let mut wanted = footage.clone();
+    if !o.synthetic {
+        wanted.push(paths::track_file(repo));
+    }
+    let missing: Vec<String> = wanted.iter().filter(|p| !p.is_file()).map(|p| rel(repo, p)).collect();
     if !missing.is_empty() {
-        f.errors.push(format!(
-            "촬영 영상이 없습니다: {}\n    드론 1·2·3 이 각각 demo_left · demo_center · demo_right 를 송출합니다.",
-            missing.join(", ")
-        ));
+        let pairing = if o.synthetic {
+            "드론 1·2·3 이 각각 demo_left · demo_center · demo_right 를 송출합니다 (--synthetic)."
+        } else {
+            "드론 1·2·3 이 각각 data/demo 의 left · center · right 를 송출하고 track.json 의 비행 기록을 재생합니다."
+        };
+        f.errors.push(format!("촬영 영상이 없습니다: {}\n    {pairing}", missing.join(", ")));
     }
 
     // ffmpeg
@@ -248,6 +254,10 @@ mod tests {
             assert!(all.contains(needle), "{needle} not in:\n{all}");
         }
         assert_eq!(f.warnings.len(), 2, "both web builds are warnings");
+        assert!(all.contains("data/demo/left.mp4") && all.contains("data/demo/track.json"), "{all}");
+        let (_, f) = resolve(&Options { synthetic: true, ..o.clone() }, &repo);
+        let all = f.errors.join("\n");
+        assert!(all.contains("res/static/video/demo_left.mp4") && !all.contains("track.json"), "{all}");
         let (_, f) = resolve(&Options { no_model: true, ..o }, &repo);
         assert!(!f.errors.join("\n").contains("체크포인트"));
         let _ = std::fs::remove_dir_all(&repo);

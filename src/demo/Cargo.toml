@@ -16,6 +16,14 @@ skylens-shared.workspace = true
 prost.workspace = true
 anyhow.workspace = true
 tokio.workspace = true
+# Flight record (track.json), camera estimate, planned route file
+serde.workspace = true
+serde_json.workspace = true
+# Footage download and the takeoff DEM tile; the footage zip
+ureq.workspace = true
+zip.workspace = true
+# Terrarium DEM tiles are PNG
+image = { version = "0.25", default-features = false, features = ["png"] }
 # Board server (the gateway's part): static files, WebSocket relay, WHEP proxy
 axum.workspace = true
 # Drone uplink simulator and the board server's upstream WebSocket to the core

@@ -2,6 +2,10 @@
 //!
 //!     cargo run -p skylens-demo -- [--native] [--auto] [--no-model] ...
 //!
+//! Before anything starts: the recorded footage is downloaded into `data/demo` when missing,
+//! the ground elevation at takeoff is looked up, and the planned route is derived from the
+//! center view (written to `<target>/demo/planned-route.json` for the core).
+//!
 //! Start order, each gated on readiness before the next:
 //!
 //!   MediaMTX (:10889 WHEP, :10890 SRT)
@@ -16,6 +20,9 @@
 
 mod args;
 mod board;
+mod elevation;
+mod fetch;
+mod footage;
 mod http1;
 mod paths;
 mod preflight;
@@ -24,15 +31,84 @@ mod route;
 mod sim;
 
 use std::future::Future;
-use std::path::Path;
-use std::time::Duration;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, Instant};
 
+use skylens_shared::geo::Gps;
+use skylens_shared::proto::viewer::v1 as viewer;
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 
 use args::Options;
+use footage::Track;
 use preflight::Plan;
 use procs::{Event, Events, Running, Spec, log};
+
+/// What this run flies and tells the core, settled before anything starts.
+struct Scenario {
+    /// The recorded flight; `None` with `--synthetic`.
+    track: Option<Track>,
+    /// Ground elevation at takeoff, metres above sea level (recorded flight only).
+    ground_alt: f64,
+    /// `SKYLENS_CORE_SITE`; `None` leaves the core's default (daejeon).
+    site: Option<String>,
+    /// The core's ENU anchor when the launcher can tell, for the model server's `SKYLENS_ANCHOR`.
+    anchor: Option<Gps>,
+    /// The route the tower starts with, and what `--auto` assigns.
+    planned: viewer::AssignRoute,
+}
+
+/// Ground elevation at takeoff: `--ground-alt`, else the core's DEM source, else the built-in
+/// estimate. Returns the value and where it came from.
+async fn ground_elevation(o: &Options) -> (f64, String) {
+    if let Some(g) = o.ground_alt {
+        return (g, "--ground-alt".into());
+    }
+    let (lat, lon) = elevation::TAKEOFF;
+    let looked_up = tokio::task::spawn_blocking(move || elevation::ground_alt(lat, lon)).await;
+    match looked_up {
+        Ok(Ok(g)) => (g, "DEM (terrarium z12, 코어 지형과 같은 출처)".into()),
+        Ok(Err(e)) => {
+            eprintln!(
+                "  경고: 이륙 지점 지면 고도를 DEM 에서 얻지 못했습니다 ({e}).\n    추정값 {:.0} m 를 씁니다. 정확한 값을 알면 --ground-alt <m> 로 주십시오.",
+                elevation::FALLBACK_GROUND_ALT_M
+            );
+            (elevation::FALLBACK_GROUND_ALT_M, "추정값 (DEM 조회 실패)".into())
+        }
+        Err(e) => (elevation::FALLBACK_GROUND_ALT_M, format!("추정값 ({e})")),
+    }
+}
+
+/// Settles the flight, site, anchor and planned route. `Err` is a Korean message.
+async fn scenario(o: &Options, repo: &Path) -> Result<Scenario, String> {
+    let center = paths::FORMATION[1].id;
+    if o.synthetic {
+        let site = o.site.clone();
+        let anchor = footage::site_anchor(site.as_deref().unwrap_or(""));
+        let waypoints = route::footage_waypoints(route::SITE_ANCHOR);
+        let planned = viewer::AssignRoute { drone_id: center, waypoints: waypoints.into_iter().map(Into::into).collect(), r#loop: true };
+        return Ok(Scenario { track: None, ground_alt: 0.0, site, anchor, planned });
+    }
+    let track = Track::load(&paths::track_file(repo)).map_err(|e| {
+        format!("비행 기록을 읽지 못했습니다: {e}\n    data/demo 를 지우고 다시 실행하면 새로 내려받습니다.")
+    })?;
+    for v in track.views() {
+        log("footage", &v.summary());
+    }
+    if let Some(c) = footage::Camera::load(&paths::camera_file(repo)) {
+        log("footage", &format!("카메라 {} (모델 서버는 내부 파라미터를 받지 않아 넘기지 않습니다)", c.describe(o.frame_width)));
+    }
+    let (ground_alt, from) = ground_elevation(o).await;
+    log("footage", &format!("이륙 지점 지면 고도 {ground_alt:.1} m, {from}. 텔레메트리 고도 = 지면 + 이륙 기준 고도"));
+    let site = Some(o.site.clone().unwrap_or_else(|| footage::site_value(track.centre(), ground_alt)));
+    let anchor = footage::site_anchor(site.as_deref().unwrap_or(""));
+    let waypoints = footage::planned_waypoints(&track.center, ground_alt);
+    if waypoints.len() < 2 {
+        return Err("track.json 의 center 첫 구간에서 경로를 만들지 못했습니다 (지점이 둘 미만)".into());
+    }
+    let planned = viewer::AssignRoute { drone_id: center, waypoints: waypoints.into_iter().map(Into::into).collect(), r#loop: true };
+    Ok(Scenario { track: Some(track), ground_alt, site, anchor, planned })
+}
 
 /// Why the demo is stopping.
 enum Stop {
@@ -123,7 +199,7 @@ fn kv(k: &str, v: impl ToString) -> (String, String) {
 }
 
 /// Environment of the Go core.
-fn core_env(plan: &Plan, o: &Options) -> Vec<(String, String)> {
+fn core_env(plan: &Plan, o: &Options, s: &Scenario, planned_file: &Path) -> Vec<(String, String)> {
     let mut env = vec![
         kv("SKYLENS_CORE_ADDR", format!(":{}", o.core_port)),
         kv("SKYLENS_CORE_WEB_DIR", plan.control_dist.display()),
@@ -135,20 +211,28 @@ fn core_env(plan: &Plan, o: &Options) -> Vec<(String, String)> {
         kv("SKYLENS_CORE_FRAME_FPS", o.fps),
         kv("SKYLENS_CORE_FRAME_WIDTH", o.frame_width),
         kv("SKYLENS_CORE_DRONE_ETA_SEC", sim::ETA_SECS),
+        kv("SKYLENS_CORE_PLANNED_ROUTE", planned_file.display()),
     ];
+    if let Some(site) = &s.site {
+        env.push(kv("SKYLENS_CORE_SITE", site));
+    }
     if let Some(v) = &plan.vworld_env {
         env.push(kv("SKYLENS_VWORLD_ENV", v.display()));
     }
     env
 }
 
-/// Environment of the model server: listeners, checkpoint, libtorch DLLs on the search path.
-fn model_env(m: &preflight::ModelPlan) -> Vec<(String, String)> {
+/// Environment of the model server: listeners, checkpoint, the core's ENU anchor (its chunks
+/// are in ENU about it), libtorch DLLs on the search path.
+fn model_env(m: &preflight::ModelPlan, anchor: Option<Gps>) -> Vec<(String, String)> {
     let mut env = vec![
         kv("SKYLENS_CHECKPOINT", m.checkpoint.display()),
         kv("SKYLENS_REST_ADDR", format!("127.0.0.1:{}", args::MODEL_REST_PORT)),
         kv("SKYLENS_GRPC_ADDR", format!("127.0.0.1:{}", args::MODEL_GRPC_PORT)),
     ];
+    if let Some(a) = anchor {
+        env.push(kv("SKYLENS_ANCHOR", footage::anchor_value(a)));
+    }
     if let Some(lib) = &m.libtorch {
         let var = if cfg!(windows) { "PATH" } else { "LD_LIBRARY_PATH" };
         let old = std::env::var_os(var).unwrap_or_default();
@@ -163,6 +247,7 @@ fn model_env(m: &preflight::ModelPlan) -> Vec<(String, String)> {
 async fn start_all(
     plan: &Plan,
     o: &Options,
+    s: &Scenario,
     events: &Events,
     rx: &mut mpsc::UnboundedReceiver<Event>,
     children: &mut Vec<Running>,
@@ -170,8 +255,23 @@ async fn start_all(
 ) -> Result<(), Stop> {
     let fail = |e: anyhow::Error| Stop::Failed(format!("{e:#}"));
 
-    // ---- MediaMTX ----
+    // ---- generated files: the planned route for the core ----
     std::fs::create_dir_all(&plan.run_dir).map_err(|e| Stop::Failed(format!("{}: {e}", plan.run_dir.display())))?;
+    let planned_file: PathBuf = paths::planned_route_file(&plan.run_dir);
+    let waypoints: Vec<Gps> = s.planned.waypoints.iter().map(|g| Gps { lat: g.lat, lon: g.lon, alt: g.alt }).collect();
+    std::fs::write(&planned_file, footage::planned_route_json(s.planned.drone_id, &waypoints, s.planned.r#loop))
+        .map_err(|e| Stop::Failed(format!("{}: {e}", planned_file.display())))?;
+    log(
+        "launch",
+        &format!(
+            "미리 계획된 경로: {}개 지점, 고도 {:.1} m ({})",
+            waypoints.len(),
+            waypoints.first().map_or(0.0, |g| g.alt),
+            planned_file.display()
+        ),
+    );
+
+    // ---- MediaMTX ----
     let deploy = std::fs::read_to_string(&plan.mediamtx_deploy_config)
         .map_err(|e| Stop::Failed(format!("{}: {e}", plan.mediamtx_deploy_config.display())))?;
     let config = plan.run_dir.join("mediamtx.yml");
@@ -185,11 +285,15 @@ async fn start_all(
     wait_ready("MediaMTX", Duration::from_secs(20), rx, || http1::listening(&whep)).await?;
 
     // ---- footage publishers ----
-    for (drone, file) in paths::FORMATION.iter().zip(&plan.footage) {
+    // Each publisher's start is the zero of its clip's timeline; the drone replaying that
+    // view's flight record counts from it.
+    let mut starts = [Instant::now(); 3];
+    for (i, (drone, file)) in paths::FORMATION.iter().zip(&plan.footage).enumerate() {
         let tag = format!("pub-{}", &drone.name[..1].to_uppercase());
         let name = format!("송출 drone{} ({})", drone.id, drone.name);
         let argv = paths::publisher_args(file, args::SRT_PORT, drone);
         children.push(procs::spawn(spec(plan, &name, &tag, &plan.ffmpeg, argv, vec![]), events.clone()).map_err(fail)?);
+        starts[i] = Instant::now();
     }
     settle(Duration::from_millis(1500), rx).await?;
     log("launch", "영상 송출 3개 시작 (drone1=left, drone2=center, drone3=right, 반복 재생)");
@@ -197,7 +301,13 @@ async fn start_all(
     // ---- model server ----
     if let Some(m) = &plan.model {
         log("launch", "모델 서버 시작 (libtorch·CUDA 로딩에 시간이 걸릴 수 있습니다)");
-        children.push(procs::spawn(spec(plan, "skylens-model", "model", &m.bin, vec![], model_env(m)), events.clone()).map_err(fail)?);
+        if s.anchor.is_none() {
+            log("launch", "경고: --site 에서 기준점을 알 수 없어 모델 서버는 기본 기준점(대전)으로 청크를 냅니다");
+        }
+        children.push(
+            procs::spawn(spec(plan, "skylens-model", "model", &m.bin, vec![], model_env(m, s.anchor)), events.clone())
+                .map_err(fail)?,
+        );
         let rest = format!("127.0.0.1:{}", args::MODEL_REST_PORT);
         wait_ready("모델 서버", Duration::from_secs(300), rx, || http1::ok(&rest, "/health")).await?;
     } else {
@@ -205,8 +315,12 @@ async fn start_all(
     }
 
     // ---- core ----
-    log("launch", "코어 시작");
-    children.push(procs::spawn(spec(plan, "skylens-core", "core", &plan.core_bin, vec![], core_env(plan, o)), events.clone()).map_err(fail)?);
+    match &s.site {
+        Some(site) => log("launch", &format!("코어 시작 (작전 구역 SKYLENS_CORE_SITE={site})")),
+        None => log("launch", "코어 시작 (작전 구역: 코어 기본값 daejeon)"),
+    }
+    let env = core_env(plan, o, s, &planned_file);
+    children.push(procs::spawn(spec(plan, "skylens-core", "core", &plan.core_bin, vec![], env), events.clone()).map_err(fail)?);
     let core = format!("127.0.0.1:{}", o.core_port);
     wait_ready("코어", Duration::from_secs(60), rx, || http1::ok(&core, "/health")).await?;
 
@@ -220,8 +334,13 @@ async fn start_all(
     wait_ready("현황판 서버", Duration::from_secs(10), rx, || http1::ok(&board_addr, "/health")).await?;
 
     // ---- drones and the control watcher ----
-    tasks.push(task("drone", events, sim::run_drones(core.clone(), o.follow_route)));
-    tasks.push(task("tower-watch", events, sim::run_control_watch(core.clone(), o.auto)));
+    let flight = match &s.track {
+        Some(track) => sim::Flight::Recorded { track: track.clone(), starts, ground_alt: s.ground_alt },
+        None => sim::Flight::Synthetic,
+    };
+    tasks.push(task("drone", events, sim::run_drones(core.clone(), o.follow_route, flight)));
+    let auto = o.auto.then(|| s.planned.clone());
+    tasks.push(task("tower-watch", events, sim::run_control_watch(core.clone(), auto)));
 
     // ---- native screens ----
     if let Some((control, client)) = &plan.native {
@@ -249,7 +368,7 @@ async fn start_all(
     Ok(())
 }
 
-fn banner(plan: &Plan, o: &Options) {
+fn banner(plan: &Plan, o: &Options, s: &Scenario) {
     let line = "  ─────────────────────────────────────────────────────────────";
     println!();
     println!("  SkyLens 데모");
@@ -265,20 +384,32 @@ fn banner(plan: &Plan, o: &Options) {
         println!("  모델     끔 (--no-model)");
     }
     println!("  영상     WHEP http://localhost:{}/live/drone{{1,2,3}}/whep, SRT :{}", o.board_port, args::SRT_PORT);
+    if s.track.is_some() {
+        println!("  촬영본   data/demo (실제 비행 기록 재생, 이륙 지점 지면 {:.1} m)", s.ground_alt);
+    } else {
+        println!("  촬영본   res/static/video/demo_*.mp4 (--synthetic, 합성 경로)");
+    }
     println!();
     println!("  시나리오");
     println!("   1. 지금은 정지 상태. 드론 3대는 업링크에 붙어 대기, 복원 없음");
     if o.auto {
-        println!("   2. --auto: 3초 뒤 런처가 데모 촬영 경로를 배정");
+        println!("   2. --auto: 3초 뒤 런처가 미리 계획된 경로({}개 지점)를 배정", s.planned.waypoints.len());
     } else {
-        println!("   2. 관제탑에서 경로 계획으로 경유 지점을 지정하고 배정");
+        println!(
+            "   2. 관제탑 경로 계획에 촬영 경로({}개 지점)가 미리 들어가 있습니다. 경로 계획을 열고 배정을 누르십시오",
+            s.planned.waypoints.len()
+        );
     }
     println!("   3. \"태스크 지정 완료\" 후 드론 연결 대기 (약 {:.0}초, 그동안 드론이 현장으로 이동)", sim::ETA_SECS);
     println!("   4. 드론이 도착해 hello 를 보내면 \"드론 연결됨\", 프레임 추출 시작");
     println!("   5. 구간마다 미리보기 점군·메시가 먼저 뜨고 정제본이 교체");
     println!("   6. 위험구역·사람 탐지 결과가 지도 위에 표시");
     if !o.follow_route {
-        println!("   (드론은 촬영본에 맞춘 고정 경로를 날며 텔레메트리를 보냅니다. 배정 경로를 따르게 하려면 --follow-route)");
+        if s.track.is_some() {
+            println!("   (드론마다 자기 영상의 비행 기록을 영상과 맞춰 재생합니다. 배정 경로를 따르게 하려면 --follow-route)");
+        } else {
+            println!("   (드론은 촬영본에 맞춘 고정 경로를 날며 텔레메트리를 보냅니다. 배정 경로를 따르게 하려면 --follow-route)");
+        }
     }
     println!();
     println!("  Ctrl+C 로 전체 종료");
@@ -300,6 +431,16 @@ async fn run() -> i32 {
     }
 
     let repo = paths::repo_root();
+    if !o.synthetic {
+        let (repo2, url, no_fetch) = (repo.clone(), o.footage_url.clone(), o.no_fetch);
+        let fetched = tokio::task::spawn_blocking(move || fetch::ensure(&repo2, &url, no_fetch))
+            .await
+            .unwrap_or_else(|e| Err(format!("내려받기 작업이 멈췄습니다: {e}")));
+        if let Err(e) = fetched {
+            eprintln!("\n  오류: {e}\n");
+            return 1;
+        }
+    }
     let (plan, findings) = preflight::resolve(&o, &repo);
     for w in &findings.warnings {
         eprintln!("  경고: {w}");
@@ -318,6 +459,13 @@ async fn run() -> i32 {
         eprintln!("\n  오류: {}\n", preflight::ports_message(&taken));
         return 1;
     }
+    let scenario = match scenario(&o, &repo).await {
+        Ok(s) => s,
+        Err(e) => {
+            eprintln!("\n  오류: {e}\n");
+            return 1;
+        }
+    };
 
     #[cfg(windows)]
     log("launch", &procs::job::init());
@@ -340,9 +488,9 @@ async fn run() -> i32 {
 
     let mut children = Vec::new();
     let mut tasks = Vec::new();
-    let stop = match start_all(&plan, &o, &events, &mut rx, &mut children, &mut tasks).await {
+    let stop = match start_all(&plan, &o, &scenario, &events, &mut rx, &mut children, &mut tasks).await {
         Ok(()) => {
-            banner(&plan, &o);
+            banner(&plan, &o, &scenario);
             loop {
                 match rx.recv().await {
                     Some(ev) => {

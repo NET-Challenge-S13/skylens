@@ -229,6 +229,22 @@ impl ControlApp {
                 w.route = (r.waypoints.len() >= 2).then(|| (r.waypoints.clone(), r.r#loop));
                 w.route_rev += 1;
             }
+            Body::PlannedRoute(r) => {
+                // A route prepared before the session (the demo's flight line): it goes into an
+                // empty planner and the operator only presses assign. Nothing is sent.
+                let before = self.planner.borrow().center;
+                if self.planner.borrow_mut().load_planned(&r.waypoints, r.r#loop) {
+                    skylens_viewer::log(&format!("[control] planned route loaded into the planner ({} waypoints)", r.waypoints.len()));
+                    if let Some(i) = self.route.as_ref().and_then(|m| m.loop_input) {
+                        modals::set_checked(dom, i, r.r#loop);
+                    }
+                    self.render_waypoints(dom);
+                    let moved = self.planner.borrow().center != before;
+                    if moved && self.route.as_ref().is_some_and(|m| m.is_open(dom)) {
+                        self.load_tiles();
+                    }
+                }
+            }
             Body::MissionStatus(m) => {
                 if let Some(p) = self.mission.as_mut() {
                     p.set_mission(dom, &m, now);

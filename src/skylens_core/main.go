@@ -55,6 +55,11 @@ func main() {
 		site.Name, site.Source, site.MinLat, site.MinLon, site.MaxLat, site.MaxLon,
 		site.Anchor.GetLat(), site.Anchor.GetLon(), site.Anchor.GetAlt())
 
+	if r := cfg.PlannedRoute; r != nil {
+		log.Printf("[core] planned route from %s: drone %d, %d waypoints (sent to control towers until a route is assigned)",
+			cfg.PlannedRouteFrom, r.GetDroneId(), len(r.GetWaypoints()))
+	}
+
 	// One feed serves the base map stream and the route planner's /vworld
 	// proxy, sharing the disk cache. Its anchor is fixed for the session.
 	feed := terrain.New(terrain.Config{

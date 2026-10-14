@@ -6,7 +6,8 @@
 // Screens come in two kinds:
 //
 //	ws /control  the control tower: everything plus the base map (terrain and
-//	             buildings); the only socket whose assign_route and
+//	             buildings) and, until a route is assigned, the planned
+//	             route; the only socket whose assign_route and
 //	             manual_control are accepted
 //	ws /viewer   status boards (through the gateway): read-only, never the
 //	             base map; anything they send is dropped and logged
@@ -225,6 +226,10 @@ func siteEnv(s *viewerv1.Site) *viewerv1.Envelope {
 	return &viewerv1.Envelope{Body: &viewerv1.Envelope_Site{Site: s}}
 }
 
+func plannedEnv(p *viewerv1.PlannedRoute) *viewerv1.Envelope {
+	return &viewerv1.Envelope{Body: &viewerv1.Envelope_PlannedRoute{PlannedRoute: p}}
+}
+
 // ---- fan-out to screens -----------------------------------------------------------
 
 // publish runs mutate once and sends what it returns to both screen sockets.
@@ -275,9 +280,17 @@ func (c *Core) ViewerHandler() ws.Handler { return viewerHandler{c} }
 
 // snapshot replays the current state in the order a screen would have
 // received it live: the site, mission, links, route, drones, video, the
-// world, status. baseMap adds terrain and buildings (control tower only).
-func (c *Core) snapshot(baseMap bool) []*viewerv1.Envelope {
-	out := []*viewerv1.Envelope{siteEnv(c.Site()), missionEnv(c.Mission.Status())}
+// world, status. control adds what only the control tower gets: the planned
+// route right after the site (until a route is assigned), and terrain and
+// buildings.
+func (c *Core) snapshot(control bool) []*viewerv1.Envelope {
+	out := []*viewerv1.Envelope{siteEnv(c.Site())}
+	if control {
+		if p := c.PlannedRoute(); p != nil {
+			out = append(out, plannedEnv(p))
+		}
+	}
+	out = append(out, missionEnv(c.Mission.Status()))
 	for _, l := range c.Store.Links() {
 		out = append(out, linkEnv(l))
 	}
@@ -291,13 +304,24 @@ func (c *Core) snapshot(baseMap bool) []*viewerv1.Envelope {
 		out = append(out, feedEnv(f))
 	}
 	chunks := c.Store.ModelChunks()
-	if baseMap {
+	if control {
 		chunks = c.Store.Chunks()
 	}
 	for _, ch := range chunks {
 		out = append(out, chunkEnv(ch))
 	}
 	return append(out, serverEnv(c.ServerStatus()))
+}
+
+// PlannedRoute is the route prepared before the session
+// (SKYLENS_CORE_PLANNED_ROUTE) while no route has been assigned; nil once
+// one has, or when none was configured. A tower that connects after the
+// assignment draws the assigned route instead.
+func (c *Core) PlannedRoute() *viewerv1.PlannedRoute {
+	if c.cfg.PlannedRoute == nil || c.Store.Route() != nil {
+		return nil
+	}
+	return c.cfg.PlannedRoute
 }
 
 type controlHandler struct{ c *Core }

@@ -36,8 +36,23 @@ pub struct Options {
     pub core_bin: Option<PathBuf>,
     /// Cargo profile directory of the native screens (`release` or `debug`).
     pub profile: Option<String>,
+    /// The old clips (`res/static/video/demo_*.mp4`) and the synthetic track
+    /// instead of the recorded flight.
+    pub synthetic: bool,
+    /// Where the recorded footage zip is downloaded from.
+    pub footage_url: String,
+    /// Never download the footage; fail with the manual steps instead.
+    pub no_fetch: bool,
+    /// Ground elevation at the takeoff point, metres above sea level (skips the DEM lookup).
+    pub ground_alt: Option<f64>,
+    /// `SKYLENS_CORE_SITE`, passed to the core verbatim (default: centred on the footage).
+    pub site: Option<String>,
     pub help: bool,
 }
+
+/// The recorded footage, published as a GitHub release asset.
+pub const FOOTAGE_URL: &str =
+    "https://github.com/NET-Challenge-S13/skylens/releases/download/demo-footage-v1/skylens-demo-footage.zip";
 
 impl Default for Options {
     fn default() -> Self {
@@ -54,6 +69,11 @@ impl Default for Options {
             checkpoint: None,
             core_bin: None,
             profile: None,
+            synthetic: false,
+            footage_url: FOOTAGE_URL.to_string(),
+            no_fetch: false,
+            ground_alt: None,
+            site: None,
             help: false,
         }
     }
@@ -68,8 +88,17 @@ pub const USAGE: &str = "usage: cargo run -p skylens-demo -- [options]
   --frame-width N      extracted frame width in px, 0 = source size (default 1920)
   --mediamtx PATH      MediaMTX executable (default ~/tools/mediamtx/mediamtx, then PATH)
   --native             also open the native control tower and status board
-  --auto               assign the route automatically (unattended run)
+  --auto               assign the pre-planned route automatically (unattended run)
   --follow-route       drones fly the assigned waypoints instead of the footage track
+  --synthetic          old clips (res/static/video/demo_*.mp4) on a synthetic track
+                       instead of the recorded flight in data/demo
+  --footage-url URL    where to download the recorded footage zip from
+                       (default: the demo-footage-v1 GitHub release)
+  --no-fetch           never download the footage; print the manual steps instead
+  --ground-alt M       ground elevation at takeoff in metres above sea level
+                       (default: the core's DEM source, else a built-in estimate)
+  --site SITE          SKYLENS_CORE_SITE for the core, verbatim
+                       (default: lat,lon,alt centred on the recorded flight)
   --checkpoint PATH    SkyLensNet checkpoint (default runs/skylens/final)
   --core-bin PATH      Go core executable (default target/skylens-core)
   --profile NAME       cargo profile of the native screens: release or debug
@@ -122,13 +151,38 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<Options, St
                     _ => return Err(format!("--profile: release or debug, not {v}")),
                 });
             }
-            "--no-model" | "--native" | "--auto" | "--follow-route" | "-h" | "--help" if inline.is_some() => {
+            "--footage-url" => {
+                let v = value("--footage-url")?;
+                if !(v.starts_with("https://") || v.starts_with("http://")) {
+                    return Err(format!("--footage-url: not an http(s) URL: {v}"));
+                }
+                o.footage_url = v;
+            }
+            "--ground-alt" => {
+                let v = value("--ground-alt")?;
+                o.ground_alt = match v.parse::<f64>() {
+                    Ok(x) if x.is_finite() && (-500.0..=9000.0).contains(&x) => Some(x),
+                    _ => return Err(format!("--ground-alt: not an elevation in metres: {v}")),
+                };
+            }
+            "--site" => {
+                let v = value("--site")?;
+                if v.trim().is_empty() {
+                    return Err("--site needs a value".into());
+                }
+                o.site = Some(v);
+            }
+            "--no-model" | "--native" | "--auto" | "--follow-route" | "--synthetic" | "--no-fetch" | "-h" | "--help"
+                if inline.is_some() =>
+            {
                 return Err(format!("{flag} takes no value"));
             }
             "--no-model" => o.no_model = true,
             "--native" => o.native = true,
             "--auto" => o.auto = true,
             "--follow-route" => o.follow_route = true,
+            "--synthetic" => o.synthetic = true,
+            "--no-fetch" => o.no_fetch = true,
             "-h" | "--help" => o.help = true,
             other => return Err(format!("unknown option: {other}")),
         }
@@ -160,7 +214,7 @@ mod tests {
         assert_eq!((o.core_port, o.board_port), (8080, 8090));
         assert_eq!(o.fps, 2.0);
         assert_eq!(o.frame_width, 1920);
-        assert!(!o.no_model && !o.native && !o.auto && !o.follow_route);
+        assert!(!o.no_model && !o.native && !o.auto && !o.follow_route && !o.synthetic);
     }
 
     #[test]
@@ -200,6 +254,33 @@ mod tests {
         assert!(parse(&["--profile", "fast"]).is_err());
         assert!(parse(&["--auto=1"]).is_err());
         assert!(parse(&["--bogus"]).is_err());
+    }
+
+    #[test]
+    fn footage_options() {
+        let o = parse(&[]).unwrap();
+        assert!(!o.synthetic && !o.no_fetch);
+        assert_eq!(o.footage_url, FOOTAGE_URL);
+        assert!(FOOTAGE_URL.ends_with("/demo-footage-v1/skylens-demo-footage.zip"));
+        assert_eq!((o.ground_alt, o.site.as_deref()), (None, None));
+
+        let o = parse(&[
+            "--synthetic", "--no-fetch", "--footage-url", "http://mirror/f.zip?a=b", "--ground-alt=48.5",
+            "--site", "36.3655,127.3423,48.5",
+        ])
+        .unwrap();
+        assert!(o.synthetic && o.no_fetch);
+        assert_eq!(o.footage_url, "http://mirror/f.zip?a=b");
+        assert_eq!(o.ground_alt, Some(48.5));
+        assert_eq!(o.site.as_deref(), Some("36.3655,127.3423,48.5"));
+        assert_eq!(parse(&["--site=daejeon"]).unwrap().site.as_deref(), Some("daejeon"));
+
+        assert!(parse(&["--footage-url", "ftp://x/f.zip"]).is_err());
+        assert!(parse(&["--ground-alt", "high"]).is_err());
+        assert!(parse(&["--ground-alt", "99999"]).is_err());
+        assert!(parse(&["--site", " "]).is_err());
+        assert!(parse(&["--synthetic=1"]).is_err());
+        assert!(parse(&["--no-fetch=yes"]).is_err());
     }
 
     #[test]

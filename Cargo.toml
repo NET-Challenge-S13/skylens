@@ -35,6 +35,10 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tokio = { version = "1", features = ["full"] }
 axum = { version = "0.8", features = ["ws"] }
 
+# demo: footage download (blocking HTTP, proxies from the environment) and its zip
+ureq = "2"
+zip = { version = "0.6.6", default-features = false, features = ["deflate"] }
+
 # gRPC between skylens_core (Go) and skylens_model (Rust); contract in src/shared/proto
 tonic = { version = "0.14", default-features = false, features = ["codegen"] }
 prost = "0.14"

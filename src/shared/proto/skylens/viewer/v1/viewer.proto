@@ -2,7 +2,7 @@
 // one binary-encoded Envelope.
 //
 //   ws /uplink   drone (or demo) -> core      Uplink
-//   ws /control  core <-> control tower       Viewer events + base map; tower -> core: Control
+//   ws /control  core <-> control tower       Viewer events + base map + planned route; tower -> core: Control
 //   ws /viewer   core -> status boards        Viewer events only (read-only, no base map)
 //
 // Chunks reuse skylens.model.v1.Chunk unchanged, so the core forwards what the
@@ -42,6 +42,8 @@ message Envelope {
     LinkStatus link_status = 33;
     ServerStatus server_status = 34;
     Site site = 35;
+    // control tower only: core -> /control, never to /viewer or /uplink
+    PlannedRoute planned_route = 36;
   }
 }
 
@@ -60,6 +62,16 @@ message AssignRoute {
   uint32 drone_id = 1;
   repeated skylens.model.v1.Gps waypoints = 2;
   bool loop = 3; // fly back and forth instead of stopping at the last waypoint
+}
+
+// A route prepared before the session (the demo's recorded flight line), not
+// assigned yet. The core sends it to every control tower that connects while no
+// route has been assigned; the tower loads it into an empty route planner so the
+// operator only presses assign. Never sent to status boards or uplinks.
+message PlannedRoute {
+  uint32 drone_id = 1;
+  repeated skylens.model.v1.Gps waypoints = 2;
+  bool loop = 3; // same meaning as AssignRoute.loop
 }
 
 message ManualControl {
