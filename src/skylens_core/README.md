@@ -39,6 +39,7 @@
 | `SKYLENS_CORE_FRAME_URL` | `srt://127.0.0.1:10890?streamid=read:{path}` | ffmpeg 입력. 대전 MediaMTX는 RTSP를 끄고 SRT만 열어 두므로 SRT로 읽는다 |
 | `SKYLENS_CORE_FRAME_FPS` | `2` | 드론당 초당 추출 프레임 |
 | `SKYLENS_CORE_FRAME_QUALITY` | `5` | JPEG 품질(ffmpeg `-q:v`, 2가 최고) |
+| `SKYLENS_CORE_FRAME_WIDTH` | `1920` | 추출 프레임 가로 폭(px, 비율 유지). `0`이면 원본 크기 |
 | `SKYLENS_CORE_FRAME_MAX_WAIT_MS` | `1500` | 빠진 카메라를 기다리는 최대 시간 |
 | `SKYLENS_CORE_FRAME_SOURCE_ID` | `formation` | `FrameKey.source_id` |
 | `SKYLENS_CORE_PUSH_QUEUE` | `256` | 모델이 없을 때 쌓아 두는 묶음 수 |

@@ -25,6 +25,9 @@ type FFmpeg struct {
 	URL     string  // input, e.g. srt://127.0.0.1:10890?streamid=read:drone1
 	FPS     float64 // frames per second to extract; default 2
 	Quality int     // mjpeg -q:v, 2 (best) .. 31; default 5
+	// Width downscales frames to this many pixels wide (aspect kept); 0 keeps the source size.
+	// 4K frames are far more than live reconstruction needs and slow every hop after this one.
+	Width int
 	// MaxFrameBytes guards against a runaway stream; default 16 MiB.
 	MaxFrameBytes int
 	Backoff       backoff.Backoff
@@ -40,12 +43,16 @@ func (f *FFmpeg) Args() []string {
 	if q <= 0 {
 		q = 5
 	}
+	filter := "fps=" + strconv.FormatFloat(fps, 'f', -1, 64)
+	if f.Width > 0 {
+		filter += ",scale=" + strconv.Itoa(f.Width) + ":-2"
+	}
 	return []string{
 		"-hide_banner", "-loglevel", "error", "-nostdin",
 		"-fflags", "nobuffer", "-flags", "low_delay",
 		"-i", f.URL,
 		"-an",
-		"-vf", "fps=" + strconv.FormatFloat(fps, 'f', -1, 64),
+		"-vf", filter,
 		"-c:v", "mjpeg", "-q:v", strconv.Itoa(q),
 		"-f", "image2pipe", "pipe:1",
 	}

@@ -52,6 +52,14 @@ func TestFFmpegArgs(t *testing.T) {
 			t.Fatalf("args %q lack %q", args, want)
 		}
 	}
+	if strings.Contains(args, "scale=") {
+		t.Fatalf("args %q scale without a width", args)
+	}
+
+	f.Width = 1920
+	if args := strings.Join(f.Args(), " "); !strings.Contains(args, "fps=2.5,scale=1920:-2") {
+		t.Fatalf("args %q lack the 1920 px downscale", args)
+	}
 }
 
 type clock struct{ t time.Time }

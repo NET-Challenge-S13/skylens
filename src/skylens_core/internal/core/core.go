@@ -513,6 +513,7 @@ func FrameFactory(cfg config.Config) frames.Factory {
 			URL:     config.Expand(cfg.FrameURL, droneID, station, path),
 			FPS:     cfg.FrameFPS,
 			Quality: cfg.FrameQuality,
+			Width:   cfg.FrameWidth,
 		}
 	}
 }

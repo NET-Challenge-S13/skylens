@@ -455,6 +455,19 @@ pub async fn serve(settings: Settings) -> anyhow::Result<()> {
     outcome.map(|_| ())
 }
 
+/// On Windows the linker drops libtorch's CUDA library because nothing references it
+/// directly, so `tch::Cuda::is_available()` reports false even with a CUDA build of libtorch.
+/// Loading it before the first tch call registers the CUDA backend.
+#[cfg(windows)]
+fn load_torch_cuda() {
+    use windows_sys::Win32::System::LibraryLoader::LoadLibraryA;
+    // SAFETY: a NUL-terminated library name; a failed load just leaves us on CPU.
+    let handle = unsafe { LoadLibraryA(c"torch_cuda.dll".as_ptr().cast()) };
+    if handle.is_null() {
+        tracing::warn!("torch_cuda.dll not found; UNet inference stays on CPU");
+    }
+}
+
 pub fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -462,6 +475,8 @@ pub fn main() -> anyhow::Result<()> {
                 .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
         )
         .init();
+    #[cfg(windows)]
+    load_torch_cuda();
     let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
     runtime.block_on(serve(settings().clone()))
 }

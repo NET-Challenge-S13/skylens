@@ -30,6 +30,7 @@ type Config struct {
 	StreamPath    string        // SKYLENS_CORE_STREAM_PATH, {id} {station}
 	FrameFPS      float64       // SKYLENS_CORE_FRAME_FPS
 	FrameQuality  int           // SKYLENS_CORE_FRAME_QUALITY
+	FrameWidth    int           // SKYLENS_CORE_FRAME_WIDTH, 0 keeps the source size
 	FrameMaxWait  time.Duration // SKYLENS_CORE_FRAME_MAX_WAIT_MS
 	FrameSourceID string        // SKYLENS_CORE_FRAME_SOURCE_ID
 	PushQueue     int           // SKYLENS_CORE_PUSH_QUEUE
@@ -203,6 +204,7 @@ func Load(getenv func(string) string, cwd string) (Config, error) {
 		StreamPath:    str("SKYLENS_CORE_STREAM_PATH", "drone{id}"),
 		FrameFPS:      num("SKYLENS_CORE_FRAME_FPS", 2),
 		FrameQuality:  int(num("SKYLENS_CORE_FRAME_QUALITY", 5)),
+		FrameWidth:    int(num("SKYLENS_CORE_FRAME_WIDTH", 1920)),
 		FrameMaxWait:  ms("SKYLENS_CORE_FRAME_MAX_WAIT_MS", 1500),
 		FrameSourceID: str("SKYLENS_CORE_FRAME_SOURCE_ID", "formation"),
 		PushQueue:     int(num("SKYLENS_CORE_PUSH_QUEUE", 256)),
