@@ -10,3 +10,23 @@ publish.workspace = true
 [[bin]]
 name = "skylens-demo"
 path = "main.rs"
+
+[dependencies]
+skylens-shared.workspace = true
+prost.workspace = true
+anyhow.workspace = true
+tokio.workspace = true
+# Board server (the gateway's part): static files, WebSocket relay, WHEP proxy
+axum.workspace = true
+# Drone uplink simulator and the board server's upstream WebSocket to the core
+tokio-tungstenite = "0.29"
+futures-util = { version = "0.3", default-features = false, features = ["std", "sink"] }
+
+[target.'cfg(windows)'.dependencies]
+# Kill-on-close Job Object so no child outlives the launcher
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+] }
