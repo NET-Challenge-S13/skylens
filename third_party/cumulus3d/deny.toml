@@ -1,0 +1,36 @@
+# Dependency policy checked in CI with `cargo deny check`.
+
+[graph]
+all-features = false
+
+[licenses]
+confidence-threshold = 0.9
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "0BSD",
+    "Unlicense",
+    "Unicode-3.0",
+]
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+
+[advisories]
+yanked = "warn"
+ignore = [
+    # `paste` is unmaintained (no vulnerability); pulled in transitively by the dense linear algebra stack.
+    { id = "RUSTSEC-2024-0436", reason = "unmaintained, no known vulnerability; transitive via faer/gemm" },
+]

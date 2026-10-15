@@ -1100,7 +1100,6 @@ dependencies = [
 [[package]]
 name = "cumulus3d-align"
 version = "0.3.1"
-source = "git+https://github.com/AH100-1/cumulus3d?rev=b9f4a9bda714fa31fc0fd395f821114b64fd2c1f#b9f4a9bda714fa31fc0fd395f821114b64fd2c1f"
 dependencies = [
  "cumulus3d-core",
  "nalgebra",
@@ -1111,7 +1110,6 @@ dependencies = [
 [[package]]
 name = "cumulus3d-ba"
 version = "0.3.1"
-source = "git+https://github.com/AH100-1/cumulus3d?rev=b9f4a9bda714fa31fc0fd395f821114b64fd2c1f#b9f4a9bda714fa31fc0fd395f821114b64fd2c1f"
 dependencies = [
  "cumulus3d-core",
  "faer",
@@ -1123,7 +1121,6 @@ dependencies = [
 [[package]]
 name = "cumulus3d-cli"
 version = "0.3.1"
-source = "git+https://github.com/AH100-1/cumulus3d?rev=b9f4a9bda714fa31fc0fd395f821114b64fd2c1f#b9f4a9bda714fa31fc0fd395f821114b64fd2c1f"
 dependencies = [
  "clap",
  "cumulus3d-align",
@@ -1144,7 +1141,6 @@ dependencies = [
 [[package]]
 name = "cumulus3d-core"
 version = "0.3.1"
-source = "git+https://github.com/AH100-1/cumulus3d?rev=b9f4a9bda714fa31fc0fd395f821114b64fd2c1f#b9f4a9bda714fa31fc0fd395f821114b64fd2c1f"
 dependencies = [
  "nalgebra",
  "rand 0.10.3",
@@ -1156,7 +1152,6 @@ dependencies = [
 [[package]]
 name = "cumulus3d-cuda"
 version = "0.3.1"
-source = "git+https://github.com/AH100-1/cumulus3d?rev=b9f4a9bda714fa31fc0fd395f821114b64fd2c1f#b9f4a9bda714fa31fc0fd395f821114b64fd2c1f"
 dependencies = [
  "cudarc",
  "cumulus3d-core",
@@ -1171,7 +1166,6 @@ dependencies = [
 [[package]]
 name = "cumulus3d-dense"
 version = "0.3.1"
-source = "git+https://github.com/AH100-1/cumulus3d?rev=b9f4a9bda714fa31fc0fd395f821114b64fd2c1f#b9f4a9bda714fa31fc0fd395f821114b64fd2c1f"
 dependencies = [
  "cumulus3d-core",
  "image",
@@ -1183,7 +1177,6 @@ dependencies = [
 [[package]]
 name = "cumulus3d-features"
 version = "0.3.1"
-source = "git+https://github.com/AH100-1/cumulus3d?rev=b9f4a9bda714fa31fc0fd395f821114b64fd2c1f#b9f4a9bda714fa31fc0fd395f821114b64fd2c1f"
 dependencies = [
  "cumulus3d-core",
  "image",
@@ -1196,7 +1189,6 @@ dependencies = [
 [[package]]
 name = "cumulus3d-matching"
 version = "0.3.1"
-source = "git+https://github.com/AH100-1/cumulus3d?rev=b9f4a9bda714fa31fc0fd395f821114b64fd2c1f#b9f4a9bda714fa31fc0fd395f821114b64fd2c1f"
 dependencies = [
  "cumulus3d-core",
  "nalgebra",
@@ -1209,7 +1201,6 @@ dependencies = [
 [[package]]
 name = "cumulus3d-sfm"
 version = "0.3.1"
-source = "git+https://github.com/AH100-1/cumulus3d?rev=b9f4a9bda714fa31fc0fd395f821114b64fd2c1f#b9f4a9bda714fa31fc0fd395f821114b64fd2c1f"
 dependencies = [
  "cumulus3d-ba",
  "cumulus3d-core",

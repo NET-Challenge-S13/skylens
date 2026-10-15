@@ -1,0 +1,19 @@
+[package]
+name = "cumulus3d-features"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Image loading, EXIF-based camera initialisation and SIFT keypoints/descriptors for cumulus3d"
+repository.workspace = true
+keywords = ["computer-vision","sift","features","photogrammetry"]
+categories = ["computer-vision"]
+readme = "README.md"
+
+[dependencies]
+cumulus3d-core.workspace = true
+nalgebra.workspace = true
+rayon.workspace = true
+thiserror.workspace = true
+image.workspace = true
+kamadak-exif.workspace = true

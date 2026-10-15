@@ -1,0 +1,129 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  # The release workflow runs every check first.
+  workflow_call:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    env:
+      # Faster CI builds: no debug info, no LTO, parallel codegen (release binaries use the real profile).
+      CARGO_PROFILE_RELEASE_DEBUG: "0"
+      CARGO_PROFILE_RELEASE_LTO: "off"
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Test
+        run: cargo test --release --workspace --locked
+
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - name: Format
+        run: cargo fmt --all --check
+      - name: License headers
+        run: |
+          missing=$(find crates \( -name '*.rs' -o -name '*.cu' \) -not -path '*/target/*' -print0 | xargs -0 grep -L 'SPDX-License-Identifier: Apache-2.0' || true)
+          if [ -n "$missing" ]; then echo "missing license header:"; echo "$missing"; exit 1; fi
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
+      - name: Docs
+        run: cargo doc --workspace --no-deps --locked
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+  content:
+    name: content policy
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Scan for restricted terms
+        env:
+          # Patterns are kept in repository secrets so the list itself is not published.
+          PATTERNS: ${{ secrets.CONTENT_PATTERNS }}
+          STRICT: ${{ secrets.CONTENT_PATTERNS_STRICT }}
+        run: |
+          if [ -z "$PATTERNS" ]; then
+            echo "::notice::content patterns not available (fork pull request or secret not set); skipped"
+            exit 0
+          fi
+          hits=$(git grep -n -i -E "$PATTERNS" -- . ':!Cargo.lock' ':!THIRD_PARTY_NOTICES.md' ':!crates/*/THIRD_PARTY_NOTICES.md' || true)
+          if [ -n "$STRICT" ]; then
+            hits="$hits$(git grep -n -i -E "$STRICT" -- . ':!THIRD_PARTY_NOTICES.md' ':!crates/*/THIRD_PARTY_NOTICES.md' ':!crates/core/src/interop.rs' ':!crates/cli/src/interop.rs' || true)"
+          fi
+          if [ -n "$hits" ]; then
+            echo "restricted terms found:"
+            echo "$hits" | cut -d: -f1,2 | sort -u
+            exit 1
+          fi
+
+  msrv:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@1.89
+      - uses: Swatinem/rust-cache@v2
+      - name: Check on minimum supported Rust version
+        run: cargo check --workspace --all-targets --locked
+
+  cuda-kernels:
+    name: CUDA kernels (NVRTC, no GPU)
+    runs-on: ubuntu-24.04
+    container: nvidia/cuda:12.4.1-devel-ubuntu22.04
+    env:
+      LD_LIBRARY_PATH: /usr/local/cuda/lib64
+      CARGO_PROFILE_RELEASE_DEBUG: "0"
+      CARGO_PROFILE_RELEASE_LTO: "off"
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
+    steps:
+      - name: System packages
+        run: apt-get update && apt-get install -y --no-install-recommends curl ca-certificates git build-essential pkg-config
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Compile every kernel for Volta and Ampere
+        run: cargo run --release --locked -p cumulus3d-cuda --example check_kernels -- compute_70 compute_86
+
+  deps:
+    name: licenses and advisories
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check licenses bans sources advisories
+
+  package:
+    name: package (crates.io dry run)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Package every crate
+        run: cargo package --workspace --locked --no-verify

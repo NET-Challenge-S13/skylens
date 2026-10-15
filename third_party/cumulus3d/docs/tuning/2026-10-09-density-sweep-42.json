@@ -1,0 +1,366 @@
+[
+ {
+  "name": "base",
+  "args": "",
+  "sec": 14.699831079,
+  "m": {
+   "points": 2719234,
+   "vertical": 0.07694335978440987,
+   "normal_consistency": 0.9967317983635875,
+   "plane_residual_cm": 0.2454755928163411,
+   "vox10": 420058,
+   "vox10_above": 154171,
+   "nn_spacing_cm": 1.9214615595575781
+  }
+ },
+ {
+  "name": "mv3_n10_r2",
+  "args": "--fusion-min-views 3 --fusion-normal-error 10 --fusion-reproj-error 2",
+  "sec": 14.882893303,
+  "m": {
+   "points": 3631512,
+   "vertical": 0.09276631882257308,
+   "normal_consistency": 0.9939901006241627,
+   "plane_residual_cm": 0.3214145393364278,
+   "vox10": 498277,
+   "vox10_above": 189282,
+   "nn_spacing_cm": 1.7357668997015
+  }
+ },
+ {
+  "name": "mv3_n10_r100",
+  "args": "--fusion-min-views 3 --fusion-normal-error 10 --fusion-reproj-error 100",
+  "sec": 14.885232888,
+  "m": {
+   "points": 3631575,
+   "vertical": 0.09277847765776558,
+   "normal_consistency": 0.9940364950807559,
+   "plane_residual_cm": 0.31777253804484495,
+   "vox10": 498271,
+   "vox10_above": 189274,
+   "nn_spacing_cm": 1.7290669149121716
+  }
+ },
+ {
+  "name": "mv3_n20_r2",
+  "args": "--fusion-min-views 3 --fusion-normal-error 20 --fusion-reproj-error 2",
+  "sec": 14.681730001,
+  "m": {
+   "points": 3513255,
+   "vertical": 0.11836800915390429,
+   "normal_consistency": 0.9946102673992747,
+   "plane_residual_cm": 0.3475941840795833,
+   "vox10": 542197,
+   "vox10_above": 211236,
+   "nn_spacing_cm": 1.9521436140226376
+  }
+ },
+ {
+  "name": "mv3_n20_r100",
+  "args": "--fusion-min-views 3 --fusion-normal-error 20 --fusion-reproj-error 100",
+  "sec": 14.74517068,
+  "m": {
+   "points": 3513284,
+   "vertical": 0.11837784818989869,
+   "normal_consistency": 0.9946834359583092,
+   "plane_residual_cm": 0.346360578580501,
+   "vox10": 542176,
+   "vox10_above": 211229,
+   "nn_spacing_cm": 1.9721963536311373
+  }
+ },
+ {
+  "name": "mv3_n30_r2",
+  "args": "--fusion-min-views 3 --fusion-normal-error 30 --fusion-reproj-error 2",
+  "sec": 14.560119127,
+  "m": {
+   "points": 3405613,
+   "vertical": 0.12705113587480432,
+   "normal_consistency": 0.9954280939646132,
+   "plane_residual_cm": 0.3488916727920743,
+   "vox10": 555266,
+   "vox10_above": 218444,
+   "nn_spacing_cm": 2.060738759671521
+  }
+ },
+ {
+  "name": "mv3_n30_r100",
+  "args": "--fusion-min-views 3 --fusion-normal-error 30 --fusion-reproj-error 100",
+  "sec": 14.704453246,
+  "m": {
+   "points": 3405628,
+   "vertical": 0.12706085338739287,
+   "normal_consistency": 0.9954403667662439,
+   "plane_residual_cm": 0.3435393394442865,
+   "vox10": 555187,
+   "vox10_above": 218396,
+   "nn_spacing_cm": 2.066352874943601
+  }
+ },
+ {
+  "name": "mv4_n10_r2",
+  "args": "--fusion-min-views 4 --fusion-normal-error 10 --fusion-reproj-error 2",
+  "sec": 14.722856214,
+  "m": {
+   "points": 3139401,
+   "vertical": 0.0838685468979592,
+   "normal_consistency": 0.9956262443225102,
+   "plane_residual_cm": 0.2759167627505437,
+   "vox10": 455598,
+   "vox10_above": 168784,
+   "nn_spacing_cm": 1.8267900066836513
+  }
+ },
+ {
+  "name": "mv4_n10_r100",
+  "args": "--fusion-min-views 4 --fusion-normal-error 10 --fusion-reproj-error 100",
+  "sec": 15.108496131,
+  "m": {
+   "points": 3139476,
+   "vertical": 0.08388374365658473,
+   "normal_consistency": 0.9956559068951001,
+   "plane_residual_cm": 0.2827988026131439,
+   "vox10": 455595,
+   "vox10_above": 168772,
+   "nn_spacing_cm": 1.8090624861196634
+  }
+ },
+ {
+  "name": "mv4_n20_r2",
+  "args": "--fusion-min-views 4 --fusion-normal-error 20 --fusion-reproj-error 2",
+  "sec": 14.764583368,
+  "m": {
+   "points": 3268145,
+   "vertical": 0.10867694058862137,
+   "normal_consistency": 0.9958036056548667,
+   "plane_residual_cm": 0.3034894636328929,
+   "vox10": 508392,
+   "vox10_above": 193187,
+   "nn_spacing_cm": 1.981839489818387
+  }
+ },
+ {
+  "name": "mv4_n20_r100",
+  "args": "--fusion-min-views 4 --fusion-normal-error 20 --fusion-reproj-error 100",
+  "sec": 14.726284564,
+  "m": {
+   "points": 3268217,
+   "vertical": 0.10869106916707183,
+   "normal_consistency": 0.9957202753800369,
+   "plane_residual_cm": 0.30793236453330747,
+   "vox10": 508353,
+   "vox10_above": 193169,
+   "nn_spacing_cm": 1.9649617671978494
+  }
+ },
+ {
+  "name": "mv4_n30_r2",
+  "args": "--fusion-min-views 4 --fusion-normal-error 30 --fusion-reproj-error 2",
+  "sec": 14.415237433,
+  "m": {
+   "points": 3229846,
+   "vertical": 0.11879111264128382,
+   "normal_consistency": 0.996236801617154,
+   "plane_residual_cm": 0.317286533991,
+   "vox10": 524183,
+   "vox10_above": 201564,
+   "nn_spacing_cm": 2.0740792836819177
+  }
+ },
+ {
+  "name": "mv4_n30_r100",
+  "args": "--fusion-min-views 4 --fusion-normal-error 30 --fusion-reproj-error 100",
+  "sec": 14.599077298,
+  "m": {
+   "points": 3229894,
+   "vertical": 0.11880544686605814,
+   "normal_consistency": 0.9961774898285213,
+   "plane_residual_cm": 0.31755659578530065,
+   "vox10": 524102,
+   "vox10_above": 201503,
+   "nn_spacing_cm": 2.078622499985757
+  }
+ },
+ {
+  "name": "mv5_n10_r2",
+  "args": "--fusion-min-views 5 --fusion-normal-error 10 --fusion-reproj-error 2",
+  "sec": 14.660122359,
+  "m": {
+   "points": 2719234,
+   "vertical": 0.07694335978440987,
+   "normal_consistency": 0.9967317983635875,
+   "plane_residual_cm": 0.2454755928163411,
+   "vox10": 420058,
+   "vox10_above": 154171,
+   "nn_spacing_cm": 1.9214615595575781
+  }
+ },
+ {
+  "name": "mv5_n10_r100",
+  "args": "--fusion-min-views 5 --fusion-normal-error 10 --fusion-reproj-error 100",
+  "sec": 14.686862566,
+  "m": {
+   "points": 2719344,
+   "vertical": 0.07695605999093899,
+   "normal_consistency": 0.9966902398932223,
+   "plane_residual_cm": 0.25702584710974524,
+   "vox10": 420053,
+   "vox10_above": 154172,
+   "nn_spacing_cm": 1.941747355521506
+  }
+ },
+ {
+  "name": "mv5_n20_r2",
+  "args": "--fusion-min-views 5 --fusion-normal-error 20 --fusion-reproj-error 2",
+  "sec": 14.702563244,
+  "m": {
+   "points": 3061977,
+   "vertical": 0.10038383697852728,
+   "normal_consistency": 0.9964842387711719,
+   "plane_residual_cm": 0.2788126099364084,
+   "vox10": 482267,
+   "vox10_above": 181476,
+   "nn_spacing_cm": 2.0096005015414775
+  }
+ },
+ {
+  "name": "mv5_n20_r100",
+  "args": "--fusion-min-views 5 --fusion-normal-error 20 --fusion-reproj-error 100",
+  "sec": 14.896970255,
+  "m": {
+   "points": 3062085,
+   "vertical": 0.10040772872078992,
+   "normal_consistency": 0.9964877986189278,
+   "plane_residual_cm": 0.2713568078091062,
+   "vox10": 482240,
+   "vox10_above": 181462,
+   "nn_spacing_cm": 2.007140546200957
+  }
+ },
+ {
+  "name": "mv5_n30_r2",
+  "args": "--fusion-min-views 5 --fusion-normal-error 30 --fusion-reproj-error 2",
+  "sec": 14.63471535,
+  "m": {
+   "points": 3084592,
+   "vertical": 0.11160244207337632,
+   "normal_consistency": 0.9967143892046536,
+   "plane_residual_cm": 0.2916049010649535,
+   "vox10": 502417,
+   "vox10_above": 191175,
+   "nn_spacing_cm": 2.0732005838888212
+  }
+ },
+ {
+  "name": "mv5_n30_r100",
+  "args": "--fusion-min-views 5 --fusion-normal-error 30 --fusion-reproj-error 100",
+  "sec": 14.531669249,
+  "m": {
+   "points": 3084670,
+   "vertical": 0.11161680179727491,
+   "normal_consistency": 0.9967015798301095,
+   "plane_residual_cm": 0.2900022094304775,
+   "vox10": 502359,
+   "vox10_above": 191140,
+   "nn_spacing_cm": 2.0735896472993542
+  }
+ },
+ {
+  "name": "L_fmv1",
+  "args": "--fusion-min-views 3 --fusion-normal-error 20 --fusion-reproj-error 100 --filter-min-views 1",
+  "sec": 14.839552524,
+  "m": {
+   "points": 3617950,
+   "vertical": 0.12085241642366533,
+   "normal_consistency": 0.9944335066809965,
+   "plane_residual_cm": 0.35678691332669943,
+   "vox10": 573790,
+   "vox10_above": 229001,
+   "nn_spacing_cm": 1.9809916139087336
+  }
+ },
+ {
+  "name": "L_fgeo2",
+  "args": "--fusion-min-views 3 --fusion-normal-error 20 --fusion-reproj-error 100 --filter-geom-error 2",
+  "sec": 14.718692569,
+  "m": {
+   "points": 3517226,
+   "vertical": 0.11878935274560122,
+   "normal_consistency": 0.9945453281033848,
+   "plane_residual_cm": 0.3433283077190071,
+   "vox10": 544669,
+   "vox10_above": 212945,
+   "nn_spacing_cm": 1.949988127937508
+  }
+ },
+ {
+  "name": "L_fncc005",
+  "args": "--fusion-min-views 3 --fusion-normal-error 20 --fusion-reproj-error 100 --filter-min-ncc 0.05",
+  "sec": 14.645429522,
+  "m": {
+   "points": 3515167,
+   "vertical": 0.1184108749314044,
+   "normal_consistency": 0.9946468908821496,
+   "plane_residual_cm": 0.34039129822208086,
+   "vox10": 542584,
+   "vox10_above": 211453,
+   "nn_spacing_cm": 1.9747952141850136
+  }
+ },
+ {
+  "name": "L_med0",
+  "args": "--fusion-min-views 3 --fusion-normal-error 20 --fusion-reproj-error 100 --median-filter 0",
+  "sec": 14.351931599,
+  "m": {
+   "points": 3503107,
+   "vertical": 0.12562990510994954,
+   "normal_consistency": 0.991314221152829,
+   "plane_residual_cm": 0.551920117803344,
+   "vox10": 556037,
+   "vox10_above": 217245,
+   "nn_spacing_cm": 1.9853196375631674
+  }
+ },
+ {
+  "name": "L_fill",
+  "args": "--fusion-min-views 3 --fusion-normal-error 20 --fusion-reproj-error 100 --fill-holes 1",
+  "sec": 14.782893667,
+  "m": {
+   "points": 3570196,
+   "vertical": 0.11983935895956413,
+   "normal_consistency": 0.9945201149067195,
+   "plane_residual_cm": 0.3542726896345709,
+   "vox10": 561181,
+   "vox10_above": 220962,
+   "nn_spacing_cm": 1.9585342513916713
+  }
+ },
+ {
+  "name": "L_win4",
+  "args": "--fusion-min-views 3 --fusion-normal-error 20 --fusion-reproj-error 100 --window-radius 4",
+  "sec": 12.638787418,
+  "m": {
+   "points": 3550942,
+   "vertical": 0.11144704700893453,
+   "normal_consistency": 0.9926610773823719,
+   "plane_residual_cm": 0.3899994587690073,
+   "vox10": 534839,
+   "vox10_above": 207245,
+   "nn_spacing_cm": 1.9479940344341293
+  }
+ },
+ {
+  "name": "L_combo",
+  "args": "--fusion-min-views 3 --fusion-normal-error 20 --fusion-reproj-error 100 --filter-min-views 1 --median-filter 0 --fill-holes 1",
+  "sec": 14.387529056,
+  "m": {
+   "points": 3635432,
+   "vertical": 0.12884988634088054,
+   "normal_consistency": 0.9910893641323302,
+   "plane_residual_cm": 0.5962836718437139,
+   "vox10": 599830,
+   "vox10_above": 241411,
+   "nn_spacing_cm": 2.023555155222646
+  }
+ }
+]
