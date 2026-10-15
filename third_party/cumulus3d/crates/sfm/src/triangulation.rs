@@ -33,7 +33,7 @@
 
 use cumulus3d_core::geometry::triangulation_angle;
 use cumulus3d_core::ransac::{n_choose_k, ransac_with_sampler, Estimator, ExhaustiveSampler, RansacParams};
-use cumulus3d_core::{Mat3x4, Rigid3, Vec2, Vec3};
+use cumulus3d_core::{Camera, Mat3x4, Rigid3, Vec2, Vec3};
 use nalgebra::{Matrix4, SymmetricEigen, SVD};
 
 /// 두 뷰 DLT. `x1`, `x2` 는 정규화 평면 좌표, `p1`, `p2` 는 [R|t].
@@ -238,6 +238,71 @@ pub fn estimate_triangulation(obs: &[TriObservation], opts: &TriangulationRansac
         return None;
     }
     rep.model.map(|m| (m, rep.inlier_mask))
+}
+
+/// RANSAC 삼각측량 문제 하나.
+#[derive(Clone, Debug)]
+pub struct TriProblem<'a> {
+    /// 관측.
+    pub obs: &'a [TriObservation],
+    /// 옵션.
+    pub params: TriangulationRansacParams,
+}
+
+/// 관측 검사 하나: 등록 영상의 관측(픽셀)과 3D 점.
+#[derive(Clone, Copy, Debug)]
+pub struct ObsQuery {
+    /// `cameras` 안 번호.
+    pub camera: u32,
+    /// `poses` 안 번호(world_to_cam).
+    pub pose: u32,
+    /// 관측 픽셀.
+    pub xy: Vec2,
+    /// 3D 점(세계 좌표).
+    pub xyz: Vec3,
+}
+
+/// 관측 검사 결과.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ObsCheck {
+    /// 픽셀 재투영 제곱 오차(`Reconstruction::squared_reprojection_error` 와 같음, 투영 실패면 f64::MAX).
+    pub sq_reproj_error: f64,
+    /// 카메라 깊이 = P 의 셋째 행 · (X, 1) ([`has_positive_depth`] 는 이 값 ≥ ε).
+    pub depth: f64,
+}
+
+/// 삼각측량 일괄 계산 백엔드. CPU 기본 구현은 [`CpuTriangulation`].
+pub trait TriangulationBackend: Send + Sync {
+    /// RANSAC 삼각측량 여러 문제. 결과는 문제마다 [`estimate_triangulation`] 과 같은 규칙, 순서는 입력 순서.
+    fn estimate_batch(&self, problems: &[TriProblem<'_>]) -> Vec<Option<(Vec3, Vec<bool>)>>;
+    /// 관측 여러 개의 재투영 오차와 깊이.
+    fn check_observations(&self, cameras: &[Camera], poses: &[Rigid3], queries: &[ObsQuery]) -> Vec<ObsCheck>;
+}
+
+/// CPU 기본 구현.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct CpuTriangulation;
+
+/// 관측 검사 하나(CPU).
+pub fn check_observation(camera: &Camera, pose: &Rigid3, xy: &Vec2, xyz: &Vec3) -> ObsCheck {
+    let p = pose.matrix();
+    let depth = p[(2, 0)] * xyz.x + p[(2, 1)] * xyz.y + p[(2, 2)] * xyz.z + p[(2, 3)];
+    ObsCheck { sq_reproj_error: cumulus3d_core::Reconstruction::squared_reprojection_error(pose, camera, xy, xyz), depth }
+}
+
+impl TriangulationBackend for CpuTriangulation {
+    fn estimate_batch(&self, problems: &[TriProblem<'_>]) -> Vec<Option<(Vec3, Vec<bool>)>> {
+        use rayon::prelude::*;
+        problems.par_iter().with_min_len(16).map(|p| estimate_triangulation(p.obs, &p.params)).collect()
+    }
+    fn check_observations(&self, cameras: &[Camera], poses: &[Rigid3], queries: &[ObsQuery]) -> Vec<ObsCheck> {
+        use rayon::prelude::*;
+        queries
+            .par_iter()
+            .with_min_len(256)
+            .map(|q| check_observation(&cameras[q.camera as usize], &poses[q.pose as usize], &q.xy, &q.xyz))
+            .collect()
+    }
 }
 
 #[cfg(test)]

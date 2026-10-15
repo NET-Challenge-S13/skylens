@@ -68,7 +68,7 @@
 //! TOML 계획 파일로 실행: `cumulus3d run plan.toml`. 기본 계획은 `cumulus3d plan --print-default`.
 //! 계획 파일의 상대 경로는 실행 위치(현재 폴더) 기준이다.
 
-use crate::densewrap::{make_ba_backend, make_match_backend, make_pm_backend, make_sift_backend, parse_profile, DenseConfig};
+use crate::densewrap::{make_ba_backend, make_match_backend, make_pm_backend, make_sift_backend, make_sparse_backend, parse_profile, DenseConfig};
 use crate::events::{EventKind, Frame, ZoneRange};
 use crate::pipeline::{Pipeline, QueuePolicy, Summary};
 use crate::session::{zones_upto, Input, Session, SessionConfig};
@@ -252,13 +252,15 @@ impl Default for Matching {
 pub struct Sparse {
     /// 새로 등록된 영상만 삼각측량(결과가 달라질 수 있는 개선).
     pub incremental_triangulation: bool,
+    /// 두 뷰 기하 검증·등록·삼각측량 백엔드(cpu|cuda).
+    pub backend: String,
     /// 번들 조정 백엔드(cpu|cuda). cuda 는 실행 중 실패하면 경고 뒤 CPU 로 푼다.
     pub ba_backend: String,
 }
 
 impl Default for Sparse {
     fn default() -> Self {
-        Self { incremental_triangulation: false, ba_backend: "cpu".into() }
+        Self { incremental_triangulation: false, backend: "cpu".into(), ba_backend: "cpu".into() }
     }
 }
 
@@ -806,10 +808,11 @@ impl ReconBuilder {
         self
     }
 
-    /// SIFT·매칭·PatchMatch·번들 조정 백엔드를 모두 cuda 로.
+    /// SIFT·매칭·희소 단계·PatchMatch·번들 조정 백엔드를 모두 cuda 로.
     pub fn gpu(mut self) -> Self {
         self.plan.features.backend = "cuda".into();
         self.plan.matching.backend = "cuda".into();
+        self.plan.sparse.backend = "cuda".into();
         self.plan.dense.backend = "cuda".into();
         self.plan.sparse.ba_backend = "cuda".into();
         self
@@ -1007,6 +1010,7 @@ fn check(plan: &Plan, pr: &mut Problems) -> (Option<Layout>, Option<Vec<GpsRecor
     pr.check(f.max_num_features >= 1, "features.max_num_features", || "1 이상이어야 함".into());
     pr.check(f.max_image_size >= 16, "features.max_image_size", || "16 이상이어야 함".into());
     backend_ok(pr, "matching.backend", &plan.matching.backend, &["cpu", "cuda"]);
+    backend_ok(pr, "sparse.backend", &plan.sparse.backend, &["cpu", "cuda"]);
     backend_ok(pr, "sparse.ba_backend", &plan.sparse.ba_backend, &["cpu", "cuda"]);
 
     let d = &plan.dense;
@@ -1204,6 +1208,7 @@ impl Recon {
         sc.extraction.reader.max_image_size = plan.features.max_image_size;
         sc.sift = make_sift_backend(&plan.features.backend)?;
         sc.matcher = Arc::from(make_match_backend(&plan.matching.backend)?);
+        sc.sparse = make_sparse_backend(&plan.sparse.backend)?;
         sc.ba_backend = make_ba_backend(&plan.sparse.ba_backend)?;
         sc.dense = dense;
         // 되감지 않는다(메모리 절약).

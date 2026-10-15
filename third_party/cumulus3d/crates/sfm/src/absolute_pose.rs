@@ -32,7 +32,7 @@
 //! 절대 자세: P3P 최소해법, EPnP 비최소해법, LO-RANSAC.
 
 use crate::math::{adjugate3, kabsch, solve_cubic_real, solve_quadratic_real};
-use cumulus3d_core::ransac::{lo_ransac, Estimator, RansacParams};
+use cumulus3d_core::ransac::{lo_ransac, BatchedRansac, Estimator, RandomSubsetSampler, RansacParams, RansacReport, Support};
 use cumulus3d_core::{Camera, Mat3, Rigid3, Vec2, Vec3};
 use nalgebra::{Matrix3, SMatrix, SVector, SymmetricEigen, SVD};
 
@@ -530,13 +530,8 @@ pub struct AbsolutePoseResult {
     pub num_trials: usize,
 }
 
-/// P3P + EPnP LO-RANSAC (초점 고정 경로). 인라이어 < 3 이면 None.
-pub fn solve_abs_pose(camera: &Camera, points2d: &[Vec2], points3d: &[Vec3], opts: &AbsolutePoseOptions) -> Option<AbsolutePoseResult> {
-    if points2d.len() != points3d.len() || points2d.len() < 3 {
-        return None;
-    }
-    let corrs: Vec<Corr2D> = points2d.iter().map(|xy| Corr2D { xy: *xy, ray: camera.img_to_ray(xy).unwrap_or_else(Vec3::zeros) }).collect();
-    let ropts = RansacParams {
+fn ransac_params(opts: &AbsolutePoseOptions) -> RansacParams {
+    RansacParams {
         max_error: opts.max_error,
         min_inlier_ratio: opts.min_inlier_ratio,
         confidence: opts.confidence,
@@ -544,8 +539,14 @@ pub fn solve_abs_pose(camera: &Camera, points2d: &[Vec2], points3d: &[Vec3], opt
         min_trials: opts.min_trials,
         max_trials: opts.max_trials,
         random_seed: opts.random_seed,
-    };
-    let rep = lo_ransac(&P3PEstimator { camera }, &EPnPEstimator { camera }, &ropts, &corrs, points3d);
+    }
+}
+
+fn correspondences(camera: &Camera, points2d: &[Vec2]) -> Vec<Corr2D> {
+    points2d.iter().map(|xy| Corr2D { xy: *xy, ray: camera.img_to_ray(xy).unwrap_or_else(Vec3::zeros) }).collect()
+}
+
+fn pose_result(rep: RansacReport<Rigid3>) -> Option<AbsolutePoseResult> {
     if !rep.success {
         return None;
     }
@@ -554,6 +555,98 @@ pub fn solve_abs_pose(camera: &Camera, points2d: &[Vec2], points3d: &[Vec3], opt
         return None;
     }
     Some(AbsolutePoseResult { world_to_cam: rep.model?, inlier_mask: rep.inlier_mask, num_inliers, num_trials: rep.num_trials })
+}
+
+/// P3P + EPnP LO-RANSAC (초점 고정 경로). 인라이어 < 3 이면 None.
+pub fn solve_abs_pose(camera: &Camera, points2d: &[Vec2], points3d: &[Vec3], opts: &AbsolutePoseOptions) -> Option<AbsolutePoseResult> {
+    if points2d.len() != points3d.len() || points2d.len() < 3 {
+        return None;
+    }
+    let corrs = correspondences(camera, points2d);
+    let rep = lo_ransac(&P3PEstimator { camera }, &EPnPEstimator { camera }, &ransac_params(opts), &corrs[..], points3d);
+    pose_result(rep)
+}
+
+/// 절대 자세 가설 일괄 채점기(GPU 백엔드가 구현). 대응 자료는 채점기를 만들 때 올려 둔다.
+pub trait PoseScorer {
+    /// 자세(world_to_cam)마다, 픽셀 재투영 제곱 오차(투영 실패면 f64::MAX)가 `max_residual` 이하인
+    /// 대응의 지지도. [`Support::measure`] 와 같은 값이어야 한다(잔차 합은 대응 순서대로).
+    fn score(&mut self, poses: &[Rigid3], max_residual: f64) -> Result<Vec<Support>, String>;
+}
+
+/// 한 라운드의 최소 반복 수.
+const POSE_MIN_BATCH: usize = 16;
+/// 한 라운드의 최대 반복 수.
+const POSE_MAX_BATCH: usize = 256;
+
+/// [`solve_abs_pose`] 와 같되 가설 채점을 `scorer` 에 묶음으로 맡긴다(표본·해법·LO 는 같음).
+/// 채점 결과가 CPU 와 같으면 결과도 같다. 채점기 오류는 그대로 돌려준다.
+pub fn solve_abs_pose_scored(
+    camera: &Camera,
+    points2d: &[Vec2],
+    points3d: &[Vec3],
+    opts: &AbsolutePoseOptions,
+    scorer: &mut dyn PoseScorer,
+) -> Result<Option<AbsolutePoseResult>, String> {
+    if points2d.len() != points3d.len() || points2d.len() < 3 {
+        return Ok(None);
+    }
+    let corrs = correspondences(camera, points2d);
+    let est = P3PEstimator { camera };
+    let k = est.min_num_samples();
+    let mut r = BatchedRansac::new(est, Some(EPnPEstimator { camera }), RandomSubsetSampler::new(k), &ransac_params(opts), &corrs[..], points3d);
+    while !r.is_done() {
+        r.propose(POSE_MIN_BATCH, POSE_MAX_BATCH);
+        let s = if r.models().is_empty() { Vec::new() } else { scorer.score(r.models(), r.max_residual())? };
+        if s.len() != r.models().len() {
+            return Err(format!("지지도 수 {} != 자세 수 {}", s.len(), r.models().len()));
+        }
+        r.consume(&s);
+    }
+    Ok(pose_result(r.finish()))
+}
+
+/// 절대 자세 RANSAC 백엔드(등록 단계). CPU 기본 구현은 [`CpuAbsPose`].
+pub trait AbsPoseBackend: Send + Sync {
+    /// [`solve_abs_pose`] 와 같은 규칙의 결과.
+    fn solve(&self, camera: &Camera, points2d: &[Vec2], points3d: &[Vec3], opts: &AbsolutePoseOptions) -> Option<AbsolutePoseResult>;
+}
+
+/// CPU 기본 구현([`solve_abs_pose`]).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct CpuAbsPose;
+
+impl AbsPoseBackend for CpuAbsPose {
+    fn solve(&self, camera: &Camera, points2d: &[Vec2], points3d: &[Vec3], opts: &AbsolutePoseOptions) -> Option<AbsolutePoseResult> {
+        solve_abs_pose(camera, points2d, points3d, opts)
+    }
+}
+
+/// CPU 채점기(대조·시험용): CPU 잔차와 [`Support::measure`].
+pub struct CpuPoseScorer<'a> {
+    camera: &'a Camera,
+    corrs: Vec<Corr2D>,
+    points3d: &'a [Vec3],
+}
+
+impl<'a> CpuPoseScorer<'a> {
+    /// 대응을 담아 만든다.
+    pub fn new(camera: &'a Camera, points2d: &[Vec2], points3d: &'a [Vec3]) -> Self {
+        Self { camera, corrs: correspondences(camera, points2d), points3d }
+    }
+}
+
+impl PoseScorer for CpuPoseScorer<'_> {
+    fn score(&mut self, poses: &[Rigid3], max_residual: f64) -> Result<Vec<Support>, String> {
+        let mut res = Vec::new();
+        Ok(poses
+            .iter()
+            .map(|p| {
+                reproj_residuals(self.camera, &self.corrs, self.points3d, p, &mut res);
+                Support::measure(&res, max_residual)
+            })
+            .collect())
+    }
 }
 
 #[cfg(test)]
@@ -621,6 +714,34 @@ mod tests {
 
     fn opencv_cam() -> Camera {
         Camera::new(1, CameraModelKind::OpenCv, 1920, 1080, vec![1500.0, 1500.0, 960.0, 540.0, -0.1, 0.02, 0.001, 0.001]).unwrap()
+    }
+
+    #[test]
+    fn scored_equals_cpu() {
+        let cam = opencv_cam();
+        let mut rng = rand_pcg::Pcg64::seed_from_u64(19);
+        for trial in 0..10u64 {
+            let pose = random_pose(&mut rng);
+            let inv = pose.inverse();
+            let (mut p2, mut p3) = (Vec::new(), Vec::new());
+            while p2.len() < 200 {
+                let xy = Vec2::new(rng.random_range(0.0..1920.0), rng.random_range(0.0..1080.0));
+                let ray = cam.img_to_ray(&xy).unwrap();
+                p3.push(inv * (ray / ray.z * rng.random_range(3.0..10.0)));
+                if p2.len() < 80 {
+                    p2.push(Vec2::new(rng.random_range(0.0..1920.0), rng.random_range(0.0..1080.0)));
+                } else {
+                    p2.push(xy);
+                }
+            }
+            let opts = AbsolutePoseOptions { random_seed: Some(trial), ..Default::default() };
+            let want = solve_abs_pose(&cam, &p2, &p3, &opts).unwrap();
+            let mut sc = CpuPoseScorer::new(&cam, &p2, &p3);
+            let got = solve_abs_pose_scored(&cam, &p2, &p3, &opts, &mut sc).unwrap().unwrap();
+            assert_eq!(got.inlier_mask, want.inlier_mask);
+            assert_eq!(got.num_trials, want.num_trials);
+            assert_eq!(got.world_to_cam, want.world_to_cam);
+        }
     }
 
     #[test]

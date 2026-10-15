@@ -32,6 +32,8 @@
 //! - [`CudaMatcher`]: `cumulus3d_matching::MatcherBackend` 구현(정수 내적 top-2).
 //! - [`CudaSift`]: `cumulus3d_features::SiftEngine` 구현(스케일 공간·검출·방향·선택·기술자 모두 GPU, CpuSift 와 같은 품질이나 비트 단위로 같지는 않음).
 //! - [`CudaBundleAdjuster`]: `cumulus3d_ba::BaBackend` 구현(잔차·야코비안·Schur 조립·축소 계통 풀이·역대입을 GPU 에서, LM 루프는 CPU).
+//! - [`CudaSparse`]: `cumulus3d_matching::TwoViewBackend`(두 뷰 기하 가설 채점), `cumulus3d_sfm::AbsPoseBackend`
+//!   (절대 자세 가설 채점), `cumulus3d_sfm::TriangulationBackend`(RANSAC 삼각측량·관측 검사) 구현.
 //!
 //! `unsafe` 는 cudarc 가 unsafe 로 둔 곳(커널 발사, 고정 호스트 메모리 할당, `DeviceRepr` 표시)에만 쓴다.
 //!
@@ -68,12 +70,14 @@ mod device;
 mod matcher;
 mod patchmatch;
 mod sift;
+mod sparse;
 
 pub use ba::{CudaBaError, CudaBundleAdjuster, CPU_CHOLESKY_N, MAX_DENSE_N};
 pub use device::{is_available, CudaDevice, GpuError};
 pub use matcher::CudaMatcher;
 pub use patchmatch::{CudaPatchMatch, CudaPatchMatchOptions};
 pub use sift::CudaSift;
+pub use sparse::CudaSparse;
 
 /// 모든 커널을 장치 없이 NVRTC 로 컴파일해 본다(CI 검사용). `arch` 예: `"compute_70"`.
 /// 실제 실행 때와 같은 옵션·정의 조합(patchmatch: 창 간격 1·2, 하드웨어 보간 켬·끔, 빠른 수학 켬·끔)을 쓴다.
@@ -88,6 +92,7 @@ pub fn check_kernels(arch: &'static str) -> Result<Vec<(String, usize)>, String>
         compile("sift".into(), sift::SRC, false, false, &[])?,
         compile("matcher".into(), matcher::SRC, true, false, &[])?,
         compile("ba".into(), ba::SRC, true, false, &[])?,
+        compile("sparse".into(), sparse::SRC, false, false, &[])?,
     ];
     for step in [1, 2] {
         for hw in [false, true] {

@@ -61,9 +61,10 @@ use cumulus3d_core::io::ply::PointCloud;
 use cumulus3d_core::io::GpsRecord;
 use cumulus3d_core::{CameraId, FeatureStore, ImageId, MatchGraph, MatchGraphOptions, Reconstruction};
 use cumulus3d_features::{CameraMode, ExtractionOptions, FeatureExtractor, ImageReport, ImageStatus, SiftEngine};
-use cumulus3d_matching::{match_pairs, MatcherBackend, PairMatchingOptions};
+use cumulus3d_matching::{match_pairs_with, MatcherBackend, PairMatchingOptions, TwoViewBackend};
 use cumulus3d_sfm::{
-    global_mapper, register_images, triangulate_points, GlobalSfmOptions, PointTriangulatorOptions, RegistrationOptions, TriangulationScope,
+    global_mapper, register_images_with, triangulate_points_with, AbsPoseBackend, GlobalSfmOptions, PointTriangulatorOptions,
+    RegistrationOptions, TriangulationBackend, TriangulationScope,
 };
 use rayon::prelude::*;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
@@ -97,6 +98,27 @@ impl FrameSet {
     }
 }
 
+/// 위치마다 도는 희소 단계의 백엔드 묶음. 기본은 모두 CPU.
+#[derive(Clone)]
+pub struct SparseBackends {
+    /// 두 뷰 기하 검증.
+    pub two_view: Arc<dyn TwoViewBackend>,
+    /// 등록의 절대 자세 RANSAC.
+    pub abs_pose: Arc<dyn AbsPoseBackend>,
+    /// 삼각측량(생성 RANSAC·깊이·재투영 검사).
+    pub triangulation: Arc<dyn TriangulationBackend>,
+}
+
+impl Default for SparseBackends {
+    fn default() -> Self {
+        Self {
+            two_view: Arc::new(cumulus3d_matching::CpuTwoView),
+            abs_pose: Arc::new(cumulus3d_sfm::CpuAbsPose),
+            triangulation: Arc::new(cumulus3d_sfm::CpuTriangulation),
+        }
+    }
+}
+
 /// 세션 설정.
 #[derive(Clone)]
 pub struct SessionConfig {
@@ -124,6 +146,8 @@ pub struct SessionConfig {
     pub matcher: Arc<dyn MatcherBackend>,
     /// 번들 조정 백엔드(구역 정밀 BA, 첫 모델 전역 매퍼의 BA).
     pub ba_backend: Arc<dyn BaBackend>,
+    /// 희소 단계(기하 검증·등록·삼각측량) 백엔드.
+    pub sparse: SparseBackends,
     /// 조밀화 설정(None = 조밀화 생략, 점군 이벤트는 `dense: false`).
     pub dense: Option<DenseConfig>,
     /// [`Command::ResetFrom`] 용으로 보관할 위치별 되감기 지점 수(0 = 되감기 불가, 메모리 절약).
@@ -151,6 +175,7 @@ impl SessionConfig {
             sift: Arc::new(cumulus3d_features::CpuSift::default()),
             matcher: Arc::new(cumulus3d_matching::CpuMatcher::default()),
             ba_backend: Arc::new(cumulus3d_ba::CpuBaBackend),
+            sparse: SparseBackends::default(),
             dense: None,
             history: 8,
             decode_frames: false,
@@ -793,7 +818,7 @@ impl Session {
         let mut mopts = PairMatchingOptions::default();
         mopts.geometry.ransac.random_seed = cfg.seed;
         let t0 = Instant::now();
-        let st = match_pairs(&self.store, &pairs, &mopts, cfg.matcher.as_ref());
+        let st = match_pairs_with(&self.store, &pairs, &mopts, cfg.matcher.as_ref(), cfg.sparse.two_view.as_ref());
         out.stage("matching", &format!("pos {p} ({} pairs)", pairs.len()), t0);
         let st = st.map_err(|e| e.to_string())?;
         Arc::make_mut(&mut self.graph).update_from_store(&self.store, &MatchGraphOptions::default());
@@ -844,7 +869,7 @@ impl Session {
             if let Some(base) = &self.chain {
                 let mut reg = base.clone();
                 let t0 = Instant::now();
-                let rr = register_images(&mut reg, &self.store, &self.graph, &RegistrationOptions::default());
+                let rr = register_images_with(&mut reg, &self.store, &self.graph, &RegistrationOptions::default(), cfg.sparse.abs_pose.as_ref());
                 out.stage("registration", &format!("pos {p}"), t0);
                 match rr {
                     Ok(rep) => {
@@ -857,7 +882,7 @@ impl Session {
                         };
                         let topts = PointTriangulatorOptions { clear_points: false, scope, ..Default::default() };
                         let t0 = Instant::now();
-                        let tr = triangulate_points(&mut reg, &self.graph, &topts);
+                        let tr = triangulate_points_with(&mut reg, &self.graph, &topts, cfg.sparse.triangulation.as_ref());
                         out.stage("triangulation", &format!("pos {p}"), t0);
                         match tr {
                             Ok(t) => {
