@@ -1047,14 +1047,16 @@ func (x *SegmentStatus) GetLevel() v1.Level {
 }
 
 type ServerStatus struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Connected     bool                   `protobuf:"varint,1,opt,name=connected,proto3" json:"connected,omitempty"`
-	Receiving     bool                   `protobuf:"varint,2,opt,name=receiving,proto3" json:"receiving,omitempty"`
-	Chunks        uint64                 `protobuf:"varint,3,opt,name=chunks,proto3" json:"chunks,omitempty"`
-	Detections    uint64                 `protobuf:"varint,4,opt,name=detections,proto3" json:"detections,omitempty"`
-	LastSeq       uint64                 `protobuf:"varint,5,opt,name=last_seq,json=lastSeq,proto3" json:"last_seq,omitempty"`
-	LatencyMs     *float64               `protobuf:"fixed64,6,opt,name=latency_ms,json=latencyMs,proto3,oneof" json:"latency_ms,omitempty"`
-	Segments      []*SegmentStatus       `protobuf:"bytes,7,rep,name=segments,proto3" json:"segments,omitempty"`
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	Connected  bool                   `protobuf:"varint,1,opt,name=connected,proto3" json:"connected,omitempty"`
+	Receiving  bool                   `protobuf:"varint,2,opt,name=receiving,proto3" json:"receiving,omitempty"`
+	Chunks     uint64                 `protobuf:"varint,3,opt,name=chunks,proto3" json:"chunks,omitempty"`
+	Detections uint64                 `protobuf:"varint,4,opt,name=detections,proto3" json:"detections,omitempty"`
+	LastSeq    uint64                 `protobuf:"varint,5,opt,name=last_seq,json=lastSeq,proto3" json:"last_seq,omitempty"`
+	LatencyMs  *float64               `protobuf:"fixed64,6,opt,name=latency_ms,json=latencyMs,proto3,oneof" json:"latency_ms,omitempty"`
+	Segments   []*SegmentStatus       `protobuf:"bytes,7,rep,name=segments,proto3" json:"segments,omitempty"`
+	// The model server lost its GPU and continues on the CPU (model HealthResponse.gpu_error).
+	ModelGpuError string `protobuf:"bytes,8,opt,name=model_gpu_error,json=modelGpuError,proto3" json:"model_gpu_error,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1136,6 +1138,13 @@ func (x *ServerStatus) GetSegments() []*SegmentStatus {
 		return x.Segments
 	}
 	return nil
+}
+
+func (x *ServerStatus) GetModelGpuError() string {
+	if x != nil {
+		return x.ModelGpuError
+	}
+	return ""
 }
 
 var File_skylens_viewer_v1_viewer_proto protoreflect.FileDescriptor
@@ -1220,7 +1229,7 @@ const file_skylens_viewer_v1_viewer_proto_rawDesc = "" +
 	"\x05_mbps\"T\n" +
 	"\rSegmentStatus\x12\x14\n" +
 	"\x05index\x18\x01 \x01(\rR\x05index\x12-\n" +
-	"\x05level\x18\x02 \x01(\x0e2\x17.skylens.model.v1.LevelR\x05level\"\x8e\x02\n" +
+	"\x05level\x18\x02 \x01(\x0e2\x17.skylens.model.v1.LevelR\x05level\"\xb6\x02\n" +
 	"\fServerStatus\x12\x1c\n" +
 	"\tconnected\x18\x01 \x01(\bR\tconnected\x12\x1c\n" +
 	"\treceiving\x18\x02 \x01(\bR\treceiving\x12\x16\n" +
@@ -1231,7 +1240,8 @@ const file_skylens_viewer_v1_viewer_proto_rawDesc = "" +
 	"\blast_seq\x18\x05 \x01(\x04R\alastSeq\x12\"\n" +
 	"\n" +
 	"latency_ms\x18\x06 \x01(\x01H\x00R\tlatencyMs\x88\x01\x01\x12<\n" +
-	"\bsegments\x18\a \x03(\v2 .skylens.viewer.v1.SegmentStatusR\bsegmentsB\r\n" +
+	"\bsegments\x18\a \x03(\v2 .skylens.viewer.v1.SegmentStatusR\bsegments\x12&\n" +
+	"\x0fmodel_gpu_error\x18\b \x01(\tR\rmodelGpuErrorB\r\n" +
 	"\v_latency_ms*\xa2\x01\n" +
 	"\vComponentId\x12\x1c\n" +
 	"\x18COMPONENT_ID_UNSPECIFIED\x10\x00\x12\x16\n" +

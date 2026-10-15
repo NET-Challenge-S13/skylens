@@ -15,7 +15,7 @@ use crate::storage;
 use crate::tower::{TowerScene, World};
 use crate::video::{Feed, Fix, VideoConfig, VideoPanel};
 use skylens_viewer::link::{LinkEvent, LinkState, LinkStatus};
-use skylens_viewer::protocol::{self, Body};
+use skylens_viewer::protocol::{self, Body, GpuLossAlert};
 use skylens_viewer::shell::{InputKind, UiInput};
 use skylens_viewer::widgets::{LoadingScreen, ToastKind, Toasts};
 use skylens_viewer::{Code, CoreLink, Dom, NodeId, PollCx, ScreenApp, SiteFrame, View3d, q};
@@ -112,6 +112,7 @@ pub struct ControlApp {
     link_seen: HashMap<String, String>,
     site_requested: bool,
     planner_centred: bool,
+    gpu_alert: GpuLossAlert,
 }
 
 impl ControlApp {
@@ -129,6 +130,7 @@ impl ControlApp {
             scene,
             range: Rc::new(RefCell::new(Range::new(20.0, 200.0, 5.0, 60.0))),
             planner_centred: stored.is_some(),
+            gpu_alert: GpuLossAlert::default(),
             planner,
             http: Http::new(),
             settings,
@@ -261,6 +263,11 @@ impl ControlApp {
                     skylens_viewer::Change::Buildings { .. } => w.buildings_rev += 1,
                     skylens_viewer::Change::Invalid(e) => skylens_viewer::log(&format!("[control] dropped chunk: {e}")),
                     _ => {}
+                }
+            }
+            Body::ServerStatus(s) => {
+                if let Some(msg) = self.gpu_alert.update(&s) {
+                    self.toast(dom, &msg, ToastKind::Danger);
                 }
             }
             Body::LinkStatus(l) => {

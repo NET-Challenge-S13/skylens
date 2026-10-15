@@ -233,6 +233,9 @@ pub struct Health {
     pub cuda: bool,
     #[serde(default)]
     pub device: Option<String>,
+    /// First CUDA failure after start; `cuda` is false from then on.
+    #[serde(default)]
+    pub gpu_error: Option<String>,
     #[serde(default)]
     pub jobs: BTreeMap<String, u64>,
 }
@@ -628,11 +631,13 @@ mod tests {
             torch: true,
             cuda: false,
             device: None,
+            gpu_error: None,
             jobs: BTreeMap::new(),
         };
         let v = serde_json::to_value(h).unwrap();
         assert_eq!(v["status"], "ok");
         assert!(v.get("device").is_some());
+        assert!(v.get("gpu_error").is_some());
     }
 
     #[test]

@@ -146,4 +146,6 @@ message ServerStatus {
   uint64 last_seq = 5;
   optional double latency_ms = 6;
   repeated SegmentStatus segments = 7;
+  // The model server lost its GPU and continues on the CPU (model HealthResponse.gpu_error).
+  string model_gpu_error = 8;
 }

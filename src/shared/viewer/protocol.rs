@@ -145,9 +145,39 @@ impl SeqTracker {
     }
 }
 
+/// Turns the `ServerStatus` heartbeat into one warning when the model server loses its GPU.
+/// The status repeats every tick, so only the change is reported; a model restart that clears
+/// the error arms it again.
+#[derive(Debug, Default)]
+pub struct GpuLossAlert {
+    shown: bool,
+}
+
+impl GpuLossAlert {
+    /// The toast text to show now, if any.
+    pub fn update(&mut self, status: &viewer::ServerStatus) -> Option<String> {
+        let lost = !status.model_gpu_error.is_empty();
+        let show = lost && !self.shown;
+        self.shown = lost;
+        show.then(|| "연산 서버 GPU 끊김 · CPU로 계속 처리해 복원이 느려집니다".to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gpu_loss_alerts_once_and_rearms_after_recovery() {
+        let mut a = GpuLossAlert::default();
+        let ok = viewer::ServerStatus::default();
+        let lost = viewer::ServerStatus { model_gpu_error: "CUDA error".into(), ..Default::default() };
+        assert!(a.update(&ok).is_none());
+        assert!(a.update(&lost).is_some());
+        assert!(a.update(&lost).is_none());
+        assert!(a.update(&ok).is_none());
+        assert!(a.update(&lost).is_some());
+    }
 
     fn gps(lat: f64, lon: f64, alt: f64) -> model::Gps {
         model::Gps { lat, lon, alt }

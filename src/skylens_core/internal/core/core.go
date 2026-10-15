@@ -571,6 +571,8 @@ func (c *Core) ServerStatus() *viewerv1.ServerStatus {
 		Chunks:     cnt.Model, // the base map is not reconstruction; boards never see it
 		Detections: cnt.Detections,
 		LastSeq:    cnt.LastModelSeq,
+		// Screens warn once the model server runs on the CPU after losing its GPU.
+		ModelGpuError: c.health.GetGpuError(),
 	}
 	if c.latencyMs != nil {
 		l := *c.latencyMs
@@ -637,13 +639,14 @@ func (c *Core) HealthHandler() http.Handler {
 		ps := c.pusher.Stats()
 		c.mu.Lock()
 		model := map[string]any{
-			"target":         c.cfg.ModelGRPC,
-			"chunks_stream":  c.modelUp,
-			"frames_stream":  ps.Connected,
-			"health_error":   c.healthErr,
-			"health_ok":      c.health.GetOk(),
-			"health_gpu":     c.health.GetGpu(),
-			"health_version": c.health.GetVersion(),
+			"target":           c.cfg.ModelGRPC,
+			"chunks_stream":    c.modelUp,
+			"frames_stream":    ps.Connected,
+			"health_error":     c.healthErr,
+			"health_ok":        c.health.GetOk(),
+			"health_gpu":       c.health.GetGpu(),
+			"health_gpu_error": c.health.GetGpuError(),
+			"health_version":   c.health.GetVersion(),
 		}
 		framesIn := c.framesIn
 		terrainChunks := c.terrainChunks

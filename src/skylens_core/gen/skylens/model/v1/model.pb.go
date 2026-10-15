@@ -1082,10 +1082,13 @@ func (*HealthRequest) Descriptor() ([]byte, []int) {
 }
 
 type HealthResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Ok            bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
-	Gpu           bool                   `protobuf:"varint,2,opt,name=gpu,proto3" json:"gpu,omitempty"`
-	Version       string                 `protobuf:"bytes,3,opt,name=version,proto3" json:"version,omitempty"`
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Ok      bool                   `protobuf:"varint,1,opt,name=ok,proto3" json:"ok,omitempty"`
+	Gpu     bool                   `protobuf:"varint,2,opt,name=gpu,proto3" json:"gpu,omitempty"` // false once the GPU was lost (gpu_error)
+	Version string                 `protobuf:"bytes,3,opt,name=version,proto3" json:"version,omitempty"`
+	// First CUDA failure after start (driver reset, GPU dropped off the bus).
+	// The server keeps running on the CPU, much slower. Empty while the GPU works.
+	GpuError      string `protobuf:"bytes,4,opt,name=gpu_error,json=gpuError,proto3" json:"gpu_error,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1137,6 +1140,13 @@ func (x *HealthResponse) GetGpu() bool {
 func (x *HealthResponse) GetVersion() string {
 	if x != nil {
 		return x.Version
+	}
+	return ""
+}
+
+func (x *HealthResponse) GetGpuError() string {
+	if x != nil {
+		return x.GpuError
 	}
 	return ""
 }
@@ -1615,11 +1625,12 @@ const file_skylens_model_v1_model_proto_rawDesc = "" +
 	"\x05error\x18\x06 \x01(\tH\x01R\x05error\x88\x01\x01B\b\n" +
 	"\x06resultB\b\n" +
 	"\x06_error\"\x0f\n" +
-	"\rHealthRequest\"L\n" +
+	"\rHealthRequest\"i\n" +
 	"\x0eHealthResponse\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x10\n" +
 	"\x03gpu\x18\x02 \x01(\bR\x03gpu\x12\x18\n" +
-	"\aversion\x18\x03 \x01(\tR\aversion\"_\n" +
+	"\aversion\x18\x03 \x01(\tR\aversion\x12\x1b\n" +
+	"\tgpu_error\x18\x04 \x01(\tR\bgpuError\"_\n" +
 	"\bFrameKey\x12\x1b\n" +
 	"\tsource_id\x18\x01 \x01(\tR\bsourceId\x12\x1a\n" +
 	"\bsequence\x18\x02 \x01(\x04R\bsequence\x12\x1a\n" +

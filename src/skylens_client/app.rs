@@ -16,8 +16,8 @@ use skylens_shared::proto::model::v1 as model;
 use skylens_shared::proto::payload::v1 as payload;
 use skylens_viewer::camera::{SyncEvent, SyncState};
 use skylens_viewer::link::VIEWER_PATH;
-use skylens_viewer::protocol::Body;
-use skylens_viewer::widgets::{CardKind, LoadingScreen, NetBadge, Toasts};
+use skylens_viewer::protocol::{Body, GpuLossAlert};
+use skylens_viewer::widgets::{CardKind, LoadingScreen, NetBadge, ToastKind, Toasts};
 use skylens_viewer::widgets::detection_card::detection_label;
 use skylens_viewer::{CoreLink, Dom, LinkEvent, NodeId, Page, PollCx, ScreenApp, ScreenDocument, SiteFrame, UiInput, View3d, q};
 use std::cell::RefCell;
@@ -101,6 +101,7 @@ pub struct StatusApp {
     minimap_size: Option<(i64, i64, u32, u32)>,
     site_seen: bool,
     last_poll_ms: Option<f64>,
+    gpu_alert: GpuLossAlert,
 }
 
 impl StatusApp {
@@ -118,6 +119,7 @@ impl StatusApp {
             card: None,
             ladder: BTreeMap::new(),
             minimap_size: None,
+            gpu_alert: GpuLossAlert::default(),
             site_seen: false,
             last_poll_ms: None,
         }
@@ -171,7 +173,12 @@ impl StatusApp {
                     Body::Telemetry(t) => b.telemetry(&t),
                     Body::AssignRoute(r) => b.assign_route(&r),
                     Body::MissionStatus(m) => b.mission = Some(m),
-                    Body::ServerStatus(s) => b.core_status = Some(s),
+                    Body::ServerStatus(s) => {
+                        if let Some(msg) = self.gpu_alert.update(&s) {
+                            self.toasts.show(dom, &msg, ToastKind::Danger, now);
+                        }
+                        b.core_status = Some(s);
+                    }
                     _ => {}
                 }
             }

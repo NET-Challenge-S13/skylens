@@ -626,3 +626,17 @@ func TestHealthNeverShowsTheKey(t *testing.T) {
 		t.Fatalf("health body %s (%v)", body, err)
 	}
 }
+
+func TestServerStatusCarriesTheModelGPUError(t *testing.T) {
+	c := New(Options{Config: testConfig(t), Clock: &manualClock{}})
+	defer c.Close()
+	if e := c.ServerStatus().GetModelGpuError(); e != "" {
+		t.Fatalf("no health yet, got gpu error %q", e)
+	}
+	c.mu.Lock()
+	c.health = &modelv1.HealthResponse{Ok: true, Gpu: false, GpuError: "CUDA error: unknown error"}
+	c.mu.Unlock()
+	if e := c.ServerStatus().GetModelGpuError(); e != "CUDA error: unknown error" {
+		t.Fatalf("gpu error %q", e)
+	}
+}

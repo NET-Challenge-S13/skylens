@@ -136,8 +136,11 @@ message HealthRequest {}
 
 message HealthResponse {
   bool ok = 1;
-  bool gpu = 2;
+  bool gpu = 2; // false once the GPU was lost (gpu_error)
   string version = 3;
+  // First CUDA failure after start (driver reset, GPU dropped off the bus).
+  // The server keeps running on the CPU, much slower. Empty while the GPU works.
+  string gpu_error = 4;
 }
 
 // ---- live path --------------------------------------------------------------

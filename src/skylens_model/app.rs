@@ -112,9 +112,70 @@ pub fn gpu_probe() -> GpuProbe {
         .clone()
 }
 
+/// First CUDA failure after start. The device does not come back without a
+/// restart (driver reset, GPU dropped off the bus), and cumulus3d and the UNet
+/// fall back to the CPU on their own, so without this the server would report
+/// CUDA while running many times slower.
+static GPU_FAULT: OnceLock<String> = OnceLock::new();
+
+/// How often the GPU watch runs its check.
+pub const GPU_WATCH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(5);
+
+pub fn gpu_fault() -> Option<String> {
+    GPU_FAULT.get().cloned()
+}
+
+fn record_gpu_fault(err: &str) {
+    // libtorch errors carry a long hint after the first line.
+    let first = err.lines().next().unwrap_or(err).trim().to_string();
+    if GPU_FAULT.set(first.clone()).is_ok() {
+        tracing::error!("GPU lost: {first}. Reconstruction and the UNet continue on the CPU, much slower");
+    }
+}
+
+/// One tiny libtorch op on the GPU. Once the device is lost every call fails.
+fn cuda_check() -> Result<(), String> {
+    std::panic::catch_unwind(|| {
+        tch::Tensor::f_ones([4], (tch::Kind::Float, tch::Device::Cuda(0)))
+            .and_then(|t| t.f_sum(tch::Kind::Float))
+            .and_then(|t| t.f_double_value(&[]))
+            .map(|_| ())
+            .map_err(|e| e.to_string())
+    })
+    .unwrap_or_else(|_| Err("CUDA check panicked".into()))
+}
+
+/// Checks the GPU every [`GPU_WATCH_INTERVAL`] until the first failure.
+/// Nothing to watch when CUDA was not available at start.
+pub fn spawn_gpu_watch() {
+    if !gpu_probe().cuda {
+        return;
+    }
+    let spawned = std::thread::Builder::new().name("skylens-gpu-watch".into()).spawn(|| loop {
+        std::thread::sleep(GPU_WATCH_INTERVAL);
+        if let Err(e) = cuda_check() {
+            record_gpu_fault(&e);
+            return;
+        }
+    });
+    if let Err(e) = spawned {
+        tracing::warn!("GPU watch not started: {e}");
+    }
+}
+
+/// What `/health` reports about the GPU: CUDA only while no failure was seen,
+/// and the failure once there was one.
+pub fn gpu_state(probe: &GpuProbe, fault: Option<String>) -> (bool, Option<String>) {
+    match fault {
+        Some(e) if probe.cuda => (false, Some(e)),
+        _ => (probe.cuda, None),
+    }
+}
+
 /// Liveness plus what this process can actually compute.
 pub async fn health(state: &AppState) -> Health {
     let probe = tokio::task::spawn_blocking(gpu_probe).await.unwrap_or_default();
+    let (cuda, gpu_error) = gpu_state(&probe, gpu_fault());
     let mut jobs = state.registry.counts();
     jobs.insert("frames".into(), state.pipeline.frames.count() as u64);
     Health {
@@ -122,8 +183,9 @@ pub async fn health(state: &AppState) -> Health {
         version: VERSION.into(),
         demo: state.pipeline.settings.demo,
         torch: probe.torch,
-        cuda: probe.cuda,
+        cuda,
         device: probe.device,
+        gpu_error,
         jobs,
     }
 }
@@ -291,7 +353,12 @@ impl ModelService for ModelGrpc {
         _request: tonic::Request<pb::HealthRequest>,
     ) -> Result<tonic::Response<pb::HealthResponse>, Status> {
         let h = health(&self.state).await;
-        Ok(tonic::Response::new(pb::HealthResponse { ok: true, gpu: h.cuda, version: h.version }))
+        Ok(tonic::Response::new(pb::HealthResponse {
+            ok: true,
+            gpu: h.cuda,
+            version: h.version,
+            gpu_error: h.gpu_error.unwrap_or_default(),
+        }))
     }
 
     async fn push_frames(
@@ -303,6 +370,7 @@ impl ModelService for ModelGrpc {
         let mut summary = pb::PushFramesSummary::default();
         while let Some(set) = stream.message().await? {
             let engine = engine.clone();
+            let started = std::time::Instant::now();
             let outcome = tokio::task::spawn_blocking(move || engine.push(set))
                 .await
                 .map_err(|e| Status::internal(format!("frame push panicked: {e}")))?
@@ -312,6 +380,7 @@ impl ModelService for ModelGrpc {
                         summary.ingested, summary.ignored, summary.pending
                     ))
                 })?;
+            tracing::debug!("frame set {outcome:?} in {:.2}s", started.elapsed().as_secs_f64());
             match outcome {
                 PushOutcome::Ingested => summary.ingested += 1,
                 PushOutcome::Ignored => summary.ignored += 1,
@@ -422,6 +491,9 @@ pub async fn serve(settings: Settings) -> anyhow::Result<()> {
         if settings.demo { settings.manifest.display().to_string() } else { "-".into() }
     );
     let live = build_live(&settings).await;
+    if !settings.demo {
+        spawn_gpu_watch();
+    }
     let state = AppState::new(Pipeline::new(settings.clone(), live));
     state.registry.start();
 
@@ -505,6 +577,16 @@ mod tests {
                 Err((status, serde_json::from_slice(&bytes).unwrap()))
             }
         }
+    }
+
+    #[test]
+    fn gpu_fault_turns_cuda_off_and_is_reported() {
+        let cuda = GpuProbe { torch: true, cuda: true, device: Some("cuda:0".into()) };
+        assert_eq!(gpu_state(&cuda, None), (true, None));
+        assert_eq!(gpu_state(&cuda, Some("lost".into())), (false, Some("lost".into())));
+        // Without CUDA at start there is nothing to lose.
+        let cpu = GpuProbe { torch: true, cuda: false, device: None };
+        assert_eq!(gpu_state(&cpu, Some("lost".into())), (false, None));
     }
 
     #[tokio::test]
