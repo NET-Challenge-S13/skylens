@@ -31,6 +31,7 @@
 
 //! 짝 목록 기반 매칭 → 두 뷰 기하 검증 → FeatureStore 기록.
 
+use crate::batched::{CpuTwoView, TwoViewBackend, VerifyJob};
 use crate::descriptor::{DescriptorMatchOptions, MatcherBackend};
 use crate::pairs::{read_pair_list, PairList};
 use crate::two_view::{derive_seed, estimate_two_view, finalize_geometry, TwoViewOptions};
@@ -96,6 +97,17 @@ pub fn match_pairs(
     opts: &PairMatchingOptions,
     backend: &dyn MatcherBackend,
 ) -> Result<MatchingStats> {
+    match_pairs_with(store, pairs, opts, backend, &CpuTwoView)
+}
+
+/// [`match_pairs`] 와 같되 두 뷰 기하 검증을 `verifier` 로 한다(블록마다 짝 묶음 한 번).
+pub fn match_pairs_with(
+    store: &FeatureStore,
+    pairs: &[(ImageId, ImageId)],
+    opts: &PairMatchingOptions,
+    backend: &dyn MatcherBackend,
+    verifier: &dyn TwoViewBackend,
+) -> Result<MatchingStats> {
     let mut stats = MatchingStats::default();
     let max_num_matches = opts.max_num_matches.min(store.largest_keypoint_count());
     let min_inl = opts.geometry.min_num_inliers;
@@ -144,8 +156,8 @@ pub fn match_pairs(
                 }
             }
         }
-        // 2) 짝 단위 병렬: 매칭 + 검증.
-        let results: Vec<PairResult> = tasks
+        // 2) 짝 단위 병렬 매칭 → 블록 단위 검증.
+        let raws: Vec<(ImageId, ImageId, Vec<FeatureMatch>, bool)> = tasks
             .into_par_iter()
             .map(|t| {
                 let matched = t.pre.is_none();
@@ -162,10 +174,17 @@ pub fn match_pairs(
                         }
                     }
                 };
-                let tvg = (!opts.skip_geometric_verification).then(|| verify_pair(store, t.id1, t.id2, &raw, &opts.geometry));
-                (t.id1, t.id2, raw, tvg, matched)
+                (t.id1, t.id2, raw, matched)
             })
             .collect();
+        let tvgs: Vec<Option<TwoViewGeometry>> = if opts.skip_geometric_verification {
+            raws.iter().map(|_| None).collect()
+        } else {
+            let jobs: Vec<VerifyJob<'_>> = raws.iter().map(|(a, b, m, _)| VerifyJob { id1: *a, id2: *b, matches: m }).collect();
+            verifier.verify_pairs(store, &jobs, &opts.geometry).into_iter().map(Some).collect()
+        };
+        let results: Vec<PairResult> =
+            raws.into_iter().zip(tvgs).map(|((id1, id2, raw, matched), tvg)| (id1, id2, raw, tvg, matched)).collect();
         // 3) 블록 단위 기록(입력 순서).
         for (id1, id2, raw, tvg, matched) in results {
             if matched {

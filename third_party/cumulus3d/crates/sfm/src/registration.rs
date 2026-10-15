@@ -31,7 +31,7 @@
 
 //! 기존 모델에 새 영상 등록(image_registrator).
 
-use crate::absolute_pose::{solve_abs_pose, AbsolutePoseOptions};
+use crate::absolute_pose::{AbsPoseBackend, AbsolutePoseOptions, CpuAbsPose};
 use cumulus3d_ba::Loss;
 use cumulus3d_core::{
     Camera, FeatureStore, Image, ImageId, MatchGraph, Point2DIdx, Point3DId, Reconstruction, Result, TrackEntry, Vec2, Vec3,
@@ -247,6 +247,17 @@ pub fn register_image(
     image_id: ImageId,
     opts: &RegistrationOptions,
 ) -> Result<RegisterOutcome> {
+    register_image_with(rec, graph, image_id, opts, &CpuAbsPose)
+}
+
+/// [`register_image`] 와 같되 절대 자세 RANSAC 을 `backend` 로 한다.
+pub fn register_image_with(
+    rec: &mut Reconstruction,
+    graph: &MatchGraph,
+    image_id: ImageId,
+    opts: &RegistrationOptions,
+    backend: &dyn AbsPoseBackend,
+) -> Result<RegisterOutcome> {
     if rec.is_image_registered(image_id) {
         return Ok(RegisterOutcome::AlreadyRegistered);
     }
@@ -267,7 +278,7 @@ pub fn register_image(
     let mut ransac = opts.ransac.clone();
     // 영상마다 다른 결정적 시드.
     ransac.random_seed = ransac.random_seed.map(|s| s ^ (image_id as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15));
-    let Some(res) = solve_abs_pose(&camera, &p2, &p3, &ransac) else {
+    let Some(res) = backend.solve(&camera, &p2, &p3, &ransac) else {
         return Ok(RegisterOutcome::RansacFailed);
     };
     if res.num_inliers < opts.abs_pose_min_num_inliers {
@@ -304,6 +315,17 @@ pub fn register_images(
     graph: &MatchGraph,
     opts: &RegistrationOptions,
 ) -> Result<RegistrationReport> {
+    register_images_with(rec, store, graph, opts, &CpuAbsPose)
+}
+
+/// [`register_images`] 와 같되 절대 자세 RANSAC 을 `backend` 로 한다.
+pub fn register_images_with(
+    rec: &mut Reconstruction,
+    store: &FeatureStore,
+    graph: &MatchGraph,
+    opts: &RegistrationOptions,
+    backend: &dyn AbsPoseBackend,
+) -> Result<RegistrationReport> {
     let added = add_missing_images(rec, store, graph)?;
     let mut report = RegistrationReport { num_added_images: added.len(), ..Default::default() };
     let mut pending: Vec<ImageId> = rec.image_ids().filter(|i| !rec.has_pose(*i)).collect();
@@ -311,7 +333,7 @@ pub fn register_images(
     match opts.order {
         RegistrationOrder::ImageId => {
             for id in pending {
-                let o = register_image(rec, graph, id, opts)?;
+                let o = register_image_with(rec, graph, id, opts, backend)?;
                 report.attempts.push((id, o));
             }
         }
@@ -326,7 +348,7 @@ pub fn register_images(
                     }
                 }
                 let id = pending.remove(best);
-                let o = register_image(rec, graph, id, opts)?;
+                let o = register_image_with(rec, graph, id, opts, backend)?;
                 report.attempts.push((id, o));
             }
         }

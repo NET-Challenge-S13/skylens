@@ -431,6 +431,240 @@ where
     run(est, local, sampler, opts, x, y)
 }
 
+/// 가설을 묶음으로 내놓고 그 지지도를 바깥(예: GPU)에서 받아 진행하는 RANSAC.
+///
+/// [`ransac_with_sampler`] 와 같은 표본·모델·판정 순서를 따른다. 한 번에 여러 반복의 가설을
+/// 만들어 내놓고([`propose`](Self::propose)), 받은 지지도로 반복을 차례대로 재생한다
+/// ([`consume`](Self::consume)). 받은 지지도가 CPU 계산([`Support::measure`])과 같으면 결과도 같다.
+/// 묶음 끝까지 가기 전에 멈출 조건이 되면 나머지 가설은 버린다(결과에는 영향 없음).
+/// 국소 최적화(LO)와 마지막 인라이어 마스크는 드물게 불리므로 CPU 로 계산한다.
+pub struct BatchedRansac<'a, E: Estimator, L, S> {
+    est: E,
+    local: Option<L>,
+    sampler: S,
+    x: &'a [E::X],
+    y: &'a [E::Y],
+    min_trials: usize,
+    confidence: f64,
+    dyn_trials_factor: f64,
+    max_residual: f64,
+    rng: Pcg64,
+    max_trials: usize,
+    dyn_max: usize,
+    best: Option<(E::Model, Support, bool)>,
+    best_support: Support,
+    trials: usize,
+    done: bool,
+    /// 이번 묶음의 반복별 모델 수.
+    counts: Vec<usize>,
+    /// 이번 묶음의 모델(반복 순서대로 이어 붙임).
+    models: Vec<E::Model>,
+}
+
+impl<'a, E, L, S> BatchedRansac<'a, E, L, S>
+where
+    E: Estimator,
+    L: Estimator<X = E::X, Y = E::Y, Model = E::Model>,
+    S: Sampler,
+{
+    /// `local` 이 있으면 LO-RANSAC. 자료가 최소 표본 수보다 적으면 곧바로 끝난 상태.
+    pub fn new(est: E, local: Option<L>, mut sampler: S, opts: &RansacParams, x: &'a [E::X], y: &'a [E::Y]) -> Self {
+        let n = x.len();
+        let k = est.min_num_samples();
+        assert_eq!(n, y.len(), "x, y 길이 불일치");
+        let degenerate = n < k || k == 0;
+        let rng = make_rng(opts.random_seed);
+        let max_trials = if degenerate {
+            0
+        } else {
+            sampler.initialize(n);
+            static_max_num_trials(opts, k).min(sampler.max_num_samples())
+        };
+        Self {
+            est,
+            local,
+            sampler,
+            x,
+            y,
+            min_trials: opts.min_trials,
+            confidence: opts.confidence,
+            dyn_trials_factor: opts.dyn_trials_factor,
+            max_residual: opts.max_error * opts.max_error,
+            rng,
+            max_trials,
+            dyn_max: max_trials,
+            best: None,
+            best_support: Support::default(),
+            trials: 0,
+            done: degenerate || max_trials == 0,
+            counts: Vec::new(),
+            models: Vec::new(),
+        }
+    }
+
+    /// 끝났는지(더 낼 가설이 없음).
+    pub fn is_done(&self) -> bool {
+        self.done
+    }
+
+    /// 인라이어 제곱 임계(max_error²).
+    pub fn max_residual(&self) -> f64 {
+        self.max_residual
+    }
+
+    /// 지금까지 수행한 반복 수.
+    pub fn num_trials(&self) -> usize {
+        self.trials
+    }
+
+    /// 마지막 [`propose`](Self::propose) 가 만든 모델(지지도를 기다리는 것).
+    pub fn models(&self) -> &[E::Model] {
+        &self.models
+    }
+
+    /// 다음 반복 묶음의 가설을 만든다. 묶음 크기 = 멈출 때까지 남은 반복 수를
+    /// [min_batch, max_batch] 로 자른 값(반복 상한 이내). 표본은 순서대로 뽑고(난수 순서 보존)
+    /// 최소 해법은 병렬로 푼다. 끝난 상태면 빈 목록.
+    pub fn propose(&mut self, min_batch: usize, max_batch: usize) -> &[E::Model]
+    where
+        E: Sync,
+        E::X: Sync,
+        E::Y: Sync,
+        E::Model: Send,
+    {
+        use rayon::prelude::*;
+        self.counts.clear();
+        self.models.clear();
+        if self.done {
+            return &self.models;
+        }
+        let left = self.max_trials - self.trials;
+        let stop = self.dyn_max.max(self.min_trials);
+        let need = stop.saturating_sub(self.trials).saturating_add(1);
+        let b = need.max(min_batch.max(1)).min(max_batch.max(1)).min(left);
+        let mut samples: Vec<Vec<usize>> = Vec::with_capacity(b);
+        let mut idx = Vec::with_capacity(self.est.min_num_samples());
+        for _ in 0..b {
+            self.sampler.sample(&mut self.rng, &mut idx);
+            samples.push(idx.clone());
+        }
+        let (est, x, y) = (&self.est, self.x, self.y);
+        let per: Vec<Vec<E::Model>> = samples
+            .par_iter()
+            .with_min_len(4)
+            .map(|s| {
+                let xs: Vec<E::X> = s.iter().map(|&i| x[i].clone()).collect();
+                let ys: Vec<E::Y> = s.iter().map(|&i| y[i].clone()).collect();
+                let mut m = Vec::new();
+                est.estimate(&xs, &ys, &mut m);
+                m
+            })
+            .collect();
+        for m in per {
+            self.counts.push(m.len());
+            self.models.extend(m);
+        }
+        &self.models
+    }
+
+    /// [`models`](Self::models) 의 지지도(같은 순서, 같은 길이)로 반복을 재생한다.
+    pub fn consume(&mut self, supports: &[Support]) {
+        assert_eq!(supports.len(), self.models.len(), "지지도 수가 모델 수와 다름");
+        let models = std::mem::take(&mut self.models);
+        let counts = std::mem::take(&mut self.counts);
+        if self.done {
+            return;
+        }
+        let k = self.est.min_num_samples();
+        let n = self.x.len();
+        let mut it = models.into_iter().zip(supports.iter().copied());
+        let mut residuals = Vec::with_capacity(n);
+        for c in counts {
+            let t = self.trials;
+            self.trials += 1;
+            for _ in 0..c {
+                let (m, support) = it.next().expect("모델 수 일치");
+                if support.is_better(&self.best_support) {
+                    let mut cand = (m, support, false);
+                    if let Some(le) = &self.local {
+                        if support.num_inliers > k && support.num_inliers >= le.min_num_samples() {
+                            self.est.residuals(self.x, self.y, &cand.0, &mut residuals);
+                            local_optimize(le, self.x, self.y, self.max_residual, &residuals, &mut cand);
+                        }
+                    }
+                    self.best_support = cand.1;
+                    self.best = Some(cand);
+                    self.dyn_max = compute_num_trials(self.best_support.num_inliers, n, k, self.confidence, self.dyn_trials_factor);
+                }
+                if t >= self.dyn_max && t >= self.min_trials {
+                    self.done = true;
+                    return;
+                }
+            }
+        }
+        if self.trials >= self.max_trials {
+            self.done = true;
+        }
+    }
+
+    /// 결과(끝나기 전에 불러도 지금까지의 최선으로 마무리).
+    pub fn finish(self) -> RansacReport<E::Model> {
+        let k = self.est.min_num_samples();
+        let trials = self.trials;
+        let Some((model, support, is_local)) = self.best else { return RansacReport::failed(trials) };
+        if support.num_inliers < k {
+            return RansacReport { success: false, num_trials: trials, support, inlier_mask: Vec::new(), model: Some(model) };
+        }
+        let mut residuals = Vec::with_capacity(self.x.len());
+        match (is_local, &self.local) {
+            (true, Some(le)) => le.residuals(self.x, self.y, &model, &mut residuals),
+            _ => self.est.residuals(self.x, self.y, &model, &mut residuals),
+        }
+        let max_residual = self.max_residual;
+        let inlier_mask = residuals.iter().map(|r| *r <= max_residual).collect();
+        RansacReport { success: true, num_trials: trials, support, inlier_mask, model: Some(model) }
+    }
+}
+
+/// LO 단계([`lo_ransac`] 의 국소 최적화와 같은 규칙). `residuals` = 후보 모델의 잔차.
+fn local_optimize<L: Estimator>(
+    le: &L,
+    x: &[L::X],
+    y: &[L::Y],
+    max_residual: f64,
+    residuals: &[f64],
+    cand: &mut (L::Model, Support, bool),
+) {
+    let mut cur_res = residuals.to_vec();
+    let (mut lx, mut ly) = (Vec::new(), Vec::new());
+    let mut local_models = Vec::new();
+    let mut local_res = Vec::with_capacity(x.len());
+    for _ in 0..10 {
+        let prev = cand.1.num_inliers;
+        lx.clear();
+        ly.clear();
+        for (i, r) in cur_res.iter().enumerate() {
+            if *r <= max_residual {
+                lx.push(x[i].clone());
+                ly.push(y[i].clone());
+            }
+        }
+        local_models.clear();
+        le.estimate(&lx, &ly, &mut local_models);
+        for lm in local_models.drain(..) {
+            le.residuals(x, y, &lm, &mut local_res);
+            let ls = Support::measure(&local_res, max_residual);
+            if ls.is_better(&cand.1) {
+                *cand = (lm, ls, true);
+                std::mem::swap(&mut cur_res, &mut local_res);
+            }
+        }
+        if cand.1.num_inliers <= prev {
+            break;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -518,6 +752,59 @@ mod tests {
         let lo2 = lo_ransac(&Line, &Line, &opts, &x, &y);
         assert_eq!(lo2.num_trials, lo.num_trials);
         assert_eq!(lo2.model, lo.model);
+    }
+
+    #[test]
+    fn batched_matches_sequential() {
+        // 지지도를 CPU 로 계산하면 묶음 크기와 무관하게 lo_ransac / ransac_with_sampler 와 같다.
+        let (x, y, _) = data(5);
+        for seed in 0..5u64 {
+            let opts = RansacParams { max_error: 0.1, random_seed: Some(seed), min_trials: 20, ..Default::default() };
+            let want = lo_ransac(&Line, &Line, &opts, &x, &y);
+            for (lo, hi) in [(1usize, 1usize), (7, 64), (16, 512)] {
+                let mut b = BatchedRansac::new(Line, Some(Line), RandomSubsetSampler::new(2), &opts, &x[..], &y[..]);
+                let mut res = Vec::new();
+                while !b.is_done() {
+                    b.propose(lo, hi);
+                    let s: Vec<Support> = b
+                        .models()
+                        .iter()
+                        .map(|m| {
+                            Line.residuals(&x, &y, m, &mut res);
+                            Support::measure(&res, b.max_residual())
+                        })
+                        .collect();
+                    b.consume(&s);
+                }
+                let got = b.finish();
+                assert_eq!(got.num_trials, want.num_trials, "seed {seed} 묶음 {lo}..{hi}");
+                assert_eq!(got.model, want.model);
+                assert_eq!(got.inlier_mask, want.inlier_mask);
+                assert_eq!(got.support, want.support);
+            }
+        }
+        // 조합 표본 + 너무 적은 자료.
+        let opts = RansacParams { max_error: 0.1, random_seed: Some(1), ..Default::default() };
+        let want = ransac_with_sampler(&Line, Some(&Line), ExhaustiveSampler::new(2), &opts, &x[..20], &y[..20]);
+        let mut b = BatchedRansac::new(Line, Some(Line), ExhaustiveSampler::new(2), &opts, &x[..20], &y[..20]);
+        let mut res = Vec::new();
+        while !b.is_done() {
+            b.propose(8, 32);
+            let s: Vec<Support> = b
+                .models()
+                .iter()
+                .map(|m| {
+                    Line.residuals(&x[..20], &y[..20], m, &mut res);
+                    Support::measure(&res, b.max_residual())
+                })
+                .collect();
+            b.consume(&s);
+        }
+        let got = b.finish();
+        assert_eq!((got.num_trials, got.model), (want.num_trials, want.model));
+        let b = BatchedRansac::new(Line, Some(Line), RandomSubsetSampler::new(2), &opts, &[1.0][..], &[1.0][..]);
+        assert!(b.is_done());
+        assert!(!b.finish().success);
     }
 
     #[test]

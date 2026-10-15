@@ -41,6 +41,9 @@ cudarc(드라이버 API + NVRTC)로 CUDA C 커널을 실행 시 컴파일하며,
 | `CudaMatcher::top2_gpu` | fn | GPU 행·열 top-2(오류를 그대로 돌려줌; 트레이트 `top2` 는 오류 시 경고 후 CPU 로 계산) |
 | `CudaSift` | struct | `cumulus3d_features::SiftEngine` 구현(장치 오류 시 경고 후 `CpuSift` 로 계산) |
 | `CudaSift::new` / `try_default` | fn | 장치로 생성 / 장치 0 |
+| `CudaSparse` | struct | `cumulus3d_matching::TwoViewBackend`(짝 묶음 E/F/H 가설 채점), `cumulus3d_sfm::AbsPoseBackend`(P3P 가설 채점), `cumulus3d_sfm::TriangulationBackend`(RANSAC 삼각측량, 재투영 오차·깊이 검사) 구현. 장치 오류 시 경고 후 CPU 로 계산 |
+| `CudaSparse::new` / `try_default` | fn | 장치로 생성 / 장치 0 |
+| `CudaSparse::estimate_batch_gpu` / `check_observations_gpu` | fn | GPU 삼각측량 / 관측 검사(오류를 그대로 돌려줌) |
 
 ## 사용 예
 

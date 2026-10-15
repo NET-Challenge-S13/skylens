@@ -68,7 +68,7 @@
 //! TOML 계획 파일로 실행: `cumulus3d run plan.toml`. 기본 계획은 `cumulus3d plan --print-default`.
 //! 계획 파일의 상대 경로는 실행 위치(현재 폴더) 기준이다.
 
-use crate::densewrap::{make_match_backend, make_pm_backend, make_sift_backend, parse_profile, DenseConfig};
+use crate::densewrap::{make_match_backend, make_pm_backend, make_sift_backend, make_sparse_backend, parse_profile, DenseConfig};
 use crate::events::{EventKind, Frame, ZoneRange};
 use crate::pipeline::{Pipeline, QueuePolicy, Summary};
 use crate::session::{zones_upto, Input, Session, SessionConfig};
@@ -247,11 +247,19 @@ impl Default for Matching {
 }
 
 /// 희소 재구성.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Sparse {
     /// 새로 등록된 영상만 삼각측량(결과가 달라질 수 있는 개선).
     pub incremental_triangulation: bool,
+    /// 두 뷰 기하 검증·등록·삼각측량 백엔드(cpu|cuda).
+    pub backend: String,
+}
+
+impl Default for Sparse {
+    fn default() -> Self {
+        Self { incremental_triangulation: false, backend: "cpu".into() }
+    }
 }
 
 /// 조밀화 계획. [`Dense::profile`] 로 시작해 메서드로 덧붙인다. 비운 융합·필터 값은 프로파일 기본값.
@@ -606,7 +614,7 @@ impl Plan {
                 max_image_size: c.sift_max_image_size,
             },
             matching: Matching { backend: c.match_backend.clone() },
-            sparse: Sparse { incremental_triangulation: c.incremental_triangulation },
+            sparse: Sparse { incremental_triangulation: c.incremental_triangulation, ..Sparse::default() },
             dense: Dense {
                 enabled: !c.no_dense,
                 backend: c.pm_backend.clone(),
@@ -798,10 +806,11 @@ impl ReconBuilder {
         self
     }
 
-    /// SIFT·매칭·PatchMatch 백엔드를 모두 cuda 로.
+    /// SIFT·매칭·희소 단계·PatchMatch 백엔드를 모두 cuda 로.
     pub fn gpu(mut self) -> Self {
         self.plan.features.backend = "cuda".into();
         self.plan.matching.backend = "cuda".into();
+        self.plan.sparse.backend = "cuda".into();
         self.plan.dense.backend = "cuda".into();
         self
     }
@@ -998,6 +1007,7 @@ fn check(plan: &Plan, pr: &mut Problems) -> (Option<Layout>, Option<Vec<GpsRecor
     pr.check(f.max_num_features >= 1, "features.max_num_features", || "1 이상이어야 함".into());
     pr.check(f.max_image_size >= 16, "features.max_image_size", || "16 이상이어야 함".into());
     backend_ok(pr, "matching.backend", &plan.matching.backend, &["cpu", "cuda"]);
+    backend_ok(pr, "sparse.backend", &plan.sparse.backend, &["cpu", "cuda"]);
 
     let d = &plan.dense;
     if d.enabled {
@@ -1194,6 +1204,7 @@ impl Recon {
         sc.extraction.reader.max_image_size = plan.features.max_image_size;
         sc.sift = make_sift_backend(&plan.features.backend)?;
         sc.matcher = Arc::from(make_match_backend(&plan.matching.backend)?);
+        sc.sparse = make_sparse_backend(&plan.sparse.backend)?;
         sc.dense = dense;
         // 되감지 않는다(메모리 절약).
         sc.history = 0;

@@ -75,6 +75,20 @@ pub fn make_match_backend(name: &str) -> Result<Box<dyn cumulus3d_matching::Matc
     }
 }
 
+/// 희소 단계(두 뷰 기하 검증·등록·삼각측량) 백엔드 선택(cpu|cuda). cuda 는 장치 하나를 세 단계가 함께 쓴다.
+pub fn make_sparse_backend(name: &str) -> Result<crate::session::SparseBackends, String> {
+    match name {
+        "cpu" => Ok(crate::session::SparseBackends::default()),
+        "cuda" => cumulus3d_cuda::CudaSparse::try_default()
+            .map(|b| {
+                let b = Arc::new(b);
+                crate::session::SparseBackends { two_view: b.clone(), abs_pose: b.clone(), triangulation: b }
+            })
+            .map_err(|e| format!("--sparse-backend cuda: {e}")),
+        other => Err(format!("알 수 없는 --sparse-backend {other} (cpu|cuda)")),
+    }
+}
+
 /// 조밀화 설정.
 #[derive(Clone)]
 pub struct DenseConfig {

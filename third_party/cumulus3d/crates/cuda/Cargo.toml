@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 authors.workspace = true
-description = "CUDA backends (multi-view stereo, descriptor matching, SIFT scale space) for cumulus3d via NVRTC"
+description = "CUDA backends (multi-view stereo, descriptor matching, SIFT scale space, sparse RANSAC and triangulation) for cumulus3d via NVRTC"
 repository.workspace = true
 keywords = ["cuda","gpu","mvs","sift","computer-vision"]
 categories = ["computer-vision","hardware-support"]
@@ -15,7 +15,12 @@ cumulus3d-core.workspace = true
 cumulus3d-dense.workspace = true
 cumulus3d-features.workspace = true
 cumulus3d-matching.workspace = true
+cumulus3d-sfm.workspace = true
 cudarc.workspace = true
 nalgebra.workspace = true
 thiserror.workspace = true
 rayon.workspace = true
+
+[dev-dependencies]
+rand.workspace = true
+rand_pcg.workspace = true

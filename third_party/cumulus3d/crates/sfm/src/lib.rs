@@ -81,5 +81,7 @@ pub mod triangulation;
 pub mod triangulator;
 
 pub use global_mapper::{global_mapper, GlobalMapperOutput, GlobalSfmOptions};
-pub use registration::{register_images, RegistrationOptions, RegistrationOrder, RegistrationReport};
-pub use triangulator::{triangulate_points, PointRefiner, PointTriangulatorOptions, TriangulationScope};
+pub use absolute_pose::{solve_abs_pose_scored, AbsPoseBackend, CpuAbsPose, CpuPoseScorer, PoseScorer};
+pub use registration::{register_images, register_images_with, RegistrationOptions, RegistrationOrder, RegistrationReport};
+pub use triangulation::{CpuTriangulation, ObsCheck, ObsQuery, TriProblem, TriangulationBackend};
+pub use triangulator::{triangulate_points, triangulate_points_with, PointRefiner, PointTriangulatorOptions, TriangulationScope};

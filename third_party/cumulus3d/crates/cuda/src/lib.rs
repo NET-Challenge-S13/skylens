@@ -31,6 +31,8 @@
 //! - [`CudaPatchMatch`]: `cumulus3d_dense::PatchMatchBackend` 구현(다중 스케일 조밀화의 스케일별 실행·평가·판독).
 //! - [`CudaMatcher`]: `cumulus3d_matching::MatcherBackend` 구현(정수 내적 top-2).
 //! - [`CudaSift`]: `cumulus3d_features::SiftEngine` 구현(GPU 스케일 공간 + CPU 검출·기술자, CpuSift 와 같은 결과).
+//! - [`CudaSparse`]: `cumulus3d_matching::TwoViewBackend`(두 뷰 기하 가설 채점), `cumulus3d_sfm::AbsPoseBackend`
+//!   (절대 자세 가설 채점), `cumulus3d_sfm::TriangulationBackend`(RANSAC 삼각측량·관측 검사) 구현.
 //!
 //! `unsafe` 는 cudarc 가 unsafe 로 둔 곳(커널 발사, 고정 호스트 메모리 할당, `DeviceRepr` 표시)에만 쓴다.
 //!
@@ -66,11 +68,13 @@ mod device;
 mod matcher;
 mod patchmatch;
 mod sift;
+mod sparse;
 
 pub use device::{is_available, CudaDevice, GpuError};
 pub use matcher::CudaMatcher;
 pub use patchmatch::{CudaPatchMatch, CudaPatchMatchOptions};
 pub use sift::CudaSift;
+pub use sparse::CudaSparse;
 
 /// 모든 커널을 장치 없이 NVRTC 로 컴파일해 본다(CI 검사용). `arch` 예: `"compute_70"`.
 /// 실제 실행 때와 같은 옵션·정의 조합(patchmatch: 창 간격 1·2, 하드웨어 보간 켬·끔, 빠른 수학 켬·끔)을 쓴다.
@@ -81,7 +85,11 @@ pub fn check_kernels(arch: &'static str) -> Result<Vec<(String, usize)>, String>
         let opts = device::compile_options(Some(arch), fmad, fast, defs);
         compile_ptx_with_opts(src, opts).map(|ptx| (name.clone(), ptx.to_src().len())).map_err(|e| format!("{name}: {e:?}"))
     };
-    let mut out = vec![compile("sift".into(), sift::SRC, false, false, &[])?, compile("matcher".into(), matcher::SRC, true, false, &[])?];
+    let mut out = vec![
+        compile("sift".into(), sift::SRC, false, false, &[])?,
+        compile("matcher".into(), matcher::SRC, true, false, &[])?,
+        compile("sparse".into(), sparse::SRC, false, false, &[])?,
+    ];
     for step in [1, 2] {
         for hw in [false, true] {
             for fast in [false, true] {

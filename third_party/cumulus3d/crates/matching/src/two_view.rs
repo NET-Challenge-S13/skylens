@@ -120,9 +120,9 @@ pub fn derive_seed(seed: Option<u64>, salt: u64) -> Option<u64> {
     })
 }
 
-const SALT_E: u64 = 1;
-const SALT_F: u64 = 2;
-const SALT_H: u64 = 3;
+pub(crate) const SALT_E: u64 = 1;
+pub(crate) const SALT_F: u64 = 2;
+pub(crate) const SALT_H: u64 = 3;
 const SALT_T: u64 = 4;
 
 /// 선택된 인라이어 마스크.
@@ -219,7 +219,7 @@ fn select_inliers(matches: &[FeatureMatch], mask: &[bool]) -> Vec<FeatureMatch> 
     matches.iter().zip(mask.iter().chain(std::iter::repeat(&false))).filter(|(_, &m)| m).map(|(m, _)| *m).collect()
 }
 
-fn ransac_opts(opts: &TwoViewOptions, max_error: f64, salt: u64) -> RansacParams {
+pub(crate) fn ransac_opts(opts: &TwoViewOptions, max_error: f64, salt: u64) -> RansacParams {
     let mut r = opts.ransac.clone();
     r.max_error = max_error;
     if opts.min_inlier_ratio > 0.0 {
@@ -252,26 +252,59 @@ pub fn estimate_two_view(
     matches: &[FeatureMatch],
     opts: &TwoViewOptions,
 ) -> TwoViewGeometry {
-    let filtered;
-    let matches = if opts.filter_stationary_matches {
-        let t2 = opts.stationary_matches_max_error * opts.stationary_matches_max_error;
-        filtered = matches
-            .iter()
-            .filter(|m| (kp_xy(&kps1[m.idx1 as usize]) - kp_xy(&kps2[m.idx2 as usize])).norm_squared() > t2)
-            .copied()
-            .collect::<Vec<_>>();
-        &filtered[..]
-    } else {
-        matches
-    };
+    let matches = filter_stationary(kps1, kps2, matches, opts);
+    let matches = &matches[..];
+    match path_of(cam1, cam2, opts) {
+        EstimationPath::Multiple => estimate_multiple(cam1, kps1, cam2, kps2, matches, opts),
+        EstimationPath::HomographyOnly => estimate_homography_only(cam1, kps1, cam2, kps2, matches, opts),
+        EstimationPath::Calibrated => estimate_calibrated(cam1, kps1, cam2, kps2, matches, opts),
+        EstimationPath::Uncalibrated => estimate_uncalibrated(cam1, kps1, cam2, kps2, matches, opts),
+    }
+}
+
+/// 추정 경로.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum EstimationPath {
+    /// 다중 모델(인라이어를 지우며 반복).
+    Multiple,
+    /// H 만.
+    HomographyOnly,
+    /// E/F/H.
+    Calibrated,
+    /// F/H.
+    Uncalibrated,
+}
+
+pub(crate) fn path_of(cam1: &Camera, cam2: &Camera, opts: &TwoViewOptions) -> EstimationPath {
     if opts.multiple_models {
-        estimate_multiple(cam1, kps1, cam2, kps2, matches, opts)
+        EstimationPath::Multiple
     } else if opts.force_h_use {
-        estimate_homography_only(cam1, kps1, cam2, kps2, matches, opts)
+        EstimationPath::HomographyOnly
     } else if cam1.focal_from_prior && cam2.focal_from_prior {
-        estimate_calibrated(cam1, kps1, cam2, kps2, matches, opts)
+        EstimationPath::Calibrated
     } else {
-        estimate_uncalibrated(cam1, kps1, cam2, kps2, matches, opts)
+        EstimationPath::Uncalibrated
+    }
+}
+
+/// 정지 매칭 사전 제거(옵션이 꺼져 있으면 그대로).
+pub(crate) fn filter_stationary<'m>(
+    kps1: &[Keypoint],
+    kps2: &[Keypoint],
+    matches: &'m [FeatureMatch],
+    opts: &TwoViewOptions,
+) -> std::borrow::Cow<'m, [FeatureMatch]> {
+    if opts.filter_stationary_matches {
+        let t2 = opts.stationary_matches_max_error * opts.stationary_matches_max_error;
+        std::borrow::Cow::Owned(
+            matches
+                .iter()
+                .filter(|m| (kp_xy(&kps1[m.idx1 as usize]) - kp_xy(&kps2[m.idx2 as usize])).norm_squared() > t2)
+                .copied()
+                .collect(),
+        )
+    } else {
+        std::borrow::Cow::Borrowed(matches)
     }
 }
 
@@ -284,11 +317,11 @@ pub fn finalize_geometry(tvg: TwoViewGeometry, min_num_inliers: usize) -> TwoVie
     }
 }
 
-fn degenerate() -> TwoViewGeometry {
+pub(crate) fn degenerate() -> TwoViewGeometry {
     TwoViewGeometry { config: TwoViewGeometryConfig::Degenerate, ..Default::default() }
 }
 
-fn gather_points(kps1: &[Keypoint], kps2: &[Keypoint], matches: &[FeatureMatch]) -> (Vec<Vec2>, Vec<Vec2>) {
+pub(crate) fn gather_points(kps1: &[Keypoint], kps2: &[Keypoint], matches: &[FeatureMatch]) -> (Vec<Vec2>, Vec<Vec2>) {
     matches.iter().map(|m| (kp_xy(&kps1[m.idx1 as usize]), kp_xy(&kps2[m.idx2 as usize]))).unzip()
 }
 
@@ -309,6 +342,24 @@ fn finish(
     tvg
 }
 
+/// 보정 경로 입력: (픽셀1, 픽셀2, 광선1, 광선2, E 오차 임계).
+pub(crate) type CalibratedInputs = (Vec<Vec2>, Vec<Vec2>, Vec<Vec3>, Vec<Vec3>, f64);
+
+pub(crate) fn calibrated_inputs(
+    cam1: &Camera,
+    kps1: &[Keypoint],
+    cam2: &Camera,
+    kps2: &[Keypoint],
+    matches: &[FeatureMatch],
+    opts: &TwoViewOptions,
+) -> CalibratedInputs {
+    let (x1, x2) = gather_points(kps1, kps2, matches);
+    let r1: Vec<Vec3> = x1.iter().map(|p| cam1.img_to_ray(p).unwrap_or_else(Vec3::zeros)).collect();
+    let r2: Vec<Vec3> = x2.iter().map(|p| cam2.img_to_ray(p).unwrap_or_else(Vec3::zeros)).collect();
+    let e_err = (opts.ransac.max_error / cam1.mean_focal() + opts.ransac.max_error / cam2.mean_focal()) / 2.0;
+    (x1, x2, r1, r2, e_err)
+}
+
 fn estimate_calibrated(
     cam1: &Camera,
     kps1: &[Keypoint],
@@ -320,16 +371,28 @@ fn estimate_calibrated(
     if matches.len() < opts.min_num_inliers {
         return degenerate();
     }
-    let (x1, x2) = gather_points(kps1, kps2, matches);
-    let r1: Vec<Vec3> = x1.iter().map(|p| cam1.img_to_ray(p).unwrap_or_else(Vec3::zeros)).collect();
-    let r2: Vec<Vec3> = x2.iter().map(|p| cam2.img_to_ray(p).unwrap_or_else(Vec3::zeros)).collect();
-    let e_err = (opts.ransac.max_error / cam1.mean_focal() + opts.ransac.max_error / cam2.mean_focal()) / 2.0;
-
+    let (x1, x2, r1, r2, e_err) = calibrated_inputs(cam1, kps1, cam2, kps2, matches, opts);
     let (er, (fr, hr)) = if opts.parallel_models {
         rayon::join(|| run_e(opts, e_err, &r1, &r2), || rayon::join(|| run_f(opts, &x1, &x2), || run_h(opts, &x1, &x2)))
     } else {
         (run_e(opts, e_err, &r1, &r2), (run_f(opts, &x1, &x2), run_h(opts, &x1, &x2)))
     };
+    assemble_calibrated(cam1, kps1, cam2, kps2, matches, opts, er, fr, hr)
+}
+
+/// 보정 경로 마무리: E/F/H RANSAC 결과로 판정·인라이어·워터마크.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn assemble_calibrated(
+    cam1: &Camera,
+    kps1: &[Keypoint],
+    cam2: &Camera,
+    kps2: &[Keypoint],
+    matches: &[FeatureMatch],
+    opts: &TwoViewOptions,
+    er: RansacReport<Mat3>,
+    fr: RansacReport<Mat3>,
+    hr: RansacReport<Mat3>,
+) -> TwoViewGeometry {
     let d = decide_calibrated(outcome(&er), outcome(&fr), outcome(&hr), opts);
     let Some(mask) = d.mask else { return degenerate() };
     let m = match mask {
@@ -371,6 +434,21 @@ fn estimate_uncalibrated(
     } else {
         (run_f(opts, &x1, &x2), run_h(opts, &x1, &x2))
     };
+    assemble_uncalibrated(cam1, kps1, cam2, kps2, matches, opts, fr, hr)
+}
+
+/// 비보정 경로 마무리.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn assemble_uncalibrated(
+    cam1: &Camera,
+    kps1: &[Keypoint],
+    cam2: &Camera,
+    kps2: &[Keypoint],
+    matches: &[FeatureMatch],
+    opts: &TwoViewOptions,
+    fr: RansacReport<Mat3>,
+    hr: RansacReport<Mat3>,
+) -> TwoViewGeometry {
     let d = decide_uncalibrated(outcome(&fr), outcome(&hr), opts);
     let Some(mask) = d.mask else { return degenerate() };
     let m = if mask == MaskChoice::H { &hr.inlier_mask } else { &fr.inlier_mask };
@@ -397,6 +475,19 @@ fn estimate_homography_only(
     }
     let (x1, x2) = gather_points(kps1, kps2, matches);
     let hr = run_h(opts, &x1, &x2);
+    assemble_homography_only(cam1, kps1, cam2, kps2, matches, opts, hr)
+}
+
+/// H 전용 경로 마무리.
+pub(crate) fn assemble_homography_only(
+    cam1: &Camera,
+    kps1: &[Keypoint],
+    cam2: &Camera,
+    kps2: &[Keypoint],
+    matches: &[FeatureMatch],
+    opts: &TwoViewOptions,
+    hr: RansacReport<Mat3>,
+) -> TwoViewGeometry {
     if !hr.success || hr.support.num_inliers < opts.min_num_inliers {
         return degenerate();
     }
