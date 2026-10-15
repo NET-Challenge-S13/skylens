@@ -135,8 +135,14 @@ pub fn spawn_detector(queue: Arc<FrameQueue>, det: Arc<dyn Detector>, tx: Sender
 pub fn spawn_forwarder(events: Receiver<Event>, tx: Sender<Msg>) -> anyhow::Result<JoinHandle<()>> {
     spawn("skylens-events", move || {
         for ev in events {
-            if matches!(ev, Event::FrameDecoded { .. } | Event::Log { .. }) {
-                continue;
+            match &ev {
+                Event::FrameDecoded { .. } => continue,
+                // cumulus3d's run log: per-stage lines (features, matching, registration, dense).
+                Event::Log { line, .. } => {
+                    tracing::debug!(target: "cumulus3d", "{line}");
+                    continue;
+                }
+                _ => {}
             }
             if tx.send(Msg::Event(ev)).is_err() {
                 return;
