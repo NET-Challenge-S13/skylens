@@ -1159,6 +1159,7 @@ dependencies = [
  "cumulus3d-dense",
  "cumulus3d-features",
  "cumulus3d-matching",
+ "cumulus3d-sfm",
  "nalgebra",
  "rayon",
  "thiserror 2.0.21",
