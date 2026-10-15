@@ -25,7 +25,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 실영상 SIFT 시간: CpuSift 대 CudaSift(같은 결과인지도 확인).
+//! 실영상 SIFT 시간: CpuSift 대 CudaSift(비트 단위로 같은지도 출력. GPU 검출·기술자는 같은 품질이지만 보통 비트 단위로는 다르다).
 //! 실행: cargo run --release -p cumulus3d-cuda --example bench_sift -- <영상 폴더> [N=6]
 
 use cumulus3d_cuda::{CudaMatcher, CudaSift};

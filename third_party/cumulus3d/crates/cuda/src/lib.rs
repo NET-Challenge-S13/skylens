@@ -30,7 +30,7 @@
 //!
 //! - [`CudaPatchMatch`]: `cumulus3d_dense::PatchMatchBackend` 구현(다중 스케일 조밀화의 스케일별 실행·평가·판독).
 //! - [`CudaMatcher`]: `cumulus3d_matching::MatcherBackend` 구현(정수 내적 top-2).
-//! - [`CudaSift`]: `cumulus3d_features::SiftEngine` 구현(GPU 스케일 공간 + CPU 검출·기술자, CpuSift 와 같은 결과).
+//! - [`CudaSift`]: `cumulus3d_features::SiftEngine` 구현(스케일 공간·검출·방향·선택·기술자 모두 GPU, CpuSift 와 같은 품질이나 비트 단위로 같지는 않음).
 //!
 //! `unsafe` 는 cudarc 가 unsafe 로 둔 곳(커널 발사, 고정 호스트 메모리 할당, `DeviceRepr` 표시)에만 쓴다.
 //!
