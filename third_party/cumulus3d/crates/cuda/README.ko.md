@@ -18,7 +18,7 @@ cudarc(드라이버 API + NVRTC)로 CUDA C 커널을 실행 시 컴파일하며,
 | `CudaMatcher::try_default` | 장치 0 기술자 매칭 백엔드 | `()` → `Result<CudaMatcher, GpuError>` |
 | `CudaMatcher` | `MatcherBackend` 구현(정수 내적 행·열 top-2) | 기술자 두 묶음 → `(Vec<Top2>, Vec<Top2>)` |
 | `CudaSift::try_default` | 장치 0 SIFT 엔진 | `()` → `Result<CudaSift, GpuError>` |
-| `CudaSift` | `SiftEngine` 구현(GPU 스케일 공간 + CPU 검출·기술자, `CpuSift` 와 비트 동일) | `&GrayImage`, `&SiftOptions` → `Result<SiftOutput>` |
+| `CudaSift` | `SiftEngine` 구현(스케일 공간·검출·방향·선택·기술자 모두 GPU, `CpuSift` 와 같은 품질이나 비트 동일은 아님) | `&GrayImage`, `&SiftOptions` → `Result<SiftOutput>` |
 | `CudaDevice::new` | 장치 `ordinal` 의 문맥·전용 스트림 생성(여러 백엔드가 공유) | `usize` → `Result<Arc<CudaDevice>, GpuError>` |
 
 ## 공개 항목

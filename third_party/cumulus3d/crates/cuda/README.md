@@ -21,7 +21,7 @@ and densification (`cumulus3d_dense::PatchMatchBackend` → `CudaPatchMatch`). `
 | `CudaMatcher::try_default` | Descriptor matching backend on device 0 | `()` → `Result<CudaMatcher, GpuError>` |
 | `CudaMatcher` | `MatcherBackend` implementation (integer dot product, row and column top-2) | two descriptor sets → `(Vec<Top2>, Vec<Top2>)` |
 | `CudaSift::try_default` | SIFT engine on device 0 | `()` → `Result<CudaSift, GpuError>` |
-| `CudaSift` | `SiftEngine` implementation (GPU scale space + CPU detection and description, bit-identical to `CpuSift`) | `&GrayImage`, `&SiftOptions` → `Result<SiftOutput>` |
+| `CudaSift` | `SiftEngine` implementation (scale space, detection, orientation, selection and descriptors all on the GPU; equivalent to `CpuSift` in quality but not bit-identical) | `&GrayImage`, `&SiftOptions` → `Result<SiftOutput>` |
 | `CudaDevice::new` | Create a context and a dedicated stream for device `ordinal` (shared by several backends) | `usize` → `Result<Arc<CudaDevice>, GpuError>` |
 
 ## Public items
