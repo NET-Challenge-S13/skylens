@@ -81,6 +81,20 @@ pub fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Options, Str
 
 pub const USAGE: &str = "usage: skylens-client [--core ws://host:8080/viewer] [--points on|off]";
 
+/// Options from loose settings that may be missing (Android has no command line and reads them
+/// from system properties or files, see README). `core` is normalised like `--core`; `points`
+/// starts the point panel closed only when it is `off`. Blank values count as missing.
+pub fn options_from_settings(core: Option<&str>, points: Option<&str>) -> Options {
+    let mut o = Options::default();
+    if let Some(c) = core.map(str::trim).filter(|c| !c.is_empty()) {
+        o.core_url = skylens_viewer::link::normalize_core_url(c, VIEWER_PATH);
+    }
+    if let Some(p) = points.map(str::trim).filter(|p| !p.is_empty()) {
+        o.points_on = !p.eq_ignore_ascii_case("off");
+    }
+    o
+}
+
 /// Ladder row nodes, by segment index, in first-seen order.
 struct LadderRow {
     pips: Vec<NodeId>,
@@ -455,6 +469,18 @@ mod tests {
         assert!(parse_args(["--points".to_string(), "maybe".to_string()]).is_err());
         assert!(parse_args(["--screen".to_string()]).is_err());
         assert!(parse_args(["--core".to_string()]).is_err());
+    }
+
+    #[test]
+    fn settings_fall_back_to_the_defaults() {
+        assert_eq!(options_from_settings(None, None), Options::default());
+        assert_eq!(options_from_settings(Some("  "), Some("")), Options::default());
+        let o = options_from_settings(Some(" 192.168.0.10:8080\n"), Some("OFF"));
+        assert_eq!(o.core_url, "ws://192.168.0.10:8080/viewer");
+        assert!(!o.points_on);
+        let o = options_from_settings(Some("wss://bridge.example/viewer"), Some("on"));
+        assert_eq!(o.core_url, "wss://bridge.example/viewer");
+        assert!(o.points_on);
     }
 
     #[test]

@@ -5349,6 +5349,7 @@ version = "0.1.0"
 name = "skylens-viewer"
 version = "0.1.0"
 dependencies = [
+ "android-activity",
  "anyhow",
  "anyrender",
  "anyrender_vello",
@@ -5363,6 +5364,7 @@ dependencies = [
  "image",
  "js-sys",
  "keyboard-types 0.7.0",
+ "libc",
  "parley",
  "peniko",
  "pointblitz",

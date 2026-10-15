@@ -1,6 +1,6 @@
 # skylens_client
 
-KOREN 외부망의 지휘관이 보는 **현황판**이다. 이전 TypeScript 현황판의 HTML(`ui/status.html`)과 CSS(`ui/status-panels.css`, 공용 `style.css`)를 고치지 않고 Blitz로 그리며, three.js 대신 pointblitz가 복원 결과를 그린다. 웹(wasm)과 데스크톱 네이티브가 같은 코드를 쓴다. Android/iOS는 나중이다.
+KOREN 외부망의 지휘관이 보는 **현황판**이다. 이전 TypeScript 현황판의 HTML(`ui/status.html`)과 CSS(`ui/status-panels.css`, 공용 `style.css`)를 고치지 않고 Blitz로 그리며, three.js 대신 pointblitz가 복원 결과를 그린다. 웹(wasm), 데스크톱 네이티브, Android가 같은 코드를 쓴다. iOS는 나중이다.
 
 화면 뼈대, 코어 연결, 청크 저장소, 3D 위젯, 카메라 부품, 공용 위젯은 `src/shared/viewer`(crate `skylens-viewer`)에 있고, 이 crate는 현황판 고유의 것만 만든다. 관제탑은 `src/skylens_core/control`이다.
 
@@ -61,6 +61,73 @@ bash src/skylens_client/build-web.sh
 - `?points=off`: 점 패널을 닫은 채로 시작한다
 
 wasm은 `file://`로 열리지 않는다. 확인만 할 때는 `python -m http.server -d src/skylens_client/dist 8000`처럼 HTTP로 띄운다.
+
+## Android
+
+같은 라이브러리(`libstatus_screen.so`)를 NativeActivity APK로 묶는다. 진입점은 `lib.rs`의 `android_main`이고, 창과 이벤트 루프는 데스크톱과 같은 blitz-shell + vello(wgpu, Vulkan)다. HTML·CSS·폰트·아이콘은 라이브러리 안에 들어 있어 APK에 따로 넣는 파일이 없다. 패키지 이름은 `kr.skylens.board`, 앱 이름은 `SkyLens 현황판`, 가로 화면 고정, 최소 API 26(Android 8.0), 대상 API 35다. 설정은 `Cargo.toml`의 `[package.metadata.android]`에 있다.
+
+### 준비
+
+```bash
+cargo install cargo-apk
+rustup target add aarch64-linux-android x86_64-linux-android
+```
+
+- Android SDK(`platforms;android-35`, build-tools, platform-tools)와 NDK(r25 이상, 이 PC는 `28.0.12433566`)
+- JDK. cargo-apk가 서명에 `keytool`과 `apksigner`를 쓴다. Android Studio의 `jbr`이나 JetBrains IDE의 `jbr`이면 된다
+
+스크립트가 다음을 스스로 찾는다. 못 찾으면 환경변수로 준다.
+
+| 환경변수 | 기본값 |
+|---|---|
+| `ANDROID_HOME` | `%LOCALAPPDATA%\Android\Sdk` 또는 `~/Android/Sdk` |
+| `ANDROID_NDK_ROOT` | `$ANDROID_HOME/ndk/` 아래 가장 새 버전 |
+| `JAVA_HOME` | Android Studio의 `jbr`, 없으면 `%LOCALAPPDATA%\Programs\*\jbr` |
+| `PROFILE` | `release`. `dev`는 폰에서 너무 느리다 |
+| `CARGO_APK_RELEASE_KEYSTORE` · `CARGO_APK_RELEASE_KEYSTORE_PASSWORD` | SDK 디버그 키(`~/.android/debug.keystore`, 없으면 만든다). adb 설치용이고 스토어 배포용이 아니다 |
+
+### 빌드 · 설치 · 실행
+
+```bash
+bash src/skylens_client/build-android.sh              # aarch64 + x86_64를 APK 하나에
+bash src/skylens_client/build-android.sh device       # 실기기용(aarch64)만
+bash src/skylens_client/build-android.sh emulator --run   # 에뮬레이터용(x86_64), 설치하고 실행하고 로그를 본다
+```
+
+결과는 `target/release/apk/skylens-board.apk`다. 손으로 할 때는 다음과 같다.
+
+```bash
+adb install -r target/release/apk/skylens-board.apk
+adb shell am start -n kr.skylens.board/android.app.NativeActivity
+adb logcat -s skylens RustStdoutStderr AndroidRuntime
+```
+
+### 코어 주소
+
+명령줄이 없으므로 다시 빌드하지 않고 바꿀 수 있게 아래 순서로 읽는다. 앞의 것이 이긴다. 값은 `--core`와 같이 `host:port`, `http://`, `ws://`를 받고 경로가 없으면 `/viewer`를 붙인다.
+
+| 순서 | 어디 | 바꾸는 법 | 비고 |
+|---|---|---|---|
+| 1 | 시스템 속성 `debug.skylens.core` · `debug.skylens.points` | `adb shell setprop debug.skylens.core ws://192.168.0.10:8080/viewer` | 재부팅하면 지워진다. 값은 91자까지 |
+| 2 | 외부 파일 폴더의 `core.txt` · `points.txt` | `adb push core.txt /sdcard/Android/data/kr.skylens.board/files/core.txt` | 릴리스 빌드에도 된다. 첫 줄(빈 줄과 `#` 주석 제외)만 읽는다 |
+| 3 | 내부 파일 폴더의 같은 파일 | `adb shell run-as kr.skylens.board sh -c 'echo ws://… > files/core.txt'` | 디버그(`PROFILE=dev`) 빌드만 |
+| 4 | 기본값 | 없음 | `ws://127.0.0.1:8080/viewer`, 점 패널 열림 |
+
+기본값을 그대로 쓰려면 `adb reverse tcp:8080 tcp:8080`으로 기기의 8080을 개발 PC의 코어(또는 게이트웨이)로 돌린다. 실기기와 에뮬레이터 모두 된다. 에뮬레이터에서는 `ws://10.0.2.2:8080/viewer`도 개발 PC다. 설정을 바꾼 뒤에는 앱을 다시 시작한다(`adb shell am force-stop kr.skylens.board` 후 실행).
+
+### 터치
+
+- 한 손가락은 마우스 왼쪽 버튼처럼 동작한다. 3D 뷰에서 끌면 회전하고, 짧게 누르면 클릭이다(탐지 카드, 점 토글, 패널 버튼).
+- 두 손가락을 벌리고 오므리면 확대·축소다. 손가락 거리 16 CSS px마다 휠 한 칸으로 바꾼다(`view3d.rs`의 `Touches`). 두 손가락 이동(팬)은 없다.
+- 점 패널의 더블클릭 맞춤은 두 번 탭도 더블클릭으로 들어올 것으로 보지만(Blitz는 탭에서도 클릭을 만든다) 기기에서 확인하지 않았다.
+
+### 알아둘 것
+
+- 화면 배치는 이전 현황판 CSS 그대로라 데스크톱 화면을 기준으로 한다. 태블릿이 맞고, 폰 가로 화면에서는 패널이 좁을 수 있다.
+- 앱이 백그라운드로 가면 GPU 표면을 버리고 돌아오면 다시 만든다. 3D 뷰는 받은 청크를 다시 올린다. 코어 연결은 백그라운드에서도 유지된다.
+- winit은 한 프로세스에 이벤트 루프를 하나만 허용한다. 그래서 액티비티가 끝나면(뒤로 가기) 프로세스를 끝내고, 회전·화면 크기 변경은 액티비티를 다시 만들지 않고 크기 변경으로 받는다(`config_changes`).
+- 에뮬레이터는 Vulkan이 켜진 x86_64 이미지(API 35 google_apis_playstore)와 호스트 GPU(`-gpu host`)가 필요하다. 소프트웨어 렌더러에서는 vello가 돌지 않을 수 있다.
+- 로그는 `adb logcat -s skylens`. 패닉도 같은 태그로 남는다.
 
 ## 테스트
 
