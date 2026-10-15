@@ -48,26 +48,42 @@ pub(crate) const NONE: u32 = u32::MAX;
 const CHUNK: usize = 8192;
 const MAX_CAM_DIM: usize = 16;
 
-/// 문제 입력(lib.rs 가 재구성에서 만든다). 관측은 점 순서로 정렬돼 있어야 한다.
-pub(crate) struct ProblemInput {
+/// 번들 조정 문제 입력(lib.rs 가 재구성에서 만든다). 관측은 점 순서로 정렬돼 있어야 한다.
+///
+/// [`crate::BaBackend`] 구현(CPU·CUDA)이 같은 입력을 받는다.
+#[derive(Clone, Debug)]
+pub struct ProblemInput {
+    /// 프레임(world_to_rig) 자세. 쿼터니언은 정규화돼 있다.
     pub poses: Vec<Rigid3>,
+    /// 자세 고정 여부.
     pub pose_const: Vec<bool>,
     /// true = 그 접공간 성분 상수(회전 0..3, 이동 3..6).
     pub pose_mask: Vec<[bool; 6]>,
+    /// 카메라(내부 파라미터).
     pub cams: Vec<Camera>,
     /// 정제할 파라미터 인덱스(비면 상수 카메라).
     pub cam_var: Vec<Vec<usize>>,
+    /// 영상별 자세 순번.
     pub img_pose: Vec<u32>,
+    /// 영상별 카메라 순번.
     pub img_cam: Vec<u32>,
     /// 비기준 센서면 rig_to_sensor.
     pub img_sensor: Vec<Option<Rigid3>>,
+    /// 3D 점.
     pub points: Vec<Vec3>,
+    /// 점 고정 여부.
     pub point_const: Vec<bool>,
+    /// 관측별 영상 순번.
     pub obs_img: Vec<u32>,
+    /// 관측별 점 순번(오름차순).
     pub obs_pt: Vec<u32>,
+    /// 관측 픽셀 좌표.
     pub obs_xy: Vec<Vec2>,
+    /// 견고 손실.
     pub loss: Loss,
+    /// 축소 계통 풀이기(CPU 기준 선택).
     pub solver: LinearSolverType,
+    /// 반복 풀이기 최대 반복.
     pub max_linear_solver_iterations: usize,
 }
 
@@ -142,7 +158,7 @@ pub(crate) struct BaProblem {
 }
 
 /// 라이브러리 쿼터니언 다양체의 ⊞: Exp_q(δ) ⊗ q.
-pub(crate) fn quat_plus(q: &Quat, d: &[f64]) -> Quat {
+pub fn quat_plus(q: &Quat, d: &[f64]) -> Quat {
     let n = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
     if n == 0.0 {
         return *q;
@@ -409,9 +425,6 @@ impl BaProblem {
 
     pub fn num_obs(&self) -> usize {
         self.obs_img.len()
-    }
-    pub fn num_var_points(&self) -> usize {
-        self.v_pt.len()
     }
 
     /// 관측 k 의 (보정) 잔차와 ρ. `jac` 가 있으면 보정·배율 적용 야코비안을 채운다.

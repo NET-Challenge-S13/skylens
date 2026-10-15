@@ -31,6 +31,7 @@
 //! - [`CudaPatchMatch`]: `cumulus3d_dense::PatchMatchBackend` 구현(다중 스케일 조밀화의 스케일별 실행·평가·판독).
 //! - [`CudaMatcher`]: `cumulus3d_matching::MatcherBackend` 구현(정수 내적 top-2).
 //! - [`CudaSift`]: `cumulus3d_features::SiftEngine` 구현(스케일 공간·검출·방향·선택·기술자 모두 GPU, CpuSift 와 같은 품질이나 비트 단위로 같지는 않음).
+//! - [`CudaBundleAdjuster`]: `cumulus3d_ba::BaBackend` 구현(잔차·야코비안·Schur 조립·축소 계통 풀이·역대입을 GPU 에서, LM 루프는 CPU).
 //!
 //! `unsafe` 는 cudarc 가 unsafe 로 둔 곳(커널 발사, 고정 호스트 메모리 할당, `DeviceRepr` 표시)에만 쓴다.
 //!
@@ -62,11 +63,13 @@
 //! ```
 #![warn(missing_docs)]
 
+mod ba;
 mod device;
 mod matcher;
 mod patchmatch;
 mod sift;
 
+pub use ba::{CudaBaError, CudaBundleAdjuster, CPU_CHOLESKY_N, MAX_DENSE_N};
 pub use device::{is_available, CudaDevice, GpuError};
 pub use matcher::CudaMatcher;
 pub use patchmatch::{CudaPatchMatch, CudaPatchMatchOptions};
@@ -81,7 +84,11 @@ pub fn check_kernels(arch: &'static str) -> Result<Vec<(String, usize)>, String>
         let opts = device::compile_options(Some(arch), fmad, fast, defs);
         compile_ptx_with_opts(src, opts).map(|ptx| (name.clone(), ptx.to_src().len())).map_err(|e| format!("{name}: {e:?}"))
     };
-    let mut out = vec![compile("sift".into(), sift::SRC, false, false, &[])?, compile("matcher".into(), matcher::SRC, true, false, &[])?];
+    let mut out = vec![
+        compile("sift".into(), sift::SRC, false, false, &[])?,
+        compile("matcher".into(), matcher::SRC, true, false, &[])?,
+        compile("ba".into(), ba::SRC, true, false, &[])?,
+    ];
     for step in [1, 2] {
         for hw in [false, true] {
             for fast in [false, true] {

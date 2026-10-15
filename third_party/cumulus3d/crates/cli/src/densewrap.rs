@@ -53,6 +53,17 @@ pub fn parse_profile(s: &str) -> Result<MvsProfile, String> {
     MvsProfile::parse(s).ok_or_else(|| format!("알 수 없는 --mvs-profile {s} (fast|quality)"))
 }
 
+/// 번들 조정 백엔드 선택(cpu|cuda). cuda 는 실행 중 실패하면 경고를 찍고 CPU 로 다시 푼다.
+pub fn make_ba_backend(name: &str) -> Result<Arc<dyn cumulus3d_ba::BaBackend>, String> {
+    match name {
+        "cpu" => Ok(Arc::new(cumulus3d_ba::CpuBaBackend)),
+        "cuda" => cumulus3d_cuda::CudaBundleAdjuster::try_default()
+            .map(|b| Arc::new(b) as Arc<dyn cumulus3d_ba::BaBackend>)
+            .map_err(|e| format!("--ba-backend cuda: {e}")),
+        other => Err(format!("알 수 없는 --ba-backend {other} (cpu|cuda)")),
+    }
+}
+
 /// SIFT 백엔드 선택(cpu|cuda).
 pub fn make_sift_backend(name: &str) -> Result<Arc<dyn cumulus3d_features::SiftEngine>, String> {
     match name {

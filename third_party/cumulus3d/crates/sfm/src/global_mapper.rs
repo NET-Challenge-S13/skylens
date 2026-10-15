@@ -36,7 +36,7 @@ use crate::positioning::{global_positioning, PositionSolverOptions, PositioningS
 use crate::rotation_averaging::{solve_rotation_averaging, RotationAveragingOptions, ViewGraph, ViewGraphEdge};
 use crate::tracks::{establish_tracks, TrackOptions, TrackSummary};
 use crate::triangulator::{refine_points, PointRefiner, TrackTriangulator, TrackTriangulatorOptions};
-use cumulus3d_ba::{BaConfig, Loss};
+use cumulus3d_ba::{BaBackendRef, BaConfig, Loss};
 use cumulus3d_core::reconstruction::{FilterErrorUpdate, NormalizeOptions};
 use cumulus3d_core::{images_of_pair, Camera, FeatureStore, Image, ImageId, MatchGraph, Reconstruction, Result, Rigid3, Vec2, Vec3};
 use rayon::prelude::*;
@@ -99,6 +99,9 @@ pub struct GlobalSfmOptions {
     pub retri_max_refinement_change: f64,
     /// 재삼각측량 점 정제 BA 최대 반복.
     pub retri_ba_max_num_iterations: usize,
+    /// 번들 조정 풀이 백엔드(기본 CPU). BA 단계와 재삼각측량 끝의 전체 BA 에 쓴다.
+    /// 재삼각측량 중 점만 정제하는 BA(`refine_points`)는 CPU 그대로다.
+    pub ba_backend: BaBackendRef,
 }
 
 impl Default for GlobalSfmOptions {
@@ -132,6 +135,7 @@ impl Default for GlobalSfmOptions {
             retri_max_refinements: 5,
             retri_max_refinement_change: 0.0005,
             retri_ba_max_num_iterations: 50,
+            ba_backend: BaBackendRef::default(),
         }
     }
 }
@@ -357,10 +361,10 @@ pub fn bundle_adjustment_stage(rec: &mut Reconstruction, opts: &GlobalSfmOptions
     let mut removed = 0;
     for it in 0..opts.ba_num_iterations {
         if !opts.ba_skip_fixed_rotation_stage {
-            cumulus3d_ba::bundle_adjust(rec, &ba_config(rec, opts, true))?;
+            cumulus3d_ba::bundle_adjust_with(rec, &ba_config(rec, opts, true), opts.ba_backend.get())?;
         }
         if !opts.ba_skip_joint_optimization_stage {
-            cumulus3d_ba::bundle_adjust(rec, &ba_config(rec, opts, false))?;
+            cumulus3d_ba::bundle_adjust_with(rec, &ba_config(rec, opts, false), opts.ba_backend.get())?;
         }
         rec.normalize(&NormalizeOptions::default());
         // 제거가 점 수의 0.1% 이하이면 반복 번호를 올려 더 엄격히 재필터, 끝까지 적으면 조기 종료.
@@ -415,7 +419,7 @@ pub fn retriangulation_stage(rec: &mut Reconstruction, graph: &MatchGraph, opts:
     }
     filter_normalized_reproj_error(rec, opts.max_normalized_reproj_error);
     rec.filter_points3d_with_small_triangulation_angle(opts.min_tri_angle_deg, None);
-    cumulus3d_ba::bundle_adjust(rec, &ba_config(rec, opts, false))?;
+    cumulus3d_ba::bundle_adjust_with(rec, &ba_config(rec, opts, false), opts.ba_backend.get())?;
     rec.normalize(&NormalizeOptions::default());
     filter_normalized_reproj_error(rec, opts.max_normalized_reproj_error);
     rec.filter_points3d_with_small_triangulation_angle(opts.min_tri_angle_deg, None);
