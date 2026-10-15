@@ -89,7 +89,7 @@
 //! [`ComposeHandle::send`] / [`ComposeHandle::try_send`] (both usable from async code; `try_send` never blocks).
 
 use crate::declare::{AlignFrame, Dense, Features, Plan};
-use crate::densewrap::{make_match_backend, make_sift_backend, parse_profile};
+use crate::densewrap::{make_ba_backend, make_match_backend, make_sift_backend, parse_profile};
 use crate::events::{Command, Event, EventKind, Frame, ZoneRange};
 use crate::pipeline::{Pipeline, QueuePolicy, Summary};
 use crate::session::{FrameSet, Input, Session, SessionConfig};
@@ -639,11 +639,12 @@ impl NodeBuilder {
         self.plan.matching.backend = name.to_string();
         self
     }
-    /// CUDA for features, matching and densification.
+    /// CUDA for features, matching, densification and bundle adjustment.
     pub fn gpu(mut self) -> Self {
         self.plan.features.backend = "cuda".into();
         self.plan.matching.backend = "cuda".into();
         self.plan.dense.backend = "cuda".into();
+        self.plan.sparse.ba_backend = "cuda".into();
         self
     }
     /// Triangulate only newly registered images.
@@ -788,6 +789,7 @@ impl NodeBuilder {
         }
         let sift = make_sift_backend(&plan.features.backend).map_err(|e| pr.push(format!("features.backend: {e}"))).ok();
         let matcher = make_match_backend(&plan.matching.backend).map_err(|e| pr.push(format!("matching.backend: {e}"))).ok();
+        let ba_backend = make_ba_backend(&plan.sparse.ba_backend).map_err(|e| pr.push(format!("sparse.ba_backend: {e}"))).ok();
         if plan.dense.enabled {
             if let Err(e) = parse_profile(&plan.dense.profile) {
                 pr.push(format!("dense.profile: {e}"));
@@ -812,6 +814,7 @@ impl NodeBuilder {
         sc.extraction.reader.max_image_size = plan.features.max_image_size;
         sc.sift = sift.expect("checked");
         sc.matcher = Arc::from(matcher.expect("checked"));
+        sc.ba_backend = ba_backend.expect("checked");
         sc.dense = dense;
         sc.history = match policy {
             ReconcilePolicy::ReplayWindow { positions } => positions + 1,

@@ -31,20 +31,31 @@
 
 use crate::Termination;
 
+/// 신뢰 영역 LM 옵션.
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct TrOptions {
+pub struct TrOptions {
+    /// 최대 반복 수.
     pub max_num_iterations: usize,
+    /// 상대 비용 감소 허용오차(0 이면 끔).
     pub function_tolerance: f64,
+    /// 기울기 허용오차.
     pub gradient_tolerance: f64,
+    /// 파라미터 변화 허용오차(0 이면 끔).
     pub parameter_tolerance: f64,
+    /// 초기 신뢰 영역 반경.
     pub initial_radius: f64,
+    /// 최대 반경.
     pub max_radius: f64,
+    /// 최소 반경(이보다 작아지면 수렴으로 끝낸다).
     pub min_radius: f64,
+    /// 단계 채택 최소 상대 감소.
     pub min_relative_decrease: f64,
+    /// 연속 무효 단계 허용 수.
     pub max_consecutive_invalid_steps: usize,
 }
 
 impl TrOptions {
+    /// 허용치를 주고 나머지는 기본값으로 만든다.
     pub fn new(max_iter: usize, ftol: f64, gtol: f64, ptol: f64) -> Self {
         Self {
             max_num_iterations: max_iter,
@@ -60,7 +71,8 @@ impl TrOptions {
     }
 }
 
-pub(crate) struct StepInfo {
+/// 한 LM 단계의 모형 정보.
+pub struct StepInfo {
     /// 선형 모형이 예측한 비용 감소(양수 기대).
     pub model_cost_change: f64,
     /// ‖x_후보 − x‖ (주변 공간).
@@ -69,7 +81,8 @@ pub(crate) struct StepInfo {
     pub x_norm: f64,
 }
 
-pub(crate) trait TrProblem {
+/// 신뢰 영역 루프가 다루는 문제. CPU·GPU 번들 조정이 같은 바깥 루프를 쓰도록 공개한다.
+pub trait TrProblem {
     /// 현재 x 에서 잔차·야코비안·기울기를 평가. `first` 면 야코비 열 배율도 정한다.
     /// 반환: 비용(½Σρ). 평가 실패(비유한) 면 None.
     fn linearize(&mut self, first: bool) -> Option<f64>;
@@ -83,16 +96,23 @@ pub(crate) trait TrProblem {
     fn accept_candidate(&mut self);
 }
 
+/// 신뢰 영역 루프 결과.
 #[derive(Clone, Debug)]
-pub(crate) struct TrResult {
+pub struct TrResult {
+    /// 수행한 반복 수.
     pub num_iterations: usize,
+    /// 채택된 단계 수.
     pub num_successful_steps: usize,
+    /// 초기 비용.
     pub initial_cost: f64,
+    /// 최종 비용.
     pub final_cost: f64,
+    /// 종료 상태.
     pub termination: Termination,
 }
 
-pub(crate) fn minimize<P: TrProblem>(p: &mut P, o: &TrOptions) -> TrResult {
+/// 신뢰 영역 LM 바깥 루프(스칼라 관리만 하고 무거운 일은 [`TrProblem`] 이 맡는다).
+pub fn minimize<P: TrProblem>(p: &mut P, o: &TrOptions) -> TrResult {
     let mut res = TrResult {
         num_iterations: 0,
         num_successful_steps: 0,

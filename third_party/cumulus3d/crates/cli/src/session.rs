@@ -55,7 +55,7 @@ use crate::densewrap::{dense_model, DenseConfig};
 use crate::events::{Command, Event, Frame, Meta, ZoneRange};
 use crate::util::StageTimes;
 use cumulus3d_align::{align_to_gps, EnuOrigin, ModelAlignerOptions};
-use cumulus3d_ba::{bundle_adjust, BaConfig};
+use cumulus3d_ba::{bundle_adjust_with, BaBackend, BaBackendRef, BaConfig};
 use cumulus3d_core::analyzer::ModelStats;
 use cumulus3d_core::io::ply::PointCloud;
 use cumulus3d_core::io::GpsRecord;
@@ -122,6 +122,8 @@ pub struct SessionConfig {
     pub sift: Arc<dyn SiftEngine>,
     /// 기술자 매칭 백엔드.
     pub matcher: Arc<dyn MatcherBackend>,
+    /// 번들 조정 백엔드(구역 정밀 BA, 첫 모델 전역 매퍼의 BA).
+    pub ba_backend: Arc<dyn BaBackend>,
     /// 조밀화 설정(None = 조밀화 생략, 점군 이벤트는 `dense: false`).
     pub dense: Option<DenseConfig>,
     /// [`Command::ResetFrom`] 용으로 보관할 위치별 되감기 지점 수(0 = 되감기 불가, 메모리 절약).
@@ -148,6 +150,7 @@ impl SessionConfig {
             extraction,
             sift: Arc::new(cumulus3d_features::CpuSift::default()),
             matcher: Arc::new(cumulus3d_matching::CpuMatcher::default()),
+            ba_backend: Arc::new(cumulus3d_ba::CpuBaBackend),
             dense: None,
             history: 8,
             decode_frames: false,
@@ -398,7 +401,7 @@ impl Shared {
         let mut out = Out { sh, fg: None, guard: Some((k, generation)) };
         out.emit(|meta| Event::RefineStarted { meta, zone: k });
         let t0 = Instant::now();
-        let r = bundle_adjust(&mut rec, &BaConfig::default());
+        let r = bundle_adjust_with(&mut rec, &BaConfig::default(), &*sh.cfg.ba_backend);
         out.stage("ba", &format!("refined {k}"), t0);
         match r {
             Ok(s) => out.log(format!(
@@ -812,7 +815,8 @@ impl Session {
         }
         if p + 1 == span + ovl {
             let t0 = Instant::now();
-            let o = global_mapper(&self.store, &self.graph, &GlobalSfmOptions::script());
+            let gopts = GlobalSfmOptions { ba_backend: BaBackendRef::new(cfg.ba_backend.clone()), ..GlobalSfmOptions::script() };
+            let o = global_mapper(&self.store, &self.graph, &gopts);
             out.stage("mapper", &format!("pos {p}"), t0);
             let o = o.map_err(|e| e.to_string())?;
             if let Some(f) = &o.failure {

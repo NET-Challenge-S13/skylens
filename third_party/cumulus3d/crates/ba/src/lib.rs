@@ -30,7 +30,7 @@
 //! 이 파일의 공개 시그니처는 sfm 크레이트와의 계약이다. 구현 중 바꾸지 말 것(필드 추가는 가능).
 //!
 //! 구성: 신뢰 영역 LM(`tr`), Schur 보수 조립·역대입(`problem`), 축소 계통 풀이기(`linsolve`),
-//! 단일 자세 정제(`abspose`), 견고 손실(`loss`).
+//! 단일 자세 정제(`abspose`), 견고 손실(`loss`), 풀이 백엔드(`backend`: CPU 기본, GPU 는 다른 크레이트가 구현).
 //!
 //! # 사용 예
 //!
@@ -68,15 +68,18 @@
 #![allow(clippy::needless_range_loop)]
 
 mod abspose;
+mod backend;
 mod linsolve;
 mod loss;
 mod problem;
 mod tr;
 
+pub use backend::{BaBackend, BaBackendRef, BaSolution, CpuBaBackend};
+pub use problem::{quat_plus, ProblemInput};
+pub use tr::{minimize, StepInfo, TrOptions, TrProblem, TrResult};
+
 use cumulus3d_core::{CameraId, Error, FrameId, ImageId, Point3DId, Reconstruction, Rigid3, SensorKey, Vec2, Vec3};
-use problem::{BaProblem, ProblemInput};
 use std::collections::{BTreeMap, HashSet};
-use tr::TrOptions;
 
 /// 견고 손실 함수. 스케일은 잔차(픽셀) 단위.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -300,14 +303,21 @@ pub fn filter_negative_depth_observations(rec: &mut Reconstruction, images: &[Im
 /// (`summary.termination` 으로 확인). 자명하지 않은 rig 는 프레임 자세를 변수로 두고
 /// rig_to_sensor 는 상수로 둔다.
 pub fn bundle_adjust(rec: &mut Reconstruction, config: &BaConfig) -> cumulus3d_core::Result<BaSummary> {
+    bundle_adjust_with(rec, config, &CpuBaBackend)
+}
+
+/// [`bundle_adjust`] 와 같되 풀이를 `backend` 에 맡긴다(예: cumulus3d-cuda 의 GPU 백엔드).
+///
+/// 문제 구성(관측 수집·게이지 고정)과 결과 써 넣기는 백엔드와 무관하게 같다.
+pub fn bundle_adjust_with(rec: &mut Reconstruction, config: &BaConfig, backend: &dyn BaBackend) -> cumulus3d_core::Result<BaSummary> {
     if config.num_threads > 0 {
         let pool = rayon::ThreadPoolBuilder::new()
             .num_threads(config.num_threads)
             .build()
             .map_err(|e| Error::InvalidArgument(format!("스레드 풀: {e}")))?;
-        pool.install(|| bundle_adjust_impl(rec, config))
+        pool.install(|| bundle_adjust_impl(rec, config, backend))
     } else {
-        bundle_adjust_impl(rec, config)
+        bundle_adjust_impl(rec, config, backend)
     }
 }
 
@@ -319,7 +329,7 @@ struct Built {
     num_images: usize,
 }
 
-fn bundle_adjust_impl(rec: &mut Reconstruction, config: &BaConfig) -> cumulus3d_core::Result<BaSummary> {
+fn bundle_adjust_impl(rec: &mut Reconstruction, config: &BaConfig, backend: &dyn BaBackend) -> cumulus3d_core::Result<BaSummary> {
     let mut images: Vec<ImageId> = if config.images.is_empty() {
         rec.registered_images()
     } else {
@@ -341,11 +351,11 @@ fn bundle_adjust_impl(rec: &mut Reconstruction, config: &BaConfig) -> cumulus3d_
     summary.num_images = num_images;
     summary.num_points = point_ids.len();
     summary.num_residuals = 2 * input.obs_img.len();
-    let mut prob = BaProblem::new(input).ok_or_else(|| Error::Invariant("BA 선형 풀이기 구조 생성 실패".into()))?;
-    summary.linear_solver = prob.solver_kind;
-    summary.free_point_count = prob.num_var_points();
+    summary.free_point_count = input.point_const.iter().filter(|&&c| !c).count();
     let opts = TrOptions::new(config.max_num_iterations, config.function_tolerance, config.gradient_tolerance, config.parameter_tolerance);
-    let r = tr::minimize(&mut prob, &opts);
+    let sol = backend.solve(&input, &opts)?;
+    summary.linear_solver = sol.linear_solver;
+    let r = &sol.result;
     summary.num_iterations = r.num_iterations;
     summary.num_successful_steps = r.num_successful_steps;
     summary.initial_cost = r.initial_cost;
@@ -354,18 +364,18 @@ fn bundle_adjust_impl(rec: &mut Reconstruction, config: &BaConfig) -> cumulus3d_
     summary.converged = r.termination == Termination::Convergence;
     // 써 넣기: 자세는 전부(사전 정규화 반영), 카메라·점은 가변인 것만.
     for (p, fid) in frame_ids.iter().enumerate() {
-        rec.set_frame_pose(*fid, Some(prob.cur.poses[p]))?;
+        rec.set_frame_pose(*fid, Some(sol.poses[p]))?;
     }
     for (c, cid) in cam_ids.iter().enumerate() {
-        if prob.cam_e[c] != problem::NONE {
+        if !input.cam_var[c].is_empty() {
             if let Some(cam) = rec.camera_mut(*cid) {
-                cam.params.clone_from(&prob.cur.cams[c].params);
+                cam.params.clone_from(&sol.cams[c].params);
             }
         }
     }
     for (j, pid) in point_ids.iter().enumerate() {
-        if prob.pt_v[j] != problem::NONE {
-            rec.set_point3d_xyz(*pid, prob.cur.pts[j])?;
+        if !input.point_const[j] {
+            rec.set_point3d_xyz(*pid, sol.points[j])?;
         }
     }
     if config.update_point_errors {

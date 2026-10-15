@@ -1154,6 +1154,7 @@ name = "cumulus3d-cuda"
 version = "0.3.1"
 dependencies = [
  "cudarc",
+ "cumulus3d-ba",
  "cumulus3d-core",
  "cumulus3d-dense",
  "cumulus3d-features",
