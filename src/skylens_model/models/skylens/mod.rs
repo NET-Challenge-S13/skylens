@@ -127,7 +127,10 @@ impl Engine {
             .fixed_enu_origin(true)
             // A refined zone can be meshed only once (deltamesh), and late or corrected
             // sets would rewind zones already streamed; append only.
-            .reconcile(ReconcilePolicy::AppendOnly);
+            .reconcile(ReconcilePolicy::AppendOnly)
+            // Triangulate only the images registered at this position. The default re-triangulates
+            // every registered image on each set, which grew to 7.5 s per set in a 5-minute run.
+            .incremental_triangulation(true);
         if cfg.gpu {
             b = b.gpu();
         }
