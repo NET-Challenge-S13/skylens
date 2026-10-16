@@ -22,6 +22,12 @@ pub struct Options {
     /// launcher then starts no model server of its own; it waits for the REST `/health`
     /// of the same host on the model REST port.
     pub model_addr: Option<String>,
+    /// A core that already runs elsewhere (host:port, e.g. an SSH tunnel to the Daejeon VM). The
+    /// launcher then starts no MediaMTX, core, model server or board; it only publishes the
+    /// footage and flies the drones against that core.
+    pub remote_core: Option<String>,
+    /// SRT ingest (host:port) the footage is published to; default the local MediaMTX.
+    pub srt_addr: Option<String>,
     /// Frames per second the core extracts per drone.
     pub fps: f64,
     /// Width of extracted frames in px (0 keeps the source size).
@@ -65,6 +71,8 @@ impl Default for Options {
             board_port: 8090,
             no_model: false,
             model_addr: None,
+            remote_core: None,
+            srt_addr: None,
             fps: 2.0,
             frame_width: 1920,
             mediamtx: None,
@@ -92,6 +100,10 @@ pub const USAGE: &str = "usage: cargo run -p skylens-demo -- [options]
   --model-addr H:P     use a model server already running at gRPC host:port (e.g. an
                        SSH tunnel to a GPU node) instead of starting one; its REST
                        /health is expected on the same host, port 8100
+  --remote-core H:P    use a core already running at host:port (e.g. an SSH tunnel to
+                       Daejeon): start only the footage feeds and the drones
+  --srt-addr H:P       publish the footage over SRT to this host:port (default: the
+                       local MediaMTX, 127.0.0.1:10890)
   --fps X              frames per second extracted per drone (default 2)
   --frame-width N      extracted frame width in px, 0 = source size (default 1920)
   --mediamtx PATH      MediaMTX executable (default ~/tools/mediamtx/mediamtx, then PATH)
@@ -112,6 +124,13 @@ pub const USAGE: &str = "usage: cargo run -p skylens-demo -- [options]
   --profile NAME       cargo profile of the native screens: release or debug
                        (default: release when built, else debug)
   -h, --help           this text";
+
+fn host_port(name: &str, v: String) -> Result<String, String> {
+    match v.rsplit_once(':') {
+        Some((h, p)) if !h.is_empty() && p.parse::<u16>().is_ok_and(|p| p > 0) => Ok(v),
+        _ => Err(format!("{name}: not host:port: {v}")),
+    }
+}
 
 fn port(name: &str, v: &str) -> Result<u16, String> {
     match v.parse::<u16>() {
@@ -137,14 +156,9 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<Options, St
         match flag.as_str() {
             "--core-port" => o.core_port = port("--core-port", &value("--core-port")?)?,
             "--board-port" => o.board_port = port("--board-port", &value("--board-port")?)?,
-            "--model-addr" => {
-                let v = value("--model-addr")?;
-                let ok = v.rsplit_once(':').is_some_and(|(h, p)| !h.is_empty() && p.parse::<u16>().is_ok_and(|p| p > 0));
-                if !ok {
-                    return Err(format!("--model-addr: not host:port: {v}"));
-                }
-                o.model_addr = Some(v);
-            }
+            "--model-addr" => o.model_addr = Some(host_port("--model-addr", value("--model-addr")?)?),
+            "--remote-core" => o.remote_core = Some(host_port("--remote-core", value("--remote-core")?)?),
+            "--srt-addr" => o.srt_addr = Some(host_port("--srt-addr", value("--srt-addr")?)?),
             "--fps" => {
                 let v = value("--fps")?;
                 o.fps = match v.parse::<f64>() {
@@ -305,6 +319,9 @@ mod tests {
         assert!(parse(&["--model-addr", "8101"]).is_err());
         assert!(parse(&["--model-addr=host:x"]).is_err());
         assert!(parse(&["--model-addr"]).is_err());
+        let o = parse(&["--remote-core", "127.0.0.1:18080", "--srt-addr=host:10890"]).unwrap();
+        assert_eq!((o.remote_core.as_deref(), o.srt_addr.as_deref()), (Some("127.0.0.1:18080"), Some("host:10890")));
+        assert!(parse(&["--remote-core", "x"]).is_err());
     }
 
     #[test]

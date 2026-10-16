@@ -91,13 +91,13 @@ pub fn stream_path(drone: &Drone) -> String {
 }
 
 /// SRT publish URL for one drone's footage.
-pub fn srt_publish_url(srt_port: u16, drone: &Drone) -> String {
-    format!("srt://127.0.0.1:{srt_port}?streamid=publish:{}&pkt_size=1316", stream_path(drone))
+pub fn srt_publish_url(srt_addr: &str, drone: &Drone) -> String {
+    format!("srt://{srt_addr}?streamid=publish:{}&pkt_size=1316", stream_path(drone))
 }
 
 /// ffmpeg arguments that publish a file to MediaMTX in a loop, at real time,
 /// without re-encoding.
-pub fn publisher_args(file: &Path, srt_port: u16, drone: &Drone) -> Vec<String> {
+pub fn publisher_args(file: &Path, srt_addr: &str, drone: &Drone) -> Vec<String> {
     [
         "-hide_banner", "-nostats", "-loglevel", "warning", "-re", "-stream_loop", "-1", "-i",
     ]
@@ -105,7 +105,7 @@ pub fn publisher_args(file: &Path, srt_port: u16, drone: &Drone) -> Vec<String> 
     .map(|s| s.to_string())
     .chain([file.display().to_string()])
     .chain(["-an", "-c:v", "copy", "-f", "mpegts"].iter().map(|s| s.to_string()))
-    .chain([srt_publish_url(srt_port, drone)])
+    .chain([srt_publish_url(srt_addr, drone)])
     .collect()
 }
 
@@ -258,14 +258,14 @@ paths:
         assert_eq!(planned_route_file(Path::new("/repo/target/demo")), Path::new("/repo/target/demo/planned-route.json"));
         assert_eq!(stream_path(&FORMATION[1]), "drone2");
         assert_eq!(
-            srt_publish_url(10890, &FORMATION[2]),
+            srt_publish_url("127.0.0.1:10890", &FORMATION[2]),
             "srt://127.0.0.1:10890?streamid=publish:drone3&pkt_size=1316"
         );
     }
 
     #[test]
     fn publisher_copies_video_in_a_real_time_loop() {
-        let args = publisher_args(Path::new("demo_left.mp4"), 10890, &FORMATION[0]);
+        let args = publisher_args(Path::new("demo_left.mp4"), "127.0.0.1:10890", &FORMATION[0]);
         let joined = args.join(" ");
         assert!(joined.contains("-re -stream_loop -1 -i demo_left.mp4"));
         assert!(joined.contains("-an -c:v copy -f mpegts"));
