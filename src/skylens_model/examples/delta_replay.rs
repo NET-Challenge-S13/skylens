@@ -28,8 +28,8 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use skylens_model::app::{build_engine, serve_with};
-use skylens_model::models::skylens::replay::{ReplayEvent, load_events, read_manifest, to_event};
 use skylens_model::models::skylens::Engine;
+use skylens_model::models::skylens::replay::{ReplayEvent, load_events, read_manifest, to_event};
 use skylens_model::utils::serving_config::Settings;
 use skylens_model::utils::serving_pipeline::LiveEngine;
 use skylens_shared::delta::from_chunk;
@@ -45,14 +45,22 @@ struct Args {
 }
 
 fn parse_args() -> Result<Args> {
-    let mut a = Args { stream: PathBuf::new(), speed: 10.0, start_after: 0.0, hold: false, check: false };
+    let mut a = Args {
+        stream: PathBuf::new(),
+        speed: 10.0,
+        start_after: 0.0,
+        hold: false,
+        check: false,
+    };
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
         let mut val = |name: &str| it.next().with_context(|| format!("{name} needs a value"));
         match arg.as_str() {
             "--stream" => a.stream = PathBuf::from(val("--stream")?),
             "--speed" => a.speed = val("--speed")?.parse().context("--speed")?,
-            "--start-after" => a.start_after = val("--start-after")?.parse().context("--start-after")?,
+            "--start-after" => {
+                a.start_after = val("--start-after")?.parse().context("--start-after")?
+            }
             "--hold" => a.hold = true,
             "--check" => a.check = true,
             other => bail!("unknown argument {other:?}"),
@@ -69,7 +77,11 @@ fn settings_for(origin: [f64; 3]) -> Settings {
     s.demo = false;
     s.checkpoint = None;
     s.gpu = Some(false);
-    s.anchor = Gps { lat: origin[0], lon: origin[1], alt: origin[2] };
+    s.anchor = Gps {
+        lat: origin[0],
+        lon: origin[1],
+        alt: origin[2],
+    };
     s
 }
 
@@ -86,7 +98,13 @@ fn feed(engine: &Engine, events: &[ReplayEvent], origin: [f64; 3], speed: f64, s
         match engine.inject_event(to_event(ev, origin)) {
             Ok(()) => tracing::info!(
                 "replay: event {} ({:?}, zone {}): +{} ~{} -{} -> {} points",
-                ev.seq, ev.kind, ev.zone, ev.delta.adds.len(), ev.delta.moves.len(), ev.delta.removes.len(), ev.delta.total_points
+                ev.seq,
+                ev.kind,
+                ev.zone,
+                ev.delta.adds.len(),
+                ev.delta.moves.len(),
+                ev.delta.removes.len(),
+                ev.delta.total_points
             ),
             Err(e) => {
                 tracing::error!("replay stopped: {e:#}");
@@ -103,7 +121,11 @@ fn run_check(args: &Args) -> Result<()> {
     let events = load_events(&args.stream, &m)?;
     let parse = t.elapsed();
     let adds: usize = events.iter().map(|e| e.delta.adds.len()).sum();
-    println!("parsed {} events ({adds} adds, final {} points) in {parse:.2?}", events.len(), events.last().map_or(0, |e| e.delta.total_points));
+    println!(
+        "parsed {} events ({adds} adds, final {} points) in {parse:.2?}",
+        events.len(),
+        events.last().map_or(0, |e| e.delta.total_points)
+    );
     let settings = settings_for(m.origin_gps);
     let work = std::env::temp_dir().join(format!("skylens-replay-check-{}", std::process::id()));
     let mut settings = settings;
@@ -125,11 +147,17 @@ fn run_check(args: &Args) -> Result<()> {
                     break;
                 }
             }
-            Err(_) if t.elapsed() > Duration::from_secs(600) => bail!("timed out waiting for the final chunk"),
+            Err(_) if t.elapsed() > Duration::from_secs(600) => {
+                bail!("timed out waiting for the final chunk")
+            }
             Err(_) => std::thread::sleep(Duration::from_millis(5)),
         }
     }
-    println!("encoded and published {n} chunks ({:.1} MB) in {:.2?}", bytes as f64 / 1e6, t.elapsed());
+    println!(
+        "encoded and published {n} chunks ({:.1} MB) in {:.2?}",
+        bytes as f64 / 1e6,
+        t.elapsed()
+    );
     drop(engine);
     let _ = std::fs::remove_dir_all(&work);
     Ok(())
@@ -137,7 +165,10 @@ fn run_check(args: &Args) -> Result<()> {
 
 fn main() -> Result<()> {
     tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")))
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+        )
         .init();
     let args = parse_args()?;
     if args.check {
@@ -146,22 +177,32 @@ fn main() -> Result<()> {
     let m = read_manifest(&args.stream)?;
     let t = Instant::now();
     let events = load_events(&args.stream, &m)?;
-    tracing::info!("replay: {} events loaded in {:.2?} from {}", events.len(), t.elapsed(), args.stream.display());
+    tracing::info!(
+        "replay: {} events loaded in {:.2?} from {}",
+        events.len(),
+        t.elapsed(),
+        args.stream.display()
+    );
     let settings = settings_for(m.origin_gps);
     let engine = Arc::new(build_engine(&settings)?);
     let feeder = {
         let engine = Arc::clone(&engine);
-        let (origin, speed, start_after, hold) = (m.origin_gps, args.speed, args.start_after, args.hold);
-        std::thread::Builder::new().name("delta-replay".into()).spawn(move || {
-            feed(&engine, &events, origin, speed, start_after);
-            if !hold {
-                // Let subscribers drain the last chunks, then end the process.
-                std::thread::sleep(Duration::from_secs(5));
-                std::process::exit(0);
-            }
-        })?
+        let (origin, speed, start_after, hold) =
+            (m.origin_gps, args.speed, args.start_after, args.hold);
+        std::thread::Builder::new()
+            .name("delta-replay".into())
+            .spawn(move || {
+                feed(&engine, &events, origin, speed, start_after);
+                if !hold {
+                    // Let subscribers drain the last chunks, then end the process.
+                    std::thread::sleep(Duration::from_secs(5));
+                    std::process::exit(0);
+                }
+            })?
     };
-    let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
     let out = runtime.block_on(serve_with(settings, LiveEngine::Ready(engine)));
     drop(feeder);
     out

@@ -31,11 +31,41 @@ pub struct TrainerControl {
 
 /// Hook points of the training loop. Every hook has a no-op default.
 pub trait TrainerCallback {
-    fn on_train_begin(&mut self, _state: &TrainerState, _control: &mut TrainerControl, _vs: &VarStore) {}
-    fn on_epoch_begin(&mut self, _state: &TrainerState, _control: &mut TrainerControl, _vs: &VarStore) {}
-    fn on_step_end(&mut self, _state: &TrainerState, _control: &mut TrainerControl, _vs: &VarStore) {}
-    fn on_evaluate(&mut self, _state: &TrainerState, _control: &mut TrainerControl, _vs: &VarStore) {}
-    fn on_train_end(&mut self, _state: &TrainerState, _control: &mut TrainerControl, _vs: &VarStore) {}
+    fn on_train_begin(
+        &mut self,
+        _state: &TrainerState,
+        _control: &mut TrainerControl,
+        _vs: &VarStore,
+    ) {
+    }
+    fn on_epoch_begin(
+        &mut self,
+        _state: &TrainerState,
+        _control: &mut TrainerControl,
+        _vs: &VarStore,
+    ) {
+    }
+    fn on_step_end(
+        &mut self,
+        _state: &TrainerState,
+        _control: &mut TrainerControl,
+        _vs: &VarStore,
+    ) {
+    }
+    fn on_evaluate(
+        &mut self,
+        _state: &TrainerState,
+        _control: &mut TrainerControl,
+        _vs: &VarStore,
+    ) {
+    }
+    fn on_train_end(
+        &mut self,
+        _state: &TrainerState,
+        _control: &mut TrainerControl,
+        _vs: &VarStore,
+    ) {
+    }
 }
 
 // --------------------------------------------------------------------------- //
@@ -171,7 +201,10 @@ mod tests {
         }
         // a stray file named like a checkpoint is ignored
         std::fs::write(dir.join("checkpoint-999"), b"x").unwrap();
-        assert_eq!(find_resume_checkpoint(&dir), Some(dir.join("checkpoint-100")));
+        assert_eq!(
+            find_resume_checkpoint(&dir),
+            Some(dir.join("checkpoint-100"))
+        );
         assert_eq!(find_resume_checkpoint(dir.join("missing")), None);
         let _ = std::fs::remove_dir_all(&dir);
     }

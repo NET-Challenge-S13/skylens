@@ -12,17 +12,21 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use super::base::{
-    dir_has_entries, ensure_exists, file_stem, finish_sample, find_with_stem, list_images,
-    mask_tensor, read_mask_raster, read_rgb_raster, read_thermal_raster, resize_bilinear,
-    resolve_root, stack_rgb_thermal, tensor_f32, tensor_u8, verify_split, walk_files,
-    Availability, DangerClass, DatasetMeta, Raster, Result, Sample, SkyLensDataset, Transform,
-    IMG_EXT,
+    Availability, DangerClass, DatasetMeta, IMG_EXT, Raster, Result, Sample, SkyLensDataset,
+    Transform, dir_has_entries, ensure_exists, file_stem, find_with_stem, finish_sample,
+    list_images, mask_tensor, read_mask_raster, read_rgb_raster, read_thermal_raster,
+    resize_bilinear, resolve_root, stack_rgb_thermal, tensor_f32, tensor_u8, verify_split,
+    walk_files,
 };
 
 /// Deterministic train/val partition for datasets shipped without splits: the first
 /// `max(1, int(n * val_frac))` items are validation, the rest train.
 pub fn split_slice<T>(items: Vec<T>, split: &str, val_frac: f64) -> Vec<T> {
-    let n_val = if items.is_empty() { 0 } else { ((items.len() as f64 * val_frac) as usize).max(1) };
+    let n_val = if items.is_empty() {
+        0
+    } else {
+        ((items.len() as f64 * val_frac) as usize).max(1)
+    };
     if split == "train" {
         items.into_iter().skip(n_val).collect()
     } else {
@@ -59,9 +63,18 @@ impl FlameSegmentation {
         let split = verify_split(&FLAME_META, split)?;
         let root = resolve_root(root);
         let (img, msk) = Self::dirs(&root);
-        ensure_exists(&FLAME_META, &root, img.is_dir() && msk.is_dir() && dir_has_entries(&img))?;
+        ensure_exists(
+            &FLAME_META,
+            &root,
+            img.is_dir() && msk.is_dir() && dir_has_entries(&img),
+        )?;
         let index = Self::build_index(&img, &msk, &split);
-        Ok(FlameSegmentation { root, split, transforms, index })
+        Ok(FlameSegmentation {
+            root,
+            split,
+            transforms,
+            index,
+        })
     }
 
     fn dirs(root: &Path) -> (PathBuf, PathBuf) {
@@ -93,7 +106,13 @@ pub fn flame_mask_to_danger(raw: &Raster<u8>) -> Raster<u8> {
         1,
         raw.data
             .iter()
-            .map(|&v| if v > 0 { DangerClass::FIRE } else { DangerClass::NORMAL })
+            .map(|&v| {
+                if v > 0 {
+                    DangerClass::FIRE
+                } else {
+                    DangerClass::NORMAL
+                }
+            })
             .collect(),
     )
 }
@@ -148,7 +167,12 @@ impl Flame3Pairs {
         let (rgb, th) = Self::dirs(&root);
         ensure_exists(&FLAME3_META, &root, rgb.is_some() && th.is_some())?;
         let index = Self::build_index(&rgb.unwrap(), &th.unwrap(), &split);
-        Ok(Flame3Pairs { root, split, transforms, index })
+        Ok(Flame3Pairs {
+            root,
+            split,
+            transforms,
+            index,
+        })
     }
 
     fn dirs(root: &Path) -> (Option<PathBuf>, Option<PathBuf>) {
@@ -159,7 +183,11 @@ impl Flame3Pairs {
     fn build_index(rgb_dir: &Path, th_dir: &Path, split: &str) -> Vec<(PathBuf, PathBuf)> {
         let mut thermal_by_stem: HashMap<String, PathBuf> = HashMap::new();
         for p in walk_files(th_dir) {
-            let ext = p.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+            let ext = p
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("")
+                .to_lowercase();
             if ext == "tif" || ext == "tiff" {
                 thermal_by_stem.insert(file_stem(&p), p);
             }

@@ -60,7 +60,10 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(pipeline: Pipeline) -> Self {
-        AppState { registry: Arc::new(JobRegistry::default()), pipeline: Arc::new(pipeline) }
+        AppState {
+            registry: Arc::new(JobRegistry::default()),
+            pipeline: Arc::new(pipeline),
+        }
     }
 }
 
@@ -78,7 +81,12 @@ pub fn submit_recon(state: &AppState, req: ReconJobRequest) -> JobAccepted {
 pub fn submit_detect(state: &AppState, req: DetectJobRequest) -> JobAccepted {
     let pipeline = state.pipeline.clone();
     let runner: Runner = Box::new(move |report: Report| -> RunnerFuture {
-        Box::pin(async move { pipeline.run_detect(req, report).await.map(JobResult::Detect) })
+        Box::pin(async move {
+            pipeline
+                .run_detect(req, report)
+                .await
+                .map(JobResult::Detect)
+        })
     });
     let (job_id, queued) = state.registry.submit(JobKind::Detect, runner);
     JobAccepted { job_id, queued }
@@ -102,8 +110,16 @@ pub fn gpu_probe() -> GpuProbe {
     static PROBE: OnceLock<GpuProbe> = OnceLock::new();
     PROBE
         .get_or_init(|| match std::panic::catch_unwind(tch::Cuda::is_available) {
-            Ok(true) => GpuProbe { torch: true, cuda: true, device: Some("cuda:0".into()) },
-            Ok(false) => GpuProbe { torch: true, cuda: false, device: None },
+            Ok(true) => GpuProbe {
+                torch: true,
+                cuda: true,
+                device: Some("cuda:0".into()),
+            },
+            Ok(false) => GpuProbe {
+                torch: true,
+                cuda: false,
+                device: None,
+            },
             Err(_) => {
                 tracing::error!("libtorch cuda probe panicked");
                 GpuProbe::default()
@@ -129,7 +145,9 @@ fn record_gpu_fault(err: &str) {
     // libtorch errors carry a long hint after the first line.
     let first = err.lines().next().unwrap_or(err).trim().to_string();
     if GPU_FAULT.set(first.clone()).is_ok() {
-        tracing::error!("GPU lost: {first}. Reconstruction and the UNet continue on the CPU, much slower");
+        tracing::error!(
+            "GPU lost: {first}. Reconstruction and the UNet continue on the CPU, much slower"
+        );
     }
 }
 
@@ -151,13 +169,17 @@ pub fn spawn_gpu_watch() {
     if !gpu_probe().cuda {
         return;
     }
-    let spawned = std::thread::Builder::new().name("skylens-gpu-watch".into()).spawn(|| loop {
-        std::thread::sleep(GPU_WATCH_INTERVAL);
-        if let Err(e) = cuda_check() {
-            record_gpu_fault(&e);
-            return;
-        }
-    });
+    let spawned = std::thread::Builder::new()
+        .name("skylens-gpu-watch".into())
+        .spawn(|| {
+            loop {
+                std::thread::sleep(GPU_WATCH_INTERVAL);
+                if let Err(e) = cuda_check() {
+                    record_gpu_fault(&e);
+                    return;
+                }
+            }
+        });
     if let Err(e) = spawned {
         tracing::warn!("GPU watch not started: {e}");
     }
@@ -174,7 +196,9 @@ pub fn gpu_state(probe: &GpuProbe, fault: Option<String>) -> (bool, Option<Strin
 
 /// Liveness plus what this process can actually compute.
 pub async fn health(state: &AppState) -> Health {
-    let probe = tokio::task::spawn_blocking(gpu_probe).await.unwrap_or_default();
+    let probe = tokio::task::spawn_blocking(gpu_probe)
+        .await
+        .unwrap_or_default();
     let (cuda, gpu_error) = gpu_state(&probe, gpu_fault());
     let mut jobs = state.registry.counts();
     jobs.insert("frames".into(), state.pipeline.frames.count() as u64);
@@ -223,7 +247,11 @@ fn json_rejection(err: &serde_json::Error) -> Response {
         Category::Data => {
             if msg.starts_with("unknown field") {
                 let loc = quoted_field(&msg).map(Value::from).into_iter().collect();
-                unprocessable("extra_forbidden", loc, format!("Extra inputs are not permitted ({msg})"))
+                unprocessable(
+                    "extra_forbidden",
+                    loc,
+                    format!("Extra inputs are not permitted ({msg})"),
+                )
             } else if msg.starts_with("missing field") {
                 let loc = quoted_field(&msg).map(Value::from).into_iter().collect();
                 unprocessable("missing", loc, format!("Field required ({msg})"))
@@ -235,7 +263,12 @@ fn json_rejection(err: &serde_json::Error) -> Response {
 }
 
 fn is_json_content_type(raw: &str) -> bool {
-    let mime = raw.split(';').next().unwrap_or("").trim().to_ascii_lowercase();
+    let mime = raw
+        .split(';')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .to_ascii_lowercase();
     match mime.split_once('/') {
         Some((_, sub)) => sub == "json" || sub.ends_with("+json"),
         None => false,
@@ -261,8 +294,12 @@ where
                 ));
             }
         }
-        let bytes = Bytes::from_request(req, state).await.map_err(IntoResponse::into_response)?;
-        serde_json::from_slice::<T>(&bytes).map(StrictJson).map_err(|e| json_rejection(&e))
+        let bytes = Bytes::from_request(req, state)
+            .await
+            .map_err(IntoResponse::into_response)?;
+        serde_json::from_slice::<T>(&bytes)
+            .map(StrictJson)
+            .map_err(|e| json_rejection(&e))
     }
 }
 
@@ -283,7 +320,10 @@ async fn post_detect_job(
 async fn get_job(State(state): State<AppState>, Path(job_id): Path<String>) -> Response {
     match state.registry.status(&job_id) {
         Some(status) => Json(status).into_response(),
-        None => (StatusCode::NOT_FOUND, Json(json!({"detail": format!("unknown job {job_id}")})))
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(json!({"detail": format!("unknown job {job_id}")})),
+        )
             .into_response(),
     }
 }
@@ -316,7 +356,10 @@ pub struct ModelGrpc {
 }
 
 fn engine_status(state: &AppState) -> Result<Arc<Engine>, Status> {
-    state.pipeline.engine().map_err(|e| Status::unavailable(e.to_string()))
+    state
+        .pipeline
+        .engine()
+        .map_err(|e| Status::unavailable(e.to_string()))
 }
 
 #[tonic::async_trait]
@@ -380,7 +423,10 @@ impl ModelService for ModelGrpc {
                         summary.ingested, summary.ignored, summary.pending
                     ))
                 })?;
-            tracing::debug!("frame set {outcome:?} in {:.2}s", started.elapsed().as_secs_f64());
+            tracing::debug!(
+                "frame set {outcome:?} in {:.2}s",
+                started.elapsed().as_secs_f64()
+            );
             match outcome {
                 PushOutcome::Ingested => summary.ingested += 1,
                 PushOutcome::Ignored => summary.ignored += 1,
@@ -402,7 +448,9 @@ impl ModelService for ModelGrpc {
             .await
             .map_err(|e| Status::internal(format!("subscribe panicked: {e}")))?;
         let stream = ReceiverStream::new(rx).map(Ok::<pb::Chunk, Status>);
-        Ok(tonic::Response::new(Box::pin(stream) as Self::SubscribeChunksStream))
+        Ok(tonic::Response::new(
+            Box::pin(stream) as Self::SubscribeChunksStream
+        ))
     }
 }
 
@@ -413,7 +461,9 @@ impl ModelService for ModelGrpc {
 /// Build the reconstruction engine with the SkyLensNet detector when a
 /// checkpoint is configured. Blocking (loads libtorch weights).
 pub fn build_engine(settings: &Settings) -> anyhow::Result<Engine> {
-    use crate::models::skylensnet::modeling_skylensnet::{DetectorOptions, Precision, SkyLensNetDetector};
+    use crate::models::skylensnet::modeling_skylensnet::{
+        DetectorOptions, Precision, SkyLensNetDetector,
+    };
 
     let cuda = gpu_probe().cuda;
     let gpu = settings.gpu.unwrap_or(cuda);
@@ -423,7 +473,11 @@ pub fn build_engine(settings: &Settings) -> anyhow::Result<Engine> {
             None
         }
         Some(path) => {
-            let device = if cuda { tch::Device::Cuda(0) } else { tch::Device::Cpu };
+            let device = if cuda {
+                tch::Device::Cuda(0)
+            } else {
+                tch::Device::Cpu
+            };
             let options = DetectorOptions {
                 precision: settings.precision.unwrap_or(Precision::Auto),
                 ..Default::default()
@@ -501,7 +555,11 @@ pub async fn serve_with(settings: Settings, live: LiveEngine) -> anyhow::Result<
     tracing::info!(
         "skylens_model api up (demo={}, manifest={})",
         settings.demo,
-        if settings.demo { settings.manifest.display().to_string() } else { "-".into() }
+        if settings.demo {
+            settings.manifest.display().to_string()
+        } else {
+            "-".into()
+        }
     );
     if !settings.demo {
         spawn_gpu_watch();
@@ -520,21 +578,25 @@ pub async fn serve_with(settings: Settings, live: LiveEngine) -> anyhow::Result<
         .await
         .with_context(|| format!("binding REST on {}", settings.rest_addr))?;
     tracing::info!("REST on {}", settings.rest_addr);
-    tracing::info!("gRPC skylens.model.v1.ModelService on {}", settings.grpc_addr);
+    tracing::info!(
+        "gRPC skylens.model.v1.ModelService on {}",
+        settings.grpc_addr
+    );
 
     let rest = axum::serve(listener, router(state.clone()))
         .with_graceful_shutdown(wait_stop(stop_rx.clone()));
-    let grpc_service = ModelServiceServer::new(ModelGrpc { state: state.clone() })
-        .max_decoding_message_size(MAX_GRPC_MESSAGE)
-        .max_encoding_message_size(MAX_GRPC_MESSAGE);
+    let grpc_service = ModelServiceServer::new(ModelGrpc {
+        state: state.clone(),
+    })
+    .max_decoding_message_size(MAX_GRPC_MESSAGE)
+    .max_encoding_message_size(MAX_GRPC_MESSAGE);
     let grpc = tonic::transport::Server::builder()
         .add_service(grpc_service)
         .serve_with_shutdown(settings.grpc_addr, wait_stop(stop_rx));
 
-    let outcome = tokio::try_join!(
-        async { rest.await.context("REST server") },
-        async { grpc.await.context("gRPC server") },
-    );
+    let outcome = tokio::try_join!(async { rest.await.context("REST server") }, async {
+        grpc.await.context("gRPC server")
+    },);
     state.registry.stop();
     outcome.map(|_| ())
 }
@@ -570,7 +632,9 @@ pub fn main() -> anyhow::Result<()> {
         // SAFETY: no other thread exists yet.
         unsafe { std::env::set_var("DELTAMESH_EXTRACT_BATCH", DELTAMESH_EXTRACT_BATCH) };
     }
-    let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
     runtime.block_on(serve(settings().clone()))
 }
 
@@ -594,7 +658,9 @@ mod tests {
             Ok(StrictJson(v)) => Ok(v),
             Err(resp) => {
                 let status = resp.status().as_u16();
-                let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+                let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+                    .await
+                    .unwrap();
                 Err((status, serde_json::from_slice(&bytes).unwrap()))
             }
         }
@@ -602,11 +668,22 @@ mod tests {
 
     #[test]
     fn gpu_fault_turns_cuda_off_and_is_reported() {
-        let cuda = GpuProbe { torch: true, cuda: true, device: Some("cuda:0".into()) };
+        let cuda = GpuProbe {
+            torch: true,
+            cuda: true,
+            device: Some("cuda:0".into()),
+        };
         assert_eq!(gpu_state(&cuda, None), (true, None));
-        assert_eq!(gpu_state(&cuda, Some("lost".into())), (false, Some("lost".into())));
+        assert_eq!(
+            gpu_state(&cuda, Some("lost".into())),
+            (false, Some("lost".into()))
+        );
         // Without CUDA at start there is nothing to lose.
-        let cpu = GpuProbe { torch: true, cuda: false, device: None };
+        let cpu = GpuProbe {
+            torch: true,
+            cuda: false,
+            device: None,
+        };
         assert_eq!(gpu_state(&cpu, Some("lost".into())), (false, None));
     }
 
@@ -624,12 +701,22 @@ mod tests {
     #[tokio::test]
     async fn malformed_missing_and_wrong_type_are_422() {
         let ct = Some("application/json");
-        assert_eq!(extract::<ReconJobRequest>("{not json", ct).await.unwrap_err().0, 422);
+        assert_eq!(
+            extract::<ReconJobRequest>("{not json", ct)
+                .await
+                .unwrap_err()
+                .0,
+            422
+        );
         assert_eq!(extract::<ReconJobRequest>("", ct).await.unwrap_err().0, 422);
-        let missing = extract::<ReconJobRequest>(r#"{"segment":0}"#, ct).await.unwrap_err();
+        let missing = extract::<ReconJobRequest>(r#"{"segment":0}"#, ct)
+            .await
+            .unwrap_err();
         assert_eq!(missing.0, 422);
         assert_eq!(missing.1["detail"][0]["type"], "missing");
-        let wrong = extract::<DetectJobRequest>(r#"{"segment":"x"}"#, ct).await.unwrap_err();
+        let wrong = extract::<DetectJobRequest>(r#"{"segment":"x"}"#, ct)
+            .await
+            .unwrap_err();
         assert_eq!(wrong.0, 422);
         let text = extract::<DetectJobRequest>(r#"{"segment":0}"#, Some("text/plain")).await;
         assert_eq!(text.unwrap_err().0, 422);
@@ -658,8 +745,8 @@ mod tests {
     }
 
     fn demo_settings() -> (TempDemo, Settings) {
-        let dir = std::env::temp_dir()
-            .join(format!("skylens-app-{}", uuid::Uuid::new_v4().simple()));
+        let dir =
+            std::env::temp_dir().join(format!("skylens-app-{}", uuid::Uuid::new_v4().simple()));
         std::fs::create_dir_all(&dir).unwrap();
         let manifest = json!({"segments": [
             {"levels": [{"level": 0, "steps": 250, "url": "seg0.ply"}], "extent": 1.0}
@@ -668,7 +755,10 @@ mod tests {
         std::fs::write(dir.join("seg0.ply"), b"0123456789").unwrap();
         let env: HashMap<&str, String> = HashMap::from([
             ("SKYLENS_DEMO", "1".to_string()),
-            ("SKYLENS_DEMO_MANIFEST", dir.join("segments.json").display().to_string()),
+            (
+                "SKYLENS_DEMO_MANIFEST",
+                dir.join("segments.json").display().to_string(),
+            ),
             ("SKYLENS_DEMO_MIN_SECONDS", "0.02".to_string()),
             ("SKYLENS_DEMO_MAX_SECONDS", "0.1".to_string()),
         ]);
@@ -701,7 +791,13 @@ mod tests {
         let addr = listener.local_addr().unwrap();
         let server = tokio::spawn(axum::serve(listener, router(state.clone())).into_future());
 
-        let (code, body) = http(addr, "POST", "/recon/jobs", r#"{"segment":0,"steps":1000,"anchorFrame":null,"sources":[]}"#).await;
+        let (code, body) = http(
+            addr,
+            "POST",
+            "/recon/jobs",
+            r#"{"segment":0,"steps":1000,"anchorFrame":null,"sources":[]}"#,
+        )
+        .await;
         assert_eq!(code, 200, "{body}");
         assert_eq!(body["queued"], 0);
         let job_id = body["jobId"].as_str().unwrap().to_string();
@@ -723,9 +819,20 @@ mod tests {
         assert_eq!(last["result"]["kind"], "recon-result");
         assert_eq!(last["result"]["url"], "/res/static/demo/seg0.ply");
         assert_eq!(last["result"]["bytes"], 10);
-        assert!(last["result"]["anchorFrame"].as_str().unwrap().starts_with("frame-"));
+        assert!(
+            last["result"]["anchorFrame"]
+                .as_str()
+                .unwrap()
+                .starts_with("frame-")
+        );
 
-        let (code, body) = http(addr, "POST", "/detect/jobs", r#"{"segment":2,"extra":true}"#).await;
+        let (code, body) = http(
+            addr,
+            "POST",
+            "/detect/jobs",
+            r#"{"segment":2,"extra":true}"#,
+        )
+        .await;
         assert_eq!(code, 422, "{body}");
 
         let (code, body) = http(addr, "GET", "/jobs/recon-unknown", "").await;
@@ -751,9 +858,14 @@ mod tests {
         let (_tmp, settings) = demo_settings();
         let state = AppState::new(Pipeline::new(settings, LiveEngine::Disabled));
         state.registry.start();
-        let svc = ModelGrpc { state: state.clone() };
+        let svc = ModelGrpc {
+            state: state.clone(),
+        };
         let accepted = svc
-            .submit_detect(tonic::Request::new(pb::DetectJobRequest { segment: 0, sources: vec![] }))
+            .submit_detect(tonic::Request::new(pb::DetectJobRequest {
+                segment: 0,
+                sources: vec![],
+            }))
             .await
             .unwrap()
             .into_inner();
@@ -762,14 +874,18 @@ mod tests {
         assert!(state.registry.status(&accepted.job_id).is_some());
 
         let missing = svc
-            .get_job(tonic::Request::new(pb::GetJobRequest { job_id: "nope".into() }))
+            .get_job(tonic::Request::new(pb::GetJobRequest {
+                job_id: "nope".into(),
+            }))
             .await
             .unwrap_err();
         assert_eq!(missing.code(), tonic::Code::NotFound);
 
         // Demo mode has no live engine: the live RPCs say so.
         let sub = svc
-            .subscribe_chunks(tonic::Request::new(pb::SubscribeRequest { after_sequence: 0 }))
+            .subscribe_chunks(tonic::Request::new(pb::SubscribeRequest {
+                after_sequence: 0,
+            }))
             .await;
         assert_eq!(sub.err().map(|s| s.code()), Some(tonic::Code::Unavailable));
         state.registry.stop();

@@ -61,7 +61,11 @@ pub enum DatasetError {
     #[error("{0}")]
     ManualDownloadRequired(String),
     #[error("{dataset}: unknown split {split:?}; expected one of {expected:?}")]
-    InvalidSplit { dataset: String, split: String, expected: Vec<String> },
+    InvalidSplit {
+        dataset: String,
+        split: String,
+        expected: Vec<String>,
+    },
     #[error("{0}")]
     InvalidSample(String),
     #[error("could not read {kind}: {path}")]
@@ -183,7 +187,13 @@ pub fn manual_download_message(meta: &DatasetMeta, root: &Path) -> String {
     };
     let indent = |s: &str| s.trim().replace('\n', "\n  ");
     let mut out = String::new();
-    let _ = write!(out, "{}: data not found under {}\n\n{}\n", meta.name, root.display(), verdict);
+    let _ = write!(
+        out,
+        "{}: data not found under {}\n\n{}\n",
+        meta.name,
+        root.display(),
+        verdict
+    );
     if !meta.homepage.is_empty() {
         let _ = write!(out, "\n  Source: {}\n", meta.homepage);
     }
@@ -197,7 +207,11 @@ pub fn manual_download_message(meta: &DatasetMeta, root: &Path) -> String {
             indent(meta.expected_layout)
         );
     }
-    let _ = write!(out, "\n  Then re-run with root={:?}.", root.display().to_string());
+    let _ = write!(
+        out,
+        "\n  Then re-run with root={:?}.",
+        root.display().to_string()
+    );
     out
 }
 
@@ -219,7 +233,9 @@ pub fn ensure_exists(meta: &DatasetMeta, root: &Path, exists: bool) -> Result<()
     if exists {
         Ok(())
     } else {
-        Err(DatasetError::ManualDownloadRequired(manual_download_message(meta, root)))
+        Err(DatasetError::ManualDownloadRequired(
+            manual_download_message(meta, root),
+        ))
     }
 }
 
@@ -280,11 +296,20 @@ pub struct Raster<T> {
 
 impl<T: Copy + Default> Raster<T> {
     pub fn new(h: usize, w: usize, c: usize) -> Self {
-        Raster { h, w, c, data: vec![T::default(); h * w * c] }
+        Raster {
+            h,
+            w,
+            c,
+            data: vec![T::default(); h * w * c],
+        }
     }
 
     pub fn from_vec(h: usize, w: usize, c: usize, data: Vec<T>) -> Self {
-        assert_eq!(data.len(), h * w * c, "raster buffer does not match its shape");
+        assert_eq!(
+            data.len(),
+            h * w * c,
+            "raster buffer does not match its shape"
+        );
         Raster { h, w, c, data }
     }
 
@@ -337,7 +362,10 @@ pub fn to_vec_u8(t: &Tensor) -> Vec<u8> {
 
 /// Reads `(N, 4)` boxes back into arrays.
 pub fn boxes_from_tensor(t: &Tensor) -> Vec<[f32; 4]> {
-    to_vec_f32(t).chunks_exact(4).map(|c| [c[0], c[1], c[2], c[3]]).collect()
+    to_vec_f32(t)
+        .chunks_exact(4)
+        .map(|c| [c[0], c[1], c[2], c[3]])
+        .collect()
 }
 
 // --------------------------------------------------------------------------- //
@@ -367,12 +395,17 @@ pub fn list_dir(dir: &Path) -> Vec<PathBuf> {
 
 /// Sorted direct children of `dir` with one of the image extensions.
 pub fn list_images(dir: &Path, exts: &[&str]) -> Vec<PathBuf> {
-    list_dir(dir).into_iter().filter(|p| has_ext(p, exts)).collect()
+    list_dir(dir)
+        .into_iter()
+        .filter(|p| has_ext(p, exts))
+        .collect()
 }
 
 /// `dir.iterdir()` has any entry at all.
 pub fn dir_has_entries(dir: &Path) -> bool {
-    std::fs::read_dir(dir).map(|mut rd| rd.next().is_some()).unwrap_or(false)
+    std::fs::read_dir(dir)
+        .map(|mut rd| rd.next().is_some())
+        .unwrap_or(false)
 }
 
 /// Recursive file walk (`Path.rglob("*")` restricted to files), sorted.
@@ -394,11 +427,15 @@ pub fn walk_files(dir: &Path) -> Vec<PathBuf> {
 
 /// First existing file `dir/<stem><ext>` over `exts`.
 pub fn find_with_stem(dir: &Path, stem: &str, exts: &[&str]) -> Option<PathBuf> {
-    exts.iter().map(|e| dir.join(format!("{stem}{e}"))).find(|p| p.is_file())
+    exts.iter()
+        .map(|e| dir.join(format!("{stem}{e}")))
+        .find(|p| p.is_file())
 }
 
 pub fn file_stem(path: &Path) -> String {
-    path.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default()
+    path.file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default()
 }
 
 // --------------------------------------------------------------------------- //
@@ -407,10 +444,15 @@ pub fn file_stem(path: &Path) -> String {
 
 fn open_image(path: &Path, kind: &'static str) -> Result<DynamicImage> {
     if !path.is_file() {
-        return Err(DatasetError::Unreadable { kind, path: path.display().to_string() });
+        return Err(DatasetError::Unreadable {
+            kind,
+            path: path.display().to_string(),
+        });
     }
-    image::open(path)
-        .map_err(|_| DatasetError::Unreadable { kind, path: path.display().to_string() })
+    image::open(path).map_err(|_| DatasetError::Unreadable {
+        kind,
+        path: path.display().to_string(),
+    })
 }
 
 /// Reads an 8-bit RGB image as an `(H, W, 3)` raster.
@@ -436,12 +478,15 @@ pub fn read_mask_raster(path: &Path) -> Result<Raster<u8>> {
         DynamicImage::ImageLuma8(b) => b.into_raw(),
         DynamicImage::ImageLumaA8(b) => b.into_raw().chunks_exact(2).map(|p| p[0]).collect(),
         DynamicImage::ImageLuma16(b) => b.into_raw().into_iter().map(|v| v as u8).collect(),
-        DynamicImage::ImageLumaA16(b) => {
-            b.into_raw().chunks_exact(2).map(|p| p[0] as u8).collect()
-        }
+        DynamicImage::ImageLumaA16(b) => b.into_raw().chunks_exact(2).map(|p| p[0] as u8).collect(),
         DynamicImage::ImageRgb16(b) => b.into_raw().chunks_exact(3).map(|p| p[2] as u8).collect(),
         DynamicImage::ImageRgba16(b) => b.into_raw().chunks_exact(4).map(|p| p[2] as u8).collect(),
-        other => other.to_rgb8().into_raw().chunks_exact(3).map(|p| p[2]).collect(),
+        other => other
+            .to_rgb8()
+            .into_raw()
+            .chunks_exact(3)
+            .map(|p| p[2])
+            .collect(),
     };
     Ok(Raster::from_vec(h, w, 1, data))
 }
@@ -462,13 +507,17 @@ pub fn read_thermal_raster(path: &Path) -> Result<Raster<f32>> {
     let (w, h) = (img.width() as usize, img.height() as usize);
     let data: Vec<f32> = match img {
         DynamicImage::ImageLuma8(b) => b.into_raw().into_iter().map(f32::from).collect(),
-        DynamicImage::ImageLumaA8(b) => {
-            b.into_raw().chunks_exact(2).map(|p| f32::from(p[0])).collect()
-        }
+        DynamicImage::ImageLumaA8(b) => b
+            .into_raw()
+            .chunks_exact(2)
+            .map(|p| f32::from(p[0]))
+            .collect(),
         DynamicImage::ImageLuma16(b) => b.into_raw().into_iter().map(f32::from).collect(),
-        DynamicImage::ImageLumaA16(b) => {
-            b.into_raw().chunks_exact(2).map(|p| f32::from(p[0])).collect()
-        }
+        DynamicImage::ImageLumaA16(b) => b
+            .into_raw()
+            .chunks_exact(2)
+            .map(|p| f32::from(p[0]))
+            .collect(),
         DynamicImage::ImageRgb16(b) => b
             .into_raw()
             .chunks_exact(3)
@@ -479,12 +528,16 @@ pub fn read_thermal_raster(path: &Path) -> Result<Raster<f32>> {
             .chunks_exact(4)
             .map(|p| (f32::from(p[0]) + f32::from(p[1]) + f32::from(p[2])) / 3.0)
             .collect(),
-        DynamicImage::ImageRgb32F(b) => {
-            b.into_raw().chunks_exact(3).map(|p| (p[0] + p[1] + p[2]) / 3.0).collect()
-        }
-        DynamicImage::ImageRgba32F(b) => {
-            b.into_raw().chunks_exact(4).map(|p| (p[0] + p[1] + p[2]) / 3.0).collect()
-        }
+        DynamicImage::ImageRgb32F(b) => b
+            .into_raw()
+            .chunks_exact(3)
+            .map(|p| (p[0] + p[1] + p[2]) / 3.0)
+            .collect(),
+        DynamicImage::ImageRgba32F(b) => b
+            .into_raw()
+            .chunks_exact(4)
+            .map(|p| (p[0] + p[1] + p[2]) / 3.0)
+            .collect(),
         other => other
             .to_rgb8()
             .into_raw()
@@ -499,14 +552,17 @@ pub fn read_thermal_raster(path: &Path) -> Result<Raster<f32>> {
 ///
 /// The thermal plane is min-max normalised into `[0.1, 1.0]` (README §2.3), reserving exactly
 /// `0.0` for "no thermal". RGB is scaled to `[0, 1]`.
-pub fn stack_rgb_thermal(rgb: Option<&Raster<u8>>, thermal: Option<&Raster<f32>>) -> Result<Raster<f32>> {
+pub fn stack_rgb_thermal(
+    rgb: Option<&Raster<u8>>,
+    thermal: Option<&Raster<f32>>,
+) -> Result<Raster<f32>> {
     let (h, w) = match (rgb, thermal) {
         (Some(r), _) => (r.h, r.w),
         (None, Some(t)) => (t.h, t.w),
         (None, None) => {
             return Err(DatasetError::InvalidSample(
                 "at least one of rgb/thermal must be provided".into(),
-            ))
+            ));
         }
     };
     let c = rgb.map_or(0, |_| 3) + thermal.map_or(0, |_| 1);
@@ -628,7 +684,12 @@ pub fn resize_area_f32(src: &Raster<f32>, nh: usize, nw: usize) -> Raster<f32> {
 }
 
 pub fn u8_to_f32(r: &Raster<u8>) -> Raster<f32> {
-    Raster::from_vec(r.h, r.w, r.c, r.data.iter().map(|&v| f32::from(v)).collect())
+    Raster::from_vec(
+        r.h,
+        r.w,
+        r.c,
+        r.data.iter().map(|&v| f32::from(v)).collect(),
+    )
 }
 
 pub fn f32_to_u8(r: &Raster<f32>) -> Raster<u8> {
@@ -636,7 +697,10 @@ pub fn f32_to_u8(r: &Raster<f32>) -> Raster<u8> {
         r.h,
         r.w,
         r.c,
-        r.data.iter().map(|&v| v.round().clamp(0.0, 255.0) as u8).collect(),
+        r.data
+            .iter()
+            .map(|&v| v.round().clamp(0.0, 255.0) as u8)
+            .collect(),
     )
 }
 
@@ -721,7 +785,10 @@ mod tests {
     #[test]
     fn split_verification() {
         assert!(verify_split(&META, "train").is_ok());
-        assert!(matches!(verify_split(&META, "test"), Err(DatasetError::InvalidSplit { .. })));
+        assert!(matches!(
+            verify_split(&META, "test"),
+            Err(DatasetError::InvalidSplit { .. })
+        ));
     }
 
     #[test]

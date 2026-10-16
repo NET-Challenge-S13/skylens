@@ -98,9 +98,25 @@ KOREN은 등록 IP 외 인바운드를 막고, 브리지 → 대전은 SSH 하�
 연산 서버. **REST 엔드포인트는 `app.py`와 같다**(§7). 같은 잡 API를 gRPC `ModelService`로도 열고, 코어는 gRPC로 붙는다. 라이브 입력(`PushFrames`)과 증분 출력(`SubscribeChunks`)은 gRPC 스트림에만 있다. 계약은 `src/shared/proto/skylens/model/v1/model.proto`. 내부는 세 층이다.
 
 1. **라이브 점군(cumulus3d).** `CompositionHost`에 `ReconNode`를 하나 띄워 두고, 코어가 넘긴 프레임 묶음을 `LiveFrameSet`으로 선언해 `compose`한다. 이미 받은 묶음의 재선언은 무시되고, 빠진 카메라가 있는 묶음은 기다린다. 구간(zone)마다 미리보기 점군이 먼저 나오고 정제본이 뒤따른다.
-   라이브 점 표시는 구간 점군 덩어리가 아니라 **점 단위 델타**(`POINTS_DELTA` 청크)로 나간다. cumulus3d가 합성한 표시 점군의 변화(추가·이동·삭제, 슬롯 id)를 앵커 기준 ENU로 실어 보내고, 모델 쪽 거울이 N개마다 스냅샷(세대 +1)을 만든다. `SKYLENS_POINTS_MODE`(`delta` 기본 · `segment` · `both`), `SKYLENS_DISPLAY_STRIDE`(기본 2: 옛 구간 청크 밀도의 절반, 근거는 `src/skylens_model/README.md`), `SKYLENS_DELTA_SNAPSHOT_EVERY`(기본 128, 0 = 안 만듦). 메시와 탐지는 모드와 무관하게 구간 점군에서 만든다.
+   라이브 점 표시는 구간 점군 덩어리가 아니라 **점 단위 델타**(`POINTS_DELTA` 청크)로 나간다. cumulus3d가 합성한 표시 점군의 변화(추가·이동·삭제, 슬롯 id)를 앵커 기준 ENU로 실어 보내고, 모델 쪽 거울이 N개마다 스냅샷(세대 +1)을 만든다. `SKYLENS_POINTS_MODE`(`delta` 기본 · `segment` · `both`), `SKYLENS_DISPLAY_STRIDE`(기본 6: V100 라이브 실행의 `--live-stride 6`과 같다), `SKYLENS_DELTA_SNAPSHOT_EVERY`(기본 128, 0 = 안 만듦). 탐지 융합은 모드와 무관하게 구간 점군에서 하고, 메시는 `segment` 모드에서만 구간 점군으로, `delta`·`both`에서는 합성된 표시(바뀐 구간의 거울 점을 Preview로 다시 넣음)에서 만들어 겹친 구간이 고스트 면을 만들지 않게 한다.
+   **복원 설정은 V100 라이브 실행(`cumulus3d stream`)과 같다.**
+
+   | 설정 | V100 플래그 → 0.6.0 빌더 | 값 |
+   |---|---|---|
+   | 안정 표시 + 고정 ENU 원점 | `--stable-display` → `.stable_display(true).fixed_enu_origin(true)` | 켬 |
+   | 증분 삼각측량 | `--incremental-triangulation` → `.incremental_triangulation(true)` | 켬 |
+   | 조밀화 | fast, `--max-levels 1` → `Dense::profile("fast").max_levels(1)` | fast, 1단 |
+   | 가시성 필터 | `--visibility-views 8` → `fusion.visibility_views` | 8뷰 |
+   | 융합 평활 | `--fusion-smooth-{iters,radius,normal}` → `.fusion_smooth_*` | 2회 · 1.5 GSD · 15도 |
+   | 표시 솎기 | `--live-stride` → `LiveOptions.stride` | 6 |
+   | 구역 | `--span 12 --overlap 2` → `.zones(12, 2)` | 12 / 2 위치 |
+   | 정착 | `--settle-tol/--settle-max-zone` → `Plan.sparse.*` | 0.01 / 3 |
+   | 시드 | `--seed 1` → `.seed(1)` | 1 |
+   | 내부값 사전값 | `--intrinsics-prior` | 0.6.0 `ReconNode`에서 표현 불가(파일 기반 `Recon` 빌더 전용) |
+
+   세부와 근거는 `src/skylens_model/README.md`의 "복원 설정".
 2. **UNet 훅.** 같은 노드에 `on_frame` 훅으로 UNet을 붙인다. 훅은 위치 계산 전에 디코딩된 RGB 프레임을 받아 별도 큐에서 돌므로 복원을 막지 않는다. 프레임마다 나온 위험구역 확률과 사람 점은 등록된 카메라 포즈로 점군에 투영하고, **여러 프레임의 결과를 confidence 가중으로 보간**해 최종 지도 좌표(GPS 기준 ENU)에 정렬한다.
-3. **메시 보정(deltamesh).** 구간 점군을 `ingest(segment, Preview|Refined, points)`로 넣고 `extract()`가 돌려준 **바뀐 블록만** 내보낸다. 정제본은 같은 구간의 미리보기를 정확히 대체한다. 블록마다 `version`이 있어 클라이언트는 더 새 버전만 받으면 된다.
+3. **메시 보정(deltamesh).** `segment` 모드에서는 구간 점군을, `delta`·`both`에서는 합성 표시의 구간별 점을 `ingest(segment, Preview, points)`로 넣고(Refined는 `segment` 모드의 구간 이벤트에서만) `extract()`가 돌려준 **바뀐 블록만** 내보낸다. 정제본은 같은 구간의 미리보기를 정확히 대체한다. 블록마다 `version`이 있어 클라이언트는 더 새 버전만 받으면 된다.
 
 UNet 쪽 규칙:
 

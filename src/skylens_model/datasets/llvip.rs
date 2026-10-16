@@ -13,10 +13,10 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use super::base::{
-    boxes_tensor, ensure_exists, file_stem, finish_sample, find_with_stem, list_images,
+    Availability, DatasetError, DatasetMeta, IMG_EXT, Result, Sample, SkyLensDataset, Transform,
+    boxes_tensor, ensure_exists, file_stem, find_with_stem, finish_sample, list_images,
     read_rgb_raster, read_thermal_raster, resize_bilinear, resolve_root, stack_rgb_thermal,
-    tensor_f32, tensor_u8, verify_split, Availability, DatasetError, DatasetMeta, Result, Sample,
-    SkyLensDataset, Transform, IMG_EXT,
+    tensor_f32, tensor_u8, verify_split,
 };
 
 pub const HF_REPO_ID: &str = "jsonhash/LLVIP";
@@ -52,7 +52,9 @@ pub fn parse_voc_person_boxes(xml: &str, names: &HashSet<&str>) -> Vec<[f32; 4]>
     let mut rest = xml;
     while let Some(i) = rest.find("<object>") {
         let after = &rest[i + "<object>".len()..];
-        let Some(j) = after.find("</object>") else { break };
+        let Some(j) = after.find("</object>") else {
+            break;
+        };
         let obj = &after[..j];
         rest = &after[j + "</object>".len()..];
 
@@ -60,7 +62,9 @@ pub fn parse_voc_person_boxes(xml: &str, names: &HashSet<&str>) -> Vec<[f32; 4]>
         if !names.is_empty() && !names.contains(name.as_str()) {
             continue;
         }
-        let Some(bb) = tag_text(obj, "bndbox") else { continue };
+        let Some(bb) = tag_text(obj, "bndbox") else {
+            continue;
+        };
         let coord = |t: &str| tag_text(bb, t).and_then(|v| v.parse::<f32>().ok());
         let (Some(x1), Some(y1), Some(x2), Some(y2)) =
             (coord("xmin"), coord("ymin"), coord("xmax"), coord("ymax"))
@@ -149,7 +153,13 @@ impl LLVIP {
             }
             index.push((vis_path, ir_path, ann.join(format!("{stem}.xml"))));
         }
-        Ok(LLVIP { root, split, modality, transforms, index })
+        Ok(LLVIP {
+            root,
+            split,
+            modality,
+            transforms,
+            index,
+        })
     }
 
     fn dirs(root: &Path, split: &str) -> (PathBuf, PathBuf, PathBuf) {
@@ -168,15 +178,22 @@ impl SkyLensDataset for LLVIP {
 
     fn get(&self, idx: usize) -> Result<Sample> {
         let (vis_path, ir_path, ann_path) = &self.index[idx];
-        let missing = |what: &'static str| DatasetError::Unreadable { kind: what, path: String::new() };
+        let missing = |what: &'static str| DatasetError::Unreadable {
+            kind: what,
+            path: String::new(),
+        };
 
         let rgb = if self.modality.needs_vis() {
-            Some(read_rgb_raster(vis_path.as_ref().ok_or_else(|| missing("image"))?)?)
+            Some(read_rgb_raster(
+                vis_path.as_ref().ok_or_else(|| missing("image"))?,
+            )?)
         } else {
             None
         };
         let mut thermal = if self.modality.needs_ir() {
-            Some(read_thermal_raster(ir_path.as_ref().ok_or_else(|| missing("thermal frame"))?)?)
+            Some(read_thermal_raster(
+                ir_path.as_ref().ok_or_else(|| missing("thermal frame"))?,
+            )?)
         } else {
             None
         };

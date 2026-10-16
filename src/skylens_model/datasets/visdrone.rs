@@ -18,14 +18,24 @@ use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use super::base::{
+    Availability, DatasetError, DatasetMeta, IMG_EXT, Result, Sample, SkyLensDataset, Transform,
     boxes_tensor, dir_has_entries, ensure_exists, file_stem, finish_sample, list_images,
-    read_rgb_raster, resolve_root, tensor_u8, verify_split, Availability, DatasetError,
-    DatasetMeta, Result, Sample, SkyLensDataset, Transform, IMG_EXT,
+    read_rgb_raster, resolve_root, tensor_u8, verify_split,
 };
 
 pub const VISDRONE_CATEGORIES: [&str; 12] = [
-    "ignored", "pedestrian", "people", "bicycle", "car", "van", "truck", "tricycle",
-    "awning-tricycle", "bus", "motor", "others",
+    "ignored",
+    "pedestrian",
+    "people",
+    "bicycle",
+    "car",
+    "van",
+    "truck",
+    "tricycle",
+    "awning-tricycle",
+    "bus",
+    "motor",
+    "others",
 ];
 
 /// Categories folded into the single SkyLens `person` class.
@@ -51,18 +61,18 @@ const FIFTYONE_MANIFEST: &str = "samples.json";
 const FIFTYONE_PERSON_LABELS: [&str; 2] = ["pedestrians", "people"];
 
 /// Parses a VisDrone annotation text into xyxy pixel boxes.
-pub fn parse_visdrone_annotation(
-    text: &str,
-    keep: &[i64],
-    drop_ignored: bool,
-) -> Vec<[f32; 4]> {
+pub fn parse_visdrone_annotation(text: &str, keep: &[i64], drop_ignored: bool) -> Vec<[f32; 4]> {
     let mut boxes = Vec::new();
     for line in text.lines() {
-        let parts: Vec<&str> = line.split([',', ' ', '\t']).filter(|p| !p.is_empty()).collect();
+        let parts: Vec<&str> = line
+            .split([',', ' ', '\t'])
+            .filter(|p| !p.is_empty())
+            .collect();
         if parts.len() < 6 {
             continue;
         }
-        let geom: std::result::Result<Vec<f32>, _> = parts[..4].iter().map(|v| v.parse::<f32>()).collect();
+        let geom: std::result::Result<Vec<f32>, _> =
+            parts[..4].iter().map(|v| v.parse::<f32>()).collect();
         let (Ok(geom), Ok(score), Ok(category)) =
             (geom, parts[4].parse::<f64>(), parts[5].parse::<f64>())
         else {
@@ -86,7 +96,9 @@ pub fn parse_visdrone_annotation(
 /// Reads a VisDrone `.txt` annotation file. A missing file gives no boxes.
 pub fn read_visdrone_annotation(path: &Path, keep: &[i64], drop_ignored: bool) -> Vec<[f32; 4]> {
     match std::fs::read(path) {
-        Ok(bytes) => parse_visdrone_annotation(&String::from_utf8_lossy(&bytes), keep, drop_ignored),
+        Ok(bytes) => {
+            parse_visdrone_annotation(&String::from_utf8_lossy(&bytes), keep, drop_ignored)
+        }
         Err(_) => Vec::new(),
     }
 }
@@ -125,14 +137,23 @@ impl VisDronePerson {
                 })
                 .collect(),
         };
-        Ok(VisDronePerson { root, split, transforms, index })
+        Ok(VisDronePerson {
+            root,
+            split,
+            transforms,
+            index,
+        })
     }
 
     fn split_dirs(split: &str) -> &'static [&'static str] {
         match split {
             "train" => &["VisDrone2019-DET-train", "train"],
             "val" => &["VisDrone2019-DET-val", "val"],
-            _ => &["VisDrone2019-DET-test-dev", "VisDrone2019-DET-test-challenge", "test"],
+            _ => &[
+                "VisDrone2019-DET-test-dev",
+                "VisDrone2019-DET-test-challenge",
+                "test",
+            ],
         }
     }
 
@@ -158,12 +179,18 @@ impl VisDronePerson {
     ///
     /// `bounding_box` is `[x, y, w, h]` normalised from the top-left corner, so it is scaled by
     /// the sample metadata's width/height. The split is selected by the sample `tags`.
-    fn build_index_fiftyone(root: &Path, manifest: &Path, split: &str) -> Result<Vec<(PathBuf, Ann)>> {
+    fn build_index_fiftyone(
+        root: &Path,
+        manifest: &Path,
+        split: &str,
+    ) -> Result<Vec<(PathBuf, Ann)>> {
         let doc: serde_json::Value = serde_json::from_slice(&std::fs::read(manifest)?)?;
         let samples = doc
             .get("samples")
             .and_then(|s| s.as_array())
-            .ok_or_else(|| DatasetError::InvalidSample("samples.json has no `samples` array".into()))?;
+            .ok_or_else(|| {
+                DatasetError::InvalidSample("samples.json has no `samples` array".into())
+            })?;
         let person: HashSet<&str> = FIFTYONE_PERSON_LABELS.into_iter().collect();
 
         let mut records = Vec::new();
@@ -247,8 +274,14 @@ mod tests {
     #[test]
     fn ignored_regions_are_dropped() {
         let text = "0,0,10,10,0,1,0,0\n0,0,10,10,1,1,0,0\n";
-        assert_eq!(parse_visdrone_annotation(text, &VISDRONE_PERSON_IDS, true).len(), 1);
-        assert_eq!(parse_visdrone_annotation(text, &VISDRONE_PERSON_IDS, false).len(), 2);
+        assert_eq!(
+            parse_visdrone_annotation(text, &VISDRONE_PERSON_IDS, true).len(),
+            1
+        );
+        assert_eq!(
+            parse_visdrone_annotation(text, &VISDRONE_PERSON_IDS, false).len(),
+            2
+        );
     }
 
     #[test]

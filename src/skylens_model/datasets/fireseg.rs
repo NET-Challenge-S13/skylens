@@ -13,9 +13,9 @@
 use std::path::{Path, PathBuf};
 
 use super::base::{
-    ensure_exists, finish_sample, list_images, mask_tensor, read_rgb_raster, resolve_root,
-    tensor_u8, verify_split, Availability, DangerClass, DatasetMeta, Raster, Result, Sample,
-    SkyLensDataset, Transform, IMG_EXT,
+    Availability, DangerClass, DatasetMeta, IMG_EXT, Raster, Result, Sample, SkyLensDataset,
+    Transform, ensure_exists, finish_sample, list_images, mask_tensor, read_rgb_raster,
+    resolve_root, tensor_u8, verify_split,
 };
 
 pub const HF_REPO_ID: &str = "sreeharivp23/fire-segmentation-dataset";
@@ -91,7 +91,12 @@ pub fn fill_polygon(mask: &mut Raster<u8>, pts: &[(i32, i32)], value: u8) {
         return;
     }
     let ymin = pts.iter().map(|p| p.1).min().unwrap().max(0);
-    let ymax = pts.iter().map(|p| p.1).max().unwrap().min(mask.h as i32 - 1);
+    let ymax = pts
+        .iter()
+        .map(|p| p.1)
+        .max()
+        .unwrap()
+        .min(mask.h as i32 - 1);
     for y in ymin..=ymax {
         let mut xs: Vec<f64> = Vec::new();
         for i in 0..pts.len() {
@@ -125,7 +130,12 @@ pub fn rasterize_fire_mask(polys: &[Vec<(f32, f32)>], h: usize, w: usize) -> Ras
         // np.round is round-half-to-even
         let pts: Vec<(i32, i32)> = poly
             .iter()
-            .map(|&(x, y)| ((x * w as f32).round_ties_even() as i32, (y * h as f32).round_ties_even() as i32))
+            .map(|&(x, y)| {
+                (
+                    (x * w as f32).round_ties_even() as i32,
+                    (y * h as f32).round_ties_even() as i32,
+                )
+            })
             .collect();
         fill_polygon(&mut mask, &pts, DangerClass::FIRE);
     }
@@ -144,7 +154,10 @@ impl FireSegmentation {
     pub fn new(root: impl AsRef<Path>, split: &str, transforms: Option<Transform>) -> Result<Self> {
         let split = verify_split(&FIRESEG_META, split)?;
         let root = resolve_root(root);
-        let (img_dir, lab_dir) = (root.join("images").join(&split), root.join("labels").join(&split));
+        let (img_dir, lab_dir) = (
+            root.join("images").join(&split),
+            root.join("labels").join(&split),
+        );
         let exists = img_dir.is_dir() && !list_images(&img_dir, &IMG_EXT).is_empty();
         ensure_exists(&FIRESEG_META, &root, exists)?;
         let index = list_images(&img_dir, &IMG_EXT)
@@ -154,7 +167,12 @@ impl FireSegmentation {
                 (p, lab_dir.join(format!("{stem}.txt")))
             })
             .collect();
-        Ok(FireSegmentation { root, split, transforms, index })
+        Ok(FireSegmentation {
+            root,
+            split,
+            transforms,
+            index,
+        })
     }
 }
 

@@ -17,7 +17,10 @@
 //! follows every delta; every `snapshot_every` deltas a snapshot chunk (the whole
 //! mirror, same `seq` as the last delta, generation + 1) starts a new generation,
 //! which the `ChunkLog` and the core store use to forget the older deltas. The
-//! zone clouds still feed meshing and detection fusion in every mode.
+//! zone clouds feed detection fusion in every mode; they feed meshing only in
+//! `Segment` mode. In `Delta`/`Both` the mesher is fed from the composed display
+//! (the mirror's points of every zone a delta touched, as a re-sent preview of
+//! that zone), so overlapping zones cannot put a second surface next to the first.
 //!
 //! Nothing on this side holds the node's lock, so reconstruction never waits on
 //! the UNet, the mesher or a subscriber.
@@ -33,8 +36,8 @@ use std::time::Duration;
 use cumulus3d_cli::compose::ReconNode;
 use cumulus3d_cli::events::{Event, Frame, ZoneRange};
 use cumulus3d_cli::live::{DeltaKind as LiveKind, DisplayDelta, DisplayFrame, DisplayMirror};
-use cumulus3d_core::io::ply::PointCloud;
 use cumulus3d_core::Reconstruction;
+use cumulus3d_core::io::ply::PointCloud;
 use deltamesh::Mesher;
 use skylens_shared::delta::{AddRec, MoveRec, pack_adds, pack_moves, pack_removes};
 use skylens_shared::geo::{GeoAnchor, Gps, gps_to_enu};
@@ -42,7 +45,9 @@ use skylens_shared::proto::model::v1::Level;
 use skylens_shared::proto::payload::v1::{DeltaKind, PointsDelta};
 
 use super::PointsMode;
-use super::chunks::{ChunkLog, detections_chunk, mesh_chunk, points_delivery, points_delta_delivery};
+use super::chunks::{
+    ChunkLog, detections_chunk, mesh_chunk, points_delivery, points_delta_delivery,
+};
 use super::fusion::{FrameObservation, Fuser};
 use super::recon::{positions_f64, zone_points, zone_views};
 use crate::detect::Detector;
@@ -128,13 +133,25 @@ fn spawn(name: &str, f: impl FnOnce() + Send + 'static) -> anyhow::Result<JoinHa
 }
 
 /// Runs the UNet on queued frames and hands the observations to the consumer.
-pub fn spawn_detector(queue: Arc<FrameQueue>, det: Arc<dyn Detector>, tx: Sender<Msg>) -> anyhow::Result<JoinHandle<()>> {
+pub fn spawn_detector(
+    queue: Arc<FrameQueue>,
+    det: Arc<dyn Detector>,
+    tx: Sender<Msg>,
+) -> anyhow::Result<JoinHandle<()>> {
     spawn("skylens-detect", move || {
         while let Some(f) = queue.pop() {
-            match catch_unwind(AssertUnwindSafe(|| det.detect(&f.rgb, None, f.width, f.height))) {
+            match catch_unwind(AssertUnwindSafe(|| {
+                det.detect(&f.rgb, None, f.width, f.height)
+            })) {
                 Ok(Ok(d)) => {
                     let obs = FrameObservation::from_detections(&d);
-                    if tx.send(Msg::Observation { name: f.name.clone(), obs }).is_err() {
+                    if tx
+                        .send(Msg::Observation {
+                            name: f.name.clone(),
+                            obs,
+                        })
+                        .is_err()
+                    {
                         return;
                     }
                 }
@@ -182,11 +199,14 @@ fn new_mesher(gpu: bool) -> Box<dyn Mesher> {
     #[cfg(feature = "gpu-mesh")]
     {
         if gpu {
-            let made = deltamesh::gpu::GpuCtx::shared()
-                .and_then(|ctx| deltamesh::gpu_mesher::GpuMesher::new(ctx, deltamesh::Config::default()));
+            let made = deltamesh::gpu::GpuCtx::shared().and_then(|ctx| {
+                deltamesh::gpu_mesher::GpuMesher::new(ctx, deltamesh::Config::default())
+            });
             match made {
                 Ok(m) => return Box::new(m),
-                Err(e) => tracing::warn!("deltamesh GPU mesher unavailable ({e}); using the CPU mesher"),
+                Err(e) => {
+                    tracing::warn!("deltamesh GPU mesher unavailable ({e}); using the CPU mesher")
+                }
             }
         }
     }
@@ -209,12 +229,18 @@ pub const ORIGIN_TOLERANCE_M: f64 = 0.01;
 /// the anchor by more than [`ORIGIN_TOLERANCE_M`], every add and move is
 /// translated by the ENU offset of the origin about the anchor. A frame without a
 /// known origin is taken as the anchor frame.
-pub fn align_delta(d: &DisplayDelta, frame: &DisplayFrame, anchor: GeoAnchor) -> Option<DisplayDelta> {
+pub fn align_delta(
+    d: &DisplayDelta,
+    frame: &DisplayFrame,
+    anchor: GeoAnchor,
+) -> Option<DisplayDelta> {
     if !frame.enu {
         return None;
     }
     let mut out = d.clone();
-    let Some([lat, lon, alt]) = frame.origin_gps else { return Some(out) };
+    let Some([lat, lon, alt]) = frame.origin_gps else {
+        return Some(out);
+    };
     let o = gps_to_enu(Gps { lat, lon, alt }, anchor);
     if (o.e * o.e + o.n * o.n + o.u * o.u).sqrt() <= ORIGIN_TOLERANCE_M {
         return Some(out);
@@ -291,7 +317,9 @@ impl Consumer {
                 let mut dirty = BTreeSet::new();
                 let mut next = Some(first);
                 while let Some(msg) = next.take().or_else(|| rx.try_recv().ok()) {
-                    let r = catch_unwind(AssertUnwindSafe(|| self.handle(msg, mesher.as_mut(), &mut dirty)));
+                    let r = catch_unwind(AssertUnwindSafe(|| {
+                        self.handle(msg, mesher.as_mut(), &mut dirty)
+                    }));
                     if r.is_err() {
                         tracing::error!("chunk consumer panicked on a message; continuing");
                     }
@@ -307,28 +335,55 @@ impl Consumer {
                 dirty.extend(self.fuser.add_observation(&name, obs));
             }
             Msg::Event(ev) => match ev {
-                Event::FrameIngested { position, images, .. } => {
+                Event::FrameIngested {
+                    position, images, ..
+                } => {
                     for im in images {
                         self.positions.insert(im, position);
                     }
-                    self.ingested = self.ingested.max(u32::try_from(position + 1).unwrap_or(u32::MAX));
+                    self.ingested = self
+                        .ingested
+                        .max(u32::try_from(position + 1).unwrap_or(u32::MAX));
                 }
-                Event::DisplayDelta { delta, zone, kind, t, frame, .. } => {
-                    self.display_delta(&delta, zone, kind, t, &frame);
+                Event::DisplayDelta {
+                    delta,
+                    zone,
+                    kind,
+                    t,
+                    frame,
+                    ..
+                } => {
+                    self.display_delta(&delta, zone, kind, t, &frame, mesher);
                 }
-                Event::FrameRegistered { position, image, .. } => {
+                Event::FrameRegistered {
+                    position, image, ..
+                } => {
                     // Poses here are in the chain frame, which is not ENU until a refined
                     // zone is adopted; projection uses the zone model's poses instead.
                     self.positions.entry(image).or_insert(position);
                 }
-                Event::ZonePreview { range, cloud, model, frame, .. } => {
+                Event::ZonePreview {
+                    range,
+                    cloud,
+                    model,
+                    frame,
+                    ..
+                } => {
                     if frame == "unaligned" {
-                        tracing::debug!("zone {} preview is not GPS-aligned yet; waiting for the refined zone", range.zone);
+                        tracing::debug!(
+                            "zone {} preview is not GPS-aligned yet; waiting for the refined zone",
+                            range.zone
+                        );
                         return;
                     }
                     self.zone(range, &cloud, &model, Level::Preview, mesher, dirty);
                 }
-                Event::ZoneRefined { range, cloud, model, .. } => {
+                Event::ZoneRefined {
+                    range,
+                    cloud,
+                    model,
+                    ..
+                } => {
                     self.zone(range, &cloud, &model, Level::Refined, mesher, dirty);
                 }
                 Event::Warning { message, .. } => tracing::warn!("recon: {message}"),
@@ -361,31 +416,61 @@ impl Consumer {
             0
         };
         if self.mode.segment() {
-            self.log.publish(points_delivery(seg, level, generation, &points));
+            self.log
+                .publish(points_delivery(seg, level, generation, &points));
         }
 
-        let dm_level = if level == Level::Refined { deltamesh::Level::Refined } else { deltamesh::Level::Preview };
-        let mpts: Vec<deltamesh::Point> =
-            points.iter().map(|p| deltamesh::Point { pos: p.pos, rgb: p.rgb, normal: p.normal }).collect();
-        match mesher.ingest(seg, dm_level, &mpts) {
-            Ok(_) => {
-                let changed = mesher.extract();
-                let blocks: Vec<_> =
-                    changed.iter().map(|id| mesh_chunk(seg, level, *id, mesher.version(id), mesher.mesh(id))).collect();
-                self.log.publish(blocks);
+        // Segment mode meshes each raw zone cloud. In Delta and Both modes the mesher is fed from the
+        // composed display instead (see `mesh_display`): zone clouds overlap and drift against each
+        // other, and meshing them would put a second, ghosted surface next to the display's one.
+        if self.mode == PointsMode::Segment {
+            let dm_level = if level == Level::Refined {
+                deltamesh::Level::Refined
+            } else {
+                deltamesh::Level::Preview
+            };
+            let mpts: Vec<deltamesh::Point> = points
+                .iter()
+                .map(|p| deltamesh::Point {
+                    pos: p.pos,
+                    rgb: p.rgb,
+                    normal: p.normal,
+                })
+                .collect();
+            match mesher.ingest(seg, dm_level, &mpts) {
+                Ok(_) => {
+                    let changed = mesher.extract();
+                    let blocks: Vec<_> = changed
+                        .iter()
+                        .map(|id| mesh_chunk(seg, level, *id, mesher.version(id), mesher.mesh(id)))
+                        .collect();
+                    self.log.publish(blocks);
+                }
+                Err(e) => tracing::warn!("deltamesh zone {seg}: {e}"),
             }
-            Err(e) => tracing::warn!("deltamesh zone {seg}: {e}"),
         }
 
         if self.detecting {
-            self.fuser.set_zone(seg, &positions_f64(&points), zone_views(model, range, &self.positions));
+            self.fuser.set_zone(
+                seg,
+                &positions_f64(&points),
+                zone_views(model, range, &self.positions),
+            );
             dirty.insert(seg);
         }
     }
 
     /// Publishes one cumulus3d display delta as a `POINTS_DELTA` chunk and, on
     /// the snapshot cadence, the snapshot that starts the next generation.
-    fn display_delta(&mut self, delta: &DisplayDelta, zone: usize, kind: LiveKind, t: f64, frame: &DisplayFrame) {
+    fn display_delta(
+        &mut self,
+        delta: &DisplayDelta,
+        zone: usize,
+        kind: LiveKind,
+        t: f64,
+        frame: &DisplayFrame,
+        mesher: &mut dyn Mesher,
+    ) {
         if !self.mode.delta() {
             return;
         }
@@ -394,20 +479,59 @@ impl Consumer {
             LiveKind::Replace => DeltaKind::Replace,
             LiveKind::Final => DeltaKind::Final,
             other => {
-                tracing::warn!("display delta {} of unknown kind {other:?} skipped", delta.seq);
+                tracing::warn!(
+                    "display delta {} of unknown kind {other:?} skipped",
+                    delta.seq
+                );
                 return;
             }
         };
         let Some(delta) = align_delta(delta, frame, self.anchor) else {
-            tracing::warn!("display delta {} skipped: its points are not in an ENU frame", delta.seq);
+            tracing::warn!(
+                "display delta {} skipped: its points are not in an ENU frame",
+                delta.seq
+            );
             return;
         };
+        // Zones whose display points change: those of the adds, of the moved points and of the
+        // removed ids. The last two are only known from the mirror before the delta.
+        let mut touched: BTreeSet<u8> = delta.adds.iter().map(|a| a.zone).collect();
+        let zone_of = |id: u32| {
+            self.mirror
+                .slots
+                .get(id as usize)
+                .copied()
+                .flatten()
+                .map(|p| p.zone)
+        };
+        touched.extend(delta.moves.iter().filter_map(|m| zone_of(m.id)));
+        touched.extend(delta.removes.iter().filter_map(|&id| zone_of(id)));
         if let Err(e) = self.mirror.apply(&delta) {
-            tracing::warn!("display delta {} does not fit the model mirror: {e}", delta.seq);
+            tracing::warn!(
+                "display delta {} does not fit the model mirror: {e}",
+                delta.seq
+            );
         }
-        let adds: Vec<AddRec> =
-            delta.adds.iter().map(|a| AddRec { id: a.id, xyz: a.xyz, rgb: a.rgb, zone: a.zone }).collect();
-        let moves: Vec<MoveRec> = delta.moves.iter().map(|m| MoveRec { id: m.id, xyz: m.xyz, rgb: m.rgb }).collect();
+        self.mesh_display(&touched, u32::try_from(zone).unwrap_or(u32::MAX), mesher);
+        let adds: Vec<AddRec> = delta
+            .adds
+            .iter()
+            .map(|a| AddRec {
+                id: a.id,
+                xyz: a.xyz,
+                rgb: a.rgb,
+                zone: a.zone,
+            })
+            .collect();
+        let moves: Vec<MoveRec> = delta
+            .moves
+            .iter()
+            .map(|m| MoveRec {
+                id: m.id,
+                xyz: m.xyz,
+                rgb: m.rgb,
+            })
+            .collect();
         let msg = PointsDelta {
             seq: u32::try_from(delta.seq).unwrap_or(u32::MAX),
             kind: kind as i32,
@@ -428,9 +552,52 @@ impl Consumer {
         if self.snapshot_every > 0 && self.deltas_since_snapshot >= self.snapshot_every {
             self.deltas_since_snapshot = 0;
             self.delta_generation += 1;
-            out.extend(points_delta_delivery(&self.snapshot(&msg), self.delta_generation));
+            out.extend(points_delta_delivery(
+                &self.snapshot(&msg),
+                self.delta_generation,
+            ));
         }
         self.log.publish(out);
+    }
+
+    /// Meshes the composed display: for each touched zone the mirror's points of that zone go to
+    /// the mesher as a (re-sent) preview of the segment, and the changed blocks are published with
+    /// preview semantics. A refined ingest is accepted once per segment, so it is never used here.
+    /// The display dedupes the overlap between zones, so the mesh is one surface.
+    fn mesh_display(&mut self, touched: &BTreeSet<u8>, seg: u32, mesher: &mut dyn Mesher) {
+        if touched.is_empty() {
+            return;
+        }
+        let mut by_zone: HashMap<u8, Vec<deltamesh::Point>> =
+            touched.iter().map(|z| (*z, Vec::new())).collect();
+        for (_, p) in self.mirror.points() {
+            if let Some(v) = by_zone.get_mut(&p.zone) {
+                v.push(deltamesh::Point {
+                    pos: p.xyz,
+                    rgb: p.rgb,
+                    normal: [0.0; 3],
+                });
+            }
+        }
+        for z in touched {
+            if let Err(e) = mesher.ingest(u32::from(*z), deltamesh::Level::Preview, &by_zone[z]) {
+                tracing::warn!("deltamesh display zone {z}: {e}");
+            }
+        }
+        let changed = mesher.extract();
+        let blocks: Vec<_> = changed
+            .iter()
+            .map(|id| {
+                mesh_chunk(
+                    seg,
+                    Level::Preview,
+                    *id,
+                    mesher.version(id),
+                    mesher.mesh(id),
+                )
+            })
+            .collect();
+        self.log.publish(blocks);
     }
 
     /// The whole mirror as a snapshot carrying the header of `last`.
@@ -438,11 +605,18 @@ impl Consumer {
         let adds: Vec<AddRec> = self
             .mirror
             .points()
-            .map(|(id, p)| AddRec { id, xyz: p.xyz, rgb: p.rgb, zone: p.zone })
+            .map(|(id, p)| AddRec {
+                id,
+                xyz: p.xyz,
+                rgb: p.rgb,
+                zone: p.zone,
+            })
             .collect();
         PointsDelta {
             snapshot: true,
-            capacity: last.capacity.max(u32::try_from(self.mirror.slots.len()).unwrap_or(u32::MAX)),
+            capacity: last
+                .capacity
+                .max(u32::try_from(self.mirror.slots.len()).unwrap_or(u32::MAX)),
             total_points: u32::try_from(adds.len()).unwrap_or(u32::MAX),
             adds: pack_adds(&adds),
             moves: Vec::new(),
@@ -471,7 +645,11 @@ mod tests {
     use skylens_shared::proto::model::v1::ChunkKind;
     use std::time::SystemTime;
 
-    const ANCHOR: GeoAnchor = skylens_shared::geo::Gps { lat: 36.3685, lon: 127.3475, alt: 30.0 };
+    const ANCHOR: GeoAnchor = skylens_shared::geo::Gps {
+        lat: 36.3685,
+        lon: 127.3475,
+        alt: 30.0,
+    };
 
     fn frame(i: usize) -> Arc<Frame> {
         Arc::new(Frame {
@@ -513,13 +691,33 @@ mod tests {
     }
 
     fn zone_event(refined: bool, frame: &str) -> Msg {
-        let meta = Meta { version: 1, at: SystemTime::now() };
-        let range = ZoneRange { zone: 2, lo: 20, hi: 34 };
+        let meta = Meta {
+            version: 1,
+            at: SystemTime::now(),
+        };
+        let range = ZoneRange {
+            zone: 2,
+            lo: 20,
+            hi: 34,
+        };
         let model = Arc::new(Reconstruction::new());
         Msg::Event(if refined {
-            Event::ZoneRefined { meta, range, cloud: patch(), model, dense: true }
+            Event::ZoneRefined {
+                meta,
+                range,
+                cloud: patch(),
+                model,
+                dense: true,
+            }
         } else {
-            Event::ZonePreview { meta, range, cloud: patch(), model, dense: true, frame: frame.into() }
+            Event::ZonePreview {
+                meta,
+                range,
+                cloud: patch(),
+                model,
+                dense: true,
+                frame: frame.into(),
+            }
         })
     }
 
@@ -531,20 +729,44 @@ mod tests {
         let mut dirty = BTreeSet::new();
 
         c.handle(zone_event(false, "unaligned"), mesher.as_mut(), &mut dirty);
-        assert_eq!(log.last_sequence(), 0, "unaligned previews are not published");
+        assert_eq!(
+            log.last_sequence(),
+            0,
+            "unaligned previews are not published"
+        );
 
         c.handle(zone_event(false, "gps"), mesher.as_mut(), &mut dirty);
         let all = log.since(0);
-        let points: Vec<_> = all.iter().filter(|x| x.kind == ChunkKind::Points as i32).collect();
-        let blocks: Vec<_> = all.iter().filter(|x| x.kind == ChunkKind::MeshBlock as i32).collect();
+        let points: Vec<_> = all
+            .iter()
+            .filter(|x| x.kind == ChunkKind::Points as i32)
+            .collect();
+        let blocks: Vec<_> = all
+            .iter()
+            .filter(|x| x.kind == ChunkKind::MeshBlock as i32)
+            .collect();
         assert!(!points.is_empty());
-        assert!(points.iter().all(|x| x.segment == 2 && x.level == Level::Preview as i32 && x.generation == 0));
-        assert!(!blocks.is_empty(), "the patch meshes into at least one block");
+        assert!(
+            points
+                .iter()
+                .all(|x| x.segment == 2 && x.level == Level::Preview as i32 && x.generation == 0)
+        );
+        assert!(
+            !blocks.is_empty(),
+            "the patch meshes into at least one block"
+        );
 
         c.handle(zone_event(true, ""), mesher.as_mut(), &mut dirty);
-        let points: Vec<_> =
-            log.since(0).iter().filter(|x| x.kind == ChunkKind::Points as i32).map(|x| (x.level, x.generation)).collect();
-        assert!(points.iter().all(|p| *p == (Level::Refined as i32, 1)), "{points:?}");
+        let points: Vec<_> = log
+            .since(0)
+            .iter()
+            .filter(|x| x.kind == ChunkKind::Points as i32)
+            .map(|x| (x.level, x.generation))
+            .collect();
+        assert!(
+            points.iter().all(|p| *p == (Level::Refined as i32, 1)),
+            "{points:?}"
+        );
         assert!(dirty.is_empty(), "no detector, no detection batches");
     }
 
@@ -554,7 +776,10 @@ mod tests {
     use skylens_shared::delta::{from_chunk, iter_adds, iter_moves, iter_removes};
     use skylens_shared::proto::model::v1::Chunk;
 
-    const ENU_FRAME: DisplayFrame = DisplayFrame { enu: true, origin_gps: Some([36.3685, 127.3475, 30.0]) };
+    const ENU_FRAME: DisplayFrame = DisplayFrame {
+        enu: true,
+        origin_gps: Some([36.3685, 127.3475, 30.0]),
+    };
 
     /// n points with unique keys; point i belongs to zone `i % 2`.
     fn keyed(n: usize, dz: f32) -> (PointCloud, Vec<usize>) {
@@ -569,13 +794,32 @@ mod tests {
         (c, z)
     }
 
-    fn delta_event(d: DisplayDelta, kind: LiveKind, zone: usize, t: f64, frame: DisplayFrame) -> Msg {
-        let meta = Meta { version: 1, at: SystemTime::now() };
-        Msg::Event(Event::DisplayDelta { meta, delta: Arc::new(d), zone, kind, t, frame })
+    fn delta_event(
+        d: DisplayDelta,
+        kind: LiveKind,
+        zone: usize,
+        t: f64,
+        frame: DisplayFrame,
+    ) -> Msg {
+        let meta = Meta {
+            version: 1,
+            at: SystemTime::now(),
+        };
+        Msg::Event(Event::DisplayDelta {
+            meta,
+            delta: Arc::new(d),
+            zone,
+            kind,
+            t,
+            frame,
+        })
     }
 
     fn deltas_of(log: &ChunkLog) -> Vec<Arc<Chunk>> {
-        log.since(0).into_iter().filter(|c| c.kind == ChunkKind::PointsDelta as i32).collect()
+        log.since(0)
+            .into_iter()
+            .filter(|c| c.kind == ChunkKind::PointsDelta as i32)
+            .collect()
     }
 
     /// Viewer-side reference applier over the wire records (the contract's rules).
@@ -616,13 +860,21 @@ mod tests {
     fn same_as_mirror(v: &Viewer, m: &DisplayMirror) {
         assert_eq!(v.slots.iter().flatten().count(), m.len());
         for (id, p) in m.points() {
-            assert_eq!(v.slots[id as usize], Some((p.xyz, p.rgb, p.zone)), "slot {id}");
+            assert_eq!(
+                v.slots[id as usize],
+                Some((p.xyz, p.rgb, p.zone)),
+                "slot {id}"
+            );
         }
     }
 
     fn consumer(mode: PointsMode, every: usize) -> (Arc<ChunkLog>, Consumer, Box<dyn Mesher>) {
         let log = ChunkLog::new();
-        (log.clone(), Consumer::new(log, ANCHOR, false, false).points(mode, every), new_mesher(false))
+        (
+            log.clone(),
+            Consumer::new(log, ANCHOR, false, false).points(mode, every),
+            new_mesher(false),
+        )
     }
 
     #[test]
@@ -636,28 +888,70 @@ mod tests {
         c2.positions[3][2] += 0.5; // a move
         c2.keys[7] = 999; // a remove + an add
         let (c3, z3) = keyed(10, 0.0);
-        c.handle(Msg::Event(Event::FrameIngested { meta: Meta { version: 1, at: SystemTime::now() }, position: 4, images: vec![] }), mesher.as_mut(), &mut dirty);
-        for (i, (cloud, zones, kind)) in
-            [(&c1, &z1, LiveKind::Refined), (&c2, &z2, LiveKind::Replace), (&c3, &z3, LiveKind::Replace)].into_iter().enumerate()
+        c.handle(
+            Msg::Event(Event::FrameIngested {
+                meta: Meta {
+                    version: 1,
+                    at: SystemTime::now(),
+                },
+                position: 4,
+                images: vec![],
+            }),
+            mesher.as_mut(),
+            &mut dirty,
+        );
+        for (i, (cloud, zones, kind)) in [
+            (&c1, &z1, LiveKind::Refined),
+            (&c2, &z2, LiveKind::Replace),
+            (&c3, &z3, LiveKind::Replace),
+        ]
+        .into_iter()
+        .enumerate()
         {
             let d = diff.apply(cloud, zones).unwrap();
             reference.apply(&d).unwrap();
-            c.handle(delta_event(d, kind, i, 1.5 + i as f64, ENU_FRAME), mesher.as_mut(), &mut dirty);
+            c.handle(
+                delta_event(d, kind, i, 1.5 + i as f64, ENU_FRAME),
+                mesher.as_mut(),
+                &mut dirty,
+            );
         }
         let fin = diff.unchanged();
         reference.apply(&fin).unwrap();
-        c.handle(delta_event(fin, LiveKind::Final, 2, 9.0, ENU_FRAME), mesher.as_mut(), &mut dirty);
+        c.handle(
+            delta_event(fin, LiveKind::Final, 2, 9.0, ENU_FRAME),
+            mesher.as_mut(),
+            &mut dirty,
+        );
 
         let chunks = deltas_of(&log);
         assert_eq!(chunks.len(), 4);
-        assert_eq!(log.since(0).len(), 4, "delta mode publishes nothing but deltas here");
+        assert_eq!(
+            log.since(0).len(),
+            4,
+            "delta mode publishes nothing but deltas here"
+        );
         for (i, ch) in chunks.iter().enumerate() {
-            assert_eq!((ch.segment, ch.level, ch.version, ch.generation), (i.min(2) as u32, Level::Refined as i32, i as u32 + 1, 0));
+            assert_eq!(
+                (ch.segment, ch.level, ch.version, ch.generation),
+                (i.min(2) as u32, Level::Refined as i32, i as u32 + 1, 0)
+            );
             assert!(ch.block_id.is_empty());
         }
         let first = from_chunk(&chunks[0]).unwrap();
-        assert_eq!((first.kind, first.t_s, first.positions, first.positions_total), (DeltaKind::Refined as i32, 1.5, 5, 0));
-        assert_eq!((first.capacity, first.total_points, first.snapshot), (10, 10, false));
+        assert_eq!(
+            (
+                first.kind,
+                first.t_s,
+                first.positions,
+                first.positions_total
+            ),
+            (DeltaKind::Refined as i32, 1.5, 5, 0)
+        );
+        assert_eq!(
+            (first.capacity, first.total_points, first.snapshot),
+            (10, 10, false)
+        );
         let last = from_chunk(&chunks[3]).unwrap();
         assert_eq!(last.kind, DeltaKind::Final as i32);
         assert!(last.adds.is_empty() && last.moves.is_empty() && last.removes.is_empty());
@@ -682,7 +976,11 @@ mod tests {
             let (cloud, zones) = keyed(10 + i, i as f32 * 0.1);
             let d = diff.apply(&cloud, &zones).unwrap();
             reference.apply(&d).unwrap();
-            c.handle(delta_event(d, LiveKind::Replace, 0, i as f64, ENU_FRAME), mesher.as_mut(), &mut dirty);
+            c.handle(
+                delta_event(d, LiveKind::Replace, 0, i as f64, ENU_FRAME),
+                mesher.as_mut(),
+                &mut dirty,
+            );
         }
         // Snapshots after deltas 3 and 6: the log keeps the last snapshot (gen 2) and delta 7 (gen 2).
         let kept = deltas_of(&log);
@@ -704,7 +1002,17 @@ mod tests {
         let mut diff = KeyedDiff::new();
         for i in 0..5 {
             let (cloud, zones) = keyed(4 + i, 0.0);
-            c.handle(delta_event(diff.apply(&cloud, &zones).unwrap(), LiveKind::Refined, 0, 0.0, ENU_FRAME), mesher.as_mut(), &mut dirty);
+            c.handle(
+                delta_event(
+                    diff.apply(&cloud, &zones).unwrap(),
+                    LiveKind::Refined,
+                    0,
+                    0.0,
+                    ENU_FRAME,
+                ),
+                mesher.as_mut(),
+                &mut dirty,
+            );
         }
         assert_eq!(deltas_of(&log).len(), 5);
         assert!(deltas_of(&log).iter().all(|ch| ch.generation == 0));
@@ -714,19 +1022,57 @@ mod tests {
     fn frame_alignment_translates_or_drops() {
         let (cloud, zones) = keyed(4, 0.0);
         let d = KeyedDiff::new().apply(&cloud, &zones).unwrap();
-        assert!(align_delta(&d, &DisplayFrame { enu: false, origin_gps: None }, ANCHOR).is_none());
+        assert!(
+            align_delta(
+                &d,
+                &DisplayFrame {
+                    enu: false,
+                    origin_gps: None
+                },
+                ANCHOR
+            )
+            .is_none()
+        );
         // Same origin (and a sub-centimetre offset): untouched.
         assert_eq!(align_delta(&d, &ENU_FRAME, ANCHOR).unwrap(), d);
-        let near = DisplayFrame { enu: true, origin_gps: Some([36.3685 + 5e-9, 127.3475, 30.0]) };
+        let near = DisplayFrame {
+            enu: true,
+            origin_gps: Some([36.3685 + 5e-9, 127.3475, 30.0]),
+        };
         assert_eq!(align_delta(&d, &near, ANCHOR).unwrap(), d);
-        assert_eq!(align_delta(&d, &DisplayFrame { enu: true, origin_gps: None }, ANCHOR).unwrap(), d);
+        assert_eq!(
+            align_delta(
+                &d,
+                &DisplayFrame {
+                    enu: true,
+                    origin_gps: None
+                },
+                ANCHOR
+            )
+            .unwrap(),
+            d
+        );
         // Origin 10 m up and ~111 m north of the anchor.
-        let origin = Gps { lat: 36.3685 + 0.001, lon: 127.3475, alt: 40.0 };
+        let origin = Gps {
+            lat: 36.3685 + 0.001,
+            lon: 127.3475,
+            alt: 40.0,
+        };
         let off = gps_to_enu(origin, ANCHOR);
-        assert!((off.n - 111.3).abs() < 0.5 && (off.u - 10.0).abs() < 1e-9, "{off:?}");
-        let far = DisplayFrame { enu: true, origin_gps: Some([origin.lat, origin.lon, origin.alt]) };
+        assert!(
+            (off.n - 111.3).abs() < 0.5 && (off.u - 10.0).abs() < 1e-9,
+            "{off:?}"
+        );
+        let far = DisplayFrame {
+            enu: true,
+            origin_gps: Some([origin.lat, origin.lon, origin.alt]),
+        };
         let mut with_move = d.clone();
-        with_move.moves.push(cumulus3d_cli::live::PointMove { id: 1, xyz: [1.0, 1.0, 1.0], rgb: [1, 2, 3] });
+        with_move.moves.push(cumulus3d_cli::live::PointMove {
+            id: 1,
+            xyz: [1.0, 1.0, 1.0],
+            rgb: [1, 2, 3],
+        });
         let t = align_delta(&with_move, &far, ANCHOR).unwrap();
         for (a, b) in t.adds.iter().zip(&with_move.adds) {
             assert!((a.xyz[0] - b.xyz[0] - off.e as f32).abs() < 1e-3);
@@ -739,30 +1085,210 @@ mod tests {
         // Through the consumer: not-ENU is skipped, a shifted origin is translated.
         let (log, mut c, mut mesher) = consumer(PointsMode::Delta, 0);
         let mut dirty = BTreeSet::new();
-        c.handle(delta_event(d.clone(), LiveKind::Refined, 0, 0.0, DisplayFrame { enu: false, origin_gps: None }), mesher.as_mut(), &mut dirty);
+        c.handle(
+            delta_event(
+                d.clone(),
+                LiveKind::Refined,
+                0,
+                0.0,
+                DisplayFrame {
+                    enu: false,
+                    origin_gps: None,
+                },
+            ),
+            mesher.as_mut(),
+            &mut dirty,
+        );
         assert!(deltas_of(&log).is_empty());
-        c.handle(delta_event(d.clone(), LiveKind::Refined, 0, 0.0, far), mesher.as_mut(), &mut dirty);
+        c.handle(
+            delta_event(d.clone(), LiveKind::Refined, 0, 0.0, far),
+            mesher.as_mut(),
+            &mut dirty,
+        );
         let got = from_chunk(&deltas_of(&log)[0]).unwrap();
         let first = iter_adds(&got.adds).unwrap().next().unwrap();
         assert!((first.xyz[1] - (2.0 + off.n as f32)).abs() < 1e-3);
     }
 
-    #[test]
-    fn modes_select_the_point_paths_and_meshing_always_runs() {
-        for (mode, want_segment, want_delta) in
-            [(PointsMode::Delta, false, true), (PointsMode::Segment, true, false), (PointsMode::Both, true, true)]
+    /// Flat patch of `nx` x 100 points every 5 cm from x = `x0` at height `z`, keys from `key0`, all in `zone`.
+    fn keyed_patch(x0: f32, nx: usize, z: f32, key0: u64, zone: usize) -> (PointCloud, Vec<usize>) {
+        let mut c = PointCloud::default();
+        for i in 0..nx {
+            for j in 0..100 {
+                c.positions.push([x0 + i as f32 * 0.05, j as f32 * 0.05, z]);
+                c.colors.push([180, 180, 180]);
+                c.keys.push(key0 + (i * 100 + j) as u64);
+            }
+        }
+        let n = c.positions.len();
+        (c, vec![zone; n])
+    }
+
+    /// Latest version of every mesh block in the log.
+    fn latest_blocks(log: &ChunkLog) -> HashMap<Vec<i32>, u32> {
+        let mut m: HashMap<Vec<i32>, u32> = HashMap::new();
+        for c in log
+            .since(0)
+            .iter()
+            .filter(|c| c.kind == ChunkKind::MeshBlock as i32)
         {
+            let v = m.entry(c.block_id.clone()).or_default();
+            *v = (*v).max(c.version);
+        }
+        m
+    }
+
+    fn mesh_count(log: &ChunkLog) -> usize {
+        log.since(0)
+            .iter()
+            .filter(|c| c.kind == ChunkKind::MeshBlock as i32)
+            .count()
+    }
+
+    #[test]
+    fn modes_select_the_point_and_mesh_paths() {
+        for (mode, want_segment, want_delta, mesh_from_zone, mesh_from_delta) in [
+            (PointsMode::Delta, false, true, false, true),
+            (PointsMode::Segment, true, false, true, false),
+            (PointsMode::Both, true, true, false, true),
+        ] {
             let (log, mut c, mut mesher) = consumer(mode, 0);
             let mut dirty = BTreeSet::new();
-            let (cloud, zones) = keyed(6, 0.0);
+            let (cloud, zones) = keyed_patch(0.0, 100, 0.0, 10, 2);
             let d = KeyedDiff::new().apply(&cloud, &zones).unwrap();
-            c.handle(delta_event(d, LiveKind::Refined, 2, 0.0, ENU_FRAME), mesher.as_mut(), &mut dirty);
+            c.handle(
+                delta_event(d, LiveKind::Refined, 2, 0.0, ENU_FRAME),
+                mesher.as_mut(),
+                &mut dirty,
+            );
+            let after_delta = mesh_count(&log);
+            assert_eq!(after_delta > 0, mesh_from_delta, "{mode:?} delta meshing");
             c.handle(zone_event(true, ""), mesher.as_mut(), &mut dirty);
             let all = log.since(0);
             let has = |k: ChunkKind| all.iter().any(|x| x.kind == k as i32);
             assert_eq!(has(ChunkKind::Points), want_segment, "{mode:?}");
             assert_eq!(has(ChunkKind::PointsDelta), want_delta, "{mode:?}");
-            assert!(has(ChunkKind::MeshBlock), "{mode:?} must still mesh the zone");
+            assert_eq!(
+                mesh_count(&log) > after_delta,
+                mesh_from_zone,
+                "{mode:?} zone meshing"
+            );
+            if mesh_from_delta {
+                // Display meshes are preview semantics and carry the delta's zone.
+                assert!(
+                    all.iter()
+                        .filter(|x| x.kind == ChunkKind::MeshBlock as i32)
+                        .all(|x| x.level == Level::Preview as i32 && x.segment == 2)
+                );
+            }
         }
+    }
+
+    #[test]
+    fn a_zone_event_alone_publishes_no_mesh_in_delta_mode() {
+        let (log, mut c, mut mesher) = consumer(PointsMode::Delta, 0);
+        let mut dirty = BTreeSet::new();
+        c.handle(zone_event(false, "gps"), mesher.as_mut(), &mut dirty);
+        c.handle(zone_event(true, ""), mesher.as_mut(), &mut dirty);
+        assert_eq!(log.last_sequence(), 0);
+    }
+
+    #[test]
+    fn a_replace_that_moves_points_remeshes_the_zones_blocks_with_a_higher_version() {
+        let (log, mut c, mut mesher) = consumer(PointsMode::Delta, 0);
+        let mut dirty = BTreeSet::new();
+        let mut diff = KeyedDiff::new();
+        let (p0, z0) = keyed_patch(0.0, 100, 0.0, 10, 0);
+        c.handle(
+            delta_event(
+                diff.apply(&p0, &z0).unwrap(),
+                LiveKind::Refined,
+                0,
+                0.0,
+                ENU_FRAME,
+            ),
+            mesher.as_mut(),
+            &mut dirty,
+        );
+        let before = latest_blocks(&log);
+        assert!(!before.is_empty());
+        // Same keys, every point 0.3 m higher: a move per point, no adds or removes.
+        let (p1, z1) = keyed_patch(0.0, 100, 0.3, 10, 0);
+        let d = diff.apply(&p1, &z1).unwrap();
+        assert!(d.adds.is_empty() && d.removes.is_empty() && !d.moves.is_empty());
+        c.handle(
+            delta_event(d, LiveKind::Replace, 0, 1.0, ENU_FRAME),
+            mesher.as_mut(),
+            &mut dirty,
+        );
+        let after = latest_blocks(&log);
+        let bumped = before
+            .iter()
+            .filter(|(id, v)| after.get(*id).is_some_and(|a| a > v))
+            .count();
+        assert!(
+            bumped > 0,
+            "blocks of the moved zone are extracted again with a higher version"
+        );
+    }
+
+    #[test]
+    fn two_zones_with_disjoint_display_points_mesh_as_one_surface() {
+        // Reference: one zone carrying the whole 10 m x 5 m patch.
+        let (log1, mut c1, mut m1) = consumer(PointsMode::Delta, 0);
+        let mut dirty = BTreeSet::new();
+        let (whole, zw) = keyed_patch(0.0, 200, 0.0, 10, 0);
+        c1.handle(
+            delta_event(
+                KeyedDiff::new().apply(&whole, &zw).unwrap(),
+                LiveKind::Refined,
+                0,
+                0.0,
+                ENU_FRAME,
+            ),
+            m1.as_mut(),
+            &mut dirty,
+        );
+        let one = latest_blocks(&log1).len();
+        assert!(one > 0);
+
+        // Two zones: the display dedupe leaves each point in exactly one zone, here the left and right halves.
+        let (log2, mut c2, mut m2) = consumer(PointsMode::Delta, 0);
+        let mut diff = KeyedDiff::new();
+        let (left, zl) = keyed_patch(0.0, 100, 0.0, 10, 0);
+        let (right, zr) = keyed_patch(5.0, 100, 0.0, 1_000_000, 1);
+        c2.handle(
+            delta_event(
+                diff.apply(&left, &zl).unwrap(),
+                LiveKind::Refined,
+                0,
+                0.0,
+                ENU_FRAME,
+            ),
+            m2.as_mut(),
+            &mut dirty,
+        );
+        let mut both = left.clone();
+        both.positions.extend(&right.positions);
+        both.colors.extend(&right.colors);
+        both.keys.extend(&right.keys);
+        let zs: Vec<usize> = zl.iter().chain(&zr).copied().collect();
+        c2.handle(
+            delta_event(
+                diff.apply(&both, &zs).unwrap(),
+                LiveKind::Refined,
+                1,
+                1.0,
+                ENU_FRAME,
+            ),
+            m2.as_mut(),
+            &mut dirty,
+        );
+        let two = latest_blocks(&log2).len();
+        assert!(
+            two.abs_diff(one) <= 2,
+            "one zone {one} blocks vs two zones {two}"
+        );
+        // No block was extracted by a stale third copy: ids are unique per block by construction of the map above.
     }
 }

@@ -42,7 +42,10 @@ pub type RunnerFuture = Pin<Box<dyn Future<Output = anyhow::Result<JobResult>> +
 pub type Runner = Box<dyn FnOnce(Report) -> RunnerFuture + Send>;
 
 fn now() -> f64 {
-    SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0)
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs_f64())
+        .unwrap_or(0.0)
 }
 
 #[derive(Debug, Clone)]
@@ -200,8 +203,10 @@ impl JobRegistry {
 
     /// Jobs per state, always with all four keys.
     pub fn counts(&self) -> std::collections::BTreeMap<String, u64> {
-        let mut out: std::collections::BTreeMap<String, u64> =
-            JobState::ALL.iter().map(|s| (s.as_str().to_string(), 0)).collect();
+        let mut out: std::collections::BTreeMap<String, u64> = JobState::ALL
+            .iter()
+            .map(|s| (s.as_str().to_string(), 0))
+            .collect();
         for job in lock(&self.inner).jobs.values() {
             *out.entry(job.state.as_str().to_string()).or_default() += 1;
         }
@@ -242,7 +247,11 @@ async fn run_one(inner: &Arc<Mutex<Inner>>, job_id: String, runner: Runner) {
     let id = job_id.clone();
     let report: Report = Arc::new(move |value: f64| {
         // min(1, max(0, v)) in Python maps NaN to 0.
-        let v = if value.is_nan() { 0.0 } else { value.clamp(0.0, 1.0) };
+        let v = if value.is_nan() {
+            0.0
+        } else {
+            value.clamp(0.0, 1.0)
+        };
         if let Some(job) = lock(&sink).jobs.get_mut(&id) {
             job.progress = v;
         }

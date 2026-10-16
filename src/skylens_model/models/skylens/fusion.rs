@@ -96,7 +96,14 @@ impl FrameObservation {
                 }
             }
         }
-        Self { width: w, height: h, grid_w: gw, grid_h: gh, prob, people: d.people.clone() }
+        Self {
+            width: w,
+            height: h,
+            grid_w: gw,
+            grid_h: gh,
+            prob,
+            people: d.people.clone(),
+        }
     }
 
     /// Class probabilities at frame pixel `(x, y)` (pixel centres at +0.5).
@@ -113,7 +120,9 @@ impl FrameObservation {
         let gy = ((y / h * self.grid_h as f64) as u32).min(self.grid_h - 1);
         let plane = (self.grid_w * self.grid_h) as usize;
         let at = (gy * self.grid_w + gx) as usize;
-        Some(std::array::from_fn(|c| f64::from(self.prob[c * plane + at]) / 255.0))
+        Some(std::array::from_fn(|c| {
+            f64::from(self.prob[c * plane + at]) / 255.0
+        }))
     }
 }
 
@@ -133,7 +142,10 @@ pub struct View {
 
 impl std::fmt::Debug for View {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("View").field("width", &self.width).field("height", &self.height).finish()
+        f.debug_struct("View")
+            .field("width", &self.width)
+            .field("height", &self.height)
+            .finish()
     }
 }
 
@@ -146,12 +158,24 @@ impl View {
         translation: [f64; 3],
         project: Projector,
     ) -> Self {
-        Self { width, height, rotation, translation, project }
+        Self {
+            width,
+            height,
+            rotation,
+            translation,
+            project,
+        }
     }
 
     /// Distortion-free pinhole with focal `f` and the principal point at the
     /// image centre.
-    pub fn pinhole(f: f64, width: u32, height: u32, rotation: [[f64; 3]; 3], translation: [f64; 3]) -> Self {
+    pub fn pinhole(
+        f: f64,
+        width: u32,
+        height: u32,
+        rotation: [[f64; 3]; 3],
+        translation: [f64; 3],
+    ) -> Self {
         let (cx, cy) = (width as f64 / 2.0, height as f64 / 2.0);
         let project: Projector = Arc::new(move |p: [f64; 3]| {
             (p[2] > f64::EPSILON).then(|| [f * p[0] / p[2] + cx, f * p[1] / p[2] + cy])
@@ -161,7 +185,9 @@ impl View {
 
     fn to_camera(&self, p: [f64; 3]) -> [f64; 3] {
         let r = &self.rotation;
-        std::array::from_fn(|i| r[i][0] * p[0] + r[i][1] * p[1] + r[i][2] * p[2] + self.translation[i])
+        std::array::from_fn(|i| {
+            r[i][0] * p[0] + r[i][1] * p[1] + r[i][2] * p[2] + self.translation[i]
+        })
     }
 
     /// Pixel of a world point, if it is in front of the camera and inside the image.
@@ -171,7 +197,8 @@ impl View {
             return None;
         }
         let px = (self.project)(c)?;
-        let inside = px[0] >= 0.0 && px[1] >= 0.0 && px[0] < self.width as f64 && px[1] < self.height as f64;
+        let inside =
+            px[0] >= 0.0 && px[1] >= 0.0 && px[0] < self.width as f64 && px[1] < self.height as f64;
         inside.then_some(px)
     }
 }
@@ -202,7 +229,11 @@ struct PersonTrack {
 
 impl PersonTrack {
     fn confidence(&self) -> f64 {
-        if self.looks == 0 { 0.0 } else { (self.score_sum / self.looks as f64).min(1.0) }
+        if self.looks == 0 {
+            0.0
+        } else {
+            (self.score_sum / self.looks as f64).min(1.0)
+        }
     }
 }
 
@@ -228,7 +259,13 @@ impl Ids {
         format!("s{segment}-{kind}-{}", self.next)
     }
 
-    fn hazard(&mut self, segment: u32, class: usize, cells: &HashSet<CellKey>, used: &mut HashSet<String>) -> String {
+    fn hazard(
+        &mut self,
+        segment: u32,
+        class: usize,
+        cells: &HashSet<CellKey>,
+        used: &mut HashSet<String>,
+    ) -> String {
         let best = self
             .hazards
             .iter()
@@ -258,7 +295,12 @@ impl Ids {
             .iter()
             .enumerate()
             .filter(|(_, (id, _))| !used.contains(id))
-            .map(|(i, (_, p))| (i, ((p[0] - pos[0]).powi(2) + (p[1] - pos[1]).powi(2)).sqrt()))
+            .map(|(i, (_, p))| {
+                (
+                    i,
+                    ((p[0] - pos[0]).powi(2) + (p[1] - pos[1]).powi(2)).sqrt(),
+                )
+            })
             .filter(|(_, d)| *d <= PERSON_MERGE_M)
             .min_by(|a, b| a.1.total_cmp(&b.1));
         let id = match best {
@@ -339,13 +381,28 @@ impl Fuser {
             .into_iter()
             .map(|(k, (s, n))| {
                 let center = s.map(|v| v / n as f64);
-                (k, Cell { center, sum_w: 0.0, sum_wp: [0.0; HAZARD_CLASSES], frames: 0 })
+                (
+                    k,
+                    Cell {
+                        center,
+                        sum_w: 0.0,
+                        sum_wp: [0.0; HAZARD_CLASSES],
+                        frames: 0,
+                    },
+                )
             })
             .collect();
-        let mut zone = Zone { cells, views, people: Vec::new(), fused: HashSet::new() };
+        let mut zone = Zone {
+            cells,
+            views,
+            people: Vec::new(),
+            fused: HashSet::new(),
+        };
         // Fuse in arrival order so person tracks evolve the same way they would live.
         for name in &self.order {
-            if let (Some(view), Some(obs)) = (zone.views.get(name).cloned(), self.observations.get(name)) {
+            if let (Some(view), Some(obs)) =
+                (zone.views.get(name).cloned(), self.observations.get(name))
+            {
                 fuse_frame(&mut zone, &view, obs);
                 zone.fused.insert(name.clone());
             }
@@ -357,7 +414,11 @@ impl Fuser {
     /// the frame registered. Returns the segments that changed.
     pub fn add_observation(&mut self, name: &str, obs: FrameObservation) -> Vec<u32> {
         let obs = Arc::new(obs);
-        if self.observations.insert(name.to_string(), obs.clone()).is_none() {
+        if self
+            .observations
+            .insert(name.to_string(), obs.clone())
+            .is_none()
+        {
             self.order.push_back(name.to_string());
         }
         while self.order.len() > self.max_observations {
@@ -386,7 +447,9 @@ impl Fuser {
 
     /// Every detection of a segment as it stands now.
     pub fn batch(&mut self, segment: u32) -> DetectionBatch {
-        let Some(zone) = self.zones.get(&segment) else { return DetectionBatch::default() };
+        let Some(zone) = self.zones.get(&segment) else {
+            return DetectionBatch::default();
+        };
         let anchor = self.anchor;
         let ids = self.ids.entry(segment).or_default();
         let mut used = HashSet::new();
@@ -399,7 +462,12 @@ impl Fuser {
                 continue;
             }
             let mean: [f64; HAZARD_CLASSES] = std::array::from_fn(|i| c.sum_wp[i] / c.sum_w);
-            let (class, p) = mean.iter().copied().enumerate().max_by(|a, b| a.1.total_cmp(&b.1)).unwrap_or((0, 0.0));
+            let (class, p) = mean
+                .iter()
+                .copied()
+                .enumerate()
+                .max_by(|a, b| a.1.total_cmp(&b.1))
+                .unwrap_or((0, 0.0));
             if class != 0 && p >= HAZARD_MIN_PROB {
                 hazard.insert(*k, (class, p));
             }
@@ -440,7 +508,12 @@ impl Fuser {
                 conf += hazard[k].1 / n;
                 frames = frames.max(c.frames);
                 let (e0, n0) = (k.0 as f64 * CELL_M, k.1 as f64 * CELL_M);
-                corners.extend([[e0, n0], [e0 + CELL_M, n0], [e0 + CELL_M, n0 + CELL_M], [e0, n0 + CELL_M]]);
+                corners.extend([
+                    [e0, n0],
+                    [e0 + CELL_M, n0],
+                    [e0 + CELL_M, n0 + CELL_M],
+                    [e0, n0 + CELL_M],
+                ]);
             }
             let outline = convex_hull(&corners)
                 .into_iter()
@@ -481,7 +554,15 @@ impl Fuser {
 }
 
 fn to_gps(p: [f64; 3], anchor: GeoAnchor) -> Gps {
-    enu_to_gps(Enu { e: p[0], n: p[1], u: p[2] }, anchor).into()
+    enu_to_gps(
+        Enu {
+            e: p[0],
+            n: p[1],
+            u: p[2],
+        },
+        anchor,
+    )
+    .into()
 }
 
 /// Adds one frame to a zone: hazard evidence on every cell in view, then people.
@@ -491,9 +572,13 @@ fn fuse_frame(zone: &mut Zone, view: &View, obs: &FrameObservation) {
     let sy = obs.height as f64 / view.height.max(1) as f64;
     let mut projected: Vec<(CellKey, [f64; 2])> = Vec::new();
     for (k, cell) in zone.cells.iter_mut() {
-        let Some(px) = view.project(cell.center) else { continue };
+        let Some(px) = view.project(cell.center) else {
+            continue;
+        };
         projected.push((*k, px));
-        let Some(p) = obs.hazard_at(px[0] * sx, px[1] * sy) else { continue };
+        let Some(p) = obs.hazard_at(px[0] * sx, px[1] * sy) else {
+            continue;
+        };
         let w = p.iter().copied().fold(0.0, f64::max);
         if w <= 0.0 {
             continue;
@@ -512,7 +597,12 @@ fn fuse_frame(zone: &mut Zone, view: &View, obs: &FrameObservation) {
         let target = [person.x as f64 / sx, person.y as f64 / sy];
         let pick = projected
             .iter()
-            .map(|(k, px)| (k, ((px[0] - target[0]).powi(2) + (px[1] - target[1]).powi(2)).sqrt()))
+            .map(|(k, px)| {
+                (
+                    k,
+                    ((px[0] - target[0]).powi(2) + (px[1] - target[1]).powi(2)).sqrt(),
+                )
+            })
             .filter(|(_, d)| *d <= radius)
             .min_by(|a, b| a.1.total_cmp(&b.1));
         let Some((k, _)) = pick else { continue };
@@ -522,7 +612,12 @@ fn fuse_frame(zone: &mut Zone, view: &View, obs: &FrameObservation) {
             .people
             .iter()
             .enumerate()
-            .map(|(i, t)| (i, ((t.pos[0] - pos[0]).powi(2) + (t.pos[1] - pos[1]).powi(2)).sqrt()))
+            .map(|(i, t)| {
+                (
+                    i,
+                    ((t.pos[0] - pos[0]).powi(2) + (t.pos[1] - pos[1]).powi(2)).sqrt(),
+                )
+            })
             .filter(|(i, d)| *d <= PERSON_MERGE_M && !(*i < before && matched[*i]))
             .min_by(|a, b| a.1.total_cmp(&b.1));
         match near {
@@ -541,7 +636,12 @@ fn fuse_frame(zone: &mut Zone, view: &View, obs: &FrameObservation) {
                     matched[i] = true;
                 }
             }
-            None => zone.people.push(PersonTrack { pos, score_sum: score, hits: 1, looks: 1 }),
+            None => zone.people.push(PersonTrack {
+                pos,
+                score_sum: score,
+                hits: 1,
+                looks: 1,
+            }),
         }
     }
     // A track this frame could see but did not detect is a miss.
@@ -560,7 +660,9 @@ pub fn convex_hull(points: &[[f64; 2]]) -> Vec<[f64; 2]> {
     if p.len() < 3 {
         return p;
     }
-    let cross = |o: [f64; 2], a: [f64; 2], b: [f64; 2]| (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+    let cross = |o: [f64; 2], a: [f64; 2], b: [f64; 2]| {
+        (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+    };
     let mut lower: Vec<[f64; 2]> = Vec::new();
     for &q in &p {
         while lower.len() >= 2 && cross(lower[lower.len() - 2], lower[lower.len() - 1], q) <= 0.0 {
@@ -586,7 +688,11 @@ mod tests {
     use super::*;
     use skylens_shared::geo::{Gps as GeoGps, gps_to_enu};
 
-    const ANCHOR: GeoAnchor = GeoGps { lat: 36.3685, lon: 127.3475, alt: 30.0 };
+    const ANCHOR: GeoAnchor = GeoGps {
+        lat: 36.3685,
+        lon: 127.3475,
+        alt: 30.0,
+    };
     const W: u32 = 200;
     const H: u32 = 200;
     const F: f64 = 100.0;
@@ -613,7 +719,14 @@ mod tests {
 
     /// Frame of size W x H, class `class` with probability 0.9 inside the
     /// pixel box, normal elsewhere.
-    fn frame(class: usize, x0: usize, x1: usize, y0: usize, y1: usize, people: Vec<PersonPoint>) -> FrameDetections {
+    fn frame(
+        class: usize,
+        x0: usize,
+        x1: usize,
+        y0: usize,
+        y1: usize,
+        people: Vec<PersonPoint>,
+    ) -> FrameDetections {
         let plane = (W * H) as usize;
         let mut prob = vec![0.0f32; HAZARD_CLASSES * plane];
         for y in 0..H as usize {
@@ -629,16 +742,31 @@ mod tests {
                 }
             }
         }
-        FrameDetections { width: W, height: H, hazard_prob: prob, people }
+        FrameDetections {
+            width: W,
+            height: H,
+            hazard_prob: prob,
+            people,
+        }
     }
 
     fn views(names: &[(&str, View)]) -> HashMap<String, View> {
-        names.iter().map(|(n, v)| (n.to_string(), v.clone())).collect()
+        names
+            .iter()
+            .map(|(n, v)| (n.to_string(), v.clone()))
+            .collect()
     }
 
     fn enu_of(d: &Detection) -> Enu {
         let g = d.gps.clone().unwrap();
-        gps_to_enu(GeoGps { lat: g.lat, lon: g.lon, alt: g.alt }, ANCHOR)
+        gps_to_enu(
+            GeoGps {
+                lat: g.lat,
+                lon: g.lon,
+                alt: g.alt,
+            },
+            ANCHOR,
+        )
     }
 
     #[test]
@@ -656,7 +784,12 @@ mod tests {
 
     #[test]
     fn wrong_length_probabilities_are_dropped() {
-        let d = FrameDetections { width: 10, height: 10, hazard_prob: vec![0.5; 7], people: vec![] };
+        let d = FrameDetections {
+            width: 10,
+            height: 10,
+            hazard_prob: vec![0.5; 7],
+            people: vec![],
+        };
         let o = FrameObservation::from_detections(&d);
         assert!(o.hazard_at(1.0, 1.0).is_none());
     }
@@ -680,9 +813,15 @@ mod tests {
         let v2 = nadir(31.0, 30.0);
         f.set_zone(0, &ground(), views(&[("a", v1), ("b", v2)]));
         // Fire in pixels 90..110 (about 10 m wide around the centre).
-        f.add_observation("a", FrameObservation::from_detections(&frame(1, 90, 110, 90, 110, vec![])));
+        f.add_observation(
+            "a",
+            FrameObservation::from_detections(&frame(1, 90, 110, 90, 110, vec![])),
+        );
         assert!(f.batch(0).detections.is_empty(), "one frame is not enough");
-        let changed = f.add_observation("b", FrameObservation::from_detections(&frame(1, 88, 108, 90, 110, vec![])));
+        let changed = f.add_observation(
+            "b",
+            FrameObservation::from_detections(&frame(1, 88, 108, 90, 110, vec![])),
+        );
         assert_eq!(changed, vec![0]);
         let b = f.batch(0);
         assert_eq!(b.detections.len(), 1, "{:?}", b.detections);
@@ -694,7 +833,10 @@ mod tests {
         assert!(d.confidence >= HAZARD_MIN_PROB);
         assert!(d.outline.len() >= 4);
         let c = enu_of(d);
-        assert!((c.e - 30.0).abs() < 2.0 && (c.n - 30.0).abs() < 2.0, "{c:?}");
+        assert!(
+            (c.e - 30.0).abs() < 2.0 && (c.n - 30.0).abs() < 2.0,
+            "{c:?}"
+        );
     }
 
     #[test]
@@ -703,9 +845,15 @@ mod tests {
         let names = ["a", "b", "c", "d"];
         let vs: Vec<(&str, View)> = names.iter().map(|n| (*n, nadir(30.0, 30.0))).collect();
         f.set_zone(0, &ground(), views(&vs));
-        f.add_observation("a", FrameObservation::from_detections(&frame(1, 90, 110, 90, 110, vec![])));
+        f.add_observation(
+            "a",
+            FrameObservation::from_detections(&frame(1, 90, 110, 90, 110, vec![])),
+        );
         for n in &names[1..] {
-            f.add_observation(n, FrameObservation::from_detections(&frame(0, 0, 0, 0, 0, vec![])));
+            f.add_observation(
+                n,
+                FrameObservation::from_detections(&frame(0, 0, 0, 0, 0, vec![])),
+            );
         }
         assert!(f.batch(0).detections.is_empty());
     }
@@ -716,10 +864,22 @@ mod tests {
         let names = ["a", "b", "c", "d", "e"];
         let vs: Vec<(&str, View)> = names.iter().map(|n| (*n, nadir(30.0, 30.0))).collect();
         f.set_zone(3, &ground(), views(&vs));
-        let seen = || vec![PersonPoint { x: 120.0, y: 80.0, score: 0.9 }];
-        f.add_observation("a", FrameObservation::from_detections(&frame(0, 0, 0, 0, 0, seen())));
+        let seen = || {
+            vec![PersonPoint {
+                x: 120.0,
+                y: 80.0,
+                score: 0.9,
+            }]
+        };
+        f.add_observation(
+            "a",
+            FrameObservation::from_detections(&frame(0, 0, 0, 0, 0, seen())),
+        );
         assert!(f.batch(3).detections.is_empty());
-        f.add_observation("b", FrameObservation::from_detections(&frame(0, 0, 0, 0, 0, seen())));
+        f.add_observation(
+            "b",
+            FrameObservation::from_detections(&frame(0, 0, 0, 0, 0, seen())),
+        );
         let b = f.batch(3);
         assert_eq!(b.detections.len(), 1);
         let d = &b.detections[0];
@@ -728,11 +888,17 @@ mod tests {
         assert!(d.outline.is_empty());
         let c = enu_of(d);
         // Pixel (120, 80) is 10 m East and 10 m North of the camera.
-        assert!((c.e - 40.0).abs() < 1.5 && (c.n - 40.0).abs() < 1.5, "{c:?}");
+        assert!(
+            (c.e - 40.0).abs() < 1.5 && (c.n - 40.0).abs() < 1.5,
+            "{c:?}"
+        );
         let id = d.id.clone();
         // Three misses lower the interpolated confidence (1.8 / 5) below the threshold.
         for n in ["c", "d", "e"] {
-            f.add_observation(n, FrameObservation::from_detections(&frame(0, 0, 0, 0, 0, vec![])));
+            f.add_observation(
+                n,
+                FrameObservation::from_detections(&frame(0, 0, 0, 0, 0, vec![])),
+            );
         }
         assert!(f.batch(3).detections.is_empty());
         // Rebuilding the zone (refined cloud) keeps the id.
@@ -750,10 +916,24 @@ mod tests {
         f.set_zone(0, &ground(), views(&vs));
         f.add_observation(
             "a",
-            FrameObservation::from_detections(&frame(0, 0, 0, 0, 0, vec![PersonPoint { x: 100.0, y: 100.0, score: 0.95 }])),
+            FrameObservation::from_detections(&frame(
+                0,
+                0,
+                0,
+                0,
+                0,
+                vec![PersonPoint {
+                    x: 100.0,
+                    y: 100.0,
+                    score: 0.95,
+                }],
+            )),
         );
         for n in &names[1..] {
-            f.add_observation(n, FrameObservation::from_detections(&frame(0, 0, 0, 0, 0, vec![])));
+            f.add_observation(
+                n,
+                FrameObservation::from_detections(&frame(0, 0, 0, 0, 0, vec![])),
+            );
         }
         assert!(f.batch(0).detections.is_empty());
     }
@@ -764,7 +944,10 @@ mod tests {
         let vs = [("a", nadir(30.0, 30.0)), ("b", nadir(30.0, 30.0))];
         f.set_zone(1, &ground(), views(&vs));
         for n in ["a", "b"] {
-            f.add_observation(n, FrameObservation::from_detections(&frame(2, 90, 110, 90, 110, vec![])));
+            f.add_observation(
+                n,
+                FrameObservation::from_detections(&frame(2, 90, 110, 90, 110, vec![])),
+            );
         }
         let first = f.batch(1).detections[0].id.clone();
         assert!(first.starts_with("s1-collapse-"), "{first}");
@@ -776,19 +959,35 @@ mod tests {
     fn observations_before_the_zone_are_fused_when_it_arrives() {
         let mut f = Fuser::new(ANCHOR, 64);
         for n in ["a", "b"] {
-            assert!(f.add_observation(n, FrameObservation::from_detections(&frame(3, 90, 110, 90, 110, vec![]))).is_empty());
+            assert!(
+                f.add_observation(
+                    n,
+                    FrameObservation::from_detections(&frame(3, 90, 110, 90, 110, vec![]))
+                )
+                .is_empty()
+            );
         }
-        f.set_zone(0, &ground(), views(&[("a", nadir(30.0, 30.0)), ("b", nadir(30.0, 30.0))]));
+        f.set_zone(
+            0,
+            &ground(),
+            views(&[("a", nadir(30.0, 30.0)), ("b", nadir(30.0, 30.0))]),
+        );
         let b = f.batch(0);
         assert_eq!(b.detections.len(), 1);
-        assert_eq!(b.detections[0].category, DetectionCategory::RoadBlocked as i32);
+        assert_eq!(
+            b.detections[0].category,
+            DetectionCategory::RoadBlocked as i32
+        );
     }
 
     #[test]
     fn eviction_bounds_stored_frames() {
         let mut f = Fuser::new(ANCHOR, 2);
         for n in ["a", "b", "c"] {
-            f.add_observation(n, FrameObservation::from_detections(&frame(1, 90, 110, 90, 110, vec![])));
+            f.add_observation(
+                n,
+                FrameObservation::from_detections(&frame(1, 90, 110, 90, 110, vec![])),
+            );
         }
         assert_eq!(f.observations.len(), 2);
         assert!(!f.observations.contains_key("a"));
@@ -796,7 +995,14 @@ mod tests {
 
     #[test]
     fn hull_of_square_corners() {
-        let pts = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0], [0.5, 0.5], [1.0, 0.0]];
+        let pts = [
+            [0.0, 0.0],
+            [1.0, 0.0],
+            [1.0, 1.0],
+            [0.0, 1.0],
+            [0.5, 0.5],
+            [1.0, 0.0],
+        ];
         let h = convex_hull(&pts);
         assert_eq!(h, vec![[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]]);
     }

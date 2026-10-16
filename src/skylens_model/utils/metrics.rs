@@ -183,7 +183,11 @@ pub struct SegmentationMetrics {
 impl SegmentationMetrics {
     pub fn new(num_classes: usize, ignore_index: i64) -> Self {
         assert!(num_classes >= 1, "num_classes >= 1");
-        Self { num_classes, ignore_index, confusion: vec![0; num_classes * num_classes] }
+        Self {
+            num_classes,
+            ignore_index,
+            confusion: vec![0; num_classes * num_classes],
+        }
     }
 
     pub fn reset(&mut self) {
@@ -216,15 +220,26 @@ impl SegmentationMetrics {
             let union = gt + pred - tp;
             tp_sum += tp;
             total += gt;
-            ious.push(if union > 0.0 { Some(tp / union.max(1.0)) } else { None });
+            ious.push(if union > 0.0 {
+                Some(tp / union.max(1.0))
+            } else {
+                None
+            });
         }
         let present: Vec<f64> = ious.iter().flatten().copied().collect();
         let mut out = BTreeMap::new();
         out.insert(
             "miou".to_string(),
-            if present.is_empty() { 0.0 } else { present.iter().sum::<f64>() / present.len() as f64 },
+            if present.is_empty() {
+                0.0
+            } else {
+                present.iter().sum::<f64>() / present.len() as f64
+            },
         );
-        out.insert("pixel_accuracy".to_string(), if total > 0.0 { tp_sum / total } else { 0.0 });
+        out.insert(
+            "pixel_accuracy".to_string(),
+            if total > 0.0 { tp_sum / total } else { 0.0 },
+        );
         for (i, iou) in ious.iter().enumerate() {
             out.insert(format!("iou_class_{i}"), iou.unwrap_or(f64::NAN));
         }
@@ -275,7 +290,10 @@ pub struct PointDetectionMetrics {
 
 impl PointDetectionMetrics {
     pub fn new(distance_threshold: f64) -> Self {
-        Self { distance_threshold, ..Default::default() }
+        Self {
+            distance_threshold,
+            ..Default::default()
+        }
     }
 
     pub fn reset(&mut self) {
@@ -415,7 +433,12 @@ pub fn average_precision(scores: &[f64], is_tp: &[bool], num_gt: usize) -> f64 {
 /// [`box_iou_matrix`]).
 pub fn box_iou(a: &[f64; 4], b: &[f64; 4]) -> f64 {
     let xyxy = |t: &[f64; 4]| {
-        [t[0] - t[2] / 2.0, t[1] - t[3] / 2.0, t[0] + t[2] / 2.0, t[1] + t[3] / 2.0]
+        [
+            t[0] - t[2] / 2.0,
+            t[1] - t[3] / 2.0,
+            t[0] + t[2] / 2.0,
+            t[1] + t[3] / 2.0,
+        ]
     };
     let area = |t: &[f64; 4]| (t[2] - t[0]).max(0.0) * (t[3] - t[1]).max(0.0);
     let (aa, bb) = (xyxy(a), xyxy(b));
@@ -423,17 +446,28 @@ pub fn box_iou(a: &[f64; 4], b: &[f64; 4]) -> f64 {
     let ih = (aa[3].min(bb[3]) - aa[1].max(bb[1])).max(0.0);
     let inter = iw * ih;
     let union = area(&aa) + area(&bb) - inter;
-    if union > 0.0 { inter / union.max(f64::EPSILON) } else { 0.0 }
+    if union > 0.0 {
+        inter / union.max(f64::EPSILON)
+    } else {
+        0.0
+    }
 }
 
 /// IoU matrix of two sets of centre-format boxes `[x, y, w, h]`.
 pub fn box_iou_matrix(a: &[[f64; 4]], b: &[[f64; 4]]) -> Vec<Vec<f64>> {
-    a.iter().map(|ra| b.iter().map(|rb| box_iou(ra, rb)).collect()).collect()
+    a.iter()
+        .map(|ra| b.iter().map(|rb| box_iou(ra, rb)).collect())
+        .collect()
 }
 
 /// Score-descending greedy matching (`_greedy_match`). `fitness[i][j]` is
 /// larger-is-better; a pair matches only where `keep[i][j]`.
-fn greedy_match(fitness: &[Vec<f64>], order: &[usize], keep: &[Vec<bool>], n_gt: usize) -> Vec<bool> {
+fn greedy_match(
+    fitness: &[Vec<f64>],
+    order: &[usize],
+    keep: &[Vec<bool>],
+    n_gt: usize,
+) -> Vec<bool> {
     let mut tp = vec![false; fitness.len()];
     let mut used = vec![false; n_gt];
     if n_gt == 0 {
@@ -468,7 +502,11 @@ struct ApAccumulator {
 
 impl ApAccumulator {
     fn new(num_thresholds: usize) -> Self {
-        Self { scores: Vec::new(), tp: vec![Vec::new(); num_thresholds], num_gt: 0 }
+        Self {
+            scores: Vec::new(),
+            tp: vec![Vec::new(); num_thresholds],
+            num_gt: 0,
+        }
     }
 
     fn reset(&mut self) {
@@ -486,7 +524,10 @@ impl ApAccumulator {
     }
 
     fn ap_per_threshold(&self) -> Vec<f64> {
-        self.tp.iter().map(|tp| average_precision(&self.scores, tp, self.num_gt)).collect()
+        self.tp
+            .iter()
+            .map(|tp| average_precision(&self.scores, tp, self.num_gt))
+            .collect()
     }
 }
 
@@ -505,9 +546,15 @@ impl Default for BoxDetectionMetrics {
 
 impl BoxDetectionMetrics {
     pub fn new(iou_thresholds: Vec<f64>) -> Self {
-        assert!(!iou_thresholds.is_empty(), "iou_thresholds must not be empty");
+        assert!(
+            !iou_thresholds.is_empty(),
+            "iou_thresholds must not be empty"
+        );
         let acc = ApAccumulator::new(iou_thresholds.len());
-        Self { iou_thresholds, acc }
+        Self {
+            iou_thresholds,
+            acc,
+        }
     }
 
     pub fn reset(&mut self) {
@@ -530,8 +577,10 @@ impl BoxDetectionMetrics {
             .iou_thresholds
             .iter()
             .map(|&thr| {
-                let keep: Vec<Vec<bool>> =
-                    iou.iter().map(|row| row.iter().map(|&v| v >= thr).collect()).collect();
+                let keep: Vec<Vec<bool>> = iou
+                    .iter()
+                    .map(|row| row.iter().map(|&v| v >= thr).collect())
+                    .collect();
                 greedy_match(&iou, &order, &keep, n_gt)
             })
             .collect();
@@ -542,7 +591,10 @@ impl BoxDetectionMetrics {
     pub fn compute(&self) -> BTreeMap<String, f64> {
         let aps = self.acc.ap_per_threshold();
         let mut out = BTreeMap::new();
-        out.insert("map_50_95".to_string(), aps.iter().sum::<f64>() / aps.len() as f64);
+        out.insert(
+            "map_50_95".to_string(),
+            aps.iter().sum::<f64>() / aps.len() as f64,
+        );
         for (thr, ap) in self.iou_thresholds.iter().zip(&aps) {
             if (thr - 0.5).abs() < 1e-9 {
                 out.insert("map_50".to_string(), *ap);
@@ -565,7 +617,10 @@ pub struct PointAveragePrecision {
 
 impl PointAveragePrecision {
     pub fn new(distance_threshold: f64) -> Self {
-        Self { radius: Radius::Fixed(distance_threshold), acc: ApAccumulator::new(1) }
+        Self {
+            radius: Radius::Fixed(distance_threshold),
+            acc: ApAccumulator::new(1),
+        }
     }
 
     pub fn reset(&mut self) {
@@ -634,7 +689,11 @@ pub fn recall_sweep(
                 tp += usize::from(t);
             }
         }
-        let r = if num_gt > 0 { tp as f64 / num_gt as f64 } else { 0.0 };
+        let r = if num_gt > 0 {
+            tp as f64 / num_gt as f64
+        } else {
+            0.0
+        };
         let prec = if n > 0 { tp as f64 / n as f64 } else { 0.0 };
         recalls.push(r);
         if prec >= min_precision && r > best {
@@ -651,7 +710,11 @@ pub fn recall_sweep(
             _ => Some((i, t)),
         })
         .map_or(0.0, |(i, _)| recalls[i]);
-    RecallSweep { recall_at_p50: best, recall_at_p50_thr: best_thr, recall_max }
+    RecallSweep {
+        recall_at_p50: best,
+        recall_at_p50_thr: best_thr,
+        recall_max,
+    }
 }
 
 #[cfg(test)]
@@ -662,8 +725,11 @@ mod tests {
     // PR: (r=0.5, p=1) -> (0.5, 0.5) -> (1.0, 2/3); envelope 1.0 for 51 points,
     // 2/3 for 50 points.
     const AP_MIXED: f64 = (51.0 * 1.0 + 50.0 * (2.0 / 3.0)) / 101.0;
-    const PREDS: [Detection; 3] =
-        [[10.0, 10.0, 10.0, 10.0, 0.9], [200.0, 200.0, 10.0, 10.0, 0.8], [50.0, 50.0, 10.0, 10.0, 0.7]];
+    const PREDS: [Detection; 3] = [
+        [10.0, 10.0, 10.0, 10.0, 0.9],
+        [200.0, 200.0, 10.0, 10.0, 0.8],
+        [50.0, 50.0, 10.0, 10.0, 0.7],
+    ];
     const GTS: [[f64; 4]; 2] = [[10.0, 10.0, 10.0, 10.0], [50.0, 50.0, 10.0, 10.0]];
 
     fn pts(d: &[Detection]) -> Vec<[f64; 3]> {
@@ -681,7 +747,10 @@ mod tests {
         let a = [[0.0, 0.0, 10.0, 10.0]];
         assert_eq!(box_iou_matrix(&a, &a)[0][0], 1.0);
         assert_eq!(box_iou_matrix(&a, &[[100.0, 100.0, 10.0, 10.0]])[0][0], 0.0);
-        assert_eq!(box_iou_matrix(&a, &[[5.0, 0.0, 10.0, 10.0]])[0][0], 1.0 / 3.0);
+        assert_eq!(
+            box_iou_matrix(&a, &[[5.0, 0.0, 10.0, 10.0]])[0][0],
+            1.0 / 3.0
+        );
         assert_eq!(box_iou_matrix(&a, &[[0.0, 0.0, 20.0, 10.0]])[0][0], 0.5);
     }
 
@@ -783,7 +852,10 @@ mod tests {
         let scores: Vec<f64> = det.iter().map(|d| d[4]).collect();
         assert_eq!(det.len(), 2);
         assert!((scores[0] - 0.8).abs() < 1e-6 && (scores[1] - 0.6).abs() < 1e-6);
-        assert_eq!(decode_heatmap_peaks(&hm, None, None, h, w, 1, 0.3, 4.0, false).len(), 1);
+        assert_eq!(
+            decode_heatmap_peaks(&hm, None, None, h, w, 1, 0.3, 4.0, false).len(),
+            1
+        );
     }
 
     #[test]
@@ -804,7 +876,10 @@ mod tests {
         let mut m = PointDetectionMetrics::new(8.0);
         m.update(&pts(&PREDS), &gpts(&GTS));
         let out = m.compute();
-        assert_eq!((out["point_tp"], out["point_fp"], out["point_fn"]), (2.0, 1.0, 0.0));
+        assert_eq!(
+            (out["point_tp"], out["point_fp"], out["point_fn"]),
+            (2.0, 1.0, 0.0)
+        );
         m.update(&[], &[[0.0, 0.0]]);
         assert_eq!(m.fn_, 1);
     }
@@ -815,7 +890,10 @@ mod tests {
     struct Lcg(u64);
     impl Lcg {
         fn next(&mut self) -> f64 {
-            self.0 = self.0.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            self.0 = self
+                .0
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             (self.0 >> 11) as f64 / (1u64 << 53) as f64
         }
     }
@@ -825,10 +903,17 @@ mod tests {
         let mut rng = Lcg(1);
         for _ in 0..20 {
             let preds: Vec<[f64; 3]> = (0..60)
-                .map(|_| [rng.next() * 120.0, rng.next() * 120.0, 0.05 + rng.next() * 0.95])
+                .map(|_| {
+                    [
+                        rng.next() * 120.0,
+                        rng.next() * 120.0,
+                        0.05 + rng.next() * 0.95,
+                    ]
+                })
                 .collect();
-            let gts: Vec<[f64; 2]> =
-                (0..35).map(|_| [rng.next() * 120.0, rng.next() * 120.0]).collect();
+            let gts: Vec<[f64; 2]> = (0..35)
+                .map(|_| [rng.next() * 120.0, rng.next() * 120.0])
+                .collect();
             let old = point_match_flags(&preds, &gts, &Radius::Fixed(8.0));
             let new = point_match_flags(&preds, &gts, &Radius::PerGt(vec![8.0; gts.len()]));
             assert_eq!(old, new);

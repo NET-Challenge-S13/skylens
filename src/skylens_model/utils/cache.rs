@@ -28,9 +28,9 @@ use serde::{Deserialize, Serialize};
 use tch::{Kind, Tensor};
 
 use crate::datasets::base::{
-    boxes_from_tensor, boxes_tensor, mask_tensor, read_mask_raster, read_rgb_raster, resize_area_f32,
-    resize_nearest, tensor_f32, to_vec_f32, to_vec_u8, DatasetError, Raster, Result, Sample,
-    SkyLensDataset, Transform,
+    DatasetError, Raster, Result, Sample, SkyLensDataset, Transform, boxes_from_tensor,
+    boxes_tensor, mask_tensor, read_mask_raster, read_rgb_raster, resize_area_f32, resize_nearest,
+    tensor_f32, to_vec_f32, to_vec_u8,
 };
 
 /// RGB is JPEG q95. The goal is decoding speed, so no lossless format; masks and thermal stay
@@ -94,7 +94,10 @@ fn to_uint8(r: &Raster<f32>, was_u8: bool) -> Raster<u8> {
         r.h,
         r.w,
         r.c,
-        r.data.iter().map(|&v| (v * scale).round_ties_even().clamp(0.0, 255.0) as u8).collect(),
+        r.data
+            .iter()
+            .map(|&v| (v * scale).round_ties_even().clamp(0.0, 255.0) as u8)
+            .collect(),
     )
 }
 
@@ -119,7 +122,12 @@ fn sample_path(dir: &Path, i: usize, suffix: &str) -> PathBuf {
 
 fn write_jpeg(path: &Path, rgb: &[u8], w: u32, h: u32) -> Result<()> {
     let file = BufWriter::new(File::create(path)?);
-    JpegEncoder::new_with_quality(file, JPEG_QUALITY).write_image(rgb, w, h, ExtendedColorType::Rgb8)?;
+    JpegEncoder::new_with_quality(file, JPEG_QUALITY).write_image(
+        rgb,
+        w,
+        h,
+        ExtendedColorType::Rgb8,
+    )?;
     Ok(())
 }
 
@@ -160,7 +168,12 @@ pub fn build_resized_cache(
                 rgb.push(img.data[p * img.c + src]);
             }
         }
-        write_jpeg(&sample_path(cache_dir, i, ".jpg"), &rgb, size as u32, size as u32)?;
+        write_jpeg(
+            &sample_path(cache_dir, i, ".jpg"),
+            &rgb,
+            size as u32,
+            size as u32,
+        )?;
 
         if s.has_thermal {
             let ch = if img.c >= 4 { 3 } else { 0 };
@@ -201,7 +214,10 @@ pub fn build_resized_cache(
         }
     }
 
-    let index = CacheIndex { size, samples: records };
+    let index = CacheIndex {
+        size,
+        samples: records,
+    };
     std::fs::write(&index_path, serde_json::to_vec(&index)?)?;
     Ok(cache_dir.to_path_buf())
 }
@@ -220,7 +236,12 @@ impl ResizedCache {
     pub fn new(cache_dir: impl AsRef<Path>, transforms: Option<Transform>) -> Result<Self> {
         let root = cache_dir.as_ref().to_path_buf();
         let meta: CacheIndex = serde_json::from_slice(&std::fs::read(root.join("index.json"))?)?;
-        Ok(ResizedCache { root, size: meta.size, records: meta.samples, transforms })
+        Ok(ResizedCache {
+            root,
+            size: meta.size,
+            records: meta.samples,
+            transforms,
+        })
     }
 }
 
@@ -231,7 +252,10 @@ impl SkyLensDataset for ResizedCache {
 
     fn get(&self, i: usize) -> Result<Sample> {
         let r = self.records.get(i).ok_or_else(|| {
-            DatasetError::InvalidSample(format!("cache index {i} out of range ({})", self.records.len()))
+            DatasetError::InvalidSample(format!(
+                "cache index {i} out of range ({})",
+                self.records.len()
+            ))
         })?;
         let rgb = read_rgb_raster(&sample_path(&self.root, i, ".jpg"))?;
         let (h, w) = (rgb.h, rgb.w);
@@ -251,7 +275,9 @@ impl SkyLensDataset for ResizedCache {
 
         let mut s = Sample::new(tensor_f32(&image), r.has_rgb, r.has_thermal);
         if r.has_mask {
-            s.danger_mask = Some(mask_tensor(&read_mask_raster(&sample_path(&self.root, i, "_m.png"))?));
+            s.danger_mask = Some(mask_tensor(&read_mask_raster(&sample_path(
+                &self.root, i, "_m.png",
+            ))?));
         }
         if r.has_boxes {
             let boxes: Vec<[f32; 4]> = r
@@ -289,7 +315,11 @@ mod tests {
         assert_eq!(out.danger_mask.as_ref().unwrap().size(), vec![50, 50]);
         let b = boxes_from_tensor(out.person_boxes.as_ref().unwrap());
         assert_eq!(b, vec![[2.5, 10.0, 7.5, 20.0]]);
-        assert!(to_vec_u8(out.danger_mask.as_ref().unwrap()).iter().all(|&v| v == 3));
+        assert!(
+            to_vec_u8(out.danger_mask.as_ref().unwrap())
+                .iter()
+                .all(|&v| v == 3)
+        );
     }
 
     #[test]

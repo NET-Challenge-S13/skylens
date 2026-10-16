@@ -71,7 +71,11 @@ fn source_frames(uri: &str, scratch: &Path) -> anyhow::Result<Vec<PathBuf>> {
         .arg(scratch.join("%06d.jpg"))
         .status()
         .with_context(|| format!("run {} (set SKYLENS_FFMPEG)", ffmpeg_bin()))?;
-    ensure!(status.success(), "ffmpeg failed on {}: {status}", path.display());
+    ensure!(
+        status.success(),
+        "ffmpeg failed on {}: {status}",
+        path.display()
+    );
     list_images(scratch)
 }
 
@@ -86,7 +90,9 @@ pub fn pick_evenly(n: usize, count: usize) -> Vec<usize> {
     if count == 1 {
         return vec![0];
     }
-    (0..count).map(|i| ((i as f64) * (n - 1) as f64 / (count - 1) as f64).round() as usize).collect()
+    (0..count)
+        .map(|i| ((i as f64) * (n - 1) as f64 / (count - 1) as f64).round() as usize)
+        .collect()
 }
 
 /// GPS at relative position `frac` (0..=1): a pose sample, else the track
@@ -104,7 +110,11 @@ pub fn gps_at(frac: f64, poses: &[Gps], track: &[Gps]) -> Option<Gps> {
             let i = (x.floor() as usize).min(n - 2);
             let t = x - i as f64;
             let (a, b) = (track[i], track[i + 1]);
-            Some(Gps { lat: a.lat + (b.lat - a.lat) * t, lon: a.lon + (b.lon - a.lon) * t, alt: a.alt + (b.alt - a.alt) * t })
+            Some(Gps {
+                lat: a.lat + (b.lat - a.lat) * t,
+                lon: a.lon + (b.lon - a.lon) * t,
+                alt: a.alt + (b.alt - a.alt) * t,
+            })
         }
     }
 }
@@ -120,10 +130,16 @@ pub struct JobFrames {
 }
 
 /// Decodes `sources` and stages their frames under `root/<camera>/`.
-pub fn prepare(root: &Path, sources: &[Source], track: &[ProtoGps], cameras: &[String]) -> anyhow::Result<JobFrames> {
+pub fn prepare(
+    root: &Path,
+    sources: &[Source],
+    track: &[ProtoGps],
+    cameras: &[String],
+) -> anyhow::Result<JobFrames> {
     ensure!(!sources.is_empty(), "job has no sources");
-    let cams: Vec<String> =
-        (0..sources.len()).map(|i| cameras.get(i).cloned().unwrap_or_else(|| format!("cam{i}"))).collect();
+    let cams: Vec<String> = (0..sources.len())
+        .map(|i| cameras.get(i).cloned().unwrap_or_else(|| format!("cam{i}")))
+        .collect();
     let track: Vec<Gps> = track.iter().cloned().map(Gps::from).collect();
     let mut frames = Vec::with_capacity(sources.len());
     for (src, cam) in sources.iter().zip(&cams) {
@@ -143,23 +159,40 @@ pub fn prepare(root: &Path, sources: &[Source], track: &[ProtoGps], cameras: &[S
         let mut row_gps = Vec::with_capacity(cams.len());
         for (i, cam) in cams.iter().enumerate() {
             let src = &frames[i][idx];
-            let ext = src.extension().and_then(|e| e.to_str()).unwrap_or("jpg").to_ascii_lowercase();
+            let ext = src
+                .extension()
+                .and_then(|e| e.to_str())
+                .unwrap_or("jpg")
+                .to_ascii_lowercase();
             let rel = format!("{cam}/{p:06}.{ext}");
             let dst = root.join(&rel);
             std::fs::create_dir_all(dst.parent().expect("has parent"))?;
             if std::fs::hard_link(src, &dst).is_err() {
-                std::fs::copy(src, &dst).with_context(|| format!("copy {} -> {}", src.display(), dst.display()))?;
+                std::fs::copy(src, &dst)
+                    .with_context(|| format!("copy {} -> {}", src.display(), dst.display()))?;
             }
             row_names.push(rel);
             let count = frames[i].len();
-            let frac = if count > 1 { idx as f64 / (count - 1) as f64 } else { 0.0 };
-            let poses: Vec<Gps> = sources[i].poses.iter().filter_map(|t| t.gps.clone().map(Gps::from)).collect();
+            let frac = if count > 1 {
+                idx as f64 / (count - 1) as f64
+            } else {
+                0.0
+            };
+            let poses: Vec<Gps> = sources[i]
+                .poses
+                .iter()
+                .filter_map(|t| t.gps.clone().map(Gps::from))
+                .collect();
             row_gps.push(gps_at(frac, &poses, &track));
         }
         names.push(row_names);
         gps.push(row_gps);
     }
-    Ok(JobFrames { cameras: cams, names, gps })
+    Ok(JobFrames {
+        cameras: cams,
+        names,
+        gps,
+    })
 }
 
 #[cfg(test)]
@@ -167,7 +200,11 @@ mod tests {
     use super::*;
 
     fn g(lat: f64) -> Gps {
-        Gps { lat, lon: 127.0, alt: 50.0 }
+        Gps {
+            lat,
+            lon: 127.0,
+            alt: 50.0,
+        }
     }
 
     #[test]
@@ -203,10 +240,27 @@ mod tests {
             d.to_string_lossy().into_owned()
         };
         let sources = vec![
-            Source { uri: mk("a", 4), poses: vec![] },
-            Source { uri: format!("file://{}", mk("b", 3)), poses: vec![] },
+            Source {
+                uri: mk("a", 4),
+                poses: vec![],
+            },
+            Source {
+                uri: format!("file://{}", mk("b", 3)),
+                poses: vec![],
+            },
         ];
-        let track = [ProtoGps { lat: 36.0, lon: 127.0, alt: 40.0 }, ProtoGps { lat: 36.1, lon: 127.0, alt: 40.0 }];
+        let track = [
+            ProtoGps {
+                lat: 36.0,
+                lon: 127.0,
+                alt: 40.0,
+            },
+            ProtoGps {
+                lat: 36.1,
+                lon: 127.0,
+                alt: 40.0,
+            },
+        ];
         let cams = ["left", "center", "right"].map(String::from);
         let root = base.join("job");
         let jf = prepare(&root, &sources, &track, &cams).unwrap();
@@ -221,7 +275,10 @@ mod tests {
 
     #[test]
     fn missing_source_is_an_error() {
-        let src = vec![Source { uri: "/definitely/not/here.mp4".into(), poses: vec![] }];
+        let src = vec![Source {
+            uri: "/definitely/not/here.mp4".into(),
+            poses: vec![],
+        }];
         assert!(prepare(&std::env::temp_dir().join("skylens-none"), &src, &[], &[]).is_err());
     }
 }

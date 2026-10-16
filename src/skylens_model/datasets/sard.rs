@@ -15,9 +15,9 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use super::base::{
+    Availability, DatasetError, DatasetMeta, IMG_EXT, Result, Sample, SkyLensDataset, Transform,
     boxes_tensor, ensure_exists, file_stem, finish_sample, list_images, read_rgb_raster,
-    resolve_root, tensor_u8, verify_split, Availability, DatasetError, DatasetMeta, Result,
-    Sample, SkyLensDataset, Transform, IMG_EXT,
+    resolve_root, tensor_u8, verify_split,
 };
 
 pub const SARD_KAGGLE_SLUG: &str = "julienmeine/search-and-rescue-dataset";
@@ -67,7 +67,9 @@ pub fn parse_yolo_labels(
         if parts.len() < 5 {
             continue;
         }
-        let Ok(cls) = parts[0].parse::<f64>().map(|v| v as i64) else { continue };
+        let Ok(cls) = parts[0].parse::<f64>().map(|v| v as i64) else {
+            continue;
+        };
         let nums: Vec<f32> = match parts[1..5].iter().map(|v| v.parse::<f32>()).collect() {
             Ok(n) => n,
             Err(_) => continue,
@@ -134,9 +136,18 @@ impl SARD {
         let split = verify_split(&SARD_META, split)?;
         let root = resolve_root(root);
         let (img, lab) = Self::dirs(&root, &split);
-        ensure_exists(&SARD_META, &root, img.is_dir() && !list_images(&img, &IMG_EXT).is_empty())?;
+        ensure_exists(
+            &SARD_META,
+            &root,
+            img.is_dir() && !list_images(&img, &IMG_EXT).is_empty(),
+        )?;
         let index = Self::build_index(&img, &lab);
-        Ok(SARD { root, split, transforms, index })
+        Ok(SARD {
+            root,
+            split,
+            transforms,
+            index,
+        })
     }
 
     /// Like [`SARD::new`], but the sample set comes from a `SPLIT.json` of the form
@@ -159,10 +170,7 @@ impl SARD {
             split: split.to_string(),
             expected: map.keys().cloned().collect(),
         })?;
-        let stems: HashSet<String> = wanted
-            .iter()
-            .map(|s| file_stem(Path::new(s)))
-            .collect();
+        let stems: HashSet<String> = wanted.iter().map(|s| file_stem(Path::new(s))).collect();
         ds.index.retain(|(img, _)| stems.contains(&file_stem(img)));
         ds.split = split.to_string();
         ds.transforms = transforms;
@@ -176,7 +184,10 @@ impl SARD {
             _ => &["test"],
         };
         for alias in aliases {
-            let (img, lab) = (root.join(alias).join("images"), root.join(alias).join("labels"));
+            let (img, lab) = (
+                root.join(alias).join("images"),
+                root.join(alias).join("labels"),
+            );
             if img.is_dir() {
                 return (img, lab);
             }

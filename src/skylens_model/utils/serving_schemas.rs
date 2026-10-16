@@ -250,25 +250,41 @@ fn u32_of(v: i64) -> u32 {
 
 impl From<Gps> for pb::Gps {
     fn from(g: Gps) -> Self {
-        pb::Gps { lat: g.lat, lon: g.lon, alt: g.alt }
+        pb::Gps {
+            lat: g.lat,
+            lon: g.lon,
+            alt: g.alt,
+        }
     }
 }
 
 impl From<pb::Gps> for Gps {
     fn from(g: pb::Gps) -> Self {
-        Gps { lat: g.lat, lon: g.lon, alt: g.alt }
+        Gps {
+            lat: g.lat,
+            lon: g.lon,
+            alt: g.alt,
+        }
     }
 }
 
 impl From<skylens_shared::geo::Gps> for Gps {
     fn from(g: skylens_shared::geo::Gps) -> Self {
-        Gps { lat: g.lat, lon: g.lon, alt: g.alt }
+        Gps {
+            lat: g.lat,
+            lon: g.lon,
+            alt: g.alt,
+        }
     }
 }
 
 impl From<Gps> for skylens_shared::geo::Gps {
     fn from(g: Gps) -> Self {
-        skylens_shared::geo::Gps { lat: g.lat, lon: g.lon, alt: g.alt }
+        skylens_shared::geo::Gps {
+            lat: g.lat,
+            lon: g.lon,
+            alt: g.alt,
+        }
     }
 }
 
@@ -310,7 +326,11 @@ impl From<pb::DroneTelemetry> for DroneTelemetry {
             kind: TelemetryKind::Tag,
             drone_id: t.drone_id as i64,
             station: station_from_pb(t.station),
-            gps: t.gps.map(Gps::from).unwrap_or(Gps { lat: 0.0, lon: 0.0, alt: 0.0 }),
+            gps: t.gps.map(Gps::from).unwrap_or(Gps {
+                lat: 0.0,
+                lon: 0.0,
+                alt: 0.0,
+            }),
             heading_deg: t.heading_deg,
             speed: t.speed,
             battery_pct: t.battery_pct,
@@ -321,13 +341,19 @@ impl From<pb::DroneTelemetry> for DroneTelemetry {
 
 impl From<&JobSource> for pb::Source {
     fn from(s: &JobSource) -> Self {
-        pb::Source { uri: s.uri.clone(), poses: s.poses.iter().map(Into::into).collect() }
+        pb::Source {
+            uri: s.uri.clone(),
+            poses: s.poses.iter().map(Into::into).collect(),
+        }
     }
 }
 
 impl From<pb::Source> for JobSource {
     fn from(s: pb::Source) -> Self {
-        JobSource { uri: s.uri, poses: s.poses.into_iter().map(Into::into).collect() }
+        JobSource {
+            uri: s.uri,
+            poses: s.poses.into_iter().map(Into::into).collect(),
+        }
     }
 }
 
@@ -375,7 +401,10 @@ impl From<pb::DetectJobRequest> for DetectJobRequest {
 
 impl From<&JobAccepted> for pb::JobAccepted {
     fn from(a: &JobAccepted) -> Self {
-        pb::JobAccepted { job_id: a.job_id.clone(), queued: a.queued.min(u32::MAX as u64) as u32 }
+        pb::JobAccepted {
+            job_id: a.job_id.clone(),
+            queued: a.queued.min(u32::MAX as u64) as u32,
+        }
     }
 }
 
@@ -468,7 +497,11 @@ impl From<payload::Detection> for DetectionResult {
             kind: DetectionKind::Tag,
             id: d.id,
             category,
-            gps: d.gps.map(Gps::from).unwrap_or(Gps { lat: 0.0, lon: 0.0, alt: 0.0 }),
+            gps: d.gps.map(Gps::from).unwrap_or(Gps {
+                lat: 0.0,
+                lon: 0.0,
+                alt: 0.0,
+            }),
             confidence: d.confidence,
             label: d.label,
             segment: d.segment as i64,
@@ -482,7 +515,10 @@ impl From<&DetectJobResult> for pb::DetectJobResult {
         let batch = payload::DetectionBatch {
             detections: r.detections.iter().map(Into::into).collect(),
         };
-        pb::DetectJobResult { segment: u32_of(r.segment), detections: batch.encode_to_vec() }
+        pb::DetectJobResult {
+            segment: u32_of(r.segment),
+            detections: batch.encode_to_vec(),
+        }
     }
 }
 
@@ -600,7 +636,10 @@ mod tests {
         assert_eq!(v["error"], serde_json::Value::Null);
         assert_eq!(v["result"]["kind"], "recon-result");
         assert_eq!(v["result"]["anchorFrame"], "frame-1");
-        assert_eq!(v["result"]["align"]["rotation"], json!([0.0, 0.0, 0.0, 1.0]));
+        assert_eq!(
+            v["result"]["align"]["rotation"],
+            json!([0.0, 0.0, 0.0, 1.0])
+        );
         assert_eq!(v["result"]["align"]["anchor"], serde_json::Value::Null);
 
         let round: JobStatus = serde_json::from_value(v).unwrap();
@@ -621,7 +660,11 @@ mod tests {
 
     #[test]
     fn health_and_accepted_field_names() {
-        let a = serde_json::to_value(JobAccepted { job_id: "j".into(), queued: 2 }).unwrap();
+        let a = serde_json::to_value(JobAccepted {
+            job_id: "j".into(),
+            queued: 2,
+        })
+        .unwrap();
         assert_eq!(a, json!({"jobId": "j", "queued": 2}));
 
         let h = Health {
@@ -650,7 +693,11 @@ mod tests {
                     kind: TelemetryKind::Tag,
                     drone_id: 2,
                     station: Some("center".into()),
-                    gps: Gps { lat: 1.0, lon: 2.0, alt: 3.0 },
+                    gps: Gps {
+                        lat: 1.0,
+                        lon: 2.0,
+                        alt: 3.0,
+                    },
                     heading_deg: 90.0,
                     speed: 4.0,
                     battery_pct: 50.0,
@@ -658,7 +705,11 @@ mod tests {
                 }],
             }],
             steps: 7000,
-            track: vec![Gps { lat: 1.0, lon: 2.0, alt: 3.0 }],
+            track: vec![Gps {
+                lat: 1.0,
+                lon: 2.0,
+                alt: 3.0,
+            }],
             anchor_frame: Some("frame-x".into()),
         };
         let back = ReconJobRequest::from(pb::ReconJobRequest::from(&req));
@@ -671,7 +722,11 @@ mod tests {
                 kind: DetectionKind::Tag,
                 id: "p1".into(),
                 category: DetectionCategory::Person,
-                gps: Gps { lat: 1.0, lon: 2.0, alt: 3.0 },
+                gps: Gps {
+                    lat: 1.0,
+                    lon: 2.0,
+                    alt: 3.0,
+                },
                 confidence: 0.9,
                 label: "x".into(),
                 segment: 1,

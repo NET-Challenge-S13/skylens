@@ -28,8 +28,8 @@ use pointblitz_io::Point as PbPoint;
 use pointblitz_io::chunk::encode;
 use pointblitz_io::convert::{MAX_POINTS, piece_plan};
 use prost::Message;
-use skylens_shared::proto::model::v1::{Chunk, ChunkKind, Level};
 use skylens_shared::delta::to_chunk;
+use skylens_shared::proto::model::v1::{Chunk, ChunkKind, Level};
 use skylens_shared::proto::payload::v1::{DetectionBatch, MeshBlock, PointsDelta};
 
 /// Channel depth of one subscriber.
@@ -47,7 +47,12 @@ pub struct ZonePoint {
 /// Encodes a zone cloud as pointblitz chunks (at most `max_points` each).
 /// `coarse` sends every 8th point first (refined snapshots). Always at least one
 /// chunk; the last carries `FLAG_LAST_IN_GENERATION`.
-pub fn point_chunks(points: &[ZonePoint], generation: u32, coarse: bool, max_points: usize) -> Vec<Vec<u8>> {
+pub fn point_chunks(
+    points: &[ZonePoint],
+    generation: u32,
+    coarse: bool,
+    max_points: usize,
+) -> Vec<Vec<u8>> {
     piece_plan(points.len(), coarse, max_points.max(1))
         .iter()
         .enumerate()
@@ -55,7 +60,10 @@ pub fn point_chunks(points: &[ZonePoint], generation: u32, coarse: bool, max_poi
             let pts: Vec<PbPoint> = (0..piece.count)
                 .map(|j| {
                     let p = &points[piece.start + j * piece.step];
-                    PbPoint { position: p.pos, color: p.rgb }
+                    PbPoint {
+                        position: p.pos,
+                        color: p.rgb,
+                    }
                 })
                 .collect();
             encode(generation, i as u32, piece.flags, &pts)
@@ -64,7 +72,12 @@ pub fn point_chunks(points: &[ZonePoint], generation: u32, coarse: bool, max_poi
 }
 
 /// Point chunks of one zone delivery, ready for the log.
-pub fn points_delivery(segment: u32, level: Level, generation: u32, points: &[ZonePoint]) -> Vec<Chunk> {
+pub fn points_delivery(
+    segment: u32,
+    level: Level,
+    generation: u32,
+    points: &[ZonePoint],
+) -> Vec<Chunk> {
     let coarse = level == Level::Refined;
     point_chunks(points, generation, coarse, MAX_POINTS)
         .into_iter()
@@ -86,7 +99,13 @@ pub fn points_delta_delivery(delta: &PointsDelta, generation: u32) -> Vec<Chunk>
 }
 
 /// One mesh block. `None` (block emptied) becomes a zero-triangle removal.
-pub fn mesh_chunk(segment: u32, level: Level, id: [i32; 3], version: u32, mesh: Option<&deltamesh::BlockMesh>) -> Chunk {
+pub fn mesh_chunk(
+    segment: u32,
+    level: Level,
+    id: [i32; 3],
+    version: u32,
+    mesh: Option<&deltamesh::BlockMesh>,
+) -> Chunk {
     let block = match mesh {
         Some(m) => MeshBlock {
             id: m.id.to_vec(),
@@ -95,7 +114,11 @@ pub fn mesh_chunk(segment: u32, level: Level, id: [i32; 3], version: u32, mesh: 
             colors: m.colors.clone(),
             indices: m.indices.clone(),
         },
-        None => MeshBlock { id: id.to_vec(), version, ..Default::default() },
+        None => MeshBlock {
+            id: id.to_vec(),
+            version,
+            ..Default::default()
+        },
     };
     Chunk {
         kind: ChunkKind::MeshBlock as i32,
@@ -171,7 +194,11 @@ impl ChunkLog {
 
     /// Chunks retained with a sequence above `after`, in order.
     pub fn since(&self, after: u64) -> Vec<Arc<Chunk>> {
-        self.lock().chunks.range(after.saturating_add(1)..).map(|(_, c)| c.clone()).collect()
+        self.lock()
+            .chunks
+            .range(after.saturating_add(1)..)
+            .map(|(_, c)| c.clone())
+            .collect()
     }
 
     /// Replays retained chunks above `after_sequence`, then follows new ones.
@@ -180,31 +207,40 @@ impl ChunkLog {
     pub fn subscribe(self: &Arc<Self>, after_sequence: u64) -> tokio::sync::mpsc::Receiver<Chunk> {
         let (tx, rx) = tokio::sync::mpsc::channel(SUBSCRIBER_BUFFER);
         let log = Arc::clone(self);
-        let spawned = std::thread::Builder::new().name("chunk-subscriber".into()).spawn(move || {
-            let mut cursor = after_sequence;
-            loop {
-                let batch = {
-                    let mut st = log.lock();
-                    loop {
-                        let next: Vec<Arc<Chunk>> =
-                            st.chunks.range(cursor.saturating_add(1)..).map(|(_, c)| c.clone()).collect();
-                        if !next.is_empty() {
-                            break next;
+        let spawned = std::thread::Builder::new()
+            .name("chunk-subscriber".into())
+            .spawn(move || {
+                let mut cursor = after_sequence;
+                loop {
+                    let batch = {
+                        let mut st = log.lock();
+                        loop {
+                            let next: Vec<Arc<Chunk>> = st
+                                .chunks
+                                .range(cursor.saturating_add(1)..)
+                                .map(|(_, c)| c.clone())
+                                .collect();
+                            if !next.is_empty() {
+                                break next;
+                            }
+                            if st.closed || tx.is_closed() {
+                                return;
+                            }
+                            st = log
+                                .cv
+                                .wait_timeout(st, Duration::from_secs(1))
+                                .unwrap_or_else(|p| p.into_inner())
+                                .0;
                         }
-                        if st.closed || tx.is_closed() {
+                    };
+                    for c in batch {
+                        cursor = c.sequence;
+                        if tx.blocking_send((*c).clone()).is_err() {
                             return;
                         }
-                        st = log.cv.wait_timeout(st, Duration::from_secs(1)).unwrap_or_else(|p| p.into_inner()).0;
-                    }
-                };
-                for c in batch {
-                    cursor = c.sequence;
-                    if tx.blocking_send((*c).clone()).is_err() {
-                        return;
                     }
                 }
-            }
-        });
+            });
         if let Err(e) = spawned {
             tracing::error!("chunk subscriber thread: {e}");
         }
@@ -222,11 +258,17 @@ impl ChunkLog {
 fn compact(chunks: &mut BTreeMap<u64, Arc<Chunk>>, new: &Chunk) {
     let kind = new.kind;
     if kind == ChunkKind::MeshBlock as i32 {
-        chunks.retain(|_, c| !(c.kind == kind && c.block_id == new.block_id && c.version <= new.version));
+        chunks.retain(|_, c| {
+            !(c.kind == kind && c.block_id == new.block_id && c.version <= new.version)
+        });
     } else if kind == ChunkKind::Detections as i32 {
-        chunks.retain(|_, c| !(c.kind == kind && c.segment == new.segment && c.version <= new.version));
+        chunks.retain(|_, c| {
+            !(c.kind == kind && c.segment == new.segment && c.version <= new.version)
+        });
     } else if kind == ChunkKind::Points as i32 {
-        chunks.retain(|_, c| !(c.kind == kind && c.segment == new.segment && c.generation < new.generation));
+        chunks.retain(|_, c| {
+            !(c.kind == kind && c.segment == new.segment && c.generation < new.generation)
+        });
     } else if kind == ChunkKind::PointsDelta as i32 {
         // One stream across zones: a higher generation is a snapshot that starts over.
         chunks.retain(|_, c| !(c.kind == kind && c.generation < new.generation));
@@ -240,7 +282,11 @@ mod tests {
 
     fn cloud(n: usize) -> Vec<ZonePoint> {
         (0..n)
-            .map(|i| ZonePoint { pos: [i as f32, 0.5 * i as f32, 10.0], rgb: [i as u8, 1, 2], normal: [0.0; 3] })
+            .map(|i| ZonePoint {
+                pos: [i as f32, 0.5 * i as f32, 10.0],
+                rgb: [i as u8, 1, 2],
+                normal: [0.0; 3],
+            })
             .collect()
     }
 
@@ -248,7 +294,10 @@ mod tests {
     fn preview_points_keep_order_and_close_the_delivery() {
         let c = point_chunks(&cloud(10), 0, false, 4);
         let h: Vec<_> = c.iter().map(|b| decode_header(b).unwrap()).collect();
-        assert_eq!(h.iter().map(|h| h.point_count).collect::<Vec<_>>(), [4, 4, 2]);
+        assert_eq!(
+            h.iter().map(|h| h.point_count).collect::<Vec<_>>(),
+            [4, 4, 2]
+        );
         assert_eq!(h.last().unwrap().flags, FLAG_LAST_IN_GENERATION);
         assert!(h.iter().all(|h| h.flags & FLAG_FIRST_PASS_COMPLETE == 0));
     }
@@ -285,7 +334,10 @@ mod tests {
         };
         let c = mesh_chunk(5, Level::Preview, m.id, m.version, Some(&m));
         assert_eq!(c.kind, ChunkKind::MeshBlock as i32);
-        assert_eq!((c.segment, c.version, c.block_id.clone()), (5, 4, vec![1, -2, 3]));
+        assert_eq!(
+            (c.segment, c.version, c.block_id.clone()),
+            (5, 4, vec![1, -2, 3])
+        );
         let back = MeshBlock::decode(c.payload.as_slice()).unwrap();
         assert_eq!(back.indices, vec![0, 1, 2]);
         assert_eq!(back.positions.len(), 9);
@@ -305,7 +357,11 @@ mod tests {
         log.publish([detections_chunk(0, 1, &DetectionBatch::default())]);
         log.publish([detections_chunk(0, 2, &DetectionBatch::default())]);
         assert_eq!(log.last_sequence(), 5);
-        let kept: Vec<_> = log.since(0).iter().map(|c| (c.sequence, c.kind, c.version)).collect();
+        let kept: Vec<_> = log
+            .since(0)
+            .iter()
+            .map(|c| (c.sequence, c.kind, c.version))
+            .collect();
         assert_eq!(
             kept,
             vec![
@@ -324,15 +380,28 @@ mod tests {
             .map(|c| (c.segment, c.generation))
             .collect();
         // Refined points go out coarse-first, so one generation may span several chunks.
-        assert!(points.contains(&(1, 0)), "segment 1 preview must stay: {points:?}");
-        assert!(points.contains(&(0, 1)), "segment 0 refined must arrive: {points:?}");
-        assert!(!points.contains(&(0, 0)), "segment 0 preview must be replaced: {points:?}");
+        assert!(
+            points.contains(&(1, 0)),
+            "segment 1 preview must stay: {points:?}"
+        );
+        assert!(
+            points.contains(&(0, 1)),
+            "segment 0 refined must arrive: {points:?}"
+        );
+        assert!(
+            !points.contains(&(0, 0)),
+            "segment 0 preview must be replaced: {points:?}"
+        );
     }
 
     #[test]
     fn delta_generation_replaces_older_delta_chunks_only() {
         let log = ChunkLog::new();
-        let d = |seq: u32, zone: u32| PointsDelta { seq, zone, ..Default::default() };
+        let d = |seq: u32, zone: u32| PointsDelta {
+            seq,
+            zone,
+            ..Default::default()
+        };
         log.publish(points_delta_delivery(&d(1, 0), 0));
         log.publish(points_delta_delivery(&d(2, 1), 0));
         log.publish(points_delivery(0, Level::Preview, 0, &cloud(2)));
@@ -343,9 +412,15 @@ mod tests {
         let mut snap = d(3, 1);
         snap.snapshot = true;
         log.publish(points_delta_delivery(&snap, 1));
-        let kept: Vec<_> = log.since(0).iter().map(|c| (c.kind, c.generation)).collect();
+        let kept: Vec<_> = log
+            .since(0)
+            .iter()
+            .map(|c| (c.kind, c.generation))
+            .collect();
         assert_eq!(
-            kept.iter().filter(|k| k.0 == ChunkKind::PointsDelta as i32).collect::<Vec<_>>(),
+            kept.iter()
+                .filter(|k| k.0 == ChunkKind::PointsDelta as i32)
+                .collect::<Vec<_>>(),
             vec![&(ChunkKind::PointsDelta as i32, 1)]
         );
         assert_eq!(kept.len(), 3, "points and mesh untouched: {kept:?}");

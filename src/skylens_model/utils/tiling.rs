@@ -47,12 +47,26 @@ pub struct Image {
 
 impl Image {
     pub fn new(width: usize, height: usize, channels: usize, data: Vec<f32>) -> Self {
-        assert_eq!(data.len(), width * height * channels, "image buffer size mismatch");
-        Self { width, height, channels, data }
+        assert_eq!(
+            data.len(),
+            width * height * channels,
+            "image buffer size mismatch"
+        );
+        Self {
+            width,
+            height,
+            channels,
+            data,
+        }
     }
 
     pub fn zeros(width: usize, height: usize, channels: usize) -> Self {
-        Self { width, height, channels, data: vec![0.0; width * height * channels] }
+        Self {
+            width,
+            height,
+            channels,
+            data: vec![0.0; width * height * channels],
+        }
     }
 
     #[inline]
@@ -165,7 +179,10 @@ fn apply_tables(img: &Image, xt: &AxisTable, yt: &AxisTable) -> Image {
 /// `cv2.resize(img, (width, height), interpolation=...)` on an `f32` image.
 pub fn resize(img: &Image, width: usize, height: usize, interpolation: Interpolation) -> Image {
     assert!(width > 0 && height > 0, "resize target must be non-empty");
-    assert!(img.width > 0 && img.height > 0, "resize source must be non-empty");
+    assert!(
+        img.width > 0 && img.height > 0,
+        "resize source must be non-empty"
+    );
     if (width, height) == (img.width, img.height) {
         return img.clone();
     }
@@ -174,12 +191,14 @@ pub fn resize(img: &Image, width: usize, height: usize, interpolation: Interpola
         Interpolation::Area if shrinks_both => {
             (area_table(img.width, width), area_table(img.height, height))
         }
-        Interpolation::Area => {
-            (linear_table(img.width, width, true), linear_table(img.height, height, true))
-        }
-        Interpolation::Linear => {
-            (linear_table(img.width, width, false), linear_table(img.height, height, false))
-        }
+        Interpolation::Area => (
+            linear_table(img.width, width, true),
+            linear_table(img.height, height, true),
+        ),
+        Interpolation::Linear => (
+            linear_table(img.width, width, false),
+            linear_table(img.height, height, false),
+        ),
     };
     apply_tables(img, &xt, &yt)
 }
@@ -203,14 +222,20 @@ pub fn scale_to_short_side(
     let nw = py_round(w as f64 * s) as usize;
     let nh = py_round(h as f64 * s) as usize;
     let out = if (nw, nh) != (w, h) {
-        let interp = if s < 1.0 { Interpolation::Area } else { Interpolation::Linear };
+        let interp = if s < 1.0 {
+            Interpolation::Area
+        } else {
+            Interpolation::Linear
+        };
         resize(image, nw, nh, interp)
     } else {
         image.clone()
     };
     let boxes = boxes.map(|b| {
         let (fx, fy) = ((nw as f64 / w as f64) as f32, (nh as f64 / h as f64) as f32);
-        b.iter().map(|r| [r[0] * fx, r[1] * fy, r[2] * fx, r[3] * fy]).collect()
+        b.iter()
+            .map(|r| [r[0] * fx, r[1] * fy, r[2] * fx, r[3] * fy])
+            .collect()
     });
     (out, boxes, s)
 }
@@ -221,11 +246,14 @@ pub fn tile_starts(length: u32, tile: u32, min_overlap: u32) -> Vec<u32> {
     if length <= tile {
         return vec![0];
     }
-    let n = ((f64::from(length) - f64::from(min_overlap)) / (f64::from(tile) - f64::from(min_overlap)))
-        .ceil() as i64;
+    let n = ((f64::from(length) - f64::from(min_overlap))
+        / (f64::from(tile) - f64::from(min_overlap)))
+    .ceil() as i64;
     let n = n.max(2);
     let span = f64::from(length - tile);
-    (0..n).map(|i| py_round(i as f64 * span / (n - 1) as f64) as u32).collect()
+    (0..n)
+        .map(|i| py_round(i as f64 * span / (n - 1) as f64) as u32)
+        .collect()
 }
 
 /// `(x0, y0)` of every tile, row-major (`tile_grid`).
@@ -261,7 +289,11 @@ pub fn clip_boxes_to_tile(
                 (b[3] - y0).clamp(0.0, tile_h),
             ];
             let (cw, ch) = (c[2] - c[0], c[3] - c[1]);
-            let vis = if area > 0.0 { cw * ch / area.max(1e-9) } else { 0.0 };
+            let vis = if area > 0.0 {
+                cw * ch / area.max(1e-9)
+            } else {
+                0.0
+            };
             (vis >= min_visible && cw >= min_size && ch >= min_size).then_some(c)
         })
         .collect()
@@ -270,7 +302,9 @@ pub fn clip_boxes_to_tile(
 /// Shift detections from tile to full-image coordinates
 /// (`tile_detections_to_full`).
 pub fn tile_detections_to_full(det: &[Detection], x0: f64, y0: f64) -> Vec<Detection> {
-    det.iter().map(|d| [d[0] + x0, d[1] + y0, d[2], d[3], d[4]]).collect()
+    det.iter()
+        .map(|d| [d[0] + x0, d[1] + y0, d[2], d[3], d[4]])
+        .collect()
 }
 
 /// Greedy de-duplication across tiles, highest score wins
@@ -320,7 +354,13 @@ pub fn merge_tile_detections(
 /// Cut a `tile_w` x `tile_h` window at `(x0, y0)`, zero-padding the part that
 /// falls outside the image (the `copyMakeBorder(..., value=0)` of
 /// `ScaledTileCropDataset`). Returns the window and its valid extent.
-pub fn crop_tile(img: &Image, x0: usize, y0: usize, tile_w: usize, tile_h: usize) -> (Image, usize, usize) {
+pub fn crop_tile(
+    img: &Image,
+    x0: usize,
+    y0: usize,
+    tile_w: usize,
+    tile_h: usize,
+) -> (Image, usize, usize) {
     let c = img.channels;
     let vw = img.width.saturating_sub(x0).min(tile_w);
     let vh = img.height.saturating_sub(y0).min(tile_h);
@@ -360,7 +400,8 @@ mod tests {
     #[test]
     fn scale_to_short_side_shape_scale_and_boxes() {
         let img = Image::zeros(960, 540, 3);
-        let (out, boxes, s) = scale_to_short_side(&img, Some(&[[96.0f32, 54.0, 192.0, 108.0]][..]), 765);
+        let (out, boxes, s) =
+            scale_to_short_side(&img, Some(&[[96.0f32, 54.0, 192.0, 108.0]][..]), 765);
         assert_eq!((out.height, out.width), (765, 1360));
         assert!((s - 765.0 / 540.0).abs() < 1e-9);
         let b = boxes.unwrap()[0];
@@ -385,14 +426,25 @@ mod tests {
     #[test]
     fn clip_boxes_small_sliver_kept_if_mostly_visible() {
         // 3px box with 2px left inside: 66% visible, 2px wide -> kept.
-        let out = clip_boxes_to_tile(&[[99.0, 0.0, 102.0, 10.0]], 100.0, 0.0, 512.0, 512.0, 0.5, 2.0);
+        let out = clip_boxes_to_tile(
+            &[[99.0, 0.0, 102.0, 10.0]],
+            100.0,
+            0.0,
+            512.0,
+            512.0,
+            0.5,
+            2.0,
+        );
         assert_eq!(out, vec![[0.0, 0.0, 2.0, 10.0]]);
     }
 
     #[test]
     fn detections_map_back_and_merge_across_tiles() {
         // The same person (full-frame 500,300) is found in the overlap of two tiles.
-        let tile_a = [[500.0, 300.0, 8.0, 20.0, 0.9], [100.0, 100.0, 8.0, 20.0, 0.5]];
+        let tile_a = [
+            [500.0, 300.0, 8.0, 20.0, 0.9],
+            [100.0, 100.0, 8.0, 20.0, 0.5],
+        ];
         let tile_b = [[76.5, 300.0, 8.0, 20.0, 0.7]]; // x0 = 424 -> x = 500.5
         let full_a = tile_detections_to_full(&tile_a, 0.0, 0.0);
         let full_b = tile_detections_to_full(&tile_b, 424.0, 0.0);
@@ -429,7 +481,11 @@ mod tests {
     fn area_fractional_shrink_uses_partial_coverage() {
         // 3 -> 2: [2/3 a0 + 1/3 a1, 1/3 a1 + 2/3 a2]
         let out = resize(&row(&[0.0, 3.0, 6.0]), 2, 1, Interpolation::Area);
-        assert!(approx(out.data[0], 1.0, 1e-6) && approx(out.data[1], 5.0, 1e-6), "{:?}", out.data);
+        assert!(
+            approx(out.data[0], 1.0, 1e-6) && approx(out.data[1], 5.0, 1e-6),
+            "{:?}",
+            out.data
+        );
     }
 
     #[test]
@@ -440,8 +496,19 @@ mod tests {
 
     #[test]
     fn resize_keeps_constant_images_and_channels() {
-        let img = Image::new(5, 3, 2, (0..30).map(|i| if i % 2 == 0 { 0.25 } else { 0.75 }).collect());
-        for (w, h, m) in [(2, 2, Interpolation::Area), (9, 7, Interpolation::Linear), (9, 2, Interpolation::Area)] {
+        let img = Image::new(
+            5,
+            3,
+            2,
+            (0..30)
+                .map(|i| if i % 2 == 0 { 0.25 } else { 0.75 })
+                .collect(),
+        );
+        for (w, h, m) in [
+            (2, 2, Interpolation::Area),
+            (9, 7, Interpolation::Linear),
+            (9, 2, Interpolation::Area),
+        ] {
             let out = resize(&img, w, h, m);
             assert_eq!((out.width, out.height, out.channels), (w, h, 2));
             for px in out.data.chunks(2) {
@@ -456,6 +523,9 @@ mod tests {
         let img = Image::new(3, 2, 1, vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
         let (t, vw, vh) = crop_tile(&img, 1, 0, 4, 3);
         assert_eq!((vw, vh), (2, 2));
-        assert_eq!(t.data, vec![2.0, 3.0, 0.0, 0.0, 5.0, 6.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+        assert_eq!(
+            t.data,
+            vec![2.0, 3.0, 0.0, 0.0, 5.0, 6.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+        );
     }
 }

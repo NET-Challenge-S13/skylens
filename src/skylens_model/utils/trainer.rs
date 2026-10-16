@@ -39,7 +39,7 @@ use tch::{Device, Kind, Reduction, Tensor};
 use super::callbacks::{GracefulInterruptCallback, TrainerCallback, TrainerControl, TrainerState};
 use super::collate::{Batch, SkyLensCollator};
 use super::training_args::SkyLensTrainingArguments;
-use crate::datasets::base::{SimpleRng, SkyLensDataset, IGNORE_INDEX};
+use crate::datasets::base::{IGNORE_INDEX, SimpleRng, SkyLensDataset};
 
 // --------------------------------------------------------------------------- //
 // model contract
@@ -69,7 +69,11 @@ pub trait DualHeadModel {
     /// Variable-name prefix of the backbone (`FreezeBackboneCallback` freezes these).
     /// Python tries the attribute names `backbone`, `encoder`, `feature_extractor` in order.
     fn backbone_prefixes(&self) -> Vec<String> {
-        vec!["backbone".into(), "encoder".into(), "feature_extractor".into()]
+        vec![
+            "backbone".into(),
+            "encoder".into(),
+            "feature_extractor".into(),
+        ]
     }
 }
 
@@ -110,14 +114,22 @@ pub fn masked_l1_loss(pred: &Tensor, target: &Tensor, mask: &Tensor) -> Tensor {
 /// Multi-class soft Dice loss (class mean) with ignore pixels removed from numerator and
 /// denominator. `logits` is `(B, C, H, W)` before softmax, `labels` is `(B, H, W)` integer.
 /// Absent classes give dice = 1 thanks to smoothing, so no NaN.
-pub fn masked_soft_dice_loss(logits: &Tensor, labels: &Tensor, ignore_index: i64, smooth: f64) -> Tensor {
+pub fn masked_soft_dice_loss(
+    logits: &Tensor,
+    labels: &Tensor,
+    ignore_index: i64,
+    smooth: f64,
+) -> Tensor {
     let num_classes = logits.size()[1];
     // float32 so sums do not overflow under half precision
     let probs = logits.to_kind(Kind::Float).softmax(1, Kind::Float);
     let labels = labels.to_kind(Kind::Int64);
     let valid = labels.ne(ignore_index);
     let safe_labels = labels.where_self(&valid, &labels.zeros_like());
-    let one_hot = safe_labels.one_hot(num_classes).permute([0, 3, 1, 2]).to_kind(Kind::Float);
+    let one_hot = safe_labels
+        .one_hot(num_classes)
+        .permute([0, 3, 1, 2])
+        .to_kind(Kind::Float);
     let valid_f = valid.unsqueeze(1).to_kind(Kind::Float);
     let probs = probs * &valid_f;
     let one_hot = one_hot * &valid_f;
@@ -169,7 +181,13 @@ pub fn compute_losses(out: &ModelOutput, batch: &Batch, cfg: &LossConfig) -> Los
 
     if let (Some(logits), Some(labels)) = (&out.danger_logits, &batch.danger_labels) {
         let labels = labels.to_kind(Kind::Int64);
-        let ce = logits.cross_entropy_loss::<Tensor>(&labels, None, Reduction::Mean, cfg.ignore_index, 0.0);
+        let ce = logits.cross_entropy_loss::<Tensor>(
+            &labels,
+            None,
+            Reduction::Mean,
+            cfg.ignore_index,
+            0.0,
+        );
         comps.insert("danger_seg".into(), ce);
         if cfg.dice_weight > 0.0 {
             comps.insert(
@@ -179,19 +197,29 @@ pub fn compute_losses(out: &ModelOutput, batch: &Batch, cfg: &LossConfig) -> Los
         }
     }
     if let (Some(pred), Some(gt)) = (&out.person_heatmap, &batch.person_heatmap) {
-        comps.insert("person_heatmap".into(), centernet_focal_loss(pred, gt, 2.0, 4.0));
-    }
-    if let (Some(pred), Some(gt), Some(mask)) = (&out.person_wh, &batch.person_wh, &batch.person_reg_mask) {
-        comps.insert("person_wh".into(), masked_l1_loss(pred, gt, mask));
+        comps.insert(
+            "person_heatmap".into(),
+            centernet_focal_loss(pred, gt, 2.0, 4.0),
+        );
     }
     if let (Some(pred), Some(gt), Some(mask)) =
-        (&out.person_offset, &batch.person_offset, &batch.person_reg_mask)
+        (&out.person_wh, &batch.person_wh, &batch.person_reg_mask)
     {
+        comps.insert("person_wh".into(), masked_l1_loss(pred, gt, mask));
+    }
+    if let (Some(pred), Some(gt), Some(mask)) = (
+        &out.person_offset,
+        &batch.person_offset,
+        &batch.person_reg_mask,
+    ) {
         comps.insert("person_offset".into(), masked_l1_loss(pred, gt, mask));
     }
 
     if comps.is_empty() {
-        return LossOutput { total: None, components: comps };
+        return LossOutput {
+            total: None,
+            components: comps,
+        };
     }
     let weight = |k: &str| match k {
         "danger_seg" => cfg.seg_weight,
@@ -208,7 +236,10 @@ pub fn compute_losses(out: &ModelOutput, batch: &Batch, cfg: &LossConfig) -> Los
             None => term,
         });
     }
-    LossOutput { total, components: comps }
+    LossOutput {
+        total,
+        components: comps,
+    }
 }
 
 /// Shape of a 0-dim tensor.
@@ -252,7 +283,9 @@ pub fn sample_modality_flags(
 /// `(B, 2)` bool tensor from [`sample_modality_flags`].
 pub fn modality_mask_tensor(flags: &[[bool; 2]], device: Device) -> Tensor {
     let flat: Vec<bool> = flags.iter().flatten().copied().collect();
-    Tensor::from_slice(&flat).reshape([flags.len() as i64, 2]).to_device(device)
+    Tensor::from_slice(&flat)
+        .reshape([flags.len() as i64, 2])
+        .to_device(device)
 }
 
 /// Zeroes the channels of an absent modality and records thermal validity (README §2.3).
@@ -268,8 +301,14 @@ pub fn apply_modality_mask(
     let size = pixel_values.size();
     let (b, c, h, w) = (size[0], size[1], size[2], size[3]);
     let kind = pixel_values.kind();
-    let rgb_present = modality_mask.select(1, 0).to_kind(kind).reshape([-1, 1, 1, 1]);
-    let thermal_present = modality_mask.select(1, 1).to_kind(kind).reshape([-1, 1, 1, 1]);
+    let rgb_present = modality_mask
+        .select(1, 0)
+        .to_kind(kind)
+        .reshape([-1, 1, 1, 1]);
+    let thermal_present = modality_mask
+        .select(1, 1)
+        .to_kind(kind)
+        .reshape([-1, 1, 1, 1]);
 
     let mut parts = vec![
         pixel_values.narrow(1, 0, 3) * &rgb_present,
@@ -299,7 +338,11 @@ pub struct FreezeBackboneCallback {
 
 impl FreezeBackboneCallback {
     pub fn new(freeze_epochs: f64, backbone_prefixes: Vec<String>) -> Self {
-        FreezeBackboneCallback { freeze_epochs, prefixes: backbone_prefixes, frozen: false }
+        FreezeBackboneCallback {
+            freeze_epochs,
+            prefixes: backbone_prefixes,
+            frozen: false,
+        }
     }
 
     /// Sets `requires_grad` on every variable under the first prefix that matches anything.
@@ -310,7 +353,9 @@ impl FreezeBackboneCallback {
             let dotted = format!("{prefix}.");
             let hits: Vec<&Tensor> = vars
                 .iter()
-                .filter(|(name, _)| name.as_str() == prefix.as_str() || name.starts_with(dotted.as_str()))
+                .filter(|(name, _)| {
+                    name.as_str() == prefix.as_str() || name.starts_with(dotted.as_str())
+                })
                 .map(|(_, t)| t)
                 .collect();
             if !hits.is_empty() {
@@ -367,7 +412,11 @@ pub fn lr_at(kind: &str, base: f64, step: u64, total: u64, warmup_ratio: f64) ->
     if warmup > 0.0 && s < warmup {
         return base * s / warmup;
     }
-    let progress = if total > warmup { (s - warmup) / (total - warmup) } else { 1.0 };
+    let progress = if total > warmup {
+        (s - warmup) / (total - warmup)
+    } else {
+        1.0
+    };
     match kind {
         "constant" => base,
         "cosine" => base * 0.5 * (1.0 + (std::f64::consts::PI * progress.min(1.0)).cos()),
@@ -402,7 +451,9 @@ impl SkyLensDataset for ConcatDataset {
             }
             idx -= p.len();
         }
-        Err(crate::datasets::base::DatasetError::InvalidSample("concat index out of range".into()))
+        Err(crate::datasets::base::DatasetError::InvalidSample(
+            "concat index out of range".into(),
+        ))
     }
 }
 
@@ -445,7 +496,11 @@ pub fn repeat_indices(len: usize, factor: usize) -> Vec<usize> {
 }
 
 /// Indices of samples whose mask contains `class` (cached as `has_class_<class>.json`).
-pub fn find_class_indices(ds: &dyn SkyLensDataset, cache_dir: &Path, class: u8) -> Result<Vec<usize>> {
+pub fn find_class_indices(
+    ds: &dyn SkyLensDataset,
+    cache_dir: &Path,
+    class: u8,
+) -> Result<Vec<usize>> {
     let marker = cache_dir.join(format!("has_class_{class}.json"));
     if marker.is_file() {
         return Ok(serde_json::from_slice(&std::fs::read(&marker)?)?);
@@ -527,7 +582,10 @@ impl<M: DualHeadModel> SkyLensTrainer<M> {
         };
         if t.args.freeze_backbone_epochs > 0.0 {
             let prefixes = t.model.backbone_prefixes();
-            t.add_callback(Box::new(FreezeBackboneCallback::new(t.args.freeze_backbone_epochs, prefixes)));
+            t.add_callback(Box::new(FreezeBackboneCallback::new(
+                t.args.freeze_backbone_epochs,
+                prefixes,
+            )));
         }
         Ok(t)
     }
@@ -552,7 +610,12 @@ impl<M: DualHeadModel> SkyLensTrainer<M> {
                 let b = pixels.size()[0] as usize;
                 let flags = sample_modality_flags(b, p_rgb_only, p_thermal_only, &mut self.rng);
                 let mask = modality_mask_tensor(&flags, pixels.device());
-                pixels = apply_modality_mask(&pixels, &mask, self.in_channels, self.use_validity_channel);
+                pixels = apply_modality_mask(
+                    &pixels,
+                    &mask,
+                    self.in_channels,
+                    self.use_validity_channel,
+                );
             }
         }
         let out = self.model.forward(&pixels, train);
@@ -578,8 +641,15 @@ impl<M: DualHeadModel> SkyLensTrainer<M> {
             if v.numel() == 0 {
                 continue;
             }
-            let val = v.detach().to_kind(Kind::Float).mean(Kind::Float).double_value(&[]);
-            self.loss_log_buffer.entry(format!("loss_{k}")).or_default().push(val);
+            let val = v
+                .detach()
+                .to_kind(Kind::Float)
+                .mean(Kind::Float)
+                .double_value(&[]);
+            self.loss_log_buffer
+                .entry(format!("loss_{k}"))
+                .or_default()
+                .push(val);
         }
     }
 
@@ -614,7 +684,9 @@ impl<M: DualHeadModel> SkyLensTrainer<M> {
     /// Optimizer steps per epoch and in total.
     pub fn plan_steps(&self, dataset_len: usize) -> (u64, u64) {
         let micro = dataset_len.div_ceil(self.args.per_device_train_batch_size.max(1));
-        let per_epoch = micro.div_ceil(self.args.gradient_accumulation_steps.max(1)).max(1) as u64;
+        let per_epoch = micro
+            .div_ceil(self.args.gradient_accumulation_steps.max(1))
+            .max(1) as u64;
         let total = (per_epoch as f64 * self.args.num_train_epochs).ceil() as u64;
         (per_epoch, total)
     }
@@ -641,7 +713,9 @@ impl<M: DualHeadModel> SkyLensTrainer<M> {
             state.global_step = self.load_checkpoint(&ckpt)?;
         }
 
-        self.fire(&state, &mut control, |cb, s, c, vs| cb.on_train_begin(s, c, vs));
+        self.fire(&state, &mut control, |cb, s, c, vs| {
+            cb.on_train_begin(s, c, vs)
+        });
 
         let n_epochs = self.args.num_train_epochs.ceil() as u64;
         let first_epoch = state.global_step / steps_per_epoch;
@@ -649,7 +723,9 @@ impl<M: DualHeadModel> SkyLensTrainer<M> {
 
         'epochs: for epoch in first_epoch..n_epochs {
             state.epoch = epoch as f64;
-            self.fire(&state, &mut control, |cb, s, c, vs| cb.on_epoch_begin(s, c, vs));
+            self.fire(&state, &mut control, |cb, s, c, vs| {
+                cb.on_epoch_begin(s, c, vs)
+            });
 
             let mut order: Vec<usize> = (0..train_ds.len()).collect();
             let mut epoch_rng = SimpleRng::new(self.args.seed.wrapping_add(epoch));
@@ -694,10 +770,16 @@ impl<M: DualHeadModel> SkyLensTrainer<M> {
                 step_in_epoch += 1;
                 state.epoch = epoch as f64 + step_in_epoch as f64 / steps_per_epoch as f64;
                 control = TrainerControl::default();
-                self.fire(&state, &mut control, |cb, s, c, vs| cb.on_step_end(s, c, vs));
+                self.fire(&state, &mut control, |cb, s, c, vs| {
+                    cb.on_step_end(s, c, vs)
+                });
 
                 if self.args.logging_steps > 0 && state.global_step % self.args.logging_steps == 0 {
-                    let mut entry = LogEntry { step: state.global_step, epoch: state.epoch, ..Default::default() };
+                    let mut entry = LogEntry {
+                        step: state.global_step,
+                        epoch: state.epoch,
+                        ..Default::default()
+                    };
                     entry.values.insert("learning_rate".into(), lr);
                     entry.values.extend(self.drain_loss_logs());
                     tracing::info!(step = entry.step, epoch = entry.epoch, values = ?entry.values, "train");
@@ -716,11 +798,17 @@ impl<M: DualHeadModel> SkyLensTrainer<M> {
         }
 
         let final_state = state;
-        self.fire(&final_state, &mut control, |cb, s, c, vs| cb.on_train_end(s, c, vs));
+        self.fire(&final_state, &mut control, |cb, s, c, vs| {
+            cb.on_train_end(s, c, vs)
+        });
         // flush components that never reached a logging boundary
         let rest = self.drain_loss_logs();
         if !rest.is_empty() {
-            result.history.push(LogEntry { step: state.global_step, epoch: state.epoch, values: rest });
+            result.history.push(LogEntry {
+                step: state.global_step,
+                epoch: state.epoch,
+                values: rest,
+            });
         }
         result.global_step = state.global_step;
         Ok(result)
@@ -758,7 +846,12 @@ impl<M: DualHeadModel> SkyLensTrainer<M> {
                 (filler.shallow_clone(), filler)
             }
         };
-        PredictionStep { loss, seg_pred, seg_gt, outputs: out }
+        PredictionStep {
+            loss,
+            seg_pred,
+            seg_gt,
+            outputs: out,
+        }
     }
 
     /// Mean loss and mean loss components over a dataset.
@@ -772,7 +865,10 @@ impl<M: DualHeadModel> SkyLensTrainer<M> {
         let mut losses = Vec::new();
         let indices: Vec<usize> = (0..ds.len()).collect();
         for chunk in indices.chunks(bs) {
-            let samples = chunk.iter().map(|&i| ds.get(i)).collect::<std::result::Result<Vec<_>, _>>()?;
+            let samples = chunk
+                .iter()
+                .map(|&i| ds.get(i))
+                .collect::<std::result::Result<Vec<_>, _>>()?;
             let batch = collator.collate(&samples)?.to_device(device);
             let step = self.prediction_step(&batch);
             if let Some(l) = step.loss {
@@ -781,11 +877,16 @@ impl<M: DualHeadModel> SkyLensTrainer<M> {
         }
         let mut out = self.drain_loss_logs();
         if !losses.is_empty() {
-            out.insert("eval_loss".into(), losses.iter().sum::<f64>() / losses.len() as f64);
+            out.insert(
+                "eval_loss".into(),
+                losses.iter().sum::<f64>() / losses.len() as f64,
+            );
         }
         let state = TrainerState::default();
         let mut control = TrainerControl::default();
-        self.fire(&state, &mut control, |cb, s, c, vs| cb.on_evaluate(s, c, vs));
+        self.fire(&state, &mut control, |cb, s, c, vs| {
+            cb.on_evaluate(s, c, vs)
+        });
         Ok(out)
     }
 
@@ -839,7 +940,12 @@ pub fn prune_checkpoints(output_dir: &Path, limit: usize) -> Result<()> {
         .filter_map(|e| e.ok())
         .filter(|e| e.path().is_dir())
         .filter_map(|e| {
-            let step = e.file_name().to_string_lossy().strip_prefix("checkpoint-")?.parse().ok()?;
+            let step = e
+                .file_name()
+                .to_string_lossy()
+                .strip_prefix("checkpoint-")?
+                .parse()
+                .ok()?;
             Some((step, e.path()))
         })
         .collect();
@@ -917,7 +1023,13 @@ mod tests {
         assert_eq!(out.get(0).get(4).sum(Kind::Float).double_value(&[]), 0.0);
         assert_eq!(out.get(0).get(0).sum(Kind::Float).double_value(&[]), 4.0);
         // sample 1: RGB absent -> channels 0..3 zero, thermal and validity kept
-        assert_eq!(out.get(1).narrow(0, 0, 3).sum(Kind::Float).double_value(&[]), 0.0);
+        assert_eq!(
+            out.get(1)
+                .narrow(0, 0, 3)
+                .sum(Kind::Float)
+                .double_value(&[]),
+            0.0
+        );
         assert_eq!(out.get(1).get(3).sum(Kind::Float).double_value(&[]), 4.0);
         assert_eq!(out.get(1).get(4).sum(Kind::Float).double_value(&[]), 4.0);
     }
@@ -928,7 +1040,8 @@ mod tests {
         let labels = Tensor::from_slice(&[0i64, 1, 1, 255]).reshape([1, 2, 2]);
         // logits favour the right class strongly; the ignored pixel is deliberately wrong
         let logits = Tensor::from_slice(&[
-            20.0f32, -20.0, -20.0, 20.0, // class 0 plane: px0 high; px1,px2 low; px3 high (wrong)
+            20.0f32, -20.0, -20.0,
+            20.0, // class 0 plane: px0 high; px1,px2 low; px3 high (wrong)
             -20.0, 20.0, 20.0, -20.0, // class 1 plane
         ])
         .reshape([1, 2, 2, 2]);
@@ -994,7 +1107,8 @@ mod tests {
         assert!(l.components.contains_key("danger_dice"));
         assert!(!l.components.contains_key("person_heatmap"));
         // CE:Dice weights are 1:1
-        let want = l.components["danger_seg"].double_value(&[]) + l.components["danger_dice"].double_value(&[]);
+        let want = l.components["danger_seg"].double_value(&[])
+            + l.components["danger_dice"].double_value(&[]);
         assert!((l.total.unwrap().double_value(&[]) - want).abs() < 1e-6);
     }
 
@@ -1009,8 +1123,15 @@ mod tests {
             person_reg_mask: None,
             person_offset: None,
         };
-        let out = ModelOutput { danger_logits: Some(Tensor::zeros([1, 4, 4, 4], cpu())), ..Default::default() };
-        assert!(compute_losses(&out, &batch, &LossConfig::default()).total.is_none());
+        let out = ModelOutput {
+            danger_logits: Some(Tensor::zeros([1, 4, 4, 4], cpu())),
+            ..Default::default()
+        };
+        assert!(
+            compute_losses(&out, &batch, &LossConfig::default())
+                .total
+                .is_none()
+        );
         let z = zero_loss(&out, Device::Cpu);
         assert_eq!(z.double_value(&[]), 0.0);
         assert!(z.requires_grad());
@@ -1025,7 +1146,10 @@ mod tests {
 
         let mut cb = FreezeBackboneCallback::new(2.0, vec!["backbone".into()]);
         let mut ctl = TrainerControl::default();
-        let at = |epoch: f64| TrainerState { epoch, global_step: 0 };
+        let at = |epoch: f64| TrainerState {
+            epoch,
+            global_step: 0,
+        };
         let grad = |name: &str| vs.variables()[name].requires_grad();
 
         cb.on_epoch_begin(&at(0.0), &mut ctl, &vs);

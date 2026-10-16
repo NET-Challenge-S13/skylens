@@ -51,7 +51,8 @@ use cumulus3d_cli::declare::AlignFrame;
 use cumulus3d_cli::post::LiveOptions;
 use prost::Message;
 use skylens_shared::proto::model::v1::{
-    Align, Chunk, DetectJobRequest, DetectJobResult, FrameSet, Level, ReconJobRequest, ReconJobResult,
+    Align, Chunk, DetectJobRequest, DetectJobResult, FrameSet, Level, ReconJobRequest,
+    ReconJobResult,
 };
 
 use crate::detect::Detector;
@@ -60,6 +61,8 @@ use frames::{Assembled, Assembler};
 use fusion::Fuser;
 use live::{Consumer, FrameQueue, Msg};
 
+/// RANSAC seed of the live node (the V100 runs used `--seed 1`).
+pub const LIVE_SEED: u64 = 1;
 /// Id of the live node on the engine's host.
 pub const LIVE_NODE: &str = "live";
 /// Folder under `work_dir` with job results; `ReconJobResult.url` is
@@ -98,13 +101,15 @@ impl std::str::FromStr for PointsMode {
             "delta" => Ok(PointsMode::Delta),
             "segment" => Ok(PointsMode::Segment),
             "both" => Ok(PointsMode::Both),
-            other => Err(format!("unknown points mode {other:?} (delta | segment | both)")),
+            other => Err(format!(
+                "unknown points mode {other:?} (delta | segment | both)"
+            )),
         }
     }
 }
 
 /// Default `EngineConfig::display_stride`.
-pub const DEFAULT_DISPLAY_STRIDE: usize = 2;
+pub const DEFAULT_DISPLAY_STRIDE: usize = 6;
 /// Default `EngineConfig::snapshot_every`.
 pub const DEFAULT_SNAPSHOT_EVERY: usize = 128;
 
@@ -125,15 +130,9 @@ pub struct EngineConfig {
     pub points_mode: PointsMode,
     /// cumulus3d display thinning: every zone cloud is cut to 1/N by key hash
     /// before the overlap dedupe (`LiveOptions::stride`, `SKYLENS_DISPLAY_STRIDE`).
-    /// Default [`DEFAULT_DISPLAY_STRIDE`] = 2. A per-zone `POINTS` chunk carried the
-    /// whole dense zone cloud (`recon::zone_points` does not thin), so stride 1 is
-    /// the old density; the overlap dedupe (voxel ownership, zone overlap 2 of 12)
-    /// already removes about a sixth of it. 2 keeps half of that: still dense enough
-    /// for the point view to read like the old one, while the diff, the slot ids and
-    /// the 20 B per point on the wire stay in budget (the composition runs on the
-    /// composing thread, so stride 1 would stall ingestion on large scenes;
-    /// cumulus3d's own default 6 is meant for a display-only viewer). 0 is
-    /// clamped to 1.
+    /// Default [`DEFAULT_DISPLAY_STRIDE`] = 6, the stride of the V100 live runs
+    /// (`cumulus3d stream --live-stride 6`, also cumulus3d's own default). 1 is the
+    /// full density of the dense zone cloud; 0 is clamped to 1.
     pub display_stride: usize,
     /// A snapshot chunk (new generation) after every N display deltas so the
     /// core's stored replay stays short; 0 = never (`SKYLENS_DELTA_SNAPSHOT_EVERY`,
@@ -155,9 +154,13 @@ pub enum PushOutcome {
 impl PushOutcome {
     fn from_compose(o: &Outcome) -> Self {
         match o {
-            Outcome::Appended { .. } | Outcome::Replayed { .. } | Outcome::Invalidated { .. } => PushOutcome::Ingested,
+            Outcome::Appended { .. } | Outcome::Replayed { .. } | Outcome::Invalidated { .. } => {
+                PushOutcome::Ingested
+            }
             Outcome::Waiting { .. } => PushOutcome::Pending,
-            Outcome::Duplicate { .. } | Outcome::Ignored(_) | Outcome::Ended => PushOutcome::Ignored,
+            Outcome::Duplicate { .. } | Outcome::Ignored(_) | Outcome::Ended => {
+                PushOutcome::Ignored
+            }
         }
     }
 }
@@ -188,11 +191,14 @@ impl Engine {
     pub fn new(cfg: EngineConfig, detector: Option<Arc<dyn Detector>>) -> anyhow::Result<Self> {
         ensure!(!cfg.cameras.is_empty(), "engine needs at least one camera");
         let live_dir = cfg.work_dir.join("live");
-        std::fs::create_dir_all(&live_dir).with_context(|| format!("create {}", live_dir.display()))?;
+        std::fs::create_dir_all(&live_dir)
+            .with_context(|| format!("create {}", live_dir.display()))?;
 
         let host = CompositionHost::new();
         let log = chunks::ChunkLog::new();
         let mut b = ReconNode::declare()
+            // The plan comes first (it replaces every setting); the builder calls below refine it.
+            .plan(jobs::live_plan())
             .id(LIVE_NODE)
             .images(&live_dir)
             .cameras(cfg.cameras.clone())
@@ -201,13 +207,17 @@ impl Engine {
             .fixed_enu_origin(true)
             // Settle-then-freeze display: shown zones are only refined, never jump.
             .stable_display(true)
-            .display_deltas(LiveOptions { stride: cfg.display_stride.max(1), ..Default::default() })
+            .display_deltas(LiveOptions {
+                stride: cfg.display_stride.max(1),
+                ..Default::default()
+            })
             // A refined zone can be meshed only once (deltamesh), and late or corrected
             // sets would rewind zones already streamed; append only.
             .reconcile(ReconcilePolicy::AppendOnly)
-            // Triangulate only the images registered at this position. The default re-triangulates
-            // every registered image on each set, which grew to 7.5 s per set in a 5-minute run.
-            .incremental_triangulation(true);
+            // Triangulate only the images registered at this position.
+            .incremental_triangulation(true)
+            // Same RANSAC seed as the V100 live runs (`--seed 1`).
+            .seed(LIVE_SEED);
         if cfg.gpu {
             b = b.gpu();
         }
@@ -260,12 +270,20 @@ impl Engine {
         let assembled = lock(&self.assembler).offer(set)?;
         let state = match assembled {
             Assembled::Repeat => return Ok(PushOutcome::Ignored),
-            Assembled::Pending { key, missing } => {
-                FrameState::pending(LiveKey::new(key.source_id, key.sequence, key.revision), missing)
-            }
-            Assembled::Complete(set) => FrameState::ready(frames::to_live_set(&set, &self.cfg.cameras, self.cfg.anchor)?),
+            Assembled::Pending { key, missing } => FrameState::pending(
+                LiveKey::new(key.source_id, key.sequence, key.revision),
+                missing,
+            ),
+            Assembled::Complete(set) => FrameState::ready(frames::to_live_set(
+                &set,
+                &self.cfg.cameras,
+                self.cfg.anchor,
+            )?),
         };
-        let outcome = self.node.compose(state).map_err(|e| anyhow!("compose: {e}"))?;
+        let outcome = self
+            .node
+            .compose(state)
+            .map_err(|e| anyhow!("compose: {e}"))?;
         Ok(PushOutcome::from_compose(&outcome))
     }
 
@@ -275,7 +293,8 @@ impl Engine {
     pub fn inject_event(&self, ev: cumulus3d_cli::events::Event) -> anyhow::Result<()> {
         let guard = lock(&self.inject);
         let tx = guard.as_ref().context("engine is shut down")?;
-        tx.send(Msg::Event(ev)).map_err(|_| anyhow!("chunk consumer has stopped"))
+        tx.send(Msg::Event(ev))
+            .map_err(|_| anyhow!("chunk consumer has stopped"))
     }
 
     /// Chunks with a sequence above `after_sequence`, then every new one as it is
@@ -300,8 +319,20 @@ impl Engine {
         let level = jobs::level_for_steps(req.steps);
         let dir = jobs::job_dir(&self.cfg.work_dir, "recon", req.segment);
         let result: anyhow::Result<ReconJobResult> = (|| {
-            let out = jobs::run(&self.cfg, &dir, &req.sources, &req.track, level, None, progress)?;
-            let suffix = if level == Level::Refined { "refined" } else { "preview" };
+            let out = jobs::run(
+                &self.cfg,
+                &dir,
+                &req.sources,
+                &req.track,
+                level,
+                None,
+                progress,
+            )?;
+            let suffix = if level == Level::Refined {
+                "refined"
+            } else {
+                "preview"
+            };
             let file = format!("segment-{:03}-{suffix}.ply", req.segment);
             let bytes = jobs::write_cloud(&self.cfg.work_dir.join(RESULTS_DIR).join(&file), &out)?;
             Ok(ReconJobResult {
@@ -310,7 +341,10 @@ impl Engine {
                 url: format!("/{RESULTS_DIR}/{file}"),
                 bytes,
                 align: Some(self.identity_align()),
-                anchor_frame: req.anchor_frame.clone().unwrap_or_else(|| self.anchor_frame()),
+                anchor_frame: req
+                    .anchor_frame
+                    .clone()
+                    .unwrap_or_else(|| self.anchor_frame()),
             })
         })();
         let _ = std::fs::remove_dir_all(&dir);
@@ -331,10 +365,21 @@ impl Engine {
         req: &DetectJobRequest,
         progress: &(dyn Fn(f64) + Send + Sync),
     ) -> anyhow::Result<DetectJobResult> {
-        let detector = self.detector.clone().context("detect job: no UNet loaded")?;
+        let detector = self
+            .detector
+            .clone()
+            .context("detect job: no UNet loaded")?;
         let _one = lock(&self.job_lock);
         let dir = jobs::job_dir(&self.cfg.work_dir, "detect", req.segment);
-        let out = jobs::run(&self.cfg, &dir, &req.sources, &[], Level::Preview, Some(detector), progress);
+        let out = jobs::run(
+            &self.cfg,
+            &dir,
+            &req.sources,
+            &[],
+            Level::Preview,
+            Some(detector),
+            progress,
+        );
         let _ = std::fs::remove_dir_all(&dir);
         let out = out?;
         let mut fuser = Fuser::new(self.cfg.anchor, out.observations.len().max(1));
@@ -344,7 +389,10 @@ impl Engine {
         }
         let batch = fuser.batch(req.segment);
         progress(1.0);
-        Ok(DetectJobResult { segment: req.segment, detections: batch.encode_to_vec() })
+        Ok(DetectJobResult {
+            segment: req.segment,
+            detections: batch.encode_to_vec(),
+        })
     }
 
     /// Clouds are produced in ENU about the anchor: identity transform.
@@ -389,21 +437,52 @@ mod tests {
 
     #[test]
     fn compose_outcomes_map_to_push_outcomes() {
-        assert_eq!(PushOutcome::from_compose(&Outcome::Appended { position: 3, skipped: 0 }), PushOutcome::Ingested);
-        assert_eq!(PushOutcome::from_compose(&Outcome::Replayed { from: 1, positions: 2 }), PushOutcome::Ingested);
-        assert_eq!(PushOutcome::from_compose(&Outcome::Waiting { missing: vec!["left".into()] }), PushOutcome::Pending);
-        assert_eq!(PushOutcome::from_compose(&Outcome::Duplicate { position: 0 }), PushOutcome::Ignored);
-        assert_eq!(PushOutcome::from_compose(&Outcome::Ignored(IgnoreReason::Late)), PushOutcome::Ignored);
-        assert_eq!(PushOutcome::from_compose(&Outcome::Ended), PushOutcome::Ignored);
+        assert_eq!(
+            PushOutcome::from_compose(&Outcome::Appended {
+                position: 3,
+                skipped: 0
+            }),
+            PushOutcome::Ingested
+        );
+        assert_eq!(
+            PushOutcome::from_compose(&Outcome::Replayed {
+                from: 1,
+                positions: 2
+            }),
+            PushOutcome::Ingested
+        );
+        assert_eq!(
+            PushOutcome::from_compose(&Outcome::Waiting {
+                missing: vec!["left".into()]
+            }),
+            PushOutcome::Pending
+        );
+        assert_eq!(
+            PushOutcome::from_compose(&Outcome::Duplicate { position: 0 }),
+            PushOutcome::Ignored
+        );
+        assert_eq!(
+            PushOutcome::from_compose(&Outcome::Ignored(IgnoreReason::Late)),
+            PushOutcome::Ignored
+        );
+        assert_eq!(
+            PushOutcome::from_compose(&Outcome::Ended),
+            PushOutcome::Ignored
+        );
     }
 
     fn engine_config(dir: &str) -> EngineConfig {
         EngineConfig {
-            anchor: skylens_shared::geo::Gps { lat: 36.3685, lon: 127.3475, alt: 30.0 },
+            anchor: skylens_shared::geo::Gps {
+                lat: 36.3685,
+                lon: 127.3475,
+                alt: 30.0,
+            },
             cameras: ["left", "center", "right"].map(String::from).to_vec(),
             zone_span: 12,
             zone_overlap: 2,
-            work_dir: std::env::temp_dir().join(format!("skylens-engine-{dir}-{}", std::process::id())),
+            work_dir: std::env::temp_dir()
+                .join(format!("skylens-engine-{dir}-{}", std::process::id())),
             gpu: false,
             points_mode: PointsMode::default(),
             display_stride: DEFAULT_DISPLAY_STRIDE,
@@ -428,7 +507,11 @@ mod tests {
         let cfg = engine_config("start");
         let engine = Engine::new(cfg.clone(), None).unwrap();
         let partial = FrameSet {
-            key: Some(FrameKey { source_id: "formation".into(), sequence: 0, revision: 0 }),
+            key: Some(FrameKey {
+                source_id: "formation".into(),
+                sequence: 0,
+                revision: 0,
+            }),
             images: vec![LiveImage {
                 camera: "left".into(),
                 format: ImageFormat::Jpeg as i32,
@@ -438,7 +521,11 @@ mod tests {
             captured_at_ms: 0,
         };
         assert_eq!(engine.push(partial).unwrap(), PushOutcome::Pending);
-        let bad = FrameSet { key: None, images: vec![], captured_at_ms: 0 };
+        let bad = FrameSet {
+            key: None,
+            images: vec![],
+            captured_at_ms: 0,
+        };
         assert!(engine.push(bad).is_err());
         assert_eq!(engine.log.last_sequence(), 0);
         assert_eq!(engine.anchor_frame(), "enu-36.3685000-127.3475000-30.00");
@@ -450,7 +537,10 @@ mod tests {
     fn detect_job_without_a_detector_is_an_error() {
         let cfg = engine_config("nodet");
         let engine = Engine::new(cfg.clone(), None).unwrap();
-        let req = DetectJobRequest { segment: 0, sources: vec![] };
+        let req = DetectJobRequest {
+            segment: 0,
+            sources: vec![],
+        };
         assert!(engine.run_detect_job(&req, &|_| {}).is_err());
         drop(engine);
         let _ = std::fs::remove_dir_all(&cfg.work_dir);

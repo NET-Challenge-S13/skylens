@@ -17,19 +17,21 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, anyhow, bail};
-use cumulus3d_cli::compose::{CompositionHost, FrameKey, FrameState, LiveFrameSet, ReconNode, ReconcilePolicy};
-use cumulus3d_cli::declare::{AlignFrame, Dense};
+use cumulus3d_cli::compose::{
+    CompositionHost, FrameKey, FrameState, LiveFrameSet, ReconNode, ReconcilePolicy,
+};
+use cumulus3d_cli::declare::{AlignFrame, Dense, Plan};
 use cumulus3d_cli::events::{Event, ZoneRange};
-use cumulus3d_core::io::ply::PointCloud;
 use cumulus3d_core::Reconstruction;
+use cumulus3d_core::io::ply::PointCloud;
 use skylens_shared::proto::model::v1::{Gps as ProtoGps, Level, Source};
 
+use super::EngineConfig;
 use super::chunks::ZonePoint;
 use super::frames::ANCHOR_RECORD;
 use super::fusion::{FrameObservation, View};
 use super::recon::{zone_points, zone_views};
 use super::sources;
-use super::EngineConfig;
 use crate::detect::Detector;
 
 /// `steps` at or above this produce the refined level; below, the preview.
@@ -37,7 +39,11 @@ pub const REFINED_MIN_STEPS: u32 = 7_000;
 
 /// Level selected by a job's `steps`.
 pub fn level_for_steps(steps: u32) -> Level {
-    if steps >= REFINED_MIN_STEPS { Level::Refined } else { Level::Preview }
+    if steps >= REFINED_MIN_STEPS {
+        Level::Refined
+    } else {
+        Level::Preview
+    }
 }
 
 /// What a job reconstructed.
@@ -49,9 +55,42 @@ pub struct JobOutput {
     pub cloud: Arc<PointCloud>,
 }
 
-/// Dense settings shared by the live node and jobs. Densification needs CUDA.
+/// Plan the live node and the jobs start from: cumulus3d's defaults with the stable-display settle
+/// parameters written out (`--settle-tol 0.01 --settle-max-zone 3`, the defaults), no densification
+/// until [`dense_for`] and no GPS file (the sets carry their GPS fixes).
+///
+/// The intrinsics prior (`--intrinsics-prior`) cannot be expressed here: in cumulus3d 0.6.0
+/// `Plan.sparse.intrinsics_prior` is read only by the file driven `Recon` builder, while
+/// `NodeBuilder::build` (the `ReconNode` used by the live node and the jobs) never passes it on
+/// to the session.
+pub fn live_plan() -> Plan {
+    let mut plan = Plan::default();
+    plan.dense.enabled = false;
+    plan.gps = None;
+    plan.sparse.settle_tol = SETTLE_TOL;
+    plan.sparse.settle_max_zone = SETTLE_MAX_ZONE;
+    plan
+}
+
+/// `--settle-tol` of the V100 live runs (also the default).
+pub const SETTLE_TOL: f64 = 0.01;
+/// `--settle-max-zone` of the V100 live runs (also the default).
+pub const SETTLE_MAX_ZONE: usize = 3;
+
+/// Dense settings shared by the live node and jobs, equal to the V100 live runs:
+/// `fast` profile, `--max-levels 1`, `--visibility-views 8`, `--fusion-smooth-iters 2
+/// --fusion-smooth-radius 1.5 --fusion-smooth-normal 15`; everything else is the profile default
+/// (views 10, 960 px, fusion min views 3). Densification needs CUDA.
 pub fn dense_for(gpu: bool) -> Option<Dense> {
-    gpu.then(|| Dense::profile("fast").fusion_min_views(2))
+    gpu.then(|| {
+        let mut d = Dense::profile("fast")
+            .max_levels(1)
+            .fusion_smooth_iters(2)
+            .fusion_smooth_radius(1.5)
+            .fusion_smooth_normal(15.0);
+        d.fusion.visibility_views = Some(8);
+        d
+    })
 }
 
 /// Runs one job node over `sources` in `dir` (created, left for the caller to remove).
@@ -80,6 +119,7 @@ pub fn run(
 
     let host = CompositionHost::new();
     let mut b = ReconNode::declare()
+        .plan(live_plan())
         .id("job")
         .images(&images)
         .cameras(input.cameras.clone())
@@ -116,7 +156,12 @@ pub fn run(
 
     let anchor = cfg.anchor;
     for p in 0..n {
-        let mut set = LiveFrameSet::new(FrameKey::new("job", p as u64, 0)).gps_fix(ANCHOR_RECORD, anchor.lat, anchor.lon, anchor.alt);
+        let mut set = LiveFrameSet::new(FrameKey::new("job", p as u64, 0)).gps_fix(
+            ANCHOR_RECORD,
+            anchor.lat,
+            anchor.lon,
+            anchor.alt,
+        );
         for (i, cam) in input.cameras.iter().enumerate() {
             set = set.file(cam.clone(), input.names[p][i].clone());
             if let Some(g) = input.gps[p][i] {
@@ -132,16 +177,23 @@ pub fn run(
     }
     // Closing waits for the background refinement and drains the hook lanes;
     // the subscription channel then closes and the collector returns.
-    let closed = host.close("job").map_err(|e| anyhow!("closing job node: {e}"));
-    let seen = collector.join().map_err(|_| anyhow!("job event collector panicked"))?;
+    let closed = host
+        .close("job")
+        .map_err(|e| anyhow!("closing job node: {e}"));
+    let seen = collector
+        .join()
+        .map_err(|_| anyhow!("job event collector panicked"))?;
     closed?;
     progress(0.9);
 
     let (range, cloud, model) = match level {
-        Level::Refined => seen.refined.ok_or_else(|| anyhow!("no refined result (too few registered frames?)"))?,
+        Level::Refined => seen
+            .refined
+            .ok_or_else(|| anyhow!("no refined result (too few registered frames?)"))?,
         _ => {
-            let (range, cloud, model, frame) =
-                seen.preview.ok_or_else(|| anyhow!("no preview result (too few registered frames?)"))?;
+            let (range, cloud, model, frame) = seen
+                .preview
+                .ok_or_else(|| anyhow!("no preview result (too few registered frames?)"))?;
             if frame == "unaligned" {
                 bail!("GPS alignment failed; the preview is not in ENU");
             }
@@ -151,7 +203,12 @@ pub fn run(
     let points = zone_points(&cloud, &model, range, &seen.positions);
     let views = zone_views(&model, range, &seen.positions);
     let observations = std::mem::take(&mut *observations.lock().unwrap_or_else(|p| p.into_inner()));
-    Ok(JobOutput { points, views, observations, cloud })
+    Ok(JobOutput {
+        points,
+        views,
+        observations,
+        cloud,
+    })
 }
 
 type PreviewZone = (ZoneRange, Arc<PointCloud>, Arc<Reconstruction>, String);
@@ -169,15 +226,28 @@ fn collect(events: std::sync::mpsc::Receiver<Event>) -> Seen {
     let mut seen = Seen::default();
     for ev in events {
         match ev {
-            Event::FrameIngested { position, images, .. } => {
+            Event::FrameIngested {
+                position, images, ..
+            } => {
                 for im in images {
                     seen.positions.insert(im, position);
                 }
             }
-            Event::ZonePreview { range, cloud, model, frame, .. } if range.zone == 0 => {
+            Event::ZonePreview {
+                range,
+                cloud,
+                model,
+                frame,
+                ..
+            } if range.zone == 0 => {
                 seen.preview = Some((range, cloud, model, frame));
             }
-            Event::ZoneRefined { range, cloud, model, .. } if range.zone == 0 => {
+            Event::ZoneRefined {
+                range,
+                cloud,
+                model,
+                ..
+            } if range.zone == 0 => {
                 seen.refined = Some((range, cloud, model));
             }
             Event::Warning { message, .. } => tracing::debug!("job: {message}"),
@@ -194,7 +264,9 @@ pub fn job_dir(work_dir: &Path, kind: &str, segment: u32) -> PathBuf {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis())
         .unwrap_or_default();
-    work_dir.join("jobs").join(format!("{kind}-s{segment}-{stamp}-{}", std::process::id()))
+    work_dir
+        .join("jobs")
+        .join(format!("{kind}-s{segment}-{stamp}-{}", std::process::id()))
 }
 
 /// Writes the job's cloud as PLY (`x y z red green blue [nx ny nz]`).
@@ -212,8 +284,12 @@ pub fn write_cloud(path: &Path, out: &JobOutput) -> anyhow::Result<u64> {
     } else {
         (*out.cloud).clone()
     };
-    cumulus3d_core::io::ply::write_ply(path, &cloud, cumulus3d_core::io::ply::PlyLayout::XyzRgbNormal)
-        .map_err(|e| anyhow!("write {}: {e}", path.display()))?;
+    cumulus3d_core::io::ply::write_ply(
+        path,
+        &cloud,
+        cumulus3d_core::io::ply::PlyLayout::XyzRgbNormal,
+    )
+    .map_err(|e| anyhow!("write {}: {e}", path.display()))?;
     Ok(std::fs::metadata(path)?.len())
 }
 

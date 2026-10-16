@@ -27,9 +27,9 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use super::base::{
-    ensure_exists, file_stem, finish_sample, has_ext, list_dir, mask_tensor, read_mask_raster,
-    read_rgb_raster, resize_nearest, resolve_root, tensor_u8, verify_split, Availability,
-    DangerClass, DatasetMeta, Raster, Result, Sample, SkyLensDataset, Transform, IMG_EXT,
+    Availability, DangerClass, DatasetMeta, IMG_EXT, Raster, Result, Sample, SkyLensDataset,
+    Transform, ensure_exists, file_stem, finish_sample, has_ext, list_dir, mask_tensor,
+    read_mask_raster, read_rgb_raster, resize_nearest, resolve_root, tensor_u8, verify_split,
 };
 
 pub const RESCUENET_CLASSES: [&str; 11] = [
@@ -82,7 +82,10 @@ pub fn map_rescuenet_labels(raw: &Raster<u8>) -> Raster<u8> {
         raw.h,
         raw.w,
         1,
-        raw.data.iter().map(|&v| RESCUENET_TO_SKYLENS[v as usize]).collect(),
+        raw.data
+            .iter()
+            .map(|&v| RESCUENET_TO_SKYLENS[v as usize])
+            .collect(),
     )
 }
 
@@ -101,17 +104,28 @@ impl RescueNetSegmentation {
         let (img, lab) = Self::dirs(&root, &split);
         ensure_exists(&RESCUENET_META, &root, img.is_dir() && lab.is_dir())?;
         let index = Self::build_index(&img, &lab);
-        Ok(RescueNetSegmentation { root, split, transforms, index })
+        Ok(RescueNetSegmentation {
+            root,
+            split,
+            transforms,
+            index,
+        })
     }
 
     fn dirs(root: &Path, s: &str) -> (PathBuf, PathBuf) {
         let base = root.join(s);
-        let (img, lab) = (base.join(format!("{s}-org-img")), base.join(format!("{s}-label-img")));
+        let (img, lab) = (
+            base.join(format!("{s}-org-img")),
+            base.join(format!("{s}-label-img")),
+        );
         if img.is_dir() && lab.is_dir() {
             return (img, lab);
         }
         // flat variant: <root>/<split>-org-img
-        (root.join(format!("{s}-org-img")), root.join(format!("{s}-label-img")))
+        (
+            root.join(format!("{s}-org-img")),
+            root.join(format!("{s}-label-img")),
+        )
     }
 
     fn build_index(img_dir: &Path, lab_dir: &Path) -> Vec<(PathBuf, PathBuf)> {
@@ -121,9 +135,14 @@ impl RescueNetSegmentation {
             .map(|p| (file_stem(&p), p))
             .collect();
         let mut pairs = Vec::new();
-        for img in list_dir(img_dir).into_iter().filter(|p| has_ext(p, &IMG_EXT)) {
+        for img in list_dir(img_dir)
+            .into_iter()
+            .filter(|p| has_ext(p, &IMG_EXT))
+        {
             let stem = file_stem(&img);
-            let lab = labels.get(&format!("{stem}_lab")).or_else(|| labels.get(&stem));
+            let lab = labels
+                .get(&format!("{stem}_lab"))
+                .or_else(|| labels.get(&stem));
             if let Some(lab) = lab {
                 pairs.push((img, lab.clone()));
             }

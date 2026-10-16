@@ -61,9 +61,16 @@ pub struct Frame {
 
 impl Frame {
     fn new(id: String, origin_segment: i64) -> Self {
-        let created_at =
-            SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs_f64()).unwrap_or(0.0);
-        Frame { id, origin_segment, created_at, align: SplatAlign::default() }
+        let created_at = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs_f64())
+            .unwrap_or(0.0);
+        Frame {
+            id,
+            origin_segment,
+            created_at,
+            align: SplatAlign::default(),
+        }
     }
 }
 
@@ -147,7 +154,10 @@ fn floats_or(obj: &Value, key: &str, default: &[f64]) -> Vec<f64> {
 }
 
 fn segments_of(manifest: &Value) -> Vec<Value> {
-    truthy(manifest.get("segments")).and_then(Value::as_array).cloned().unwrap_or_default()
+    truthy(manifest.get("segments"))
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
 }
 
 // ---------------------------------------------------------------------------
@@ -244,12 +254,20 @@ pub fn resolve_asset(settings: &Settings, segment: i64, steps: i64) -> anyhow::R
 
 /// Simulated processing time for a request of `steps`, clamped to the limits.
 pub fn demo_seconds(settings: &Settings, steps: i64) -> f64 {
-    settings.min_seconds.max(settings.max_seconds.min(steps as f64 * settings.step_seconds))
+    settings.min_seconds.max(
+        settings
+            .max_seconds
+            .min(steps as f64 * settings.step_seconds),
+    )
 }
 
 /// Burn the simulated processing time, reporting progress as it goes.
 pub async fn simulate(seconds: f64, report: &Report, ticks: u32) {
-    let per_tick = if seconds.is_finite() && seconds > 0.0 { seconds / ticks as f64 } else { 0.0 };
+    let per_tick = if seconds.is_finite() && seconds > 0.0 {
+        seconds / ticks as f64
+    } else {
+        0.0
+    };
     for i in 0..ticks {
         tokio::time::sleep(Duration::from_secs_f64(per_tick)).await;
         report((i + 1) as f64 / ticks as f64);
@@ -266,7 +284,11 @@ fn median(values: &mut [f64]) -> f64 {
     }
     values.sort_by(f64::total_cmp);
     let mid = values.len() / 2;
-    if values.len() % 2 == 1 { values[mid] } else { (values[mid - 1] + values[mid]) / 2.0 }
+    if values.len() % 2 == 1 {
+        values[mid]
+    } else {
+        (values[mid - 1] + values[mid]) / 2.0
+    }
 }
 
 /// Ground distance flown, heading in radians east-of-north, and the middle fix.
@@ -291,7 +313,10 @@ pub fn flight(fixes: &[Gps]) -> Option<(f64, f64, Gps)> {
 
 /// Every pose the segment was filmed from, in order.
 pub fn segment_fixes(sources: &[JobSource]) -> Vec<Gps> {
-    sources.iter().flat_map(|s| s.poses.iter().map(|p| p.gps)).collect()
+    sources
+        .iter()
+        .flat_map(|s| s.poses.iter().map(|p| p.gps))
+        .collect()
 }
 
 /// Put the prebuilt chunk on the ground it stands for: scale it to what was
@@ -349,7 +374,11 @@ pub fn demo_align(
 
     // Horizontal from the flight, height from the site datum.
     SplatAlign {
-        anchor: Some(Gps { lat: middle.lat, lon: middle.lon, alt: settings.anchor.alt }),
+        anchor: Some(Gps {
+            lat: middle.lat,
+            lon: middle.lon,
+            alt: settings.anchor.alt,
+        }),
         position: [-rx, -sy, -rz],
         rotation,
         scale: [scale, scale, scale],
@@ -363,7 +392,10 @@ pub fn load_people(settings: &Settings) -> anyhow::Result<Vec<Value>> {
         return Ok(Vec::new());
     }
     let data: Value = serde_json::from_str(&std::fs::read_to_string(path)?)?;
-    Ok(truthy(data.get("people")).and_then(Value::as_array).cloned().unwrap_or_default())
+    Ok(truthy(data.get("people"))
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default())
 }
 
 // ---------------------------------------------------------------------------
@@ -390,7 +422,12 @@ pub struct Pipeline {
 
 impl Pipeline {
     pub fn new(settings: Settings, live: LiveEngine) -> Self {
-        Pipeline { settings, frames: FrameStore::default(), flight_align: Mutex::new(None), live }
+        Pipeline {
+            settings,
+            frames: FrameStore::default(),
+            flight_align: Mutex::new(None),
+            live,
+        }
     }
 
     /// The live engine, or why there is none.
@@ -409,8 +446,14 @@ impl Pipeline {
     // -- reconstruction ----------------------------------------------------
 
     /// Reconstruct one capture segment at one refinement level.
-    pub async fn run_recon(&self, req: ReconJobRequest, report: Report) -> anyhow::Result<ReconJobResult> {
-        let frame = self.frames.resolve(req.anchor_frame.as_deref(), req.segment);
+    pub async fn run_recon(
+        &self,
+        req: ReconJobRequest,
+        report: Report,
+    ) -> anyhow::Result<ReconJobResult> {
+        let frame = self
+            .frames
+            .resolve(req.anchor_frame.as_deref(), req.segment);
         if self.settings.demo {
             self.recon_demo(&req, &frame, &report).await
         } else {
@@ -418,7 +461,12 @@ impl Pipeline {
         }
     }
 
-    async fn recon_demo(&self, req: &ReconJobRequest, frame: &Frame, report: &Report) -> anyhow::Result<ReconJobResult> {
+    async fn recon_demo(
+        &self,
+        req: &ReconJobRequest,
+        frame: &Frame,
+        report: &Report,
+    ) -> anyhow::Result<ReconJobResult> {
         let asset = resolve_asset(&self.settings, req.segment, req.steps)?;
         tracing::info!(
             "recon(demo) segment {} steps {} -> level {} ({} steps) {}",
@@ -434,8 +482,13 @@ impl Pipeline {
         let manifest = load_manifest(&self.settings)?;
         let n = segments_of(&manifest).len().max(1) as i64;
         let index = req.segment.rem_euclid(n) as usize;
-        let align =
-            demo_align(&self.settings, &req.track, &segment_fixes(&req.sources), &manifest, index);
+        let align = demo_align(
+            &self.settings,
+            &req.track,
+            &segment_fixes(&req.sources),
+            &manifest,
+            index,
+        );
         // The board places the WHOLE scene by the origin segment's align;
         // detections reuse it so a marker lands on the drawn person.
         if req.segment == frame.origin_segment && align.anchor.is_some() {
@@ -452,7 +505,12 @@ impl Pipeline {
         })
     }
 
-    async fn recon_live(&self, req: ReconJobRequest, frame: Frame, report: Report) -> anyhow::Result<ReconJobResult> {
+    async fn recon_live(
+        &self,
+        req: ReconJobRequest,
+        frame: Frame,
+        report: Report,
+    ) -> anyhow::Result<ReconJobResult> {
         let engine = self.engine().map_err(|e| {
             PipelineUnavailable(format!(
                 "{}; requested segment={} steps={} frame={} sources={}. Run with \
@@ -465,8 +523,8 @@ impl Pipeline {
             ))
         })?;
         let request = skylens_shared::proto::model::v1::ReconJobRequest::from(&req);
-        let out = tokio::task::spawn_blocking(move || engine.run_recon_job(&request, &*report))
-            .await??;
+        let out =
+            tokio::task::spawn_blocking(move || engine.run_recon_job(&request, &*report)).await??;
         let mut result = ReconJobResult::from(out);
         if result.anchor_frame.is_empty() {
             result.anchor_frame = frame.id;
@@ -477,7 +535,11 @@ impl Pipeline {
     // -- detection ---------------------------------------------------------
 
     /// Detect people and danger zones in one capture segment.
-    pub async fn run_detect(&self, req: DetectJobRequest, report: Report) -> anyhow::Result<DetectJobResult> {
+    pub async fn run_detect(
+        &self,
+        req: DetectJobRequest,
+        report: Report,
+    ) -> anyhow::Result<DetectJobResult> {
         if self.settings.demo {
             self.detect_demo(&req, &report).await
         } else {
@@ -488,14 +550,24 @@ impl Pipeline {
     /// Markers for the people that really stand in this segment's slab. No
     /// danger markers: the capture has no collapsed structure, and an invented
     /// one on the board is indistinguishable from a real one.
-    async fn detect_demo(&self, req: &DetectJobRequest, report: &Report) -> anyhow::Result<DetectJobResult> {
+    async fn detect_demo(
+        &self,
+        req: &DetectJobRequest,
+        report: &Report,
+    ) -> anyhow::Result<DetectJobResult> {
         let manifest = load_manifest(&self.settings)?;
         let nseg = segments_of(&manifest).len().max(1) as i64;
         let index = req.segment.rem_euclid(nseg);
 
         let flight_align = *lock(&self.flight_align);
         let align = flight_align.unwrap_or_else(|| {
-            demo_align(&self.settings, &[], &segment_fixes(&req.sources), &manifest, index as usize)
+            demo_align(
+                &self.settings,
+                &[],
+                &segment_fixes(&req.sources),
+                &manifest,
+                index as usize,
+            )
         });
         let mut detections = Vec::new();
         if let Some(anchor) = align.anchor {
@@ -508,7 +580,11 @@ impl Pipeline {
             let yaw = 2.0 * align.rotation[1].atan2(align.rotation[3]);
             let (cos_y, sin_y) = (yaw.cos(), yaw.sin());
             let scale = align.scale[0];
-            let geo_anchor = geo::Gps { lat: anchor.lat, lon: anchor.lon, alt: anchor.alt };
+            let geo_anchor = geo::Gps {
+                lat: anchor.lat,
+                lon: anchor.lon,
+                alt: anchor.alt,
+            };
             for person in load_people(&self.settings)? {
                 let pos = person
                     .get("pos")
@@ -526,10 +602,19 @@ impl Pipeline {
                 let wx = cos_y * sx + sin_y * sz + align.position[0];
                 let wy = sy + align.position[1];
                 let wz = -sin_y * sx + cos_y * sz + align.position[2];
-                let gps = geo::enu_to_gps(geo::Enu { e: wx, n: -wz, u: wy }, geo_anchor);
+                let gps = geo::enu_to_gps(
+                    geo::Enu {
+                        e: wx,
+                        n: -wz,
+                        u: wy,
+                    },
+                    geo_anchor,
+                );
                 detections.push(DetectionResult {
                     kind: DetectionKind::Tag,
-                    id: truthy(person.get("id")).map(str_of).unwrap_or_else(|| format!("person-{slab}")),
+                    id: truthy(person.get("id"))
+                        .map(str_of)
+                        .unwrap_or_else(|| format!("person-{slab}")),
                     category: DetectionCategory::Person,
                     gps: gps.into(),
                     confidence: float_or(&person, "confidence", 0.9),
@@ -541,10 +626,18 @@ impl Pipeline {
             }
         }
         simulate(self.settings.min_seconds.max(0.2), report, 4).await;
-        Ok(DetectJobResult { kind: DetectResultKind::Tag, segment: req.segment, detections })
+        Ok(DetectJobResult {
+            kind: DetectResultKind::Tag,
+            segment: req.segment,
+            detections,
+        })
     }
 
-    async fn detect_live(&self, req: DetectJobRequest, report: Report) -> anyhow::Result<DetectJobResult> {
+    async fn detect_live(
+        &self,
+        req: DetectJobRequest,
+        report: Report,
+    ) -> anyhow::Result<DetectJobResult> {
         let engine = self.engine().map_err(|e| {
             PipelineUnavailable(format!(
                 "{}; requested segment={} sources={}. Run with SKYLENS_DEMO=1 for demo markers.",
@@ -588,7 +681,10 @@ mod tests {
         }
         let mut env: HashMap<String, String> = HashMap::from([
             ("SKYLENS_DEMO".into(), "1".into()),
-            ("SKYLENS_DEMO_MANIFEST".into(), dir.join("segments.json").display().to_string()),
+            (
+                "SKYLENS_DEMO_MANIFEST".into(),
+                dir.join("segments.json").display().to_string(),
+            ),
             ("SKYLENS_DEMO_MIN_SECONDS".into(), "0.05".into()),
             ("SKYLENS_DEMO_MAX_SECONDS".into(), "0.4".into()),
             ("SKYLENS_DEMO_STEP_SECONDS".into(), "0.0001".into()),
@@ -624,7 +720,11 @@ mod tests {
 
     #[test]
     fn asset_level_selection_matches_python() {
-        let d = demo(two_levels(), &["seg0_hi.ply", "seg0_lo.ply", "seg1_lo.ply"], &[]);
+        let d = demo(
+            two_levels(),
+            &["seg0_hi.ply", "seg0_lo.ply", "seg1_lo.ply"],
+            &[],
+        );
         let s = &d.settings;
         assert_eq!(resolve_asset(s, 0, 7000).unwrap().steps, 7000);
         assert_eq!(resolve_asset(s, 0, 300).unwrap().steps, 250);
@@ -635,14 +735,20 @@ mod tests {
         assert_eq!(a.bytes, 9);
         assert_eq!(a.label, "lo");
         // Segments beyond the manifest wrap.
-        assert_eq!(resolve_asset(s, 3, 9999).unwrap().url, "/res/static/demo/seg1_lo.ply");
+        assert_eq!(
+            resolve_asset(s, 3, 9999).unwrap().url,
+            "/res/static/demo/seg1_lo.ply"
+        );
     }
 
     #[test]
     fn missing_asset_or_manifest_is_pipeline_unavailable() {
         let d = demo(two_levels(), &["seg0_lo.ply"], &[]);
         let err = resolve_asset(&d.settings, 0, 7000).unwrap_err();
-        assert!(err.downcast_ref::<PipelineUnavailable>().is_some(), "{err:#}");
+        assert!(
+            err.downcast_ref::<PipelineUnavailable>().is_some(),
+            "{err:#}"
+        );
 
         let mut s = d.settings.clone();
         s.manifest = d.dir.join("nope.json");
@@ -660,7 +766,11 @@ mod tests {
 
     #[tokio::test]
     async fn demo_recon_waits_reports_and_returns_asset() {
-        let d = demo(two_levels(), &["seg0_hi.ply", "seg0_lo.ply", "seg1_lo.ply"], &[]);
+        let d = demo(
+            two_levels(),
+            &["seg0_hi.ply", "seg0_lo.ply", "seg1_lo.ply"],
+            &[],
+        );
         let p = Pipeline::new(d.settings.clone(), LiveEngine::Disabled);
         let (report, seen) = report_sink();
         let req = ReconJobRequest {
@@ -697,28 +807,59 @@ mod tests {
             anchor_frame: anchor,
         };
         let first = p.run_recon(mk(0, None), report.clone()).await.unwrap();
-        let second = p.run_recon(mk(1, Some(first.anchor_frame.clone())), report.clone()).await.unwrap();
+        let second = p
+            .run_recon(mk(1, Some(first.anchor_frame.clone())), report.clone())
+            .await
+            .unwrap();
         assert_eq!(second.anchor_frame, first.anchor_frame);
-        let adopted = p.run_recon(mk(1, Some("frame-old".into())), report).await.unwrap();
+        let adopted = p
+            .run_recon(mk(1, Some("frame-old".into())), report)
+            .await
+            .unwrap();
         assert_eq!(adopted.anchor_frame, "frame-old");
         assert_eq!(p.frames.count(), 2);
     }
 
     #[tokio::test]
     async fn demo_align_scales_to_flown_track() {
-        let d = demo(two_levels(), &["seg0_lo.ply", "seg1_lo.ply"], &[("SKYLENS_ANCHOR", "36,127,30")]);
+        let d = demo(
+            two_levels(),
+            &["seg0_lo.ply", "seg1_lo.ply"],
+            &[("SKYLENS_ANCHOR", "36,127,30")],
+        );
         let p = Pipeline::new(d.settings.clone(), LiveEngine::Disabled);
         let (report, _) = report_sink();
         // Due north, about 40 m.
         let track = vec![
-            Gps { lat: 36.0, lon: 127.0, alt: 60.0 },
-            Gps { lat: 36.0 + 40.0 / 111_320.0, lon: 127.0, alt: 60.0 },
+            Gps {
+                lat: 36.0,
+                lon: 127.0,
+                alt: 60.0,
+            },
+            Gps {
+                lat: 36.0 + 40.0 / 111_320.0,
+                lon: 127.0,
+                alt: 60.0,
+            },
         ];
-        let req = ReconJobRequest { segment: 0, sources: vec![], steps: 1, track, anchor_frame: None };
+        let req = ReconJobRequest {
+            segment: 0,
+            sources: vec![],
+            steps: 1,
+            track,
+            anchor_frame: None,
+        };
         let out = p.run_recon(req, report).await.unwrap();
         let anchor = out.align.anchor.expect("anchored");
-        assert_eq!(anchor.alt, 30.0, "height from the site datum, not the aircraft");
-        assert!((out.align.scale[0] - 4.0).abs() < 1e-6, "{:?}", out.align.scale);
+        assert_eq!(
+            anchor.alt, 30.0,
+            "height from the site datum, not the aircraft"
+        );
+        assert!(
+            (out.align.scale[0] - 4.0).abs() < 1e-6,
+            "{:?}",
+            out.align.scale
+        );
         // Asset axis is east (yaw pi/2), flight is north (0): yaw = pi/2.
         let yaw = 2.0 * out.align.rotation[1].atan2(out.align.rotation[3]);
         assert!((yaw - std::f64::consts::FRAC_PI_2).abs() < 1e-9);
@@ -726,7 +867,11 @@ mod tests {
 
     #[tokio::test]
     async fn demo_detect_emits_only_people_in_the_slab() {
-        let d = demo(two_levels(), &["seg0_lo.ply", "seg1_lo.ply"], &[("SKYLENS_ANCHOR", "36,127,30")]);
+        let d = demo(
+            two_levels(),
+            &["seg0_lo.ply", "seg1_lo.ply"],
+            &[("SKYLENS_ANCHOR", "36,127,30")],
+        );
         std::fs::write(
             d.dir.join("people.json"),
             json!({"people": [
@@ -742,7 +887,11 @@ mod tests {
             kind: TelemetryKind::Tag,
             drone_id: 1,
             station: None,
-            gps: Gps { lat, lon: 127.0, alt: 60.0 },
+            gps: Gps {
+                lat,
+                lon: 127.0,
+                alt: 60.0,
+            },
             heading_deg: 0.0,
             speed: 5.0,
             battery_pct: 90.0,
@@ -750,7 +899,10 @@ mod tests {
         };
         let req = DetectJobRequest {
             segment: 1,
-            sources: vec![JobSource { uri: "x".into(), poses: vec![pose(36.0), pose(36.0004)] }],
+            sources: vec![JobSource {
+                uri: "x".into(),
+                poses: vec![pose(36.0), pose(36.0004)],
+            }],
         };
         let t0 = Instant::now();
         let out = p.run_detect(req, report).await.unwrap();
@@ -769,7 +921,10 @@ mod tests {
         let d = demo(two_levels(), &[], &[("SKYLENS_DEMO", "0")]);
         let p = Pipeline::new(d.settings.clone(), LiveEngine::Failed("no gpu".into()));
         let (report, _) = report_sink();
-        let req = DetectJobRequest { segment: 0, sources: vec![] };
+        let req = DetectJobRequest {
+            segment: 0,
+            sources: vec![],
+        };
         let err = p.run_detect(req, report).await.unwrap_err();
         let msg = format!("{err:#}");
         assert!(msg.starts_with("PipelineUnavailable: "), "{msg}");
@@ -778,10 +933,18 @@ mod tests {
 
     #[test]
     fn flight_needs_two_distinct_fixes() {
-        let a = Gps { lat: 36.0, lon: 127.0, alt: 0.0 };
+        let a = Gps {
+            lat: 36.0,
+            lon: 127.0,
+            alt: 0.0,
+        };
         assert!(flight(&[a]).is_none());
         assert!(flight(&[a, a]).is_none());
-        let b = Gps { lat: 36.0, lon: 127.001, alt: 0.0 };
+        let b = Gps {
+            lat: 36.0,
+            lon: 127.001,
+            alt: 0.0,
+        };
         let (flown, heading, _) = flight(&[a, b]).unwrap();
         assert!(flown > 80.0 && flown < 100.0);
         assert!((heading - std::f64::consts::FRAC_PI_2).abs() < 1e-9);

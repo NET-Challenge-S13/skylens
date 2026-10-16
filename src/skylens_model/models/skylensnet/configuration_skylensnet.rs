@@ -100,8 +100,8 @@ impl SkyLensConfig {
 
     /// Reads `config.json` from a file path.
     pub fn from_json_file(path: &Path) -> Result<Self> {
-        let body = std::fs::read_to_string(path)
-            .with_context(|| format!("reading {}", path.display()))?;
+        let body =
+            std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
         Self::from_json_str(&body).with_context(|| format!("loading {}", path.display()))
     }
 
@@ -164,7 +164,10 @@ impl SkyLensConfig {
             out.push(pos as usize);
         }
         if out.windows(2).any(|w| w[0] >= w[1]) {
-            bail!("backbone_out_indices must be unique and in stage order, got {:?}", out);
+            bail!(
+                "backbone_out_indices must be unique and in stage order, got {:?}",
+                out
+            );
         }
         Ok(out)
     }
@@ -234,31 +237,47 @@ mod tests {
 
     #[test]
     fn validity_channel_adds_an_input() {
-        let c = SkyLensConfig { use_validity_channel: true, ..Default::default() };
+        let c = SkyLensConfig {
+            use_validity_channel: true,
+            ..Default::default()
+        };
         assert_eq!(c.num_input_channels(), 5);
     }
 
     #[test]
     fn invalid_configs_are_rejected() {
-        let too_much_dropout = r#"{"modality_dropout_rgb_only": 0.6, "modality_dropout_thermal_only": 0.5}"#;
+        let too_much_dropout =
+            r#"{"modality_dropout_rgb_only": 0.6, "modality_dropout_thermal_only": 0.5}"#;
         assert!(SkyLensConfig::from_json_str(too_much_dropout).is_err());
         assert!(SkyLensConfig::from_json_str(r#"{"in_channels": 3}"#).is_err());
     }
 
     #[test]
     fn json_round_trip() {
-        let c = SkyLensConfig { use_offset_head: true, ..Default::default() };
+        let c = SkyLensConfig {
+            use_offset_head: true,
+            ..Default::default()
+        };
         let back = SkyLensConfig::from_json_str(&c.to_json_string().unwrap()).unwrap();
         assert_eq!(c, back);
     }
 
     #[test]
     fn out_indices_resolve_like_backbone_mixin() {
-        let c = SkyLensConfig { backbone_out_indices: vec![1, -1], ..Default::default() };
+        let c = SkyLensConfig {
+            backbone_out_indices: vec![1, -1],
+            ..Default::default()
+        };
         assert_eq!(c.resolved_out_indices(5).unwrap(), vec![1, 4]);
-        let bad = SkyLensConfig { backbone_out_indices: vec![2, 1], ..Default::default() };
+        let bad = SkyLensConfig {
+            backbone_out_indices: vec![2, 1],
+            ..Default::default()
+        };
         assert!(bad.resolved_out_indices(5).is_err());
-        let oob = SkyLensConfig { backbone_out_indices: vec![0, 5], ..Default::default() };
+        let oob = SkyLensConfig {
+            backbone_out_indices: vec![0, 5],
+            ..Default::default()
+        };
         assert!(oob.resolved_out_indices(5).is_err());
     }
 }

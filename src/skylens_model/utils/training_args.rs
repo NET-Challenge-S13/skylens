@@ -159,10 +159,12 @@ impl SkyLensTrainingArguments {
     /// `__post_init__` checks. Returns a readable message on the first violation.
     pub fn validate(&self) -> Result<(), String> {
         if self.remove_unused_columns {
-            return Err("SkyLensTrainingArguments needs remove_unused_columns=false: with true \
+            return Err(
+                "SkyLensTrainingArguments needs remove_unused_columns=false: with true \
                         the Trainer would strip raw keys such as 'image' before the \
                         SkyLensCollator runs and raise a KeyError."
-                .into());
+                    .into(),
+            );
         }
         if self.person_head_stride < 1 {
             return Err("person_head_stride must be >= 1".into());
@@ -185,7 +187,10 @@ impl SkyLensTrainingArguments {
         if self.per_device_train_batch_size < 1 {
             return Err("per_device_train_batch_size must be >= 1".into());
         }
-        if !matches!(self.lr_scheduler_type.as_str(), "linear" | "constant" | "cosine") {
+        if !matches!(
+            self.lr_scheduler_type.as_str(),
+            "linear" | "constant" | "cosine"
+        ) {
             return Err(format!(
                 "lr_scheduler_type must be linear|constant|cosine; got {:?}",
                 self.lr_scheduler_type
@@ -257,6 +262,11 @@ mod tests {
         assert_eq!(a.freeze_backbone_epochs, 2.0);
         assert_eq!(a.person_head_stride, 2);
         assert!(SkyLensTrainingArguments::from_json(r#"{"output_dir": "x", "bogus": 1}"#).is_err());
-        assert!(SkyLensTrainingArguments::from_json(r#"{"output_dir": "x", "remove_unused_columns": true}"#).is_err());
+        assert!(
+            SkyLensTrainingArguments::from_json(
+                r#"{"output_dir": "x", "remove_unused_columns": true}"#
+            )
+            .is_err()
+        );
     }
 }

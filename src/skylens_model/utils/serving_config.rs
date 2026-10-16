@@ -24,7 +24,7 @@
 //! | `SKYLENS_WORK_DIR`      | `<repo>/runs/model` | cumulus3d working directory |
 //! | `SKYLENS_GPU`           | unset (= CUDA available) | force the GPU backends on or off |
 //! | `SKYLENS_POINTS_MODE`   | `delta`        | live point display: `delta` (`POINTS_DELTA` chunks from cumulus3d display deltas), `segment` (old per-zone `POINTS` chunks), `both` |
-//! | `SKYLENS_DISPLAY_STRIDE` | `2`           | display thinning 1/N per zone before the overlap dedupe (1 = the old per-zone density; cumulus3d's own default is 6) |
+//! | `SKYLENS_DISPLAY_STRIDE` | `6`           | display thinning 1/N per zone before the overlap dedupe (1 = the old per-zone density; 6 = the V100 live runs and cumulus3d's own default) |
 //! | `SKYLENS_DELTA_SNAPSHOT_EVERY` | `128`   | snapshot chunk (new generation) every N deltas; 0 = never |
 //! | `SKYLENS_PRECISION`     | `auto`         | SkyLensNet arithmetic on CUDA: `auto` (by compute capability: >= 8.0 bf16, 7.x fp16 autocast, else fp32), `fp32`, `fp16`, `bf16` |
 //! | `DELTAMESH_EXTRACT_BATCH` | `128` (set by `app::main`) | deltamesh GPU mesher blocks per extraction batch; deltamesh's own default 512 holds about 0.7 GB more GPU memory |
@@ -40,10 +40,17 @@ use crate::models::skylensnet::modeling_skylensnet::Precision;
 /// `src/skylens_model` -> `src` -> repo.
 pub fn repo_root() -> PathBuf {
     let here = Path::new(env!("CARGO_MANIFEST_DIR"));
-    here.parent().and_then(Path::parent).unwrap_or(here).to_path_buf()
+    here.parent()
+        .and_then(Path::parent)
+        .unwrap_or(here)
+        .to_path_buf()
 }
 
-pub const DEFAULT_ANCHOR: Gps = Gps { lat: 36.3685, lon: 127.3475, alt: 30.0 };
+pub const DEFAULT_ANCHOR: Gps = Gps {
+    lat: 36.3685,
+    lon: 127.3475,
+    alt: 30.0,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct Settings {
@@ -74,20 +81,32 @@ pub struct Settings {
 impl Settings {
     /// Directory the manifest's relative urls resolve against.
     pub fn demo_root(&self) -> PathBuf {
-        self.manifest.parent().map(Path::to_path_buf).unwrap_or_default()
+        self.manifest
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_default()
     }
 
     /// Read settings through `get` (the process environment in production, a
     /// map in tests).
     pub fn from_lookup(get: impl Fn(&str) -> Option<String>) -> Self {
         let flag = |name: &str| -> Option<bool> {
-            get(name).map(|raw| matches!(raw.trim().to_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+            get(name).map(|raw| {
+                matches!(
+                    raw.trim().to_lowercase().as_str(),
+                    "1" | "true" | "yes" | "on"
+                )
+            })
         };
         let num = |name: &str, default: f64| -> f64 {
-            get(name).and_then(|raw| raw.trim().parse::<f64>().ok()).unwrap_or(default)
+            get(name)
+                .and_then(|raw| raw.trim().parse::<f64>().ok())
+                .unwrap_or(default)
         };
         let int = |name: &str, default: usize| -> usize {
-            get(name).and_then(|raw| raw.trim().parse::<usize>().ok()).unwrap_or(default)
+            get(name)
+                .and_then(|raw| raw.trim().parse::<usize>().ok())
+                .unwrap_or(default)
         };
         let addr = |name: &str, default: &str| -> SocketAddr {
             get(name)
@@ -97,7 +116,13 @@ impl Settings {
 
         let manifest = get("SKYLENS_DEMO_MANIFEST")
             .map(PathBuf::from)
-            .unwrap_or_else(|| repo_root().join("res").join("static").join("demo").join("segments.json"));
+            .unwrap_or_else(|| {
+                repo_root()
+                    .join("res")
+                    .join("static")
+                    .join("demo")
+                    .join("segments.json")
+            });
         let manifest = std::path::absolute(&manifest).unwrap_or(manifest);
 
         let cameras: Vec<String> = get("SKYLENS_CAMERAS")
@@ -168,7 +193,11 @@ pub fn parse_anchor(raw: Option<&str>) -> Gps {
     }
     let parsed: Result<Vec<f64>, _> = parts.iter().map(|p| p.trim().parse::<f64>()).collect();
     match parsed {
-        Ok(v) => Gps { lat: v[0], lon: v[1], alt: v[2] },
+        Ok(v) => Gps {
+            lat: v[0],
+            lon: v[1],
+            alt: v[2],
+        },
         Err(_) => DEFAULT_ANCHOR,
     }
 }
@@ -185,8 +214,10 @@ mod tests {
     use std::collections::HashMap;
 
     fn with(pairs: &[(&str, &str)]) -> Settings {
-        let map: HashMap<String, String> =
-            pairs.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
+        let map: HashMap<String, String> = pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
         Settings::from_lookup(|k| map.get(k).cloned())
     }
 
@@ -207,7 +238,7 @@ mod tests {
         assert_eq!(s.gpu, None);
         assert_eq!(s.precision, None);
         assert_eq!(s.points_mode, PointsMode::Delta);
-        assert_eq!((s.display_stride, s.snapshot_every), (2, 128));
+        assert_eq!((s.display_stride, s.snapshot_every), (6, 128));
     }
 
     #[test]
@@ -217,16 +248,34 @@ mod tests {
             ("SKYLENS_DISPLAY_STRIDE", "0"),
             ("SKYLENS_DELTA_SNAPSHOT_EVERY", "0"),
         ]);
-        assert_eq!((s.points_mode, s.display_stride, s.snapshot_every), (PointsMode::Both, 1, 0));
-        assert_eq!(with(&[("SKYLENS_POINTS_MODE", "nope")]).points_mode, PointsMode::Delta);
-        assert_eq!(with(&[("SKYLENS_POINTS_MODE", "segment")]).points_mode, PointsMode::Segment);
+        assert_eq!(
+            (s.points_mode, s.display_stride, s.snapshot_every),
+            (PointsMode::Both, 1, 0)
+        );
+        assert_eq!(
+            with(&[("SKYLENS_POINTS_MODE", "nope")]).points_mode,
+            PointsMode::Delta
+        );
+        assert_eq!(
+            with(&[("SKYLENS_POINTS_MODE", "segment")]).points_mode,
+            PointsMode::Segment
+        );
     }
 
     #[test]
     fn precision_override_parses() {
-        assert_eq!(with(&[("SKYLENS_PRECISION", "FP16")]).precision, Some(Precision::Fp16Autocast));
-        assert_eq!(with(&[("SKYLENS_PRECISION", "bf16")]).precision, Some(Precision::Bf16));
-        assert_eq!(with(&[("SKYLENS_PRECISION", "fp32")]).precision, Some(Precision::Fp32));
+        assert_eq!(
+            with(&[("SKYLENS_PRECISION", "FP16")]).precision,
+            Some(Precision::Fp16Autocast)
+        );
+        assert_eq!(
+            with(&[("SKYLENS_PRECISION", "bf16")]).precision,
+            Some(Precision::Bf16)
+        );
+        assert_eq!(
+            with(&[("SKYLENS_PRECISION", "fp32")]).precision,
+            Some(Precision::Fp32)
+        );
         assert_eq!(with(&[("SKYLENS_PRECISION", "auto")]).precision, None);
         assert_eq!(with(&[("SKYLENS_PRECISION", "int8")]).precision, None);
     }
@@ -239,15 +288,28 @@ mod tests {
         for raw in ["0", "no", "", "2"] {
             assert!(!with(&[("SKYLENS_DEMO", raw)]).demo, "{raw}");
         }
-        let s = with(&[("SKYLENS_DEMO_STEP_SECONDS", "abc"), ("SKYLENS_DEMO_MIN_SECONDS", "0.5")]);
+        let s = with(&[
+            ("SKYLENS_DEMO_STEP_SECONDS", "abc"),
+            ("SKYLENS_DEMO_MIN_SECONDS", "0.5"),
+        ]);
         assert_eq!(s.step_seconds, 0.0006);
         assert_eq!(s.min_seconds, 0.5);
-        assert_eq!(with(&[("SKYLENS_DEMO_URL_BASE", "/x/y//")]).url_base, "/x/y");
+        assert_eq!(
+            with(&[("SKYLENS_DEMO_URL_BASE", "/x/y//")]).url_base,
+            "/x/y"
+        );
     }
 
     #[test]
     fn anchor_falls_back_on_garbage() {
-        assert_eq!(parse_anchor(Some("1,2,3,4")), Gps { lat: 1.0, lon: 2.0, alt: 3.0 });
+        assert_eq!(
+            parse_anchor(Some("1,2,3,4")),
+            Gps {
+                lat: 1.0,
+                lon: 2.0,
+                alt: 3.0
+            }
+        );
         assert_eq!(parse_anchor(Some("1,2")), DEFAULT_ANCHOR);
         assert_eq!(parse_anchor(Some("a,b,c")), DEFAULT_ANCHOR);
     }

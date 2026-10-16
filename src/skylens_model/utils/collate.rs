@@ -26,7 +26,7 @@
 use tch::{Kind, Tensor};
 
 use crate::datasets::base::{
-    to_vec_f32, to_vec_u8, DatasetError, Result, Sample, SimpleRng, IGNORE_INDEX,
+    DatasetError, IGNORE_INDEX, Result, Sample, SimpleRng, to_vec_f32, to_vec_u8,
 };
 
 /// Value reserved in the thermal channel to mean "this modality is absent".
@@ -106,7 +106,13 @@ pub fn gaussian2d(shape: (usize, usize), sigma: f64) -> Vec<f64> {
 
 /// Splats a gaussian onto a row-major `(h, w)` heatmap in place, combining with `max` so that
 /// nearby people do not erase each other. `center` is `(cx, cy)` in heatmap coordinates.
-pub fn draw_gaussian(heatmap: &mut [f32], hw: (usize, usize), center: (i64, i64), radius: i64, k: f32) {
+pub fn draw_gaussian(
+    heatmap: &mut [f32],
+    hw: (usize, usize),
+    center: (i64, i64),
+    radius: i64,
+    k: f32,
+) {
     let radius = radius.max(0);
     let diameter = (2 * radius + 1) as usize;
     let gauss = gaussian2d((diameter, diameter), diameter as f64 / 6.0);
@@ -212,7 +218,9 @@ impl SkyLensCollator {
 
     pub fn with_rng(cfg: CollatorConfig, rng: SimpleRng) -> Result<Self> {
         if cfg.person_head_stride < 1 {
-            return Err(DatasetError::InvalidSample("person_head_stride must be >= 1".into()));
+            return Err(DatasetError::InvalidSample(
+                "person_head_stride must be >= 1".into(),
+            ));
         }
         if !(cfg.min_overlap > 0.0 && cfg.min_overlap < 1.0) {
             return Err(DatasetError::InvalidSample(format!(
@@ -230,7 +238,9 @@ impl SkyLensCollator {
     /// Collates samples into the model's batch.
     pub fn collate(&mut self, samples: &[Sample]) -> Result<Batch> {
         if samples.is_empty() {
-            return Err(DatasetError::InvalidSample("SkyLensCollator received an empty batch".into()));
+            return Err(DatasetError::InvalidSample(
+                "SkyLensCollator received an empty batch".into(),
+            ));
         }
         let (h, w) = Self::verify_uniform_size(samples)?;
         let s = self.cfg.person_head_stride;
@@ -276,7 +286,9 @@ impl SkyLensCollator {
             let mut reg = vec![0f32; b * plane];
             let mut off = vec![0f32; b * 2 * plane];
             for (i, s_) in samples.iter().enumerate() {
-                let Some(boxes) = &s_.person_boxes else { continue };
+                let Some(boxes) = &s_.person_boxes else {
+                    continue;
+                };
                 let boxes = to_vec_f32(boxes);
                 if boxes.is_empty() {
                     continue;
@@ -336,7 +348,7 @@ impl SkyLensCollator {
             _ => {
                 return Err(DatasetError::InvalidSample(format!(
                     "image must be (H, W, C); got shape {sz:?}"
-                )))
+                )));
             }
         };
         let is_u8 = sample.image.kind() == Kind::Uint8;
@@ -463,7 +475,7 @@ impl SkyLensCollator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::datasets::base::{boxes_tensor, mask_tensor, Raster};
+    use crate::datasets::base::{Raster, boxes_tensor, mask_tensor};
 
     fn rgb_sample(h: usize, w: usize, v: u8) -> Sample {
         let img = Tensor::from_slice(&vec![v; h * w * 3]).reshape([h as i64, w as i64, 3]);
@@ -507,7 +519,8 @@ mod tests {
         let mut b = rgb_sample(16, 16, 0);
         b.person_boxes = Some(boxes_tensor(&[[4.0, 4.0, 12.0, 12.0]]));
 
-        let mut col = SkyLensCollator::with_rng(CollatorConfig::default(), SimpleRng::new(1)).unwrap();
+        let mut col =
+            SkyLensCollator::with_rng(CollatorConfig::default(), SimpleRng::new(1)).unwrap();
         let batch = col.collate(&[a, b]).unwrap();
 
         assert_eq!(batch.pixel_values.size(), vec![2, 4, 16, 16]);
@@ -517,10 +530,19 @@ mod tests {
         assert_eq!(labels.kind(), Kind::Int64);
         // sample without a mask is filled with ignore
         assert_eq!(labels.get(1).max().int64_value(&[]), 255);
-        assert_eq!(batch.person_heatmap.as_ref().unwrap().size(), vec![2, 1, 4, 4]);
+        assert_eq!(
+            batch.person_heatmap.as_ref().unwrap().size(),
+            vec![2, 1, 4, 4]
+        );
         assert_eq!(batch.person_wh.as_ref().unwrap().size(), vec![2, 2, 4, 4]);
-        assert_eq!(batch.person_reg_mask.as_ref().unwrap().size(), vec![2, 1, 4, 4]);
-        assert_eq!(batch.person_offset.as_ref().unwrap().size(), vec![2, 2, 4, 4]);
+        assert_eq!(
+            batch.person_reg_mask.as_ref().unwrap().size(),
+            vec![2, 1, 4, 4]
+        );
+        assert_eq!(
+            batch.person_offset.as_ref().unwrap().size(),
+            vec![2, 2, 4, 4]
+        );
         // RGB is scaled to [0, 1] and thermal stays at the reserved 0.0
         let px = to_vec_f32(&batch.pixel_values.get(0));
         assert!((px[0] - 1.0).abs() < 1e-6);
@@ -529,7 +551,8 @@ mod tests {
 
     #[test]
     fn heads_without_gt_have_no_keys() {
-        let mut col = SkyLensCollator::with_rng(CollatorConfig::default(), SimpleRng::new(1)).unwrap();
+        let mut col =
+            SkyLensCollator::with_rng(CollatorConfig::default(), SimpleRng::new(1)).unwrap();
         let batch = col.collate(&[rgb_sample(8, 8, 10)]).unwrap();
         assert!(batch.danger_labels.is_none());
         assert!(!batch.has_person_gt());
@@ -540,7 +563,8 @@ mod tests {
         let mut s = rgb_sample(16, 16, 0);
         // centre (8, 8) px -> cell (2, 2); width 8 px -> 2 cells
         s.person_boxes = Some(boxes_tensor(&[[4.0, 4.0, 12.0, 12.0]]));
-        let mut col = SkyLensCollator::with_rng(CollatorConfig::default(), SimpleRng::new(1)).unwrap();
+        let mut col =
+            SkyLensCollator::with_rng(CollatorConfig::default(), SimpleRng::new(1)).unwrap();
         let batch = col.collate(&[s]).unwrap();
         let hm = to_vec_f32(batch.person_heatmap.as_ref().unwrap());
         assert_eq!(hm[2 * 4 + 2], 1.0);
@@ -553,18 +577,28 @@ mod tests {
 
     #[test]
     fn mixed_sizes_are_rejected() {
-        let mut col = SkyLensCollator::with_rng(CollatorConfig::default(), SimpleRng::new(1)).unwrap();
-        assert!(col.collate(&[rgb_sample(8, 8, 0), rgb_sample(8, 16, 0)]).is_err());
+        let mut col =
+            SkyLensCollator::with_rng(CollatorConfig::default(), SimpleRng::new(1)).unwrap();
+        assert!(
+            col.collate(&[rgb_sample(8, 8, 0), rgb_sample(8, 16, 0)])
+                .is_err()
+        );
         assert!(col.collate(&[]).is_err());
     }
 
     #[test]
     fn validity_channel_follows_thermal_presence() {
-        let cfg = CollatorConfig { validity_channel: true, ..Default::default() };
+        let cfg = CollatorConfig {
+            validity_channel: true,
+            ..Default::default()
+        };
         let mut col = SkyLensCollator::with_rng(cfg, SimpleRng::new(1)).unwrap();
         let batch = col.collate(&[rgb_sample(8, 8, 10)]).unwrap();
         assert_eq!(batch.pixel_values.size(), vec![1, 5, 8, 8]);
-        assert_eq!(batch.pixel_values.get(0).get(4).max().double_value(&[]), 0.0);
+        assert_eq!(
+            batch.pixel_values.get(0).get(4).max().double_value(&[]),
+            0.0
+        );
     }
 
     #[test]
@@ -576,12 +610,24 @@ mod tests {
         }
         let img = Tensor::from_slice(&data).reshape([4, 4, 4]);
         let s = Sample::new(img, true, true);
-        let cfg = CollatorConfig { modality_dropout: (1.0, 0.0), ..Default::default() };
+        let cfg = CollatorConfig {
+            modality_dropout: (1.0, 0.0),
+            ..Default::default()
+        };
         let mut col = SkyLensCollator::with_rng(cfg, SimpleRng::new(3)).unwrap();
         let batch = col.collate(&[s]).unwrap();
         let mask = to_vec_u8(&batch.modality_mask);
         assert_eq!(mask, vec![1, 0]);
-        assert_eq!(batch.pixel_values.get(0).get(3).abs().max().double_value(&[]), 0.0);
+        assert_eq!(
+            batch
+                .pixel_values
+                .get(0)
+                .get(3)
+                .abs()
+                .max()
+                .double_value(&[]),
+            0.0
+        );
     }
 
     #[test]
@@ -595,7 +641,10 @@ mod tests {
 
     #[test]
     fn radius_rounding_parse() {
-        assert_eq!(RadiusRounding::parse("round").unwrap(), RadiusRounding::Round);
+        assert_eq!(
+            RadiusRounding::parse("round").unwrap(),
+            RadiusRounding::Round
+        );
         assert!(RadiusRounding::parse("ceil").is_err());
     }
 }

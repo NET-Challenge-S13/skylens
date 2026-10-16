@@ -40,16 +40,29 @@ fn sniff(data: &[u8]) -> Option<EncodedFormat> {
 }
 
 /// Converts a complete proto set. Cameras must be among `cameras`.
-pub fn to_live_set(set: &FrameSet, cameras: &[String], anchor: GeoAnchor) -> anyhow::Result<LiveFrameSet> {
+pub fn to_live_set(
+    set: &FrameSet,
+    cameras: &[String],
+    anchor: GeoAnchor,
+) -> anyhow::Result<LiveFrameSet> {
     let key = set.key.as_ref().context("frame set without key")?;
-    let mut live = LiveFrameSet::new(LiveKey::new(key.source_id.clone(), key.sequence, key.revision));
+    let mut live = LiveFrameSet::new(LiveKey::new(
+        key.source_id.clone(),
+        key.sequence,
+        key.revision,
+    ));
     if set.captured_at_ms > 0 {
         live = live.at(SystemTime::UNIX_EPOCH + Duration::from_millis(set.captured_at_ms as u64));
     }
     live = live.gps_fix(ANCHOR_RECORD, anchor.lat, anchor.lon, anchor.alt);
     for im in &set.images {
         if !cameras.iter().any(|c| *c == im.camera) {
-            bail!("frame set {}#{}: unknown camera {:?} (expected one of {cameras:?})", key.source_id, key.sequence, im.camera);
+            bail!(
+                "frame set {}#{}: unknown camera {:?} (expected one of {cameras:?})",
+                key.source_id,
+                key.sequence,
+                im.camera
+            );
         }
         let data = im.data.clone();
         live = match im.format() {
@@ -58,13 +71,22 @@ pub fn to_live_set(set: &FrameSet, cameras: &[String], anchor: GeoAnchor) -> any
             ImageFormat::Rgb8 => {
                 let need = im.width as usize * im.height as usize * 3;
                 if im.width == 0 || im.height == 0 || data.len() != need {
-                    bail!("camera {}: {} bytes for {}x{} RGB8", im.camera, data.len(), im.width, im.height);
+                    bail!(
+                        "camera {}: {} bytes for {}x{} RGB8",
+                        im.camera,
+                        data.len(),
+                        im.width,
+                        im.height
+                    );
                 }
                 live.rgb8(im.camera.clone(), im.width, im.height, data)
             }
             ImageFormat::Unspecified => match sniff(&data) {
                 Some(f) => live.encoded(im.camera.clone(), data, f),
-                None => bail!("camera {}: image format unspecified and not JPEG/PNG", im.camera),
+                None => bail!(
+                    "camera {}: image format unspecified and not JPEG/PNG",
+                    im.camera
+                ),
             },
         };
         if let Some(g) = &im.gps {
@@ -129,11 +151,18 @@ impl Assembler {
         let key = set.key.clone().context("frame set without key")?;
         for im in &set.images {
             if !self.cameras.contains(&im.camera) {
-                bail!("frame set {}#{}: unknown camera {:?}", key.source_id, key.sequence, im.camera);
+                bail!(
+                    "frame set {}#{}: unknown camera {:?}",
+                    key.source_id,
+                    key.sequence,
+                    im.camera
+                );
             }
         }
         let id = key_id(&key);
-        let complete_alone = self.missing(|c| set.images.iter().any(|i| i.camera == c)).is_empty();
+        let complete_alone = self
+            .missing(|c| set.images.iter().any(|i| i.camera == c))
+            .is_empty();
         if complete_alone {
             if self.partial.remove(&id).is_some() {
                 self.arrival.retain(|k| *k != id);
@@ -147,10 +176,10 @@ impl Assembler {
         if !self.partial.contains_key(&id) {
             self.arrival.push_back(id.clone());
         }
-        let entry = self
-            .partial
-            .entry(id.clone())
-            .or_insert_with(|| Partial { images: BTreeMap::new(), captured_at_ms: set.captured_at_ms });
+        let entry = self.partial.entry(id.clone()).or_insert_with(|| Partial {
+            images: BTreeMap::new(),
+            captured_at_ms: set.captured_at_ms,
+        });
         if entry.captured_at_ms <= 0 {
             entry.captured_at_ms = set.captured_at_ms;
         }
@@ -159,14 +188,26 @@ impl Assembler {
         }
         let missing = {
             let have = &entry.images;
-            self.cameras.iter().filter(|c| !have.contains_key(*c)).cloned().collect::<Vec<_>>()
+            self.cameras
+                .iter()
+                .filter(|c| !have.contains_key(*c))
+                .cloned()
+                .collect::<Vec<_>>()
         };
         if missing.is_empty() {
             let p = self.partial.remove(&id).expect("present");
             self.arrival.retain(|k| *k != id);
             self.mark_done(id);
-            let images = self.cameras.iter().filter_map(|c| p.images.get(c).cloned()).collect();
-            return Ok(Assembled::Complete(FrameSet { key: Some(key), images, captured_at_ms: p.captured_at_ms }));
+            let images = self
+                .cameras
+                .iter()
+                .filter_map(|c| p.images.get(c).cloned())
+                .collect();
+            return Ok(Assembled::Complete(FrameSet {
+                key: Some(key),
+                images,
+                captured_at_ms: p.captured_at_ms,
+            }));
         }
         while self.arrival.len() > MAX_PARTIAL_SETS {
             if let Some(old) = self.arrival.pop_front() {
@@ -183,7 +224,11 @@ mod tests {
     use cumulus3d_cli::compose::FramePayload;
     use skylens_shared::proto::model::v1::Gps;
 
-    const ANCHOR: GeoAnchor = skylens_shared::geo::Gps { lat: 36.3685, lon: 127.3475, alt: 30.0 };
+    const ANCHOR: GeoAnchor = skylens_shared::geo::Gps {
+        lat: 36.3685,
+        lon: 127.3475,
+        alt: 30.0,
+    };
 
     fn cams() -> Vec<String> {
         ["left", "center", "right"].map(String::from).to_vec()
@@ -194,14 +239,22 @@ mod tests {
             camera: camera.into(),
             format: ImageFormat::Jpeg as i32,
             data: vec![0xFF, 0xD8, 0xFF, 0xE0],
-            gps: Some(Gps { lat: 36.37, lon: 127.35, alt: 80.0 }),
+            gps: Some(Gps {
+                lat: 36.37,
+                lon: 127.35,
+                alt: 80.0,
+            }),
             ..Default::default()
         }
     }
 
     fn set(seq: u64, images: Vec<LiveImage>) -> FrameSet {
         FrameSet {
-            key: Some(FrameKey { source_id: "formation-1".into(), sequence: seq, revision: 0 }),
+            key: Some(FrameKey {
+                source_id: "formation-1".into(),
+                sequence: seq,
+                revision: 0,
+            }),
             images,
             captured_at_ms: 1_700_000_000_000,
         }
@@ -221,19 +274,45 @@ mod tests {
         let live = to_live_set(&s, &cams(), ANCHOR).unwrap();
         assert_eq!(live.key, LiveKey::new("formation-1", 7, 0));
         assert_eq!(live.images.len(), 3);
-        assert!(matches!(live.images[0].payload, FramePayload::Encoded { format: EncodedFormat::Jpeg, .. }));
-        assert!(matches!(live.images[2].payload, FramePayload::Rgb8 { width: 2, height: 2, .. }));
+        assert!(matches!(
+            live.images[0].payload,
+            FramePayload::Encoded {
+                format: EncodedFormat::Jpeg,
+                ..
+            }
+        ));
+        assert!(matches!(
+            live.images[2].payload,
+            FramePayload::Rgb8 {
+                width: 2,
+                height: 2,
+                ..
+            }
+        ));
         assert_eq!(live.gps[0].name, ANCHOR_RECORD);
-        assert_eq!((live.gps[0].lat, live.gps[0].lon, live.gps[0].alt), (ANCHOR.lat, ANCHOR.lon, ANCHOR.alt));
+        assert_eq!(
+            (live.gps[0].lat, live.gps[0].lon, live.gps[0].alt),
+            (ANCHOR.lat, ANCHOR.lon, ANCHOR.alt)
+        );
         assert_eq!(live.gps.iter().filter(|g| g.name == "left").count(), 1);
         assert_eq!(live.gps.len(), 3);
-        assert_eq!(live.timestamp, SystemTime::UNIX_EPOCH + Duration::from_millis(1_700_000_000_000));
+        assert_eq!(
+            live.timestamp,
+            SystemTime::UNIX_EPOCH + Duration::from_millis(1_700_000_000_000)
+        );
     }
 
     #[test]
     fn rejects_unknown_cameras_and_bad_rgb() {
         assert!(to_live_set(&set(0, vec![jpeg("rear")]), &cams(), ANCHOR).is_err());
-        let bad = LiveImage { camera: "left".into(), format: ImageFormat::Rgb8 as i32, data: vec![0; 5], width: 2, height: 2, gps: None };
+        let bad = LiveImage {
+            camera: "left".into(),
+            format: ImageFormat::Rgb8 as i32,
+            data: vec![0; 5],
+            width: 2,
+            height: 2,
+            gps: None,
+        };
         assert!(to_live_set(&set(0, vec![bad]), &cams(), ANCHOR).is_err());
         assert!(to_live_set(&FrameSet::default(), &cams(), ANCHOR).is_err());
     }
@@ -243,7 +322,13 @@ mod tests {
         let mut im = jpeg("left");
         im.format = ImageFormat::Unspecified as i32;
         let live = to_live_set(&set(0, vec![im]), &cams(), ANCHOR).unwrap();
-        assert!(matches!(live.images[0].payload, FramePayload::Encoded { format: EncodedFormat::Jpeg, .. }));
+        assert!(matches!(
+            live.images[0].payload,
+            FramePayload::Encoded {
+                format: EncodedFormat::Jpeg,
+                ..
+            }
+        ));
         let mut junk = jpeg("left");
         junk.format = ImageFormat::Unspecified as i32;
         junk.data = vec![1, 2, 3];
@@ -257,7 +342,10 @@ mod tests {
             Assembled::Pending { missing, .. } => assert_eq!(missing, vec!["center", "right"]),
             other => panic!("{other:?}"),
         }
-        assert!(matches!(a.offer(set(1, vec![jpeg("right")])).unwrap(), Assembled::Pending { .. }));
+        assert!(matches!(
+            a.offer(set(1, vec![jpeg("right")])).unwrap(),
+            Assembled::Pending { .. }
+        ));
         match a.offer(set(1, vec![jpeg("center")])).unwrap() {
             Assembled::Complete(s) => {
                 let order: Vec<_> = s.images.iter().map(|i| i.camera.as_str()).collect();
@@ -265,7 +353,10 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
-        assert!(matches!(a.offer(set(1, vec![jpeg("left")])).unwrap(), Assembled::Repeat));
+        assert!(matches!(
+            a.offer(set(1, vec![jpeg("left")])).unwrap(),
+            Assembled::Repeat
+        ));
         // A complete re-send still goes through, so the node can report it as a duplicate.
         let full = set(1, vec![jpeg("left"), jpeg("center"), jpeg("right")]);
         assert!(matches!(a.offer(full).unwrap(), Assembled::Complete(_)));

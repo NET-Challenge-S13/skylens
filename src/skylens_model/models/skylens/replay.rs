@@ -59,9 +59,18 @@ pub struct ReplayEvent {
 pub fn read_manifest(dir: &Path) -> Result<Manifest> {
     let path = dir.join("manifest.json");
     let raw = std::fs::read(&path).with_context(|| format!("read {}", path.display()))?;
-    let m: Manifest = serde_json::from_slice(&raw).with_context(|| format!("parse {}", path.display()))?;
-    ensure!(m.version == 4, "unsupported stream version {} (want 4)", m.version);
-    ensure!(m.frame == "enu", "unsupported stream frame {:?} (want \"enu\")", m.frame);
+    let m: Manifest =
+        serde_json::from_slice(&raw).with_context(|| format!("parse {}", path.display()))?;
+    ensure!(
+        m.version == 4,
+        "unsupported stream version {} (want 4)",
+        m.version
+    );
+    ensure!(
+        m.frame == "enu",
+        "unsupported stream frame {:?} (want \"enu\")",
+        m.frame
+    );
     Ok(m)
 }
 
@@ -85,9 +94,19 @@ fn f32_at(b: &[u8], i: usize) -> f32 {
 #[allow(clippy::chunks_exact_to_as_chunks)]
 /// Decodes one pack into a delta. `capacity` is the largest slot id + 1 seen
 /// so far (cumulus3d's meaning); `total_points` the manifest's `points`.
-pub fn parse_pack(bytes: &[u8], ev: &ManifestEvent, seq: u64, capacity: u32) -> Result<(DisplayDelta, u32)> {
+pub fn parse_pack(
+    bytes: &[u8],
+    ev: &ManifestEvent,
+    seq: u64,
+    capacity: u32,
+) -> Result<(DisplayDelta, u32)> {
     let want = ev.n_add * REC + ev.n_move * REC + ev.n_remove * 4;
-    ensure!(bytes.len() == want, "pack {}: {} bytes, sections need {want}", ev.pack.as_deref().unwrap_or("-"), bytes.len());
+    ensure!(
+        bytes.len() == want,
+        "pack {}: {} bytes, sections need {want}",
+        ev.pack.as_deref().unwrap_or("-"),
+        bytes.len()
+    );
     let (add_b, rest) = bytes.split_at(ev.n_add * REC);
     let (move_b, remove_b) = rest.split_at(ev.n_move * REC);
     let mut capacity = capacity;
@@ -105,10 +124,24 @@ pub fn parse_pack(bytes: &[u8], ev: &ManifestEvent, seq: u64, capacity: u32) -> 
     }
     let moves = move_b
         .chunks_exact(REC)
-        .map(|r| PointMove { id: u32_at(r, 0), xyz: [f32_at(r, 4), f32_at(r, 8), f32_at(r, 12)], rgb: [r[16], r[17], r[18]] })
+        .map(|r| PointMove {
+            id: u32_at(r, 0),
+            xyz: [f32_at(r, 4), f32_at(r, 8), f32_at(r, 12)],
+            rgb: [r[16], r[17], r[18]],
+        })
         .collect();
     let removes = remove_b.chunks_exact(4).map(|r| u32_at(r, 0)).collect();
-    Ok((DisplayDelta { seq, adds, moves, removes, total_points: ev.points, capacity }, capacity))
+    Ok((
+        DisplayDelta {
+            seq,
+            adds,
+            moves,
+            removes,
+            total_points: ev.points,
+            capacity,
+        },
+        capacity,
+    ))
 }
 
 /// Loads every event of a stream directory, checking pack sizes against the
@@ -130,16 +163,37 @@ pub fn load_events(dir: &Path, m: &Manifest) -> Result<Vec<ReplayEvent>> {
             }
             None => Vec::new(),
         };
-        ensure!(bytes.len() as u64 == ev.bytes, "pack {}: {} bytes, manifest says {}", ev.pack.as_deref().unwrap_or("-"), bytes.len(), ev.bytes);
+        ensure!(
+            bytes.len() as u64 == ev.bytes,
+            "pack {}: {} bytes, manifest says {}",
+            ev.pack.as_deref().unwrap_or("-"),
+            bytes.len(),
+            ev.bytes
+        );
         let (delta, cap) = parse_pack(&bytes, ev, ev.seq, capacity)?;
         capacity = cap;
         shown = (shown + ev.n_add)
             .checked_sub(ev.n_remove)
             .with_context(|| format!("event {}: removes exceed the shown points", ev.seq))?;
-        ensure!(shown == ev.points, "event {}: {shown} points after the delta, manifest says {}", ev.seq, ev.points);
-        out.push(ReplayEvent { seq: ev.seq, t: ev.t, zone: ev.zone, kind: kind_of(&ev.kind)?, delta: Arc::new(delta) });
+        ensure!(
+            shown == ev.points,
+            "event {}: {shown} points after the delta, manifest says {}",
+            ev.seq,
+            ev.points
+        );
+        out.push(ReplayEvent {
+            seq: ev.seq,
+            t: ev.t,
+            zone: ev.zone,
+            kind: kind_of(&ev.kind)?,
+            delta: Arc::new(delta),
+        });
     }
-    ensure!(capacity <= m.capacity, "slot ids reach {capacity}, manifest capacity is {}", m.capacity);
+    ensure!(
+        capacity <= m.capacity,
+        "slot ids reach {capacity}, manifest capacity is {}",
+        m.capacity
+    );
     Ok(out)
 }
 
@@ -147,12 +201,18 @@ pub fn load_events(dir: &Path, m: &Manifest) -> Result<Vec<ReplayEvent>> {
 /// The engine anchor must equal `origin_gps` so the consumer does not translate.
 pub fn to_event(ev: &ReplayEvent, origin_gps: [f64; 3]) -> Event {
     Event::DisplayDelta {
-        meta: Meta { version: 1, at: SystemTime::now() },
+        meta: Meta {
+            version: 1,
+            at: SystemTime::now(),
+        },
         delta: Arc::clone(&ev.delta),
         zone: ev.zone,
         kind: ev.kind,
         t: ev.t,
-        frame: DisplayFrame { enu: true, origin_gps: Some(origin_gps) },
+        frame: DisplayFrame {
+            enu: true,
+            origin_gps: Some(origin_gps),
+        },
     }
 }
 
@@ -186,7 +246,9 @@ mod tests {
     /// adds / final) and returns the manifest json events' packs.
     fn write_stream(dir: &Path) {
         std::fs::create_dir_all(dir.join("packs")).unwrap();
-        let p1: Vec<u8> = (0..6).flat_map(|i| add(i, i as f32, 10 + i as u8, 0)).collect();
+        let p1: Vec<u8> = (0..6)
+            .flat_map(|i| add(i, i as f32, 10 + i as u8, 0))
+            .collect();
         let mut p2: Vec<u8> = [add(6, 6.0, 40, 1), add(7, 7.0, 50, 1)].concat();
         p2.extend([mv(1, 1.5, 90), mv(2, 2.0, 91)].concat());
         p2.extend([3u32, 4u32].iter().flat_map(|i| i.to_le_bytes()));
@@ -201,7 +263,11 @@ mod tests {
             ev(1, 1.0, 0, "refined", 6, 6, 0, 0, 120),
             ev(2, 2.0, 1, "replace", 6, 2, 2, 2, 88),
             ev(3, 3.0, 1, "final", 6, 0, 0, 0, 0)]});
-        std::fs::write(dir.join("manifest.json"), serde_json::to_vec_pretty(&m).unwrap()).unwrap();
+        std::fs::write(
+            dir.join("manifest.json"),
+            serde_json::to_vec_pretty(&m).unwrap(),
+        )
+        .unwrap();
     }
 
     /// Applies the pack records directly (removes, adds, moves).
@@ -230,12 +296,26 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("skylens-replay-{}", std::process::id()));
         write_stream(&dir);
         let events = load_stream(&dir).unwrap();
-        assert_eq!(events.iter().map(|e| (e.delta.adds.len(), e.delta.moves.len(), e.delta.removes.len())).collect::<Vec<_>>(), [(6, 0, 0), (2, 2, 2), (0, 0, 0)]);
+        assert_eq!(
+            events
+                .iter()
+                .map(|e| (
+                    e.delta.adds.len(),
+                    e.delta.moves.len(),
+                    e.delta.removes.len()
+                ))
+                .collect::<Vec<_>>(),
+            [(6, 0, 0), (2, 2, 2), (0, 0, 0)]
+        );
         assert_eq!(events[1].delta.capacity, 8);
         let want = reference(&events);
 
         let cfg = EngineConfig {
-            anchor: skylens_shared::geo::Gps { lat: ORIGIN[0], lon: ORIGIN[1], alt: ORIGIN[2] },
+            anchor: skylens_shared::geo::Gps {
+                lat: ORIGIN[0],
+                lon: ORIGIN[1],
+                alt: ORIGIN[2],
+            },
             cameras: ["left", "center", "right"].map(String::from).to_vec(),
             zone_span: 12,
             zone_overlap: 2,
@@ -264,7 +344,11 @@ mod tests {
             if chunks.last().is_some_and(|d| d.kind == fin && !d.snapshot) {
                 break;
             }
-            assert!(t0.elapsed().as_secs() < 20, "timed out; got {} chunks", chunks.len());
+            assert!(
+                t0.elapsed().as_secs() < 20,
+                "timed out; got {} chunks",
+                chunks.len()
+            );
             std::thread::sleep(std::time::Duration::from_millis(10));
         }
         // Snapshot after delta 2 bumps the generation; the log keeps it and delta 3.
@@ -314,7 +398,14 @@ mod tests {
         let m = read_manifest(Path::new(&dir)).unwrap();
         assert_eq!(events.len(), m.events.len());
         for (e, me) in events.iter().zip(&m.events) {
-            assert_eq!((e.delta.adds.len(), e.delta.moves.len(), e.delta.removes.len()), (me.n_add, me.n_move, me.n_remove));
+            assert_eq!(
+                (
+                    e.delta.adds.len(),
+                    e.delta.moves.len(),
+                    e.delta.removes.len()
+                ),
+                (me.n_add, me.n_move, me.n_remove)
+            );
         }
         println!("parsed {} events in {:.2?}", events.len(), t.elapsed());
     }

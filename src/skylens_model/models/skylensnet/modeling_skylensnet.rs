@@ -102,11 +102,16 @@ pub struct TensorMeta {
 pub fn read_safetensors_header(path: &Path) -> Result<BTreeMap<String, TensorMeta>> {
     let mut f = std::fs::File::open(path).with_context(|| format!("opening {}", path.display()))?;
     let mut len = [0u8; 8];
-    f.read_exact(&mut len).context("reading the safetensors header length")?;
+    f.read_exact(&mut len)
+        .context("reading the safetensors header length")?;
     let n = u64::from_le_bytes(len);
-    ensure!(n <= 100 * 1024 * 1024, "safetensors header of {n} bytes is implausibly large");
+    ensure!(
+        n <= 100 * 1024 * 1024,
+        "safetensors header of {n} bytes is implausibly large"
+    );
     let mut buf = vec![0u8; n as usize];
-    f.read_exact(&mut buf).context("reading the safetensors header")?;
+    f.read_exact(&mut buf)
+        .context("reading the safetensors header")?;
     let raw: serde_json::Map<String, serde_json::Value> =
         serde_json::from_slice(&buf).context("parsing the safetensors header")?;
     let mut out = BTreeMap::new();
@@ -124,7 +129,10 @@ pub fn read_safetensors_header(path: &Path) -> Result<BTreeMap<String, TensorMet
             .and_then(|s| s.as_array())
             .ok_or_else(|| anyhow!("tensor {name} has no shape"))?
             .iter()
-            .map(|d| d.as_i64().ok_or_else(|| anyhow!("tensor {name} has a bad shape")))
+            .map(|d| {
+                d.as_i64()
+                    .ok_or_else(|| anyhow!("tensor {name} has a bad shape"))
+            })
             .collect::<Result<Vec<_>>>()?;
         out.insert(name, TensorMeta { dtype, shape });
     }
@@ -141,7 +149,12 @@ fn conv(p: &nn::Path, i: i64, o: i64, k: i64, stride: i64, bias: bool) -> nn::Co
         i,
         o,
         k,
-        nn::ConvConfig { stride, padding: k / 2, bias, ..Default::default() },
+        nn::ConvConfig {
+            stride,
+            padding: k / 2,
+            bias,
+            ..Default::default()
+        },
     )
 }
 
@@ -210,7 +223,11 @@ struct SkyLensUNetDecoder {
 impl SkyLensUNetDecoder {
     /// `encoder_channels` is shallow to deep; the deepest feeds the decoder.
     fn new(p: &nn::Path, encoder_channels: &[i64], decoder_channels: &[i64]) -> Self {
-        let skips: Vec<i64> = encoder_channels[..encoder_channels.len() - 1].iter().rev().copied().collect();
+        let skips: Vec<i64> = encoder_channels[..encoder_channels.len() - 1]
+            .iter()
+            .rev()
+            .copied()
+            .collect();
         let mut in_ch = encoder_channels[encoder_channels.len() - 1];
         let bp = p.sub("blocks");
         let mut blocks = Vec::with_capacity(decoder_channels.len());
@@ -221,7 +238,10 @@ impl SkyLensUNetDecoder {
             });
             in_ch = out_ch;
         }
-        Self { blocks, out_channels: in_ch }
+        Self {
+            blocks,
+            out_channels: in_ch,
+        }
     }
 
     fn forward(&self, features: &[Tensor]) -> Tensor {
@@ -284,7 +304,11 @@ impl ResNetSpec {
     /// Reads the stage layout from checkpoint keys under `prefix`
     /// (`skylens.backbone.` for a SkyLens checkpoint).
     pub fn from_header(header: &BTreeMap<String, TensorMeta>, prefix: &str) -> Result<Self> {
-        let shape = |key: &str| header.get(&format!("{prefix}{key}")).map(|m| m.shape.clone());
+        let shape = |key: &str| {
+            header
+                .get(&format!("{prefix}{key}"))
+                .map(|m| m.shape.clone())
+        };
         let emb = shape("embedder.embedder.convolution.weight")
             .ok_or_else(|| anyhow!("no {prefix}embedder.embedder.convolution.weight: not a transformers ResNet backbone"))?;
         ensure!(emb.len() == 4, "stem conv weight must be 4-D, got {emb:?}");
@@ -292,23 +316,32 @@ impl ResNetSpec {
         let stages_prefix = format!("{prefix}encoder.stages.");
         let mut depths: BTreeMap<usize, usize> = BTreeMap::new();
         for key in header.keys() {
-            let Some(rest) = key.strip_prefix(&stages_prefix) else { continue };
-            let mut parts = rest.split('.');
-            let (Some(s), Some("layers"), Some(l)) = (parts.next(), parts.next(), parts.next()) else {
+            let Some(rest) = key.strip_prefix(&stages_prefix) else {
                 continue;
             };
-            let (Ok(s), Ok(l)) = (s.parse::<usize>(), l.parse::<usize>()) else { continue };
+            let mut parts = rest.split('.');
+            let (Some(s), Some("layers"), Some(l)) = (parts.next(), parts.next(), parts.next())
+            else {
+                continue;
+            };
+            let (Ok(s), Ok(l)) = (s.parse::<usize>(), l.parse::<usize>()) else {
+                continue;
+            };
             let d = depths.entry(s).or_insert(0);
             *d = (*d).max(l + 1);
         }
-        ensure!(!depths.is_empty(), "no encoder stages under {stages_prefix}");
+        ensure!(
+            !depths.is_empty(),
+            "no encoder stages under {stages_prefix}"
+        );
         ensure!(
             depths.keys().copied().eq(0..depths.len()),
             "encoder stages are not numbered 0..n: {:?}",
             depths.keys().collect::<Vec<_>>()
         );
 
-        let layer_type = if shape("encoder.stages.0.layers.0.layer.2.convolution.weight").is_some() {
+        let layer_type = if shape("encoder.stages.0.layers.0.layer.2.convolution.weight").is_some()
+        {
             ResNetLayerType::Bottleneck
         } else {
             ResNetLayerType::Basic
@@ -319,9 +352,11 @@ impl ResNetSpec {
         };
         let hidden_sizes = (0..depths.len())
             .map(|s| {
-                shape(&format!("encoder.stages.{s}.layers.0.layer.{last}.convolution.weight"))
-                    .map(|w| w[0])
-                    .ok_or_else(|| anyhow!("stage {s} has no layer.{last} conv"))
+                shape(&format!(
+                    "encoder.stages.{s}.layers.0.layer.{last}.convolution.weight"
+                ))
+                .map(|w| w[0])
+                .ok_or_else(|| anyhow!("stage {s} has no layer.{last} conv"))
             })
             .collect::<Result<Vec<_>>>()?;
         let embedding_size = emb[0];
@@ -346,7 +381,9 @@ impl ResNetSpec {
 
     /// Output channels per stage name (`ResNetBackbone.num_features`).
     pub fn num_features(&self) -> Vec<i64> {
-        std::iter::once(self.embedding_size).chain(self.hidden_sizes.iter().copied()).collect()
+        std::iter::once(self.embedding_size)
+            .chain(self.hidden_sizes.iter().copied())
+            .collect()
     }
 }
 
@@ -393,7 +430,11 @@ impl ResNetResidualLayer {
             ],
             ResNetLayerType::Bottleneck => {
                 let r = o / 4;
-                let (s1, s2) = if spec.downsample_in_bottleneck { (stride, 1) } else { (1, stride) };
+                let (s1, s2) = if spec.downsample_in_bottleneck {
+                    (stride, 1)
+                } else {
+                    (1, stride)
+                };
                 vec![
                     ResNetConvLayer::new(&l.sub("0"), i, r, 1, s1, true),
                     ResNetConvLayer::new(&l.sub("1"), r, r, 3, s2, true),
@@ -444,7 +485,11 @@ impl ResNetBackbone {
         let mut in_ch = spec.embedding_size;
         for s in 0..needed {
             let out_ch = spec.hidden_sizes[s];
-            let stride = if s == 0 { if spec.downsample_in_first_stage { 2 } else { 1 } } else { 2 };
+            let stride = if s == 0 {
+                if spec.downsample_in_first_stage { 2 } else { 1 }
+            } else {
+                2
+            };
             let lp = sp.sub(s).sub("layers");
             let layers = (0..spec.depths[s])
                 .map(|j| {
@@ -457,11 +502,19 @@ impl ResNetBackbone {
         }
         let features = spec.num_features();
         let channels = out_indices.iter().map(|&i| features[i]).collect();
-        Self { embedder, stages, out_indices, channels }
+        Self {
+            embedder,
+            stages,
+            out_indices,
+            channels,
+        }
     }
 
     fn forward(&self, x: &Tensor) -> Vec<Tensor> {
-        let stem = self.embedder.forward(x).max_pool2d([3, 3], [2, 2], [1, 1], [1, 1], false);
+        let stem = self
+            .embedder
+            .forward(x)
+            .max_pool2d([3, 3], [2, 2], [1, 1], [1, 1], false);
         let mut hidden = vec![stem];
         for stage in &self.stages {
             let mut h = hidden[hidden.len() - 1].shallow_clone();
@@ -470,7 +523,10 @@ impl ResNetBackbone {
             }
             hidden.push(h);
         }
-        self.out_indices.iter().map(|&i| hidden[i].shallow_clone()).collect()
+        self.out_indices
+            .iter()
+            .map(|&i| hidden[i].shallow_clone())
+            .collect()
     }
 }
 
@@ -507,10 +563,17 @@ pub struct SkyLensModel {
 impl SkyLensModel {
     pub fn new(p: &nn::Path, config: &SkyLensConfig, spec: &ResNetSpec) -> Result<Self> {
         let out_indices = config.resolved_out_indices(spec.num_stage_names())?;
-        let backbone =
-            ResNetBackbone::new(&p.sub("backbone"), spec, config.num_input_channels(), out_indices);
-        let decoder =
-            SkyLensUNetDecoder::new(&p.sub("decoder"), &backbone.channels, &config.decoder_channels);
+        let backbone = ResNetBackbone::new(
+            &p.sub("backbone"),
+            spec,
+            config.num_input_channels(),
+            out_indices,
+        );
+        let decoder = SkyLensUNetDecoder::new(
+            &p.sub("decoder"),
+            &backbone.channels,
+            &config.decoder_channels,
+        );
         Ok(Self { backbone, decoder })
     }
 
@@ -559,14 +622,26 @@ impl SkyLensForDisasterPerception {
     /// (pass `vs.root()`).
     pub fn new(p: &nn::Path, config: &SkyLensConfig, arch: &ArchSpec) -> Result<Self> {
         config.validate()?;
-        ensure!(!config.use_timm_backbone, "timm backbones are not supported by the Rust model");
+        ensure!(
+            !config.use_timm_backbone,
+            "timm backbones are not supported by the Rust model"
+        );
         let skylens = SkyLensModel::new(&p.sub("skylens"), config, &arch.backbone)?;
         let f = skylens.out_channels();
         Ok(Self {
             config: config.clone(),
-            danger_head: conv(&p.sub("danger_head"), f, config.num_danger_classes, 1, 1, true),
+            danger_head: conv(
+                &p.sub("danger_head"),
+                f,
+                config.num_danger_classes,
+                1,
+                1,
+                true,
+            ),
             person_stem: SkyLensConvBlock::new(&p.sub("person_stem"), f, f),
-            wh_stem: arch.wh_stem.then(|| SkyLensConvBlock::new(&p.sub("wh_stem"), f, f)),
+            wh_stem: arch
+                .wh_stem
+                .then(|| SkyLensConvBlock::new(&p.sub("wh_stem"), f, f)),
             heatmap_head: conv(&p.sub("heatmap_head"), f, 1, 1, 1, true),
             wh_head: conv(&p.sub("wh_head"), f, 2, 1, 1, true),
             offset_head: config
@@ -642,9 +717,17 @@ impl SkyLensForDisasterPerception {
             Some(stem) => self.wh_head.forward(&stem.forward(&person_feat)),
             None => self.wh_head.forward(&person_feat_hm),
         };
-        let person_offset = self.offset_head.as_ref().map(|h| h.forward(&person_feat_hm));
+        let person_offset = self
+            .offset_head
+            .as_ref()
+            .map(|h| h.forward(&person_feat_hm));
 
-        SkyLensOutput { danger_logits, person_heatmap, person_wh, person_offset }
+        SkyLensOutput {
+            danger_logits,
+            person_heatmap,
+            person_wh,
+            person_offset,
+        }
     }
 }
 
@@ -711,7 +794,9 @@ impl std::str::FromStr for Precision {
             "fp32" | "f32" | "float32" => Ok(Self::Fp32),
             "fp16" | "f16" | "half" | "autocast" | "fp16-autocast" => Ok(Self::Fp16Autocast),
             "bf16" | "bfloat16" => Ok(Self::Bf16),
-            other => Err(format!("unknown precision {other:?} (expected auto, fp32, fp16 or bf16)")),
+            other => Err(format!(
+                "unknown precision {other:?} (expected auto, fp32, fp16 or bf16)"
+            )),
         }
     }
 }
@@ -754,16 +839,18 @@ pub fn cuda_compute_capability(ordinal: i32) -> Option<(i32, i32)> {
 /// Precision for a CUDA device of the given compute capability, with the reason.
 pub fn precision_for_capability(capability: Option<(i32, i32)>) -> (Precision, String) {
     match capability {
-        Some((major, minor)) if major >= 8 => {
-            (Precision::Bf16, format!("compute capability {major}.{minor} has bf16 tensor cores"))
-        }
+        Some((major, minor)) if major >= 8 => (
+            Precision::Bf16,
+            format!("compute capability {major}.{minor} has bf16 tensor cores"),
+        ),
         Some((7, minor)) => (
             Precision::Fp16Autocast,
             format!("compute capability 7.{minor} has fp16 tensor cores but no bf16 hardware"),
         ),
-        Some((major, minor)) => {
-            (Precision::Fp32, format!("compute capability {major}.{minor} has no half-precision tensor cores"))
-        }
+        Some((major, minor)) => (
+            Precision::Fp32,
+            format!("compute capability {major}.{minor} has no half-precision tensor cores"),
+        ),
         None => (Precision::Fp32, "compute capability unknown".to_string()),
     }
 }
@@ -792,7 +879,9 @@ impl Default for DetectorOptions {
             top_k: 300,
             merge_iou: 0.5,
             merge_center_distance: 2.0,
-            hazard: HazardMode::Squash { size: tiling::TILE_SIZE },
+            hazard: HazardMode::Squash {
+                size: tiling::TILE_SIZE,
+            },
             precision: Precision::Auto,
         }
     }
@@ -838,12 +927,19 @@ impl SkyLensNetDetector {
         Self::load_with_options(checkpoint, device, DetectorOptions::default())
     }
 
-    pub fn load_with_options(checkpoint: &Path, device: Device, mut options: DetectorOptions) -> Result<Self> {
+    pub fn load_with_options(
+        checkpoint: &Path,
+        device: Device,
+        mut options: DetectorOptions,
+    ) -> Result<Self> {
         let (precision, reason) = resolve_precision(options.precision, device);
         tracing::info!(?device, %precision, %reason, "SkyLensNet precision");
         options.precision = precision;
         let config = SkyLensConfig::from_pretrained(checkpoint)?;
-        ensure!(!config.use_timm_backbone, "timm backbones are not supported by the Rust model");
+        ensure!(
+            !config.use_timm_backbone,
+            "timm backbones are not supported by the Rust model"
+        );
         ensure!(
             config.in_channels == 4,
             "the inference channel layout is RGB + thermal; in_channels = {} is not supported",
@@ -854,7 +950,10 @@ impl SkyLensNetDetector {
             "checkpoint has {} hazard classes, the frame hook expects {HAZARD_CLASSES}",
             config.num_danger_classes
         );
-        ensure!(options.tile > 0 && options.tile_batch > 0, "tile and tile_batch must be positive");
+        ensure!(
+            options.tile > 0 && options.tile_batch > 0,
+            "tile and tile_batch must be positive"
+        );
 
         let weights = checkpoint.join(WEIGHTS_NAME);
         let header = read_safetensors_header(&weights)?;
@@ -873,7 +972,8 @@ impl SkyLensNetDetector {
         let mut vs = nn::VarStore::new(device);
         let net = SkyLensForDisasterPerception::new(&vs.root(), &config, &arch)?;
         check_against_header(&vs, &header)?;
-        vs.load(&weights).with_context(|| format!("loading {}", weights.display()))?;
+        vs.load(&weights)
+            .with_context(|| format!("loading {}", weights.display()))?;
         // Loading adopts the file dtype; cast to the run precision.
         if device.is_cuda() && options.precision == Precision::Bf16 {
             vs.bfloat16();
@@ -882,7 +982,12 @@ impl SkyLensNetDetector {
         }
         vs.freeze();
 
-        Ok(Self { config, options, device, model: Mutex::new(Loaded { _vs: vs, net }) })
+        Ok(Self {
+            config,
+            options,
+            device,
+            model: Mutex::new(Loaded { _vs: vs, net }),
+        })
     }
 
     pub fn config(&self) -> &SkyLensConfig {
@@ -894,13 +999,20 @@ impl SkyLensNetDetector {
     }
 
     fn run(&self, pixel_values: &Tensor, modality_mask: &Tensor) -> Result<SkyLensOutput> {
-        let loaded = self.model.lock().map_err(|_| anyhow!("SkyLensNet model lock poisoned"))?;
+        let loaded = self
+            .model
+            .lock()
+            .map_err(|_| anyhow!("SkyLensNet model lock poisoned"))?;
         let cuda = self.device.is_cuda();
         let autocast = cuda && self.options.precision == Precision::Fp16Autocast;
         let bf16 = cuda && self.options.precision == Precision::Bf16;
         Ok(tch::no_grad(|| {
             tch::autocast(autocast, || {
-                let x = if bf16 { pixel_values.to_kind(Kind::BFloat16) } else { pixel_values.shallow_clone() };
+                let x = if bf16 {
+                    pixel_values.to_kind(Kind::BFloat16)
+                } else {
+                    pixel_values.shallow_clone()
+                };
                 let out = loaded.net.forward(&x, Some(modality_mask));
                 SkyLensOutput {
                     danger_logits: out.danger_logits.to_kind(Kind::Float),
@@ -930,14 +1042,18 @@ impl SkyLensNetDetector {
             if c > 4 {
                 // validity plane(s): 1.0 where thermal is real (collator layout)
                 let v = if has_thermal { 1.0 } else { 0.0 };
-                buf[base + 4 * plane..base + c * plane].iter_mut().for_each(|d| *d = v);
+                buf[base + 4 * plane..base + c * plane]
+                    .iter_mut()
+                    .for_each(|d| *d = v);
             }
         }
         let px = Tensor::from_slice(buf.as_slice())
             .view([tiles.len() as i64, c as i64, h as i64, w as i64])
             .to_device(self.device);
         let mask: Vec<bool> = (0..tiles.len()).flat_map(|_| [true, has_thermal]).collect();
-        let mask = Tensor::from_slice(mask.as_slice()).view([tiles.len() as i64, 2]).to_device(self.device);
+        let mask = Tensor::from_slice(mask.as_slice())
+            .view([tiles.len() as i64, 2])
+            .to_device(self.device);
         (px, mask)
     }
 }
@@ -949,9 +1065,11 @@ fn check_against_header(vs: &nn::VarStore, header: &BTreeMap<String, TensorMeta>
     for (name, t) in vs.variables() {
         match header.get(&name) {
             None => missing.push(name),
-            Some(meta) if meta.shape != t.size() => {
-                mismatched.push(format!("{name}: file {:?} vs model {:?}", meta.shape, t.size()))
-            }
+            Some(meta) if meta.shape != t.size() => mismatched.push(format!(
+                "{name}: file {:?} vs model {:?}",
+                meta.shape,
+                t.size()
+            )),
             Some(_) => {}
         }
     }
@@ -969,7 +1087,11 @@ fn check_against_header(vs: &nn::VarStore, header: &BTreeMap<String, TensorMeta>
 
 /// Copies a tensor to a flat CPU `f32` vector.
 fn to_vec_f32(t: &Tensor) -> Result<Vec<f32>> {
-    let flat = t.to_device(Device::Cpu).to_kind(Kind::Float).contiguous().reshape([-1]);
+    let flat = t
+        .to_device(Device::Cpu)
+        .to_kind(Kind::Float)
+        .contiguous()
+        .reshape([-1]);
     Ok(Vec::<f32>::try_from(&flat)?)
 }
 
@@ -989,7 +1111,11 @@ pub fn frame_image(rgb: &[u8], thermal: Option<&[u8]>, width: usize, height: usi
             data[i * c + ch] = f32::from(rgb[i * 3 + ch]) / 255.0;
         }
         if let Some(t) = thermal {
-            let norm = if hi <= lo { 0.0 } else { (f32::from(t[i]) - lo) / (hi - lo) };
+            let norm = if hi <= lo {
+                0.0
+            } else {
+                (f32::from(t[i]) - lo) / (hi - lo)
+            };
             data[i * c + 3] = 0.1 + 0.9 * norm;
         }
     }
@@ -1006,7 +1132,10 @@ impl Detector for SkyLensNetDetector {
     ) -> Result<FrameDetections> {
         let (w, h) = (width as usize, height as usize);
         ensure!(w > 0 && h > 0, "empty frame");
-        ensure!(rgb.len() == w * h * 3, "rgb must be width * height * 3 bytes");
+        ensure!(
+            rgb.len() == w * h * 3,
+            "rgb must be width * height * 3 bytes"
+        );
         if let Some(t) = thermal {
             ensure!(t.len() == w * h, "thermal must be width * height bytes");
         }
@@ -1062,7 +1191,11 @@ impl Detector for SkyLensNetDetector {
                     stride,
                     false,
                 );
-                per_tile.push(tiling::tile_detections_to_full(&det, f64::from(x0), f64::from(y0)));
+                per_tile.push(tiling::tile_detections_to_full(
+                    &det,
+                    f64::from(x0),
+                    f64::from(y0),
+                ));
             }
 
             if let (Some(acc), Some(cnt)) = (acc.as_ref(), cnt.as_ref()) {
@@ -1081,12 +1214,17 @@ impl Detector for SkyLensNetDetector {
             }
         }
 
-        let merged = tiling::merge_tile_detections(&per_tile, opts.merge_iou, opts.merge_center_distance);
+        let merged =
+            tiling::merge_tile_detections(&per_tile, opts.merge_iou, opts.merge_center_distance);
         // Scaled frame -> original frame, per axis (boxes were scaled by new / old).
         let (fx, fy) = (sw as f64 / w as f64, sh as f64 / h as f64);
         let people = merged
             .iter()
-            .map(|d| PersonPoint { x: (d[0] / fx) as f32, y: (d[1] / fy) as f32, score: d[4] as f32 })
+            .map(|d| PersonPoint {
+                x: (d[0] / fx) as f32,
+                y: (d[1] / fy) as f32,
+                score: d[4] as f32,
+            })
             .collect();
 
         // --- hazard map ----------------------------------------------------
@@ -1110,7 +1248,12 @@ impl Detector for SkyLensNetDetector {
                     let logits = if (s, s) == (w, h) {
                         logits
                     } else {
-                        logits.upsample_bilinear2d([h as i64, w as i64], false, None::<f64>, None::<f64>)
+                        logits.upsample_bilinear2d(
+                            [h as i64, w as i64],
+                            false,
+                            None::<f64>,
+                            None::<f64>,
+                        )
                     };
                     logits.softmax(1, Kind::Float)
                 })
@@ -1125,7 +1268,12 @@ impl Detector for SkyLensNetDetector {
             HAZARD_CLASSES * w * h
         );
 
-        Ok(FrameDetections { width, height, hazard_prob, people })
+        Ok(FrameDetections {
+            width,
+            height,
+            hazard_prob,
+            people,
+        })
     }
 }
 
@@ -1162,7 +1310,10 @@ mod tests {
     #[test]
     fn parameter_names_follow_the_state_dict() {
         let vs = nn::VarStore::new(Device::Cpu);
-        let arch = ArchSpec { backbone: tiny_spec(), wh_stem: true };
+        let arch = ArchSpec {
+            backbone: tiny_spec(),
+            wh_stem: true,
+        };
         SkyLensForDisasterPerception::new(&vs.root(), &tiny_config(true), &arch).unwrap();
         let n = names(&vs);
         for key in [
@@ -1186,7 +1337,9 @@ mod tests {
             assert!(n.contains(key), "missing {key}");
         }
         // the first stage keeps 8 channels at stride 1, so it has no shortcut
-        assert!(!n.contains("skylens.backbone.encoder.stages.0.layers.0.shortcut.convolution.weight"));
+        assert!(
+            !n.contains("skylens.backbone.encoder.stages.0.layers.0.shortcut.convolution.weight")
+        );
         // out_indices (0,1,2,3) never read the 4th stage, so it is not built
         assert!(!n.iter().any(|k| k.contains("encoder.stages.3.")));
         assert!(!n.iter().any(|k| k.contains("num_batches_tracked")));
@@ -1196,18 +1349,43 @@ mod tests {
     fn resnet50_layout_matches_a_real_checkpoint() {
         // Shapes taken from runs/skylens/final/model.safetensors.
         let vs = nn::VarStore::new(Device::Cpu);
-        let arch = ArchSpec { backbone: ResNetSpec::for_name("microsoft/resnet-50").unwrap(), wh_stem: true };
-        let net = SkyLensForDisasterPerception::new(&vs.root(), &SkyLensConfig::default(), &arch).unwrap();
+        let arch = ArchSpec {
+            backbone: ResNetSpec::for_name("microsoft/resnet-50").unwrap(),
+            wh_stem: true,
+        };
+        let net = SkyLensForDisasterPerception::new(&vs.root(), &SkyLensConfig::default(), &arch)
+            .unwrap();
         assert_eq!(net.encoder_channels(), &[64, 256, 512, 1024]);
         let vars = vs.variables();
         let shape = |k: &str| vars[k].size();
-        assert_eq!(shape("skylens.backbone.embedder.embedder.convolution.weight"), vec![64, 4, 7, 7]);
-        assert_eq!(shape("skylens.backbone.encoder.stages.0.layers.0.shortcut.convolution.weight"), vec![256, 64, 1, 1]);
-        assert_eq!(shape("skylens.backbone.encoder.stages.0.layers.1.layer.0.convolution.weight"), vec![64, 256, 1, 1]);
-        assert_eq!(shape("skylens.decoder.blocks.0.conv.block.0.weight"), vec![256, 1536, 3, 3]);
-        assert_eq!(shape("skylens.decoder.blocks.1.conv.block.0.weight"), vec![128, 512, 3, 3]);
-        assert_eq!(shape("skylens.decoder.blocks.2.conv.block.0.weight"), vec![64, 192, 3, 3]);
-        assert_eq!(shape("skylens.decoder.blocks.3.conv.block.0.weight"), vec![32, 64, 3, 3]);
+        assert_eq!(
+            shape("skylens.backbone.embedder.embedder.convolution.weight"),
+            vec![64, 4, 7, 7]
+        );
+        assert_eq!(
+            shape("skylens.backbone.encoder.stages.0.layers.0.shortcut.convolution.weight"),
+            vec![256, 64, 1, 1]
+        );
+        assert_eq!(
+            shape("skylens.backbone.encoder.stages.0.layers.1.layer.0.convolution.weight"),
+            vec![64, 256, 1, 1]
+        );
+        assert_eq!(
+            shape("skylens.decoder.blocks.0.conv.block.0.weight"),
+            vec![256, 1536, 3, 3]
+        );
+        assert_eq!(
+            shape("skylens.decoder.blocks.1.conv.block.0.weight"),
+            vec![128, 512, 3, 3]
+        );
+        assert_eq!(
+            shape("skylens.decoder.blocks.2.conv.block.0.weight"),
+            vec![64, 192, 3, 3]
+        );
+        assert_eq!(
+            shape("skylens.decoder.blocks.3.conv.block.0.weight"),
+            vec![32, 64, 3, 3]
+        );
         assert_eq!(shape("danger_head.weight"), vec![4, 32, 1, 1]);
         assert_eq!(shape("person_stem.block.0.weight"), vec![32, 32, 3, 3]);
     }
@@ -1215,7 +1393,10 @@ mod tests {
     #[test]
     fn forward_shapes() {
         let vs = nn::VarStore::new(Device::Cpu);
-        let arch = ArchSpec { backbone: tiny_spec(), wh_stem: true };
+        let arch = ArchSpec {
+            backbone: tiny_spec(),
+            wh_stem: true,
+        };
         let net = SkyLensForDisasterPerception::new(&vs.root(), &tiny_config(true), &arch).unwrap();
         let x = Tensor::rand([2, 4, 64, 96], (Kind::Float, Device::Cpu));
         let mask = Tensor::from_slice(&[true, false, true, true]).view([2, 2]);
@@ -1231,8 +1412,14 @@ mod tests {
     #[test]
     fn modality_mask_zeroes_missing_thermal_and_sets_validity() {
         let vs = nn::VarStore::new(Device::Cpu);
-        let cfg = SkyLensConfig { use_validity_channel: true, ..tiny_config(false) };
-        let arch = ArchSpec { backbone: tiny_spec(), wh_stem: true };
+        let cfg = SkyLensConfig {
+            use_validity_channel: true,
+            ..tiny_config(false)
+        };
+        let arch = ArchSpec {
+            backbone: tiny_spec(),
+            wh_stem: true,
+        };
         let net = SkyLensForDisasterPerception::new(&vs.root(), &cfg, &arch).unwrap();
         let x = Tensor::ones([1, 5, 2, 2], (Kind::Float, Device::Cpu));
         let mask = Tensor::from_slice(&[true, false]).view([1, 2]);
@@ -1243,10 +1430,19 @@ mod tests {
 
     #[test]
     fn arch_is_inferred_from_the_header() {
-        let meta = |s: &[i64]| TensorMeta { dtype: "F32".into(), shape: s.to_vec() };
+        let meta = |s: &[i64]| TensorMeta {
+            dtype: "F32".into(),
+            shape: s.to_vec(),
+        };
         let mut h = BTreeMap::new();
-        h.insert("skylens.backbone.embedder.embedder.convolution.weight".to_string(), meta(&[64, 4, 7, 7]));
-        for (s, (out, depth)) in [(256, 3), (512, 4), (1024, 6), (2048, 3)].into_iter().enumerate() {
+        h.insert(
+            "skylens.backbone.embedder.embedder.convolution.weight".to_string(),
+            meta(&[64, 4, 7, 7]),
+        );
+        for (s, (out, depth)) in [(256, 3), (512, 4), (1024, 6), (2048, 3)]
+            .into_iter()
+            .enumerate()
+        {
             for l in 0..depth {
                 for (k, o) in [(0, out / 4), (1, out / 4), (2, out)] {
                     h.insert(
@@ -1257,7 +1453,10 @@ mod tests {
             }
         }
         let arch = ArchSpec::from_header(&h).unwrap();
-        assert_eq!(arch.backbone, ResNetSpec::for_name("microsoft/resnet-50").unwrap());
+        assert_eq!(
+            arch.backbone,
+            ResNetSpec::for_name("microsoft/resnet-50").unwrap()
+        );
         assert!(!arch.wh_stem); // legacy layout: no wh_stem keys
         h.insert("wh_stem.block.0.weight".into(), meta(&[32, 32, 3, 3]));
         assert!(ArchSpec::from_header(&h).unwrap().wh_stem);
@@ -1283,8 +1482,15 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let vs = nn::VarStore::new(Device::Cpu);
         let cfg = tiny_config(offset);
-        SkyLensForDisasterPerception::new(&vs.root(), &cfg, &ArchSpec { backbone: tiny_spec(), wh_stem })
-            .unwrap();
+        SkyLensForDisasterPerception::new(
+            &vs.root(),
+            &cfg,
+            &ArchSpec {
+                backbone: tiny_spec(),
+                wh_stem,
+            },
+        )
+        .unwrap();
         vs.save(dir.join(WEIGHTS_NAME)).unwrap();
         std::fs::write(dir.join(CONFIG_NAME), cfg.to_json_string().unwrap()).unwrap();
         dir
@@ -1307,12 +1513,16 @@ mod tests {
             assert_eq!((out.width, out.height), (w as u32, h as u32));
             assert_eq!(out.hazard_prob.len(), HAZARD_CLASSES * w * h);
             for i in [0, w * h / 2, w * h - 1] {
-                let s: f32 = (0..HAZARD_CLASSES).map(|c| out.hazard_prob[c * w * h + i]).sum();
+                let s: f32 = (0..HAZARD_CLASSES)
+                    .map(|c| out.hazard_prob[c * w * h + i])
+                    .sum();
                 assert!((s - 1.0).abs() < 1e-4, "probabilities sum to {s}");
             }
             for p in &out.people {
                 assert!(p.score >= 0.05 && p.score <= 1.0);
-                assert!(p.x > -10.0 && p.x < w as f32 + 10.0 && p.y > -10.0 && p.y < h as f32 + 10.0);
+                assert!(
+                    p.x > -10.0 && p.x < w as f32 + 10.0 && p.y > -10.0 && p.y < h as f32 + 10.0
+                );
             }
         }
         std::fs::remove_dir_all(&dir).ok();
@@ -1321,12 +1531,17 @@ mod tests {
     #[test]
     fn detector_tiled_hazard_and_legacy_wh_layout() {
         let dir = tiny_checkpoint("legacy", false, false);
-        let opts = DetectorOptions { hazard: HazardMode::Tiles, ..Default::default() };
+        let opts = DetectorOptions {
+            hazard: HazardMode::Tiles,
+            ..Default::default()
+        };
         let det = SkyLensNetDetector::load_with_options(&dir, Device::Cpu, opts).unwrap();
         let (w, h) = (80usize, 50usize);
         let (rgb, _) = frame(w, h);
         let out = det.detect(&rgb, None, w as u32, h as u32).unwrap();
-        let s: f32 = (0..HAZARD_CLASSES).map(|c| out.hazard_prob[c * w * h]).sum();
+        let s: f32 = (0..HAZARD_CLASSES)
+            .map(|c| out.hazard_prob[c * w * h])
+            .sum();
         assert!((s - 1.0).abs() < 1e-4);
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -1340,7 +1555,9 @@ mod tests {
         // A checkpoint whose config asks for an offset head the weights lack.
         let cfg = tiny_config(true);
         std::fs::write(dir.join(CONFIG_NAME), cfg.to_json_string().unwrap()).unwrap();
-        let err = SkyLensNetDetector::load(&dir, Device::Cpu).unwrap_err().to_string();
+        let err = SkyLensNetDetector::load(&dir, Device::Cpu)
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("offset_head"), "{err}");
         std::fs::remove_dir_all(&dir).ok();
     }
@@ -1359,9 +1576,18 @@ mod tests {
 
     #[test]
     fn precision_resolution_and_parsing() {
-        assert_eq!(resolve_precision(Precision::Auto, Device::Cpu).0, Precision::Fp32);
-        assert_eq!(resolve_precision(Precision::Bf16, Device::Cpu).0, Precision::Fp32);
-        assert_eq!(resolve_precision(Precision::Fp16Autocast, Device::Cuda(0)).0, Precision::Fp16Autocast);
+        assert_eq!(
+            resolve_precision(Precision::Auto, Device::Cpu).0,
+            Precision::Fp32
+        );
+        assert_eq!(
+            resolve_precision(Precision::Bf16, Device::Cpu).0,
+            Precision::Fp32
+        );
+        assert_eq!(
+            resolve_precision(Precision::Fp16Autocast, Device::Cuda(0)).0,
+            Precision::Fp16Autocast
+        );
         assert_eq!("BF16".parse(), Ok(Precision::Bf16));
         assert_eq!("fp16".parse(), Ok(Precision::Fp16Autocast));
         assert_eq!("auto".parse(), Ok(Precision::Auto));
@@ -1378,7 +1604,9 @@ mod tests {
         #[cfg(windows)]
         // SAFETY: a NUL-terminated library name; a failed load leaves tch on CPU.
         unsafe {
-            windows_sys::Win32::System::LibraryLoader::LoadLibraryA(c"torch_cuda.dll".as_ptr().cast());
+            windows_sys::Win32::System::LibraryLoader::LoadLibraryA(
+                c"torch_cuda.dll".as_ptr().cast(),
+            );
         }
         if !tch::Cuda::is_available() {
             eprintln!("no CUDA; skipped");
@@ -1386,17 +1614,33 @@ mod tests {
         }
         let dir = tiny_checkpoint("bf16", true, true);
         let load = |precision| {
-            let opts = DetectorOptions { precision, ..Default::default() };
+            let opts = DetectorOptions {
+                precision,
+                ..Default::default()
+            };
             SkyLensNetDetector::load_with_options(&dir, Device::Cuda(0), opts).unwrap()
         };
         let (fp32, bf16) = (load(Precision::Fp32), load(Precision::Bf16));
-        let kinds: Vec<Kind> = bf16.model.lock().unwrap()._vs.variables().values().map(|t| t.kind()).collect();
+        let kinds: Vec<Kind> = bf16
+            .model
+            .lock()
+            .unwrap()
+            ._vs
+            .variables()
+            .values()
+            .map(|t| t.kind())
+            .collect();
         assert!(kinds.iter().all(|k| *k == Kind::BFloat16), "{kinds:?}");
         let (w, h) = (100usize, 60usize);
         let (rgb, th) = frame(w, h);
         let a = fp32.detect(&rgb, Some(&th), w as u32, h as u32).unwrap();
         let b = bf16.detect(&rgb, Some(&th), w as u32, h as u32).unwrap();
-        let worst = a.hazard_prob.iter().zip(&b.hazard_prob).map(|(x, y)| (x - y).abs()).fold(0.0f32, f32::max);
+        let worst = a
+            .hazard_prob
+            .iter()
+            .zip(&b.hazard_prob)
+            .map(|(x, y)| (x - y).abs())
+            .fold(0.0f32, f32::max);
         assert!(worst < 0.05, "hazard probability differs by {worst}");
         std::fs::remove_dir_all(&dir).ok();
     }

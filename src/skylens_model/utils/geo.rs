@@ -12,8 +12,16 @@ mod tests {
 
     #[test]
     fn reexport_round_trips() {
-        let anchor = Gps { lat: 36.3685, lon: 127.3475, alt: 30.0 };
-        let enu = Enu { e: 12.0, n: -4.0, u: 1.5 };
+        let anchor = Gps {
+            lat: 36.3685,
+            lon: 127.3475,
+            alt: 30.0,
+        };
+        let enu = Enu {
+            e: 12.0,
+            n: -4.0,
+            u: 1.5,
+        };
         let back = gps_to_enu(enu_to_gps(enu, anchor), anchor);
         assert!((back.e - enu.e).abs() < 1e-6);
         assert!((back.n - enu.n).abs() < 1e-6);

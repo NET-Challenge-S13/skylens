@@ -10,9 +10,9 @@
 use std::path::{Path, PathBuf};
 
 use super::base::{
-    boxes_tensor, ensure_exists, file_stem, finish_sample, list_images, read_thermal_raster,
-    resolve_root, stack_rgb_thermal, tensor_f32, verify_split, Availability, DatasetMeta, Result,
-    Sample, SkyLensDataset, Transform,
+    Availability, DatasetMeta, Result, Sample, SkyLensDataset, Transform, boxes_tensor,
+    ensure_exists, file_stem, finish_sample, list_images, read_thermal_raster, resolve_root,
+    stack_rgb_thermal, tensor_f32, verify_split,
 };
 use super::sard::read_yolo_labels;
 
@@ -53,7 +53,12 @@ impl AIResQ {
                 (p, lab.join(format!("{stem}.txt")))
             })
             .collect();
-        Ok(AIResQ { root, split, transforms, index })
+        Ok(AIResQ {
+            root,
+            split,
+            transforms,
+            index,
+        })
     }
 
     fn dirs(root: &Path, split: &str) -> (PathBuf, PathBuf) {

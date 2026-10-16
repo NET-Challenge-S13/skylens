@@ -293,16 +293,47 @@ TypeScript 클라이언트(`src/skylens_core/`)는 이 패키지를 직접 호�
 
 # 라이브 점 표시 (points delta)
 
-Rust 서버(`models/skylens/`)는 라이브 점군을 **`POINTS_DELTA` 청크**로 내보낸다. cumulus3d 0.6.0이 구간 결과마다 표시용 점군을 합성(키 해시 솎아내기, 겹침 voxel 소유, 낮은 구간 우선)하고 직전 표시와 비교해 `DisplayDelta`(점 추가·이동·삭제, 조밀한 슬롯 id)를 주면, 컨슈머가 이를 `PointsDelta` 페이로드로 인코딩해 `ChunkLog`에 싣는다. 구간마다 점 덩어리를 통째로 보내던 옛 방식(`POINTS`)은 `segment` 모드로 남아 있다. 메시(deltamesh)와 탐지 융합은 어느 모드에서나 구간 점군으로 그대로 돈다.
+Rust 서버(`models/skylens/`)는 라이브 점군을 **`POINTS_DELTA` 청크**로 내보낸다. cumulus3d 0.6.0이 구간 결과마다 표시용 점군을 합성(키 해시 솎아내기, 겹침 voxel 소유, 낮은 구간 우선)하고 직전 표시와 비교해 `DisplayDelta`(점 추가·이동·삭제, 조밀한 슬롯 id)를 주면, 컨슈머가 이를 `PointsDelta` 페이로드로 인코딩해 `ChunkLog`에 싣는다. 구간마다 점 덩어리를 통째로 보내던 옛 방식(`POINTS`)은 `segment` 모드로 남아 있다. 탐지 융합은 어느 모드에서나 구간 점군으로 돈다. **메시(deltamesh)는 `segment` 모드에서만 구간 점군으로 만든다.** `delta`·`both`에서는 합성된 표시에서 만든다(아래 "메시 입력").
 
 | env | 기본값 | 뜻 |
 |---|---|---|
 | `SKYLENS_POINTS_MODE` | `delta` | `delta`(`POINTS_DELTA`만) · `segment`(옛 구간별 `POINTS`만) · `both` |
-| `SKYLENS_DISPLAY_STRIDE` | `2` | 구간 점군을 1/N로 솎는다(`LiveOptions::stride`). 0은 1로 본다 |
+| `SKYLENS_DISPLAY_STRIDE` | `6` | 구간 점군을 1/N로 솎는다(`LiveOptions::stride`). V100 라이브 실행의 `--live-stride 6`(cumulus3d 기본값)과 같다. 0은 1로 본다 |
 | `SKYLENS_DELTA_SNAPSHOT_EVERY` | `128` | N개 델타마다 전체 상태 스냅샷 청크(세대 +1). 0이면 만들지 않는다 |
 
-**기본 stride를 2로 정한 이유.** 옛 구간 청크는 밀집 점군 전체를 솎지 않고 실었으므로(`recon::zone_points`) 옛 밀도는 stride 1이다. 겹침 구간(12 중 2)의 중복을 voxel 소유로 지우면 거기서 약 1/6이 빠진다. stride 2는 그 절반이라 점 뷰가 옛 모습과 비슷하게 읽히면서, 합성이 복원 스레드에서 돌고 점당 20 B가 와이어에 실리는 비용을 감당할 만하다. cumulus3d 기본값 6은 표시 전용 뷰어용이라 너무 성기다. 더 촘촘히 보려면 `SKYLENS_DISPLAY_STRIDE=1`.
+**기본 stride 6.** V100 라이브 실행과 같은 표시 밀도다(`--live-stride 6`). 옛 구간 청크 밀도(stride 1)가 필요하면 `SKYLENS_DISPLAY_STRIDE=1`로 올리되, 합성이 복원 스레드에서 돌고 점당 20 B가 와이어에 실리므로 큰 장면에서는 수집이 느려질 수 있다.
+
+**메시 입력.** 구간 점군은 서로 겹치고 구간마다 조금씩 어긋나므로, 이를 그대로 메셔에 넣으면 같은 표면이 두 겹(고스트)으로 메시가 된다. `delta`·`both`에서는 델타를 거울에 적용한 뒤, 점이 바뀐 구간(추가된 점의 구간, 이동한 점의 구간, 삭제된 id의 구간 — 뒤의 둘은 적용 전 거울에서 찾는다)마다 거울의 그 구간 점을 모아 `ingest(구간, Preview, 점)`로 다시 넣고(Preview는 같은 구간에 되풀이해 보낼 수 있다. Refined는 한 번뿐이라 쓰지 않는다) `extract()`가 돌려준 바뀐 블록만 `MeshBlock`(Level::Preview, 세그먼트=델타를 일으킨 구간)으로 낸다. 표시가 겹침을 이미 한 점으로 정리했으므로 메시도 한 겹이다. `segment` 모드는 예전처럼 구간 이벤트(`ZonePreview`/`ZoneRefined`)로 메시를 만든다.
 
 **좌표.** 델타 점은 옛 경로와 똑같이 앵커 기준 ENU 미터(x 동, y 북, z 위)다. 앵커 기록이 첫 GPS 픽스이므로 `DisplayFrame.origin_gps`는 앵커와 같다. 다르면(1 cm 초과) 컨슈머가 ENU 오프셋만큼 평행이동하고, ENU 프레임이 아니면 그 델타를 경고와 함께 건너뛴다(`live::align_delta`).
 
 **세대와 재생.** 모델 쪽 `DisplayMirror`가 모든 델타를 따라가고, 스냅샷 주기마다 거울 전체를 `snapshot=true`(마지막 델타와 같은 `seq`, 세대 +1) 청크로 낸다. `ChunkLog`는 코어 저장소와 같은 규칙으로, 더 높은 세대의 델타 청크가 오면 이전 세대 델타 청크를 모두 버린다. 그래서 `SubscribeChunks(after_sequence)`로 이어받아도 스냅샷부터 일관된 스트림이 오고, 로그 길이는 스냅샷 주기로 묶인다.
+
+# 복원 설정 (V100 라이브 실행과 같은 값)
+
+온라인 데모(`Engine::new`의 라이브 노드, `jobs::run`의 REST 잡 노드)는 V100 노드에서 돌린 `cumulus3d stream` 라이브 실행(`drive_live3.sh`)과 같은 설정으로 만든다. 플랫폼 쪽 코드는 `models/skylens/mod.rs`·`jobs.rs`(`live_plan`, `dense_for`)에 있다. 0.7 벤더 GPU 패치(전체 GPU SIFT, CUDA BA 백엔드, `sparse.backend`/`ba_backend`)는 쓰지 않고, `.gpu()`는 그대로다.
+
+| 설정 | V100 플래그 | 빌더 호출 (cumulus3d 0.6.0) | 값 |
+|---|---|---|---|
+| 안정 표시 | `--stable-display` | `.stable_display(true)` | 켬 |
+| ENU 원점 | (안정 표시 기본) | `.align(AlignFrame::Enu).fixed_enu_origin(true)` | 첫 GPS 픽스에 고정 |
+| 증분 삼각측량 | `--incremental-triangulation` | `.incremental_triangulation(true)` | 켬 |
+| 조밀화 프로파일 | (기본) fast | `Dense::profile("fast")` | fast (이웃 10, 960 px, 융합 최소 뷰 3) |
+| 조밀화 스케일 | `--max-levels 1` | `.max_levels(1)` | 1 |
+| 가시성 필터 | `--visibility-views 8` | `d.fusion.visibility_views = Some(8)` | 8뷰 (tau 0.01, 위반 2 기본) |
+| 융합 평활 | `--fusion-smooth-iters 2` | `.fusion_smooth_iters(2)` | 2회 |
+| | `--fusion-smooth-radius 1.5` | `.fusion_smooth_radius(1.5)` | 1.5 GSD |
+| | `--fusion-smooth-normal 15` | `.fusion_smooth_normal(15.0)` | 15도 |
+| 표시 솎기 | `--live-stride` (기본 6) | `display_deltas(LiveOptions { stride, .. })` | 6 (`SKYLENS_DISPLAY_STRIDE`) |
+| 구역 크기·겹침 | `--span 12 --overlap 2` | `.zones(12, 2)` | 12 / 2 (`EngineConfig::zone_span/overlap` 기본값) |
+| 정착 허용치 | `--settle-tol` (0.01) | `Plan.sparse.settle_tol` (`.plan(live_plan())`) | 0.01 |
+| 정착 최대 구역 | `--settle-max-zone` (3) | `Plan.sparse.settle_max_zone` | 3 |
+| RANSAC 시드 | `--seed 1` | `.seed(1)` | 1 |
+| CUDA | `--gpu` | `.gpu()` | `EngineConfig::gpu` |
+| 내부값 사전값 | `--intrinsics-prior` (σ 0.005 / 왜곡 σ 0.01) | **표현 불가** | 아래 |
+
+**구역 크기와 데모 프레임 간격.** `zones(span, overlap)`의 단위는 시간 길이가 아니라 **위치(프레임 묶음) 수**다. 데모는 약 2 fps × 3카메라이므로 위치 하나가 약 0.5초이고 구역 12/2는 약 6초 분량이다. V100 실행은 `--stride 3`(원본 프레임 번호 3의 배수만 사용)으로 위치를 뽑아 같은 12/2를 썼다. 따라서 숫자(12 위치, 겹침 2 위치)는 같고 위치 사이 물리적 간격(드론 이동거리)은 입력의 프레임레이트·비행 속도에 달려 있다. 기본값 12/2를 유지한다.
+
+**0.6.0에서 표현할 수 없는 것: 내부값 사전값.** 영상의 추정 `camera.json`(fx=fy=1329, 1920x1080, cx 960, cy 540, OPENCV 왜곡 0, 초점 상대 σ 0.005, 왜곡 σ 0.01)을 사전값으로 넣고 싶지만, `Plan.sparse.intrinsics_prior`(파일 경로, `intrinsics_prior_sigma`, `intrinsics_prior_dist_sigma`)는 파일 기반 `Recon` 빌더에서만 읽힌다. `NodeBuilder::build`가 세션 설정(`SessionConfig::intrinsics_prior`)에 넘기지 않으므로, `ReconNode`(라이브 노드·잡 노드)에서는 `.plan()`에 넣어도 무시된다. 그래서 사전값 없이 돌고, 구역 0의 BA가 내부값을 자유롭게 푼 뒤 정착 규칙(`settle_tol`, `settle_max_zone`)으로 고정한다. 노드 빌더가 사전값을 노출하면 `live_plan`에 한 줄로 넣을 수 있다.
+
+**잡(`jobs::run`).** REST 잡 노드도 같은 `live_plan`·`dense_for`를 쓴다(잡 의미는 그대로: 한 구역, 단계는 `steps`로 선택). 안정 표시·증분 삼각측량은 라이브 노드에만 켠다.

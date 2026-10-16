@@ -371,7 +371,12 @@ fn read_run(out: &Path, precision: Precision) -> Result<Run, String> {
         return Err(e.to_string());
     }
     let raw = std::fs::read(out.join(format!("{precision}.prob"))).map_err(|e| e.to_string())?;
-    let hazard_prob: Vec<f32> = raw.as_chunks::<4>().0.iter().map(|c| f32::from_le_bytes(*c)).collect();
+    let hazard_prob: Vec<f32> = raw
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|c| f32::from_le_bytes(*c))
+        .collect();
     let people = v["people"]
         .as_array()
         .map(|a| {
