@@ -40,13 +40,21 @@ tokio.workspace = true
 tokio-tungstenite = "0.29"
 futures-util = { version = "0.3", default-features = false, features = ["std", "sink"] }
 
-# Web: the same Blitz revision without the desktop-only features (system fonts,
-# clipboard, file dialogs), like Blitz's own examples/wasm_hello. Declared directly
-# because the workspace entry turns default features on.
+# Android: the NativeActivity glue (cargo-apk packages a NativeActivity APK). winit needs one of
+# its activity features or android-activity refuses to compile; blitz-shell takes the same
+# android-activity 0.6 for its event loop. libc for system properties (settings, see android.rs).
+[target.'cfg(target_os = "android")'.dependencies]
+android-activity = { version = "0.6", features = ["native-activity"] }
+winit = { version = "=0.31.0-beta.3", features = ["android-native-activity"] }
+libc = "0.2"
+
 [target.'cfg(windows)'.dependencies]
 # System icon sizes for the window and task bar icons.
 windows-sys = { version = "0.61", features = ["Win32_UI_WindowsAndMessaging"] }
 
+# Web: the same Blitz revision without the desktop-only features (system fonts,
+# clipboard, file dialogs), like Blitz's own examples/wasm_hello. Declared directly
+# because the workspace entry turns default features on.
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 blitz-dom = { git = "https://github.com/DioxusLabs/blitz", rev = "45496d9288b063719ebeae4e0761273f7881b3d7", default-features = false, features = ["woff", "custom-widget"] }
 blitz-html = { git = "https://github.com/DioxusLabs/blitz", rev = "45496d9288b063719ebeae4e0761273f7881b3d7", default-features = false }

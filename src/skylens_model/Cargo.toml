@@ -30,6 +30,8 @@ cumulus3d-cli.workspace = true
 deltamesh.workspace = true
 pointblitz-io.workspace = true
 tch.workspace = true
+# Compute capability for the default precision. Already in the graph through cumulus3d-cuda; driver only, loaded at run time.
+cudarc = { version = "0.19", default-features = false, features = ["std", "driver", "dynamic-loading", "cuda-12040"] }
 uuid = { version = "1", features = ["v4"] }
 tokio-stream = "0.1"
 # datasets / cache: image decode + JPEG/PNG encode (no OpenCV)

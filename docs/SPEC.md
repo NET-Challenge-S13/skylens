@@ -108,7 +108,7 @@ related: "[[INTENT.md]], [[COMPONENTS.md]], [[ARCHITECTURE.md]], [[NETWORK_ARCHI
 
 > 구간 청크가 도착해야 그 구간이 보인다. "보인다 = 복원되어 도착했다"가 하나의 진실이다.
 
-- 코드는 `src/skylens_client/`이다. 이전 HTML/CSS를 Blitz로 그대로 그리고, 웹(wasm)과 데스크톱 네이티브가 같은 코드다. Android/iOS는 후순위다.
+- 코드는 `src/skylens_client/`이다. 이전 HTML/CSS를 Blitz로 그대로 그리고, 웹(wasm), 데스크톱 네이티브, Android가 같은 코드다. iOS는 후순위다.
 - 코어의 `ws /viewer`(읽기 전용)로 받는다. 바탕 지도는 받지 않는다.
 - 노출(reveal)은 드론 궤적이 아니라 **도착 기준**이다. 탐지 마커도 해당 구간이 복원돼야 표시된다.
 - 라이브 영상은 대전 MediaMTX에서 WHEP로 직접 받는다.
@@ -200,7 +200,7 @@ related: "[[INTENT.md]], [[COMPONENTS.md]], [[ARCHITECTURE.md]], [[NETWORK_ARCHI
 |---|---:|---|
 | `skylens_core` | 8080 | `ws /uplink` · `ws /control` · `ws /viewer` · `GET /site` · `GET /vworld/*` · `GET /health` · 관제탑 웹 |
 | `skylens_proxy` | 8082 | 코어로 넘김 · `GET /health` · `GET /core/health` |
-| `skylens_gateway` | 80 | `/` 현황판 웹 · `/live/` WHEP · `/healthz` |
+| `skylens_gateway` | 80 | `/` 현황판 웹 · `ws /viewer`·`ws /uplink`(터널 20882 → 프록시) · `/live/{path}/whep` WHEP · `/healthz` · `/health` |
 | `skylens_drone` | 8091 | `/health` · `/missions` · `/formation` · `/cloud/*` |
 | `skylens_model` | 8100 | REST `POST /recon/jobs` · `POST /detect/jobs` · `GET /jobs/{id}` · `GET /health` (`app.py`와 같음) |
 | `skylens_model` | 8101 | gRPC `skylens.model.v1.ModelService` (코어가 쓰는 쪽) |

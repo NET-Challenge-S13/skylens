@@ -1,2 +1,12 @@
 # 작업 로그는 로컬에만 둔다 (커밋 금지)
 worklog/
+
+# 측정 결과는 확장자가 .log 라도 올린다.
+# 루트 .gitignore 의 `*.log` 는 애플리케이션 로그를 겨냥한 규칙인데,
+# lab 의 포화점·상태 측정은 결과물이고 발표에서 인용할 근거다.
+!lab/results/scale-*.log
+!lab/results/saturation-*.log
+!lab/results/state-*.log
+
+# 에러 로그는 결과가 아니므로 제외한다.
+lab/results/*-error.log

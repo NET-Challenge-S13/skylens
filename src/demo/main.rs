@@ -203,7 +203,7 @@ fn core_env(plan: &Plan, o: &Options, s: &Scenario, planned_file: &Path) -> Vec<
     let mut env = vec![
         kv("SKYLENS_CORE_ADDR", format!(":{}", o.core_port)),
         kv("SKYLENS_CORE_WEB_DIR", plan.control_dist.display()),
-        kv("SKYLENS_MODEL_GRPC", format!("127.0.0.1:{}", args::MODEL_GRPC_PORT)),
+        kv("SKYLENS_MODEL_GRPC", o.model_addr.clone().unwrap_or_else(|| format!("127.0.0.1:{}", args::MODEL_GRPC_PORT))),
         kv("SKYLENS_CORE_FRAME_SOURCE", if o.no_model { "off" } else { "ffmpeg" }),
         kv("SKYLENS_CORE_FFMPEG", plan.ffmpeg.display()),
         kv("SKYLENS_CORE_STREAM_PATH", "drone{id}"),
@@ -310,6 +310,11 @@ async fn start_all(
         );
         let rest = format!("127.0.0.1:{}", args::MODEL_REST_PORT);
         wait_ready("모델 서버", Duration::from_secs(300), rx, || http1::ok(&rest, "/health")).await?;
+    } else if let Some(addr) = &o.model_addr {
+        let host = addr.rsplit_once(':').map_or(addr.as_str(), |(h, _)| h);
+        let rest = format!("{host}:{}", args::MODEL_REST_PORT);
+        log("launch", &format!("원격 모델 서버 사용: gRPC {addr}, REST {rest}"));
+        wait_ready("원격 모델 서버", Duration::from_secs(60), rx, || http1::ok(&rest, "/health")).await?;
     } else {
         log("launch", "--no-model: 모델 서버 없이 진행 (프레임 추출 끔)");
     }
@@ -378,7 +383,9 @@ fn banner(plan: &Plan, o: &Options, s: &Scenario) {
     if plan.native.is_some() {
         println!("  네이티브 관제탑 -> ws://127.0.0.1:{}/control, 현황판 -> ws://127.0.0.1:{}/viewer", o.core_port, o.board_port);
     }
-    if plan.model.is_some() {
+    if let Some(addr) = &o.model_addr {
+        println!("  모델     원격 gRPC {addr}  (REST {}번 포트 /health)", args::MODEL_REST_PORT);
+    } else if plan.model.is_some() {
         println!("  모델     http://127.0.0.1:{}/health  (gRPC :{})", args::MODEL_REST_PORT, args::MODEL_GRPC_PORT);
     } else {
         println!("  모델     끔 (--no-model)");

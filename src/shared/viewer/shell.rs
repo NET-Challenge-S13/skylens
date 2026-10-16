@@ -1,5 +1,6 @@
 //! Document shell: a Blitz document built from an HTML template, the legacy CSS (unmodified) and
-//! the bundled fonts; DOM event dispatch to the screen; native window and wasm entry points.
+//! the bundled fonts; DOM event dispatch to the screen; native window (desktop and Android) and
+//! wasm entry points.
 //!
 //! A screen implements [`ScreenApp`] and is wrapped in a [`ScreenDocument`]:
 //!
@@ -580,10 +581,37 @@ pub fn run_native(doc: impl Document, opts: WindowOptions) -> anyhow::Result<()>
             winit::platform::windows::WindowAttributesWindows::default().with_taskbar_icon(big),
         ))
     };
-    #[cfg(not(windows))]
+    // Android has no window icon (the launcher icon comes from the APK).
+    #[cfg(not(any(windows, target_os = "android")))]
     let attributes = attributes.with_window_icon(window_icon_from(opts.icon_png.unwrap_or(WINDOW_ICON_PNG)));
     application.add_window(WindowConfig::with_attributes(Box::new(doc), VelloWindowRenderer::new(), attributes));
     event_loop.run_app(application).map_err(|e| anyhow::anyhow!("event loop: {e}"))
+}
+
+#[cfg(target_os = "android")]
+pub use android_activity::AndroidApp;
+
+/// Android: runs the screen in the NativeActivity's window until the activity is destroyed, then
+/// ends the process. Call it from the screen's `#[unsafe(no_mangle)] fn android_main(app)`.
+///
+/// `document` builds the screen once the activity is known (it may read settings through
+/// [`crate::android::setting`]). The window is the same `blitz-shell` + vello window as
+/// [`run_native`]; blitz-shell drops the GPU surface when Android takes the window away
+/// (app in the background) and makes a new one when it comes back, and the 3D view re-uploads.
+///
+/// winit allows one event loop per process, and Android may keep the process alive after the
+/// activity is gone and call `android_main` again for the next launch. Exiting here makes every
+/// launch start from a fresh process.
+#[cfg(target_os = "android")]
+pub fn run_android<D: Document + 'static>(app: AndroidApp, opts: WindowOptions, document: impl FnOnce(&AndroidApp) -> D) -> ! {
+    crate::android::install_panic_hook();
+    let doc = document(&app);
+    // blitz-shell's event loop and accessibility adapter take the activity from here.
+    blitz_shell::set_android_app(app);
+    if let Err(e) = run_native(doc, opts) {
+        crate::android::log_error(&format!("[skylens] {e:#}"));
+    }
+    std::process::exit(0)
 }
 
 /// The default SkyLens icon for the title bar and task bar.

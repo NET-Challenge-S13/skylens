@@ -55,6 +55,7 @@ Windows에서는 런처가 시작하자마자 자기 자신을 **kill-on-close J
 | `--core-port N` | `8080` | 코어 포트(운영과 같다). 관제탑 웹도 여기서 나온다 |
 | `--board-port N` | `8090` | 현황판 서버 포트(이전 현황판 포트) |
 | `--no-model` | 끔 | 모델 서버를 띄우지 않는다. 코어의 프레임 추출도 끈다 |
+| `--model-addr H:P` | 없음 | 이미 떠 있는 모델 서버(예: GPU 노드로 가는 SSH 터널)의 gRPC 주소. 모델 서버를 띄우지 않고, 같은 호스트의 REST(8100) `/health`만 기다린다 |
 | `--fps X` | `2` | 코어가 드론마다 뽑는 초당 프레임(`SKYLENS_CORE_FRAME_FPS`) |
 | `--frame-width N` | `1920` | 뽑는 프레임 가로 폭, `0`이면 원본(`SKYLENS_CORE_FRAME_WIDTH`) |
 | `--mediamtx PATH` | `~/tools/mediamtx/mediamtx`, 다음은 `PATH` | MediaMTX 실행 파일 |
