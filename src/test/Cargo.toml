@@ -9,3 +9,9 @@ publish.workspace = true
 
 [lib]
 path = "lib.rs"
+
+[dev-dependencies]
+skylens-shared.workspace = true
+skylens-viewer.workspace = true
+cumulus3d-cli.workspace = true
+cumulus3d-core = "0.6"

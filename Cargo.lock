@@ -5369,6 +5369,12 @@ dependencies = [
 [[package]]
 name = "skylens-tests"
 version = "0.1.0"
+dependencies = [
+ "cumulus3d-cli",
+ "cumulus3d-core",
+ "skylens-shared",
+ "skylens-viewer",
+]
 
 [[package]]
 name = "skylens-viewer"
