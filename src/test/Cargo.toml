@@ -20,4 +20,4 @@ skylens-shared.workspace = true
 skylens-viewer.workspace = true
 pointblitz-io.workspace = true
 cumulus3d-cli.workspace = true
-cumulus3d-core = "0.9"
+cumulus3d-core = "0.10"

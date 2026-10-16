@@ -244,7 +244,7 @@ pointblitz는 서버에서 헤드리스로 그려 영상으로 보내는 모드�
 - UNet 추론은 `tch` 0.24(libtorch 2.11)이다. libtorch는 빌드할 때 `download-libtorch`로 받아 오며 Python venv와 무관하다. CUDA 판은 `.cargo/config.toml`의 `TORCH_CUDA_VERSION`(cu126)이 정한다.
 - UNet 추론 정밀도는 CUDA compute capability로 정한다(8.0 이상 bf16, 7.x 즉 V100은 fp16 autocast, 그 미만 fp32, CPU fp32). `SKYLENS_PRECISION`으로 강제하고, 비교는 `cargo run --release -p skylens-model --example precision_bench`. 자세한 내용은 `src/skylens_model/models/skylensnet/README.md` §5.
 - 공용 의존성 버전은 루트 `Cargo.toml`의 `[workspace.dependencies]` 한 곳에서 정한다.
-- cumulus3d는 crates.io 릴리스(0.9)를 그대로 쓴다. SkyLens의 GPU 패치(전체 GPU SIFT, CUDA BA·희소 단계)는 릴리스에 들어 있고 `.gpu()`가 고른다. 저장소에 벤더 복사본은 없다.
+- cumulus3d는 crates.io 릴리스(0.10)를 그대로 쓴다. SkyLens의 GPU 패치(전체 GPU SIFT, CUDA BA·희소 단계)는 릴리스에 들어 있고 `.gpu()`가 고른다. 저장소에 벤더 복사본은 없다.
 - gRPC 코드 생성: Rust는 빌드 스크립트에서 protox로 컴파일하므로 protoc가 없어도 된다. Go는 `protoc-gen-go`·`protoc-gen-go-grpc`로 `src/skylens_core/gen/`에 생성한다.
 
 ---
