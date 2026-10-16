@@ -414,11 +414,33 @@ impl PoseScorer for GpuPoseScorer<'_> {
     }
 }
 
+/// `CUMULUS3D_CUDA_COMPARE=1` 이면 백엔드 호출마다 GPU 시간과 같은 입력의 CPU 시간을 함께 찍는다(계측용, 일을 두 번 한다).
+pub(crate) fn compare_enabled() -> bool {
+    std::env::var("CUMULUS3D_CUDA_COMPARE").is_ok_and(|v| v != "0")
+}
+
+/// 계측 한 줄: `[cuda-compare] <단계> n=<크기> gpu=<ms> cpu=<ms>`.
+pub(crate) fn compare_line(stage: &str, n: usize, gpu: std::time::Duration, cpu: Option<std::time::Duration>) {
+    match cpu {
+        Some(c) => eprintln!("[cuda-compare] {stage} n={n} gpu={:.1}ms cpu={:.1}ms", gpu.as_secs_f64() * 1e3, c.as_secs_f64() * 1e3),
+        None => eprintln!("[cuda-compare] {stage} n={n} gpu={:.1}ms", gpu.as_secs_f64() * 1e3),
+    }
+}
+
 impl TwoViewBackend for CudaSparse {
     fn verify_pairs(&self, store: &FeatureStore, jobs: &[VerifyJob<'_>], opts: &TwoViewOptions) -> Vec<TwoViewGeometry> {
+        let t0 = std::time::Instant::now();
         let mut sc = GpuTwoViewScorer { sp: self, data: None, slots: Vec::new() };
         match verify_pairs_batched(store, jobs, opts, &mut sc) {
-            Ok(v) => v,
+            Ok(v) => {
+                if compare_enabled() {
+                    let g = t0.elapsed();
+                    let t1 = std::time::Instant::now();
+                    let _ = CpuTwoView.verify_pairs(store, jobs, opts);
+                    compare_line("two-view", jobs.len(), g, Some(t1.elapsed()));
+                }
+                v
+            }
             Err(e) => {
                 eprintln!("경고: CUDA 기하 검증 실패({e}), CPU 로 계산");
                 CpuTwoView.verify_pairs(store, jobs, opts)
@@ -432,11 +454,20 @@ impl AbsPoseBackend for CudaSparse {
         if points2d.len() != points3d.len() || points2d.len() < 3 {
             return solve_abs_pose(camera, points2d, points3d, opts);
         }
+        let t0 = std::time::Instant::now();
         let r = GpuPoseScorer::new(self, camera, points2d, points3d)
             .map_err(|e| e.to_string())
             .and_then(|mut sc| solve_abs_pose_scored(camera, points2d, points3d, opts, &mut sc));
         match r {
-            Ok(v) => v,
+            Ok(v) => {
+                if compare_enabled() {
+                    let g = t0.elapsed();
+                    let t1 = std::time::Instant::now();
+                    let _ = solve_abs_pose(camera, points2d, points3d, opts);
+                    compare_line("abs-pose", points2d.len(), g, Some(t1.elapsed()));
+                }
+                v
+            }
             Err(e) => {
                 eprintln!("경고: CUDA 절대 자세 실패({e}), CPU 로 계산");
                 solve_abs_pose(camera, points2d, points3d, opts)
@@ -448,10 +479,24 @@ impl AbsPoseBackend for CudaSparse {
 impl TriangulationBackend for CudaSparse {
     fn estimate_batch(&self, problems: &[TriProblem<'_>]) -> Vec<Option<(Vec3, Vec<bool>)>> {
         if problems.len() < TRI_MIN_GPU {
-            return CpuTriangulation.estimate_batch(problems);
+            let t0 = std::time::Instant::now();
+            let r = CpuTriangulation.estimate_batch(problems);
+            if compare_enabled() {
+                eprintln!("[cuda-compare] tri-ransac(cpu, small) n={} cpu={:.1}ms", problems.len(), t0.elapsed().as_secs_f64() * 1e3);
+            }
+            return r;
         }
+        let t0 = std::time::Instant::now();
         match self.estimate_batch_gpu(problems) {
-            Ok(r) => r,
+            Ok(r) => {
+                if compare_enabled() {
+                    let g = t0.elapsed();
+                    let t1 = std::time::Instant::now();
+                    let _ = CpuTriangulation.estimate_batch(problems);
+                    compare_line("tri-ransac", problems.len(), g, Some(t1.elapsed()));
+                }
+                r
+            }
             Err(e) => {
                 eprintln!("경고: CUDA 삼각측량 실패({e}), CPU 로 계산");
                 CpuTriangulation.estimate_batch(problems)
@@ -461,10 +506,24 @@ impl TriangulationBackend for CudaSparse {
 
     fn check_observations(&self, cameras: &[Camera], poses: &[Rigid3], queries: &[ObsQuery]) -> Vec<ObsCheck> {
         if queries.len() < OBS_MIN_GPU {
-            return CpuTriangulation.check_observations(cameras, poses, queries);
+            let t0 = std::time::Instant::now();
+            let r = CpuTriangulation.check_observations(cameras, poses, queries);
+            if compare_enabled() {
+                eprintln!("[cuda-compare] check-obs(cpu, small) n={} cpu={:.1}ms", queries.len(), t0.elapsed().as_secs_f64() * 1e3);
+            }
+            return r;
         }
+        let t0 = std::time::Instant::now();
         match self.check_observations_gpu(cameras, poses, queries) {
-            Ok(r) => r,
+            Ok(r) => {
+                if compare_enabled() {
+                    let g = t0.elapsed();
+                    let t1 = std::time::Instant::now();
+                    let _ = CpuTriangulation.check_observations(cameras, poses, queries);
+                    compare_line("check-obs", queries.len(), g, Some(t1.elapsed()));
+                }
+                r
+            }
             Err(e) => {
                 eprintln!("경고: CUDA 관측 검사 실패({e}), CPU 로 계산");
                 CpuTriangulation.check_observations(cameras, poses, queries)

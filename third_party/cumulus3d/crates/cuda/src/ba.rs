@@ -161,8 +161,17 @@ impl BaBackend for CudaBundleAdjuster {
     }
 
     fn solve(&self, input: &ProblemInput, opts: &TrOptions) -> cumulus3d_core::Result<BaSolution> {
+        let t0 = std::time::Instant::now();
         match self.solve_gpu(input, opts) {
-            Ok(s) => Ok(s),
+            Ok(s) => {
+                if crate::sparse::compare_enabled() {
+                    let g = t0.elapsed();
+                    let t1 = std::time::Instant::now();
+                    let _ = CpuBaBackend.solve(input, opts);
+                    crate::sparse::compare_line("bundle-adjust", input_size(input), g, Some(t1.elapsed()));
+                }
+                Ok(s)
+            }
             Err(e) => {
                 eprintln!("경고: CUDA 번들 조정 실패({e}), CPU 로 계산");
                 CpuBaBackend.solve(input, opts)
@@ -1201,4 +1210,9 @@ impl TrProblem for GpuProblem<'_> {
         std::mem::swap(&mut d.cams, &mut d.cams_c);
         std::mem::swap(&mut d.pts, &mut d.pts_c);
     }
+}
+
+/// 계측용 크기: 관측 수.
+fn input_size(input: &ProblemInput) -> usize {
+    input.obs_img.len()
 }
