@@ -191,6 +191,7 @@ fn spec(plan: &Plan, name: &str, tag: &str, program: &Path, argv: Vec<String>, e
         env,
         cwd: plan.repo.clone(),
         critical: true,
+        delay: Duration::ZERO,
     }
 }
 
@@ -303,8 +304,9 @@ async fn start_all(
         let mut publisher = spec(plan, &name, &tag, &plan.ffmpeg, argv, vec![]);
         // A clip that plays once ends on its own; that is not a failure.
         publisher.critical = !o.no_loop;
+        publisher.delay = Duration::from_secs_f64(o.publish_delay);
         children.push(procs::spawn(publisher, events.clone()).map_err(fail)?);
-        starts[i] = Instant::now();
+        starts[i] = Instant::now() + Duration::from_secs_f64(o.publish_delay);
     }
     settle(Duration::from_millis(1500), rx).await?;
     log("launch", &format!("영상 송출 3개 시작 (drone1=left, drone2=center, drone3=right, {})", if o.no_loop { "한 번만 재생" } else { "반복 재생" }));
