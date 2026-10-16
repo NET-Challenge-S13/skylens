@@ -38,6 +38,10 @@ PUBLISH_PASS=""
 SRT_PORT=10890
 HTTPS_PORT=443
 TLS_NAMES=
+REDIRECT_TO_HTTPS=yes
+TOWER_PORT=8090
+TOWER_TLS_PORT=8091
+TOWER_ALLOW="127.0.0.1 10.9.8.0/24 10.9.9.0/24"
 WEB_DIR=/opt/skylens/web
 DAEJEON_HOST=116.89.187.181
 DAEJEON_PORT=26022
@@ -68,6 +72,7 @@ LOGS="$BASE/logs"
 TLS_DIR="$BASE/tls"
 TLS_CERT="$TLS_DIR/board.crt"
 TLS_KEY="$TLS_DIR/board.key"
+TOWER_ACL="$BASE/tower-acl.conf"
 
 step() { printf '\n\033[1;36m== %s ==\033[0m\n' "$*"; }
 ok()   { printf '   \033[32m✓\033[0m %s\n' "$*"; }
@@ -165,7 +170,9 @@ else
       SAN="$SAN,IP:$ip"
     done
   fi
-  openssl req -x509 -newkey rsa:2048 -sha256 -days 1825 -nodes     -keyout "$TLS_KEY" -out "$TLS_CERT"     -subj "/CN=skylens-board" -addext "subjectAltName=$SAN" >/dev/null 2>&1
+  openssl req -x509 -newkey rsa:2048 -sha256 -days 1825 -nodes \
+    -keyout "$TLS_KEY" -out "$TLS_CERT" \
+    -subj "/CN=skylens-board" -addext "subjectAltName=$SAN" >/dev/null 2>&1
   chmod 0640 "$TLS_KEY"; chmod 0644 "$TLS_CERT"; chown -R "$RUN_USER" "$TLS_DIR"
   ok "self-signed certificate written ($SAN)"
 fi
@@ -176,7 +183,24 @@ NGINX_ETC="$PREFIX/etc/nginx"
 mkdir -p "$NGINX_ETC/servers"
 # A redirect to the default TLS port must not carry :443 in the URL.
 if [ "$HTTPS_PORT" = 443 ]; then HTTPS_SUFFIX=""; else HTTPS_SUFFIX=":$HTTPS_PORT"; fi
-sed -e "s/__HTTP_PORT__/$HTTP_PORT/g" -e "s|__WEB_DIR__|$WEB_DIR|g"   -e "s/__HTTPS_PORT__/$HTTPS_PORT/g" -e "s|__HTTPS_HOSTSUFFIX__|$HTTPS_SUFFIX|g"   -e "s|__TLS_CERT__|$TLS_CERT|g" -e "s|__TLS_KEY__|$TLS_KEY|g"   nginx-skylens.conf > "$NGINX_ETC/servers/skylens.conf"
+if [ "$REDIRECT_TO_HTTPS" = no ]; then
+  HTTPS_REDIRECT="# redirect off (REDIRECT_TO_HTTPS=no)"
+  TOWER_REDIRECT="# redirect off (REDIRECT_TO_HTTPS=no)"
+else
+  HTTPS_REDIRECT="if (\$scheme = http) { return 301 https://\$host$HTTPS_SUFFIX\$request_uri; }"
+  TOWER_REDIRECT="if (\$skylens_tower_redirect) { return 301 https://\$host:$TOWER_TLS_PORT\$request_uri; }"
+fi
+# The tower is reachable from the operator LAN and the VPN only. nginx reads
+# these lines in order, so the deny has to come last.
+{ for net in $TOWER_ALLOW; do echo "allow $net;"; done; echo "deny all;"; } > "$TOWER_ACL"
+chmod 0644 "$TOWER_ACL"
+sed -e "s/__HTTP_PORT__/$HTTP_PORT/g" -e "s|__WEB_DIR__|$WEB_DIR|g" \
+  -e "s/__HTTPS_PORT__/$HTTPS_PORT/g" -e "s|__HTTPS_HOSTSUFFIX__|$HTTPS_SUFFIX|g" \
+  -e "s|__TLS_CERT__|$TLS_CERT|g" -e "s|__TLS_KEY__|$TLS_KEY|g" \
+  -e "s|__HTTPS_REDIRECT__|$HTTPS_REDIRECT|g" \
+  -e "s/__TOWER_PORT__/$TOWER_PORT/g" -e "s/__TOWER_TLS_PORT__/$TOWER_TLS_PORT/g" \
+  -e "s|__TOWER_ACL__|$TOWER_ACL|g" -e "s|__TOWER_REDIRECT__|$TOWER_REDIRECT|g" \
+  nginx-skylens.conf > "$NGINX_ETC/servers/skylens.conf"
 grep -qE '^\s*include\s+servers/\*;' "$NGINX_ETC/nginx.conf" \
   || warn "nginx.conf 에 'include servers/*;' 가 없습니다 — http { } 블록 안에 추가해야 합니다"
 "$PREFIX/bin/nginx" -t -c "$NGINX_ETC/nginx.conf"
@@ -283,6 +307,8 @@ cat <<SUMMARY
  이 서버 생존      : http://$PUB_IP:$HTTP_PORT/health      (nginx 만 확인)
  터널 생존         : http://$PUB_IP:$HTTP_PORT/healthz     (대전까지 확인)
  라이브 영상       : http://$PUB_IP:$HTTP_PORT/live/drone1/whep  (drone1~3)
+ 관제탑            : https://$(ipconfig getifaddr en0 2>/dev/null || hostname):$TOWER_TLS_PORT/  (랜·VPN 전용)
+                     허용 범위: $TOWER_ALLOW
  SRT 수신          : srt://$PUB_IP:$SRT_PORT?streamid=publish:drone1:drone:<PASS>
  SRT publish 비번  : $PUBLISH_PASS$([ "$GENERATED_PASS" = 1 ] && printf '   (자동 생성 — bridge.env 에 적어두세요)')
 
