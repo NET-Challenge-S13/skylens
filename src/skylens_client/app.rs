@@ -31,6 +31,14 @@ pub const STATUS_PANELS_CSS: &str = include_str!("ui/status-panels.css");
 pub const LOADING_TITLE: &str = "현황판 · 3D 복원 데이터 로딩";
 pub const WINDOW_TITLE: &str = "SkyLens · 현황판 - 실시간 3D 복원";
 pub const DEFAULT_CORE: &str = "ws://127.0.0.1:8080/viewer";
+/// The loading overlay's title while the core is not reachable and the link keeps retrying.
+pub const WAITING_TITLE: &str = "코어 연결 대기 중";
+
+/// The loading overlay's detail line while waiting for the core: the address and the attempt
+/// the link is on (`attempts` as in [`skylens_viewer::LinkStatus::attempts`]).
+pub fn waiting_text(core_url: &str, attempts: u32) -> String {
+    if attempts == 0 { core_url.to_string() } else { format!("{core_url} · 시도 {attempts}회") }
+}
 
 /// The page: legacy template plus the shared CSS and `status-panels.css`.
 pub fn page() -> Page {
@@ -113,6 +121,8 @@ pub struct StatusApp {
     card: Option<Card>,
     ladder: BTreeMap<u32, LadderRow>,
     minimap_size: Option<(i64, i64, u32, u32)>,
+    /// The point panel's inline placement last written (outer None: not written yet).
+    inset_place: Option<Option<[f64; 4]>>,
     site_seen: bool,
     last_poll_ms: Option<f64>,
     gpu_alert: GpuLossAlert,
@@ -133,6 +143,7 @@ impl StatusApp {
             card: None,
             ladder: BTreeMap::new(),
             minimap_size: None,
+            inset_place: None,
             gpu_alert: GpuLossAlert::default(),
             site_seen: false,
             last_poll_ms: None,
@@ -148,21 +159,17 @@ impl StatusApp {
 
     fn on_event(&mut self, ev: LinkEvent, dom: &mut Dom<'_>, now: f64) {
         match ev {
-            LinkEvent::Connecting | LinkEvent::Invalid(_) => {}
+            LinkEvent::Invalid(_) => {}
+            LinkEvent::Connecting => self.show_waiting(dom, false),
             LinkEvent::Connected => {
                 self.board.borrow_mut().reconnected();
                 if let Some(l) = &mut self.loading {
                     l.progress(dom, 60.0, None);
                 }
             }
-            LinkEvent::Disconnected(_) => {
-                if !self.site_seen
-                    && let Some(l) = &mut self.loading
-                    && !l.is_finishing()
-                {
-                    l.fail(dom, self.link.status.detail(), now);
-                }
-            }
+            // Not a failure: the link keeps retrying (the core may simply not be up yet), and the
+            // overlay turns back into the loading bar on the next connect.
+            LinkEvent::Disconnected(_) => self.show_waiting(dom, true),
             LinkEvent::Message(env) => {
                 let Some(body) = env.body else { return };
                 let mut b = self.board.borrow_mut();
@@ -196,6 +203,19 @@ impl StatusApp {
                     _ => {}
                 }
             }
+        }
+    }
+
+    /// Puts the loading overlay into its waiting state (`start`), or refreshes it when it is
+    /// already waiting. Once the site has arrived the overlay is gone and the banner and the
+    /// server panel report the link instead.
+    fn show_waiting(&mut self, dom: &mut Dom<'_>, start: bool) {
+        if self.site_seen {
+            return;
+        }
+        let Some(l) = &mut self.loading else { return };
+        if start || l.is_waiting() {
+            l.wait(dom, WAITING_TITLE, &waiting_text(self.link.url(), self.link.status.attempts));
         }
     }
 
@@ -326,6 +346,37 @@ impl StatusApp {
             let (high, low) = panels::legend_ticks(range);
             dom.set_text(q(".point-inset__tick--high"), &high);
             dom.set_text(q(".point-inset__tick--low"), &low);
+            self.place_inset(dom);
+        }
+    }
+
+    /// On a short viewport (a phone on its side) the point panel moves beside the server panel
+    /// instead of under it; see [`panels::inset_placement`]. Inline styles, like the minimap's
+    /// move in `mount`, so `status-panels.css` stays the legacy file.
+    fn place_inset(&mut self, dom: &mut Dom<'_>) {
+        let place = {
+            let vp = dom.doc_ref().viewport();
+            let scale = vp.scale_f64();
+            let scale = if scale > 0.0 { scale } else { 1.0 };
+            panels::inset_placement(f64::from(vp.window_size.0) / scale, f64::from(vp.window_size.1) / scale)
+        };
+        if self.inset_place == Some(place) {
+            return;
+        }
+        self.inset_place = Some(place);
+        match place {
+            Some([left, top, width, height]) => {
+                dom.set_style("point-inset", "left", &format!("{left}px"));
+                dom.set_style("point-inset", "top", &format!("{top}px"));
+                dom.set_style("point-inset", "bottom", "auto");
+                dom.set_style("point-inset", "width", &format!("{width}px"));
+                dom.set_style("point-inset", "height", &format!("{height}px"));
+            }
+            None => {
+                for prop in ["left", "top", "bottom", "width", "height"] {
+                    dom.remove_style("point-inset", prop);
+                }
+            }
         }
     }
 
@@ -469,6 +520,12 @@ mod tests {
         assert!(parse_args(["--points".to_string(), "maybe".to_string()]).is_err());
         assert!(parse_args(["--screen".to_string()]).is_err());
         assert!(parse_args(["--core".to_string()]).is_err());
+    }
+
+    #[test]
+    fn waiting_text_names_the_core_and_the_attempt() {
+        assert_eq!(waiting_text(DEFAULT_CORE, 0), "ws://127.0.0.1:8080/viewer");
+        assert_eq!(waiting_text("ws://10.0.0.2:8080/viewer", 3), "ws://10.0.0.2:8080/viewer · 시도 3회");
     }
 
     #[test]

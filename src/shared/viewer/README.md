@@ -12,7 +12,7 @@
 | `android` | Android 전용 도우미. 명령줄 대신 설정을 시스템 속성 `debug.skylens.<키>`, 외부·내부 파일 폴더의 `<키>.txt` 순서로 읽고(`setting`), 로그를 logcat 태그 `skylens`로 보낸다. 파일 형식 해석은 모든 플랫폼에서 테스트한다 |
 | `dom` | `Dom`: id·class·선택자로 요소를 찾고 텍스트·class·속성·인라인 스타일·자식 마크업을 바꾼다. 바뀌지 않는 쓰기는 건너뛴다 |
 | `widgets` | 로딩 화면, 토스트, 패널 라벨(`sl-surface`), 연결 배지, 탐지 카드. 이전 TS가 만들던 DOM 그대로 |
-| `link` | 코어와의 WebSocket 하나(`/control` 또는 `/viewer`). 바이너리 `viewer.v1.Envelope`, 재접속(0.8초에서 두 배씩 최대 8초), 이전 문구의 연결 상태 |
+| `link` | 코어와의 WebSocket 하나(`/control` 또는 `/viewer`). 바이너리 `viewer.v1.Envelope`, 재접속(0.5초에서 두 배씩 최대 5초, 네이티브는 연결 5초·무수신 45초 제한), 이전 문구의 연결 상태 |
 | `protocol` | Envelope 인코딩, `assign_route` · `manual_control`, payload 디코딩(메시 블록·탐지·지형 타일·건물 묶음) |
 | `site` | 코어가 보내는 `Site`. `Site.anchor`가 ENU 원점이고 화면은 원점을 스스로 정하지 않는다 |
 | `chunks` | 청크 저장소. 교체 규칙과 종류별 조회, 구간 도착 추적, 탐지 노출 |

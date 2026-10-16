@@ -1,8 +1,11 @@
 //! The one WebSocket to the core (`ws /control` for the tower, `ws /viewer` for boards).
 //!
 //! Every frame is one binary `skylens.viewer.v1.Envelope`. The proxy does not migrate sockets, so
-//! when the link drops it reconnects with the legacy backoff (0.8 s doubling to 8 s) and the core
-//! replays what it holds; screens clear their stores on [`LinkEvent::Connected`].
+//! when the link drops, or the core is not up yet, it keeps retrying with a backoff (0.5 s doubling
+//! to 5 s) and the core replays what it holds; screens clear their stores on
+//! [`LinkEvent::Connected`]. Native also gives up on a handshake after
+//! [`crate::config::link::CONNECT_TIMEOUT_MS`] and on a silent connection after
+//! [`crate::config::link::IDLE_TIMEOUT_MS`], so a half-open socket cannot stall the screen.
 //!
 //! Native runs tokio-tungstenite on a background thread; web uses the browser WebSocket. Both
 //! queue events for [`CoreLink::drain`] and wake the Blitz window with the waker given to
@@ -118,6 +121,8 @@ pub struct LinkStatus {
     pub receiving: bool,
     /// Why the last attempt failed.
     pub reason: Option<String>,
+    /// Connection attempts started since the last successful connect (the current one included).
+    pub attempts: u32,
     /// Frames received on this connection.
     pub frames: u64,
     /// Unix ms of the last frame; 0 before the first one.
@@ -135,6 +140,7 @@ impl Default for LinkStatus {
             ever_connected: false,
             receiving: false,
             reason: None,
+            attempts: 0,
             frames: 0,
             last_frame_ms: 0.0,
             invalid: 0,
@@ -148,11 +154,15 @@ impl LinkStatus {
     pub fn observe(&mut self, ev: &LinkEvent, now_ms: f64) -> bool {
         let before = (self.state, self.receiving, self.ever_connected);
         match ev {
-            LinkEvent::Connecting => self.state = LinkState::Connecting,
+            LinkEvent::Connecting => {
+                self.state = LinkState::Connecting;
+                self.attempts = self.attempts.saturating_add(1);
+            }
             LinkEvent::Connected => {
                 self.state = LinkState::Connected;
                 self.ever_connected = true;
                 self.reason = None;
+                self.attempts = 0;
                 self.frames = 0;
                 self.receiving = false;
             }
@@ -271,6 +281,7 @@ use web::Transport;
 #[cfg(not(target_arch = "wasm32"))]
 mod native {
     use super::{RawEvent, TICK_MS, Waker};
+    use crate::config::link::{CONNECT_TIMEOUT_MS, IDLE_TIMEOUT_MS};
     use crate::protocol::Backoff;
     use futures_util::{SinkExt as _, StreamExt as _};
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -376,8 +387,12 @@ mod native {
             if !emit(RawEvent::Connecting) {
                 return;
             }
-            match tokio_tungstenite::connect_async(url.as_str()).await {
-                Ok((ws, _)) => {
+            let attempt = tokio::time::timeout(
+                Duration::from_millis(CONNECT_TIMEOUT_MS),
+                tokio_tungstenite::connect_async(url.as_str()),
+            );
+            match attempt.await {
+                Ok(Ok((ws, _))) => {
                     backoff.reset();
                     // Drop anything queued while disconnected.
                     while outgoing.try_recv().is_ok() {}
@@ -386,10 +401,16 @@ mod native {
                         return;
                     }
                     let (mut sink, mut stream) = ws.split();
+                    let idle_for = Duration::from_millis(IDLE_TIMEOUT_MS);
+                    let idle = tokio::time::sleep(idle_for);
+                    tokio::pin!(idle);
                     let reason = loop {
                         tokio::select! {
+                            // Any frame, pings included, proves the connection is alive.
+                            () = &mut idle => break "코어 응답 없음 (수신 끊김)".to_string(),
                             msg = stream.next() => match msg {
                                 Some(Ok(WsMessage::Binary(b))) => {
+                                    idle.as_mut().reset(tokio::time::Instant::now() + idle_for);
                                     if !emit(RawEvent::Frame(b.to_vec())) {
                                         return;
                                     }
@@ -400,7 +421,7 @@ mod native {
                                         |f| format!("코어가 연결을 닫았습니다 ({})", u16::from(f.code)),
                                     );
                                 }
-                                Some(Ok(_)) => {}
+                                Some(Ok(_)) => idle.as_mut().reset(tokio::time::Instant::now() + idle_for),
                                 Some(Err(e)) => break e.to_string(),
                                 None => break "연결이 끊어졌습니다".to_string(),
                             },
@@ -420,8 +441,13 @@ mod native {
                         return;
                     }
                 }
-                Err(e) => {
+                Ok(Err(e)) => {
                     if !emit(RawEvent::Disconnected(e.to_string())) {
+                        return;
+                    }
+                }
+                Err(_) => {
+                    if !emit(RawEvent::Disconnected("코어 응답 없음 (연결 시간 초과)".to_string())) {
                         return;
                     }
                 }
@@ -658,6 +684,26 @@ mod tests {
         s.observe(&LinkEvent::Connecting, 4.0);
         assert_eq!(s.detail(), "코어 재연결 시도 중");
         assert_eq!(s.reason.as_deref(), Some("closed"));
+    }
+
+    #[test]
+    fn attempts_count_until_a_connect_succeeds() {
+        let mut s = LinkStatus::default();
+        assert_eq!(s.attempts, 0);
+        for n in 1..=3 {
+            s.observe(&LinkEvent::Connecting, 0.0);
+            assert_eq!(s.attempts, n);
+            s.observe(&LinkEvent::Disconnected("refused".into()), 0.0);
+            assert_eq!(s.attempts, n, "a failure does not start an attempt");
+        }
+        s.observe(&LinkEvent::Connecting, 0.0);
+        s.observe(&LinkEvent::Connected, 0.0);
+        assert_eq!(s.attempts, 0);
+        assert!(s.connected());
+        // A later drop counts from one again.
+        s.observe(&LinkEvent::Disconnected("closed".into()), 0.0);
+        s.observe(&LinkEvent::Connecting, 0.0);
+        assert_eq!(s.attempts, 1);
     }
 
     #[test]
