@@ -28,6 +28,9 @@ pub struct Options {
     pub remote_core: Option<String>,
     /// SRT ingest (host:port) the footage is published to; default the local MediaMTX.
     pub srt_addr: Option<String>,
+    /// Publish the footage as MPEG-TS over plain TCP instead (host:port, drone N goes to
+    /// port+N-1), for links that block SRT's UDP; something on the far side feeds MediaMTX.
+    pub feed_tcp: Option<String>,
     /// Frames per second the core extracts per drone.
     pub fps: f64,
     /// Width of extracted frames in px (0 keeps the source size).
@@ -73,6 +76,7 @@ impl Default for Options {
             model_addr: None,
             remote_core: None,
             srt_addr: None,
+            feed_tcp: None,
             fps: 2.0,
             frame_width: 1920,
             mediamtx: None,
@@ -104,6 +108,8 @@ pub const USAGE: &str = "usage: cargo run -p skylens-demo -- [options]
                        Daejeon): start only the footage feeds and the drones
   --srt-addr H:P       publish the footage over SRT to this host:port (default: the
                        local MediaMTX, 127.0.0.1:10890)
+  --feed-tcp H:P       publish the footage as MPEG-TS over TCP to host:port (drone N to
+                       port+N-1) instead of SRT, for links that block UDP
   --fps X              frames per second extracted per drone (default 2)
   --frame-width N      extracted frame width in px, 0 = source size (default 1920)
   --mediamtx PATH      MediaMTX executable (default ~/tools/mediamtx/mediamtx, then PATH)
@@ -158,6 +164,7 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<Options, St
             "--board-port" => o.board_port = port("--board-port", &value("--board-port")?)?,
             "--model-addr" => o.model_addr = Some(host_port("--model-addr", value("--model-addr")?)?),
             "--remote-core" => o.remote_core = Some(host_port("--remote-core", value("--remote-core")?)?),
+            "--feed-tcp" => o.feed_tcp = Some(host_port("--feed-tcp", value("--feed-tcp")?)?),
             "--srt-addr" => o.srt_addr = Some(host_port("--srt-addr", value("--srt-addr")?)?),
             "--fps" => {
                 let v = value("--fps")?;
@@ -322,6 +329,7 @@ mod tests {
         let o = parse(&["--remote-core", "127.0.0.1:18080", "--srt-addr=host:10890"]).unwrap();
         assert_eq!((o.remote_core.as_deref(), o.srt_addr.as_deref()), (Some("127.0.0.1:18080"), Some("host:10890")));
         assert!(parse(&["--remote-core", "x"]).is_err());
+        assert_eq!(parse(&["--feed-tcp", "127.0.0.1:19101"]).unwrap().feed_tcp.as_deref(), Some("127.0.0.1:19101"));
     }
 
     #[test]

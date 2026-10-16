@@ -58,6 +58,7 @@ Windows에서는 런처가 시작하자마자 자기 자신을 **kill-on-close J
 | `--model-addr H:P` | 없음 | 이미 떠 있는 모델 서버(예: GPU 노드로 가는 SSH 터널)의 gRPC 주소. 모델 서버를 띄우지 않고, 같은 호스트의 REST(8100) `/health`만 기다린다 |
 | `--remote-core H:P` | 없음 | 이미 떠 있는 코어(예: 대전으로 가는 SSH 터널)를 쓴다. MediaMTX·코어·모델·현황판 서버를 띄우지 않고, 영상 송출과 드론 시뮬레이터만 돈다 |
 | `--srt-addr H:P` | `127.0.0.1:10890` | 영상을 SRT로 보낼 곳(브리지나 대전 MediaMTX) |
+| `--feed-tcp H:P` | 없음 | SRT 대신 MPEG-TS를 TCP로 보낸다(드론 N은 포트+N-1). UDP가 막힌 회선용이고, 받는 쪽에서 MediaMTX로 이어 준다 |
 | `--fps X` | `2` | 코어가 드론마다 뽑는 초당 프레임(`SKYLENS_CORE_FRAME_FPS`) |
 | `--frame-width N` | `1920` | 뽑는 프레임 가로 폭, `0`이면 원본(`SKYLENS_CORE_FRAME_WIDTH`) |
 | `--mediamtx PATH` | `~/tools/mediamtx/mediamtx`, 다음은 `PATH` | MediaMTX 실행 파일 |

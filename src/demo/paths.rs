@@ -95,9 +95,17 @@ pub fn srt_publish_url(srt_addr: &str, drone: &Drone) -> String {
     format!("srt://{srt_addr}?streamid=publish:{}&pkt_size=1316", stream_path(drone))
 }
 
+/// TCP publish URL for one drone's footage (`--feed-tcp`): the base port plus the drone index.
+pub fn tcp_publish_url(base: &str, drone: &Drone) -> String {
+    match base.rsplit_once(':') {
+        Some((host, port)) => format!("tcp://{host}:{}", port.parse::<u16>().unwrap_or(0) + (drone.id as u16 - 1)),
+        None => format!("tcp://{base}"),
+    }
+}
+
 /// ffmpeg arguments that publish a file to MediaMTX in a loop, at real time,
 /// without re-encoding.
-pub fn publisher_args(file: &Path, srt_addr: &str, drone: &Drone) -> Vec<String> {
+pub fn publisher_args(file: &Path, url: &str) -> Vec<String> {
     [
         "-hide_banner", "-nostats", "-loglevel", "warning", "-re", "-stream_loop", "-1", "-i",
     ]
@@ -105,7 +113,7 @@ pub fn publisher_args(file: &Path, srt_addr: &str, drone: &Drone) -> Vec<String>
     .map(|s| s.to_string())
     .chain([file.display().to_string()])
     .chain(["-an", "-c:v", "copy", "-f", "mpegts"].iter().map(|s| s.to_string()))
-    .chain([srt_publish_url(srt_addr, drone)])
+    .chain([url.to_string()])
     .collect()
 }
 
@@ -265,11 +273,16 @@ paths:
 
     #[test]
     fn publisher_copies_video_in_a_real_time_loop() {
-        let args = publisher_args(Path::new("demo_left.mp4"), "127.0.0.1:10890", &FORMATION[0]);
+        let args = publisher_args(Path::new("demo_left.mp4"), &srt_publish_url("127.0.0.1:10890", &FORMATION[0]));
         let joined = args.join(" ");
         assert!(joined.contains("-re -stream_loop -1 -i demo_left.mp4"));
         assert!(joined.contains("-an -c:v copy -f mpegts"));
         assert_eq!(args.last().unwrap(), "srt://127.0.0.1:10890?streamid=publish:drone1&pkt_size=1316");
+    }
+
+    #[test]
+    fn tcp_feed_uses_one_port_per_drone() {
+        assert_eq!(tcp_publish_url("127.0.0.1:19101", &FORMATION[2]), "tcp://127.0.0.1:19103");
     }
 
     #[test]

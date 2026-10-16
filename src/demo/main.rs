@@ -295,7 +295,11 @@ async fn start_all(
     for (i, (drone, file)) in paths::FORMATION.iter().zip(&plan.footage).enumerate() {
         let tag = format!("pub-{}", &drone.name[..1].to_uppercase());
         let name = format!("송출 drone{} ({})", drone.id, drone.name);
-        let argv = paths::publisher_args(file, &srt_addr, drone);
+        let url = match &o.feed_tcp {
+            Some(base) => paths::tcp_publish_url(base, drone),
+            None => paths::srt_publish_url(&srt_addr, drone),
+        };
+        let argv = paths::publisher_args(file, &url);
         children.push(procs::spawn(spec(plan, &name, &tag, &plan.ffmpeg, argv, vec![]), events.clone()).map_err(fail)?);
         starts[i] = Instant::now();
     }
