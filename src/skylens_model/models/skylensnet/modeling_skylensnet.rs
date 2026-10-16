@@ -53,9 +53,11 @@
 //!   (`align_corners = false`, as the model itself does) to the frame size and
 //!   applies softmax. [`HazardMode::Tiles`] instead averages the per-tile
 //!   softmax of the person tiles, then resizes bilinearly.
-//! - **Mixed precision.** `eval_deploy.py` runs under fp16 autocast on CUDA;
-//!   [`DetectorOptions::autocast`] does the same through `tch::autocast`, so
-//!   CUDA results carry the same fp16 rounding, and CPU runs in fp32.
+//! - **Precision.** On CUDA the weights, inputs and activations are bf16
+//!   ([`Precision::Bf16`], default), which halves the GPU memory of the weights
+//!   and the caching allocator. [`Precision::Fp16Autocast`] runs as
+//!   `eval_deploy.py` does (fp32 weights under fp16 autocast), for comparing
+//!   against its numbers. CPU always runs in fp32. Outputs are fp32 either way.
 //! - **Decoding** runs on CPU in `utils::metrics::decode_heatmap_peaks`; score
 //!   ties are ordered by index where torch `topk` leaves them unspecified.
 
@@ -679,8 +681,19 @@ pub struct DetectorOptions {
     pub merge_iou: f64,
     pub merge_center_distance: f64,
     pub hazard: HazardMode,
-    /// fp16 autocast on CUDA, as `eval_deploy.py` runs.
-    pub autocast: bool,
+    /// Arithmetic on CUDA (CPU is always fp32).
+    pub precision: Precision,
+}
+
+/// Arithmetic of a CUDA forward pass.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Precision {
+    /// fp32 weights and activations.
+    Fp32,
+    /// fp32 weights under fp16 autocast, as `eval_deploy.py` runs.
+    Fp16Autocast,
+    /// bf16 weights, inputs and activations.
+    Bf16,
 }
 
 impl Default for DetectorOptions {
@@ -695,7 +708,7 @@ impl Default for DetectorOptions {
             merge_iou: 0.5,
             merge_center_distance: 2.0,
             hazard: HazardMode::Squash { size: tiling::TILE_SIZE },
-            autocast: true,
+            precision: Precision::Bf16,
         }
     }
 }
@@ -773,8 +786,12 @@ impl SkyLensNetDetector {
         let net = SkyLensForDisasterPerception::new(&vs.root(), &config, &arch)?;
         check_against_header(&vs, &header)?;
         vs.load(&weights).with_context(|| format!("loading {}", weights.display()))?;
-        // Loading adopts the file dtype; run the graph in fp32 (autocast does fp16).
-        vs.float();
+        // Loading adopts the file dtype; cast to the run precision.
+        if device.is_cuda() && options.precision == Precision::Bf16 {
+            vs.bfloat16();
+        } else {
+            vs.float();
+        }
         vs.freeze();
 
         Ok(Self { config, options, device, model: Mutex::new(Loaded { _vs: vs, net }) })
@@ -790,10 +807,13 @@ impl SkyLensNetDetector {
 
     fn run(&self, pixel_values: &Tensor, modality_mask: &Tensor) -> Result<SkyLensOutput> {
         let loaded = self.model.lock().map_err(|_| anyhow!("SkyLensNet model lock poisoned"))?;
-        let autocast = self.options.autocast && self.device.is_cuda();
+        let cuda = self.device.is_cuda();
+        let autocast = cuda && self.options.precision == Precision::Fp16Autocast;
+        let bf16 = cuda && self.options.precision == Precision::Bf16;
         Ok(tch::no_grad(|| {
             tch::autocast(autocast, || {
-                let out = loaded.net.forward(pixel_values, Some(modality_mask));
+                let x = if bf16 { pixel_values.to_kind(Kind::BFloat16) } else { pixel_values.shallow_clone() };
+                let out = loaded.net.forward(&x, Some(modality_mask));
                 SkyLensOutput {
                     danger_logits: out.danger_logits.to_kind(Kind::Float),
                     person_heatmap: out.person_heatmap.to_kind(Kind::Float),
@@ -1234,6 +1254,35 @@ mod tests {
         std::fs::write(dir.join(CONFIG_NAME), cfg.to_json_string().unwrap()).unwrap();
         let err = SkyLensNetDetector::load(&dir, Device::Cpu).unwrap_err().to_string();
         assert!(err.contains("offset_head"), "{err}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// bf16 on CUDA keeps bf16 weights and stays close to the fp32 result. Skipped without CUDA.
+    #[test]
+    fn cuda_bf16_tracks_fp32() {
+        #[cfg(windows)]
+        // SAFETY: a NUL-terminated library name; a failed load leaves tch on CPU.
+        unsafe {
+            windows_sys::Win32::System::LibraryLoader::LoadLibraryA(c"torch_cuda.dll".as_ptr().cast());
+        }
+        if !tch::Cuda::is_available() {
+            eprintln!("no CUDA; skipped");
+            return;
+        }
+        let dir = tiny_checkpoint("bf16", true, true);
+        let load = |precision| {
+            let opts = DetectorOptions { precision, ..Default::default() };
+            SkyLensNetDetector::load_with_options(&dir, Device::Cuda(0), opts).unwrap()
+        };
+        let (fp32, bf16) = (load(Precision::Fp32), load(Precision::Bf16));
+        let kinds: Vec<Kind> = bf16.model.lock().unwrap()._vs.variables().values().map(|t| t.kind()).collect();
+        assert!(kinds.iter().all(|k| *k == Kind::BFloat16), "{kinds:?}");
+        let (w, h) = (100usize, 60usize);
+        let (rgb, th) = frame(w, h);
+        let a = fp32.detect(&rgb, Some(&th), w as u32, h as u32).unwrap();
+        let b = bf16.detect(&rgb, Some(&th), w as u32, h as u32).unwrap();
+        let worst = a.hazard_prob.iter().zip(&b.hazard_prob).map(|(x, y)| (x - y).abs()).fold(0.0f32, f32::max);
+        assert!(worst < 0.05, "hazard probability differs by {worst}");
         std::fs::remove_dir_all(&dir).ok();
     }
 }
