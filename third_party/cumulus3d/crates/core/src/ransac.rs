@@ -29,40 +29,40 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 범용 RANSAC / LO-RANSAC.
+//! General-purpose RANSAC / LO-RANSAC.
 //!
-//! 잔차는 "제곱 오차"이고 인라이어 판정은 잔차 ≤ max_error². 지지도 = (인라이어 수, 인라이어 잔차 합).
+//! Residuals are "squared errors" and an inlier test is residual <= max_error². Support = (inlier count, sum of inlier residuals).
 
 use rand::{RngExt, SeedableRng};
 use rand_pcg::Pcg64;
 
-/// 추정기: 최소/비최소 해법 + 잔차.
+/// Estimator: minimal/non-minimal solver + residual.
 pub trait Estimator {
-    /// 입력 자료 1(예: 영상1 좌표).
+    /// Input data 1 (e.g. image 1 coordinates).
     type X: Clone;
-    /// 입력 자료 2(예: 영상2 좌표).
+    /// Input data 2 (e.g. image 2 coordinates).
     type Y: Clone;
-    /// 추정 모델 타입.
+    /// Estimated model type.
     type Model: Clone;
-    /// 해법에 필요한 최소 표본 수.
+    /// Minimum number of samples required by the solver.
     fn min_num_samples(&self) -> usize;
-    /// 표본으로부터 모델(0개 이상)을 `models` 에 추가한다(호출 전 비워져 있음).
+    /// Appends zero or more models from the sample to `models` (empty before the call).
     fn estimate(&self, x: &[Self::X], y: &[Self::Y], models: &mut Vec<Self::Model>);
-    /// 모든 자료의 제곱 잔차를 `residuals` 에 채운다(길이 = x.len()).
+    /// Fills `residuals` with the squared residuals of all data (length = x.len()).
     fn residuals(&self, x: &[Self::X], y: &[Self::Y], model: &Self::Model, residuals: &mut Vec<f64>);
 }
 
-/// 표본 추출기.
+/// Sampler.
 pub trait Sampler {
-    /// 자료 수 n 으로 초기화.
+    /// Initializes with n data points.
     fn initialize(&mut self, n: usize);
-    /// 서로 다른 표본의 최대 개수(반복 상한에 반영).
+    /// Maximum number of distinct samples (reflected in the iteration cap).
     fn max_num_samples(&self) -> usize;
-    /// 다음 표본 인덱스를 `out` 에 채운다.
+    /// Fills `out` with the next sample indices.
     fn sample(&mut self, rng: &mut Pcg64, out: &mut Vec<usize>);
 }
 
-/// 무작위 표본: 부분 피셔-예이츠, 매 반복 이전 셔플 상태에서 이어 섞는다.
+/// Random sampler: partial Fisher-Yates, continuing the shuffle from the previous iteration's state each time.
 #[derive(Clone, Debug)]
 pub struct RandomSubsetSampler {
     k: usize,
@@ -70,7 +70,7 @@ pub struct RandomSubsetSampler {
 }
 
 impl RandomSubsetSampler {
-    /// 표본 크기 k 로 생성.
+    /// Creates with sample size k.
     pub fn new(num_samples: usize) -> Self {
         Self { k: num_samples, perm: Vec::new() }
     }
@@ -94,7 +94,7 @@ impl Sampler for RandomSubsetSampler {
     }
 }
 
-/// 조합 표본: 모든 k-조합을 사전식 순서로 차례대로(끝나면 처음부터).
+/// Combination sampler: all k-combinations in lexicographic order (restarting from the beginning when exhausted).
 #[derive(Clone, Debug)]
 pub struct ExhaustiveSampler {
     k: usize,
@@ -104,13 +104,13 @@ pub struct ExhaustiveSampler {
 }
 
 impl ExhaustiveSampler {
-    /// 표본 크기 k 로 생성.
+    /// Creates with sample size k.
     pub fn new(num_samples: usize) -> Self {
         Self { k: num_samples, n: 0, cur: Vec::new(), first: true }
     }
 }
 
-/// 이항계수 C(n, k) (포화).
+/// Binomial coefficient C(n, k) (saturating).
 pub fn n_choose_k(n: usize, k: usize) -> usize {
     if k > n {
         return 0;
@@ -137,7 +137,7 @@ impl Sampler for ExhaustiveSampler {
     }
     fn sample(&mut self, _rng: &mut Pcg64, out: &mut Vec<usize>) {
         if !self.first {
-            // 다음 조합
+            // next combination
             let (n, k) = (self.n, self.k);
             let mut i = k;
             let mut advanced = false;
@@ -162,22 +162,22 @@ impl Sampler for ExhaustiveSampler {
     }
 }
 
-/// RANSAC 옵션. 기본값은 범용 설정이며, 각 단계가 필요한 값을 덮어쓴다.
+/// RANSAC options. Defaults are general-purpose; each stage overrides the values it needs.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RansacParams {
-    /// 인라이어 임계(제곱 전). 잔차 ≤ max_error² 이면 인라이어.
+    /// Inlier threshold (before squaring). Inlier if residual <= max_error².
     pub max_error: f64,
-    /// 사전 인라이어 비율(정적 반복 상한 계산용).
+    /// Prior inlier ratio (for computing the static iteration cap).
     pub min_inlier_ratio: f64,
-    /// 성공 확률 목표(동적 반복 상한 계산용).
+    /// Target success probability (for computing the dynamic iteration cap).
     pub confidence: f64,
-    /// 동적 반복 상한 배수.
+    /// Multiplier of the dynamic iteration cap.
     pub dyn_trials_factor: f64,
-    /// 최소 반복 수.
+    /// Minimum number of iterations.
     pub min_trials: usize,
-    /// 최대 반복 수.
+    /// Maximum number of iterations.
     pub max_trials: usize,
-    /// None = 비결정적.
+    /// None = non-deterministic.
     pub random_seed: Option<u64>,
 }
 
@@ -195,12 +195,12 @@ impl Default for RansacParams {
     }
 }
 
-/// 지지도: 인라이어 수 많을수록, 같으면 잔차 합 작을수록 우수.
+/// Support: more inliers is better; with equal counts, a smaller residual sum is better.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Support {
-    /// 인라이어 수.
+    /// Number of inliers.
     pub num_inliers: usize,
-    /// 인라이어 제곱 잔차 합.
+    /// Sum of inlier squared residuals.
     pub residual_sum: f64,
 }
 
@@ -211,7 +211,7 @@ impl Default for Support {
 }
 
 impl Support {
-    /// 제곱 잔차와 제곱 임계로 계산.
+    /// Computed from squared residuals and a squared threshold.
     pub fn measure(residuals: &[f64], max_residual: f64) -> Self {
         let mut s = Self { num_inliers: 0, residual_sum: 0.0 };
         for &r in residuals {
@@ -222,7 +222,7 @@ impl Support {
         }
         s
     }
-    /// `self` 가 `other` 보다 나은지(인라이어 수 → 잔차 합 순).
+    /// Whether `self` is better than `other` (by inlier count, then residual sum).
     pub fn is_better(&self, other: &Support) -> bool {
         if self.num_inliers != other.num_inliers {
             self.num_inliers > other.num_inliers
@@ -232,18 +232,18 @@ impl Support {
     }
 }
 
-/// RANSAC 결과.
+/// RANSAC result.
 #[derive(Clone, Debug)]
 pub struct RansacReport<M> {
-    /// 모델을 찾았는지.
+    /// Whether a model was found.
     pub success: bool,
-    /// 수행한 반복 수.
+    /// Number of iterations performed.
     pub num_trials: usize,
-    /// 최종 모델의 지지도.
+    /// Support of the final model.
     pub support: Support,
-    /// 자료별 인라이어 여부.
+    /// Per-datum inlier flags.
     pub inlier_mask: Vec<bool>,
-    /// 최종 모델(실패 시 None).
+    /// Final model (None on failure).
     pub model: Option<M>,
 }
 
@@ -253,8 +253,8 @@ impl<M> RansacReport<M> {
     }
 }
 
-/// 필요 반복 수: ceil( ln(1−conf) / ln(1−P_good) × 배수 ),
-/// P_good = Π_{i<k} (n_in − i)/(n − i). P_good ≥ 1 → 1, P_good = 0 또는 conf = 1 → usize::MAX.
+/// Required iteration count: ceil( ln(1−conf) / ln(1−P_good) × multiplier ),
+/// P_good = Π_{i<k} (n_in − i)/(n − i). P_good ≥ 1 → 1, P_good = 0 or conf = 1 → usize::MAX.
 pub fn compute_num_trials(num_inliers: usize, num_samples: usize, min_num_samples: usize, confidence: f64, multiplier: f64) -> usize {
     if num_inliers < min_num_samples || num_samples < min_num_samples {
         return usize::MAX;
@@ -285,14 +285,14 @@ pub fn compute_num_trials(num_inliers: usize, num_samples: usize, min_num_sample
     }
 }
 
-/// 생성 시 정적 상한: n = 100000, n_in = floor(비율 × 100000) 으로 계산 후 max_trials 와 최솟값.
+/// Static cap at construction: computed with n = 100000, n_in = floor(ratio × 100000), then the minimum with max_trials.
 pub fn static_max_num_trials(opts: &RansacParams, min_num_samples: usize) -> usize {
     let n = 100_000usize;
     let n_in = (opts.min_inlier_ratio * n as f64).floor() as usize;
     compute_num_trials(n_in, n, min_num_samples, opts.confidence, opts.dyn_trials_factor).min(opts.max_trials)
 }
 
-/// 난수 생성기: 시드가 있으면 고정, 없으면 OS/스레드 난수로 시드.
+/// Random number generator: fixed if a seed is given, otherwise seeded from OS/thread randomness.
 pub fn make_rng(seed: Option<u64>) -> Pcg64 {
     match seed {
         Some(s) => Pcg64::seed_from_u64(s),
@@ -305,7 +305,7 @@ fn gather<T: Clone>(src: &[T], idx: &[usize], out: &mut Vec<T>) {
     out.extend(idx.iter().map(|&i| src[i].clone()));
 }
 
-/// 내부 공통 루프. `local` 이 있으면 LO-RANSAC.
+/// Shared internal loop. LO-RANSAC if `local` is present.
 fn run<E, L, S>(est: &E, local: Option<&L>, mut sampler: S, opts: &RansacParams, x: &[E::X], y: &[E::Y]) -> RansacReport<E::Model>
 where
     E: Estimator,
@@ -349,7 +349,7 @@ where
             if support.is_better(&best_support) {
                 let mut cand = (m, support, false);
                 if let Some(le) = local {
-                    // 국소 최적화.
+                    // Local optimization.
                     if support.num_inliers > k && support.num_inliers >= le.min_num_samples() {
                         let mut cur_res = residuals.clone();
                         for _ in 0..10 {
@@ -400,12 +400,12 @@ where
     RansacReport { success: true, num_trials: trials, support, inlier_mask, model: Some(model) }
 }
 
-/// 기본 RANSAC (무작위 표본).
+/// Basic RANSAC (random sampling).
 pub fn ransac<E: Estimator>(est: &E, opts: &RansacParams, x: &[E::X], y: &[E::Y]) -> RansacReport<E::Model> {
     run::<E, E, _>(est, None, RandomSubsetSampler::new(est.min_num_samples()), opts, x, y)
 }
 
-/// LO-RANSAC (무작위 표본). `local` 은 비최소 해법.
+/// LO-RANSAC (random sampling). `local` is the non-minimal solver.
 pub fn lo_ransac<E, L>(est: &E, local: &L, opts: &RansacParams, x: &[E::X], y: &[E::Y]) -> RansacReport<E::Model>
 where
     E: Estimator,
@@ -414,7 +414,7 @@ where
     run(est, Some(local), RandomSubsetSampler::new(est.min_num_samples()), opts, x, y)
 }
 
-/// 표본기를 지정하는 일반형. `local` 이 None 이면 기본 RANSAC.
+/// General form with a specified sampler. Basic RANSAC if `local` is None.
 pub fn ransac_with_sampler<E, L, S>(
     est: &E,
     local: Option<&L>,
@@ -695,7 +695,7 @@ mod tests {
         assert_eq!(compute_num_trials(5, 10, 3, 1.0, 3.0), usize::MAX);
     }
 
-    /// 2D 직선 y = a x + b. 최소 2점, 비최소 = 최소제곱.
+    /// 2D line y = a x + b. Minimum 2 points, non-minimal = least squares.
     struct Line;
     impl Estimator for Line {
         type X = f64;
@@ -751,12 +751,12 @@ mod tests {
         assert!(lo.success);
         let (a, b) = lo.model.unwrap();
         assert!((a - 2.0).abs() < 0.005 && (b + 1.0).abs() < 0.01, "{a} {b}");
-        // 모든 진짜 인라이어 포함, 이상치는 거의 없음
+        // Contains all true inliers, almost no outliers
         let tp = lo.inlier_mask.iter().zip(&truth).filter(|(m, t)| **m && **t).count();
         assert_eq!(tp, 200);
         assert!(lo.support.num_inliers <= 205);
         assert!(lo.num_trials < 200, "동적 상한으로 조기 종료: {}", lo.num_trials);
-        // 결정성
+        // Determinism
         let lo2 = lo_ransac(&Line, &Line, &opts, &x, &y);
         assert_eq!(lo2.num_trials, lo.num_trials);
         assert_eq!(lo2.model, lo.model);

@@ -25,10 +25,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 일치 융합의 남은 픽셀 처리(none / release / second-pass): 합성 장면의 참 깊이맵 입력.
+//! Leftover-pixel handling of agreement fusion (none / release / second-pass): ground-truth depth map input of a synthetic scene.
 
 use cumulus3d_dense::fusion::{fuse, FusionInput, FusionOutput};
 use cumulus3d_dense::neighbors::PairStats;
+use cumulus3d_dense::params::FusionMode;
 use cumulus3d_dense::synthetic::{make_scene, SynthConfig, SynthScene};
 use cumulus3d_dense::{DenseScene, FusionParams, FusionResidual};
 use std::collections::HashMap;
@@ -44,7 +45,7 @@ fn overlap(scene: &DenseScene) -> Vec<Vec<usize>> {
     (0..scene.views.len()).map(|v| st.select(v, 50, 0.0)).collect()
 }
 
-/// 참 깊이에 픽셀별 결정적 잡음(상대 ±amp)을 넣어, 엄격한 1차 융합에서 떨어지는 픽셀이 생기게 한다.
+/// Adds deterministic per-pixel noise (relative ±amp) to the ground-truth depth so that some pixels fall out of the strict first fusion.
 fn noisy_depth(amp: f32) -> Vec<Vec<f32>> {
     synth()
         .depth
@@ -94,12 +95,12 @@ fn none_and_release_are_identical_and_untagged() {
     let none = run(&d, &params(FusionResidual::None), 0);
     let rel = run(&d, &params(FusionResidual::Release), 0);
     assert!(none.cloud.len() > 1000);
-    // 채택이 확정된 뒤에만 표시를 남기므로, 버려진 후보의 점유를 되돌려도 결과가 같다.
+    // Marks are left only after adoption is confirmed, so giving back the occupation of discarded candidates yields the same result.
     assert_eq!(none.cloud, rel.cloud);
     assert_eq!(none.visibility, rel.visibility);
     assert!(none.residual.is_empty() && rel.residual.is_empty());
     assert_eq!(none.num_residual(), 0);
-    // 기본값(none)은 이전 동작과 같다: 표시를 끄지 않은 일치 융합의 결정성.
+    // The default (none) equals the previous behavior: determinism of agreement fusion without turning marks off.
     assert_eq!(run(&d, &params(FusionResidual::Release), 1).cloud, rel.cloud);
 }
 
@@ -110,7 +111,7 @@ fn second_pass_adds_points_away_from_first_pass() {
     let none = run(&d, &params(FusionResidual::None), 0);
     let sp = run(&d, &params(FusionResidual::SecondPass), 0);
     let n1 = none.cloud.len();
-    // 1차 결과는 그대로이고, 뒤에 2차 점이 꼬리표와 함께 붙는다.
+    // The first-pass result is unchanged, and second-pass points are appended after it with tags.
     assert_eq!(sp.residual.len(), sp.cloud.len());
     assert_eq!(&sp.cloud.positions[..n1], &none.cloud.positions[..]);
     assert!(sp.residual[..n1].iter().all(|&r| !r));
@@ -119,10 +120,10 @@ fn second_pass_adds_points_away_from_first_pass() {
     assert!(nr > 0, "2차 점 없음");
     assert_eq!(sp.residual_cloud().len(), nr);
     assert!(sp.visibility[n1..].iter().all(|v| v.len() > FusionParams::default().residual_params.min_views));
-    // 2차 점은 표면 위(깊이 잡음 ±0.3%·고도 20 m ≈ ±6 cm 안).
+    // Second-pass points lie on the surface (within depth noise ±0.3% · altitude 20 m ≈ ±6 cm).
     let far = sp.cloud.positions[n1..].iter().filter(|x| s.surface_distance([x[0] as f64, x[1] as f64, x[2] as f64]) > 0.07).count();
     assert!(far * 50 < nr, "표면 밖 2차 점 {far}/{nr}");
-    // 1차 점과 min-dist 이내로 겹치지 않는다.
+    // They do not overlap first-pass points within min-dist.
     let md = FusionParams::default().residual_params.min_dist_gsd * gsd(&d);
     assert!(md > 0.0);
     let key = |x: &[f32; 3]| x.map(|a| (a as f64 / md).floor() as i64);
@@ -144,7 +145,7 @@ fn second_pass_adds_points_away_from_first_pass() {
             }
         }
     }
-    // min-dist 를 0 으로 하면 2차 점이 더 많거나 같다.
+    // With min-dist 0, second-pass points are at least as many.
     let mut p0 = params(FusionResidual::SecondPass);
     p0.residual_params.min_dist_gsd = 0.0;
     assert!(run(&d, &p0, 0).num_residual() >= nr);
@@ -162,4 +163,35 @@ fn second_pass_is_deterministic() {
         assert_eq!(a.residual, b.residual);
     }
     assert!(a.pass1_time.as_nanos() > 0 && a.pass2_time.as_nanos() > 0);
+}
+
+/// Fusion point key: present for every point, unique within a point cloud, and the same when the same depth map is fused again. Both
+/// agreement fusion (first + second pass) and extended fusion.
+#[test]
+fn fusion_keys_are_unique_and_reproducible() {
+    let d = noisy_depth(0.003);
+    for (name, p) in [
+        ("consistency", params(FusionResidual::None)),
+        ("second pass", params(FusionResidual::SecondPass)),
+        ("traversal", FusionParams { mode: FusionMode::Traversal, ..params(FusionResidual::None) }),
+    ] {
+        let a = run(&d, &p, 0);
+        assert!(a.cloud.len() > 500, "{name}: too few points");
+        assert_eq!(a.cloud.keys.len(), a.cloud.len(), "{name}");
+        let set: std::collections::HashSet<u64> = a.cloud.keys.iter().copied().collect();
+        assert_eq!(set.len(), a.cloud.keys.len(), "{name}: duplicate keys");
+        // Traversal claims pixels first-come across threads, so it is only reproducible single-threaded.
+        let single = |_: ()| run(&d, &p, 1).cloud.keys;
+        assert_eq!(single(()), single(()), "{name}: keys differ between runs");
+        if p.mode == FusionMode::Consistency {
+            assert_eq!(a.cloud.keys, single(()), "{name}: keys depend on thread count");
+        }
+        // The key's image id must be a scene view and its pixel inside that view.
+        let s = synth();
+        for &k in &a.cloud.keys {
+            let (img, v, u) = ((k >> 32) as u32, ((k >> 16) & 0xffff) as usize, (k & 0xffff) as usize);
+            let view = s.scene.views.iter().find(|w| w.image_id == img).unwrap_or_else(|| panic!("{name}: unknown image {img}"));
+            assert!(u < view.width && v < view.height, "{name}: pixel out of range");
+        }
+    }
 }

@@ -29,11 +29,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 번들 조정 문제: 관측별 잔차·야코비안, 정규방정식 블록, Schur 보수 조립과 역대입.
+//! Bundle adjustment problem: per-observation residuals/Jacobians, normal-equation blocks, Schur complement assembly and back-substitution.
 //!
-//! 변수 배치: E 블록 = [가변 자세(6) …, 가변 카메라(정제 파라미터 수) …], 점 블록(3) 은 소거.
-//! 자세 국소 매개화: 접공간 (δ회전 3, δ이동 3). 회전 갱신 q ← Exp_q(δ) ⊗ q,
-//! Exp_q(δ) = [cos‖δ‖, sin‖δ‖ δ/‖δ‖] (라이브러리 쿼터니언 다양체 관례 → 실제 회전각 2‖δ‖).
+//! Variable layout: E blocks = [variable poses (6) ..., variable cameras (number of refined parameters) ...]; point blocks (3) are
+//! eliminated.
+//! Pose local parameterization: tangent space (δrotation 3, δtranslation 3). Rotation update q <- Exp_q(δ) ⊗ q,
+//! Exp_q(δ) = [cos‖δ‖, sin‖δ‖ δ/‖δ‖] (library quaternion manifold convention -> actual rotation angle 2‖δ‖).
 
 use crate::linsolve::{BlockSym, SchurSolver};
 use crate::tr::{StepInfo, TrProblem};
@@ -44,46 +45,51 @@ use nalgebra::{Matrix2x3, Matrix3};
 use rayon::prelude::*;
 
 pub(crate) const NONE: u32 = u32::MAX;
-/// 관측 결과를 결정적으로 합칠 때의 조각 크기.
+/// Chunk size for deterministically combining observation results.
 const CHUNK: usize = 8192;
 const MAX_CAM_DIM: usize = 16;
 
-/// 번들 조정 문제 입력(lib.rs 가 재구성에서 만든다). 관측은 점 순서로 정렬돼 있어야 한다.
+/// Bundle adjustment problem input (built from the reconstruction by lib.rs). Observations must be sorted in point order.
 ///
-/// [`crate::BaBackend`] 구현(CPU·CUDA)이 같은 입력을 받는다.
+/// Every [`crate::BaBackend`] implementation (CPU, CUDA) receives the same input.
 #[derive(Clone, Debug)]
 pub struct ProblemInput {
-    /// 프레임(world_to_rig) 자세. 쿼터니언은 정규화돼 있다.
+    /// Frame (world_to_rig) poses. Quaternions are normalized.
     pub poses: Vec<Rigid3>,
-    /// 자세 고정 여부.
+    /// Whether each pose is constant.
     pub pose_const: Vec<bool>,
-    /// true = 그 접공간 성분 상수(회전 0..3, 이동 3..6).
+    /// true = that tangent-space component is constant (rotation 0..3, translation 3..6).
     pub pose_mask: Vec<[bool; 6]>,
-    /// 카메라(내부 파라미터).
+    /// Cameras (intrinsics).
     pub cams: Vec<Camera>,
-    /// 정제할 파라미터 인덱스(비면 상수 카메라).
+    /// Indices of parameters to refine (empty = constant camera).
     pub cam_var: Vec<Vec<usize>>,
-    /// 영상별 자세 순번.
+    /// Pose index per image.
     pub img_pose: Vec<u32>,
-    /// 영상별 카메라 순번.
+    /// Camera index per image.
     pub img_cam: Vec<u32>,
-    /// 비기준 센서면 rig_to_sensor.
+    /// rig_to_sensor if not the reference sensor.
     pub img_sensor: Vec<Option<Rigid3>>,
-    /// 3D 점.
+    /// 3D points.
     pub points: Vec<Vec3>,
-    /// 점 고정 여부.
+    /// Whether each point is constant.
     pub point_const: Vec<bool>,
-    /// 관측별 영상 순번.
+    /// Image index per observation.
     pub obs_img: Vec<u32>,
-    /// 관측별 점 순번(오름차순).
+    /// Point index per observation (ascending).
     pub obs_pt: Vec<u32>,
-    /// 관측 픽셀 좌표.
+    /// Observed pixel coordinates.
     pub obs_xy: Vec<Vec2>,
-    /// 견고 손실.
+    /// Camera position priors: (pose index, target center, σ).
+    pub pose_priors: Vec<(usize, Vec3, f64)>,
+    /// Intrinsics priors: (camera index, parameter slot in the camera's parameter vector, target value, 1/σ).
+    /// Only slots listed in `cam_var` of that camera take part.
+    pub cam_priors: Vec<(usize, usize, f64, f64)>,
+    /// Robust loss.
     pub loss: Loss,
-    /// 축소 계통 풀이기(CPU 기준 선택).
+    /// Reduced camera system solver (chosen for the CPU).
     pub solver: LinearSolverType,
-    /// 반복 풀이기 최대 반복.
+    /// Maximum iterations of the iterative solver.
     pub max_linear_solver_iterations: usize,
 }
 
@@ -112,7 +118,16 @@ pub(crate) struct BaProblem {
     obs_pt: Vec<u32>,
     obs_xy: Vec<Vec2>,
     pt_obs: Vec<usize>,
-    // E 배치
+    /// Position priors (pose index, target center, 1/σ) and their scaled residuals / Jacobians (3×6, row-major).
+    priors: Vec<(u32, Vec3, f64)>,
+    prior_r: Vec<[f64; 3]>,
+    prior_j: Vec<[f64; 18]>,
+    /// Intrinsics priors (camera index, index inside the camera's E block, target, 1/σ) with their residual / Jacobian
+    /// (scalar per prior; the Jacobian is `w` times the column scale).
+    cam_priors: Vec<(u32, u32, f64, f64)>,
+    cprior_r: Vec<f64>,
+    cprior_j: Vec<f64>,
+    // E layout
     e_dim: Vec<usize>,
     e_off: Vec<usize>,
     n_e: usize,
@@ -126,7 +141,7 @@ pub(crate) struct BaProblem {
     s: BlockSym,
     solver: SchurSolver,
     pub solver_kind: LinearSolverType,
-    // 관측별 저장(로버스트·야코비 배율 적용 후)
+    // Per-observation storage (after applying robustness and Jacobian scaling)
     cs: usize,
     jp: Vec<[f64; 12]>,
     jx: Vec<[f64; 6]>,
@@ -141,15 +156,15 @@ pub(crate) struct BaProblem {
     v: Vec<[f64; 9]>,
     vinv: Vec<[f64; 9]>,
     hdiag_e: Vec<f64>,
-    /// 가변 점별 (카메라 E 블록, W_cj = Σ Jxᵀ Jc 의 pcw_vals 오프셋), 3×nc 행 우선.
+    /// Per variable point: (camera E block, pcw_vals offset of W_cj = Σ Jxᵀ Jc), 3×nc row-major.
     pcw_ptr: Vec<usize>,
     pcw_idx: Vec<(u32, usize)>,
     pcw_vals: Vec<f64>,
-    /// 점 우선 Schur 조립 조각(가변 점 범위). 비면 행 우선 조립.
+    /// Point-first Schur assembly chunks (variable point ranges). If empty, use row-first assembly.
     s_chunks: Vec<(usize, usize)>,
     s_acc: Vec<Vec<f64>>,
     r_acc: Vec<Vec<f64>>,
-    /// 점 우선 B 누적 조각(관측 범위)과 누적기 [bdiag | cross | g].
+    /// Point-first B accumulation chunks (observation ranges) and accumulators [bdiag | cross | g].
     b_chunks: Vec<(usize, usize)>,
     b_acc: Vec<Vec<f64>>,
     delta_e: Vec<f64>,
@@ -157,7 +172,7 @@ pub(crate) struct BaProblem {
     rhs: Vec<f64>,
 }
 
-/// 라이브러리 쿼터니언 다양체의 ⊞: Exp_q(δ) ⊗ q.
+/// ⊞ of the library quaternion manifold: Exp_q(δ) ⊗ q.
 pub fn quat_plus(q: &Quat, d: &[f64]) -> Quat {
     let n = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
     if n == 0.0 {
@@ -173,7 +188,7 @@ fn det_sum(v: &[f64]) -> f64 {
     parts.iter().sum()
 }
 
-/// 3×3 대칭 양정치 역행렬(촐레스키). 실패면 None.
+/// 3×3 symmetric positive-definite inverse (Cholesky). None on failure.
 fn inv3(m: &[f64; 9]) -> Option<[f64; 9]> {
     let mm = Matrix3::from_row_slice(m);
     let c = mm.cholesky()?;
@@ -187,7 +202,7 @@ fn inv3(m: &[f64; 9]) -> Option<[f64; 9]> {
     o.iter().all(|x| x.is_finite()).then_some(o)
 }
 
-/// 가변 슬라이스를 주어진 길이들로 쪼갠다.
+/// Splits a mutable slice into the given lengths.
 fn split_lens(mut s: &mut [f64], lens: impl Iterator<Item = usize>) -> Vec<&mut [f64]> {
     let mut out = Vec::new();
     for l in lens {
@@ -204,7 +219,7 @@ impl BaProblem {
         let nc = inp.cams.len();
         let npt = inp.points.len();
         let nobs = inp.obs_img.len();
-        // E 블록 배치
+        // E block layout
         let mut e_dim = Vec::new();
         let mut e_src = Vec::new();
         let mut pose_e = vec![NONE; np];
@@ -233,7 +248,7 @@ impl BaProblem {
             n_e += d;
         }
         let ne = e_dim.len();
-        // 점
+        // Points
         let mut pt_v = vec![NONE; npt];
         let mut v_pt = Vec::new();
         for j in 0..npt {
@@ -252,7 +267,7 @@ impl BaProblem {
         }
         let block_pose = |k: usize| pose_e[inp.img_pose[inp.obs_img[k] as usize] as usize];
         let block_cam = |k: usize| cam_e[inp.img_cam[inp.obs_img[k] as usize] as usize];
-        // E 블록별 관측
+        // Observations per E block
         let mut e_obs: Vec<Vec<u32>> = vec![Vec::new(); ne];
         for k in 0..nobs {
             let pe = block_pose(k);
@@ -272,7 +287,7 @@ impl BaProblem {
                 v
             })
             .collect();
-        // 자세-카메라 교차 블록
+        // Pose-camera cross blocks
         let mut b_cross: Vec<Vec<(u32, usize)>> = vec![Vec::new(); n_pose_e];
         let mut ncross = 0;
         for (a, bc) in b_cross.iter_mut().enumerate() {
@@ -290,7 +305,7 @@ impl BaProblem {
             bdiag_off.push(nbd);
             nbd += d * d;
         }
-        // S 구조
+        // S structure
         let row_cols: Vec<Vec<u32>> = (0..ne)
             .into_par_iter()
             .map(|a| {
@@ -331,8 +346,8 @@ impl BaProblem {
             pcw_ptr.push(pcw_idx.len());
         }
         let solver = SchurSolver::new(inp.solver, &s, inp.max_linear_solver_iterations)?;
-        // 점 우선 조립 조각: 조각마다 S 사본을 두므로 메모리 상한(256MB)으로 개수를 정한다.
-        // 개수는 문제 크기로만 정해 스레드 수와 무관하게 결정적이다.
+        // Point-first assembly chunks: each chunk has its own copy of S, so the count is set by a memory cap (256MB).
+        // The count depends only on the problem size, so it is deterministic regardless of the thread count.
         let s_bytes = 8 * s.vals.len().max(1);
         let nch = (256usize << 20) / s_bytes;
         let nch = nch.min(16);
@@ -361,6 +376,14 @@ impl BaProblem {
         let r_acc = vec![vec![0.0; n_e]; s_chunks.len()];
         let nbch = 32.min(nobs.max(1));
         let b_chunks: Vec<(usize, usize)> = (0..nbch).map(|c| (c * nobs / nbch, (c + 1) * nobs / nbch)).collect();
+        let cam_priors: Vec<(u32, u32, f64, f64)> = inp
+            .cam_priors
+            .iter()
+            .filter_map(|&(c, pi, target, w)| {
+                let q = inp.cam_var.get(c)?.iter().position(|&x| x == pi)?;
+                (w.is_finite() && w > 0.0 && target.is_finite()).then_some((c as u32, q as u32, target, w))
+            })
+            .collect();
         let rot: Vec<Mat3> = inp.poses.iter().map(|p| p.rotation_matrix()).collect();
         let cur = State { poses: inp.poses, rot, cams: inp.cams, pts: inp.points };
         let nv = v_pt.len();
@@ -382,6 +405,12 @@ impl BaProblem {
             obs_pt: inp.obs_pt,
             obs_xy: inp.obs_xy,
             pt_obs,
+            prior_r: vec![[0.0; 3]; inp.pose_priors.len()],
+            prior_j: vec![[0.0; 18]; inp.pose_priors.len()],
+            priors: inp.pose_priors.iter().map(|&(p, c, s)| (p as u32, c, 1.0 / s)).collect(),
+            cprior_r: vec![0.0; cam_priors.len()],
+            cprior_j: vec![0.0; cam_priors.len()],
+            cam_priors,
             e_dim,
             e_off,
             n_e,
@@ -427,7 +456,7 @@ impl BaProblem {
         self.obs_img.len()
     }
 
-    /// 관측 k 의 (보정) 잔차와 ρ. `jac` 가 있으면 보정·배율 적용 야코비안을 채운다.
+    /// (Corrected) residual and ρ of observation k. If `jac` is given, fills the Jacobian with correction and scaling applied.
     #[inline]
     pub(crate) fn eval_obs(&self, st: &State, k: usize, jac: Option<(&mut [f64; 12], &mut [f64; 6], &mut [f64])>) -> ([f64; 2], f64) {
         let i = self.obs_img[k] as usize;
@@ -449,7 +478,7 @@ impl BaProblem {
         let n = cam.model.num_params();
         let proj = cam.cam_to_img_with_jacobian(&xc, if want { Some(&mut dp[..2 * n]) } else { None });
         let Some((pix, jxc)) = proj else {
-            // 투영 실패: 잔차·야코비안 0.
+            // Projection failure: residual and Jacobian 0.
             if let Some((jp, jx, jc)) = jac {
                 *jp = [0.0; 12];
                 *jx = [0.0; 6];
@@ -513,10 +542,79 @@ impl BaProblem {
         (rr, rho)
     }
 
-    /// 상태 st 에서의 비용(½Σρ).
+    /// Position prior i: residual `(C − target)/σ` with `C = −Rᵀt`, and (when `jac` is given) its Jacobian in the
+    /// scaled local parameters of the pose (3×6 row-major: δrot, δt). With `R ← Exp(δ)·R ≈ (I + 2[δ]×)R`:
+    /// ∂C/∂δrot = −2 Rᵀ[t]×, ∂C/∂δt = −Rᵀ.
+    #[inline]
+    fn eval_prior(&self, st: &State, i: usize, jac: Option<&mut [f64; 18]>) -> [f64; 3] {
+        let (p, target, w) = self.priors[i];
+        let p = p as usize;
+        let rt = st.rot[p].transpose();
+        let t = st.poses[p].translation;
+        let c = -(rt * t);
+        let r = (c - target) * w;
+        if let Some(j) = jac {
+            let jr = rt * skew(&t) * (-2.0 * w);
+            let jt = rt * (-w);
+            let mask = &self.pose_mask[p];
+            let pe = self.pose_e[p];
+            let off = if pe != NONE { self.e_off[pe as usize] } else { 0 };
+            for row in 0..3 {
+                for q in 0..3 {
+                    let s0 = if self.scaled && pe != NONE { self.scale_e[off + q] } else { 1.0 };
+                    let s1 = if self.scaled && pe != NONE { self.scale_e[off + 3 + q] } else { 1.0 };
+                    j[row * 6 + q] = if mask[q] || pe == NONE { 0.0 } else { jr[(row, q)] * s0 };
+                    j[row * 6 + 3 + q] = if mask[3 + q] || pe == NONE { 0.0 } else { jt[(row, q)] * s1 };
+                }
+            }
+        }
+        [r.x, r.y, r.z]
+    }
+
+    /// ½Σ‖prior residual‖² at `st`.
+    fn prior_cost(&self, st: &State) -> f64 {
+        let v: Vec<f64> = (0..self.priors.len())
+            .map(|i| {
+                let r = self.eval_prior(st, i, None);
+                r[0] * r[0] + r[1] * r[1] + r[2] * r[2]
+            })
+            .collect();
+        0.5 * det_sum(&v)
+    }
+
+    /// Intrinsics prior i: residual `(p − target)/σ` of one camera parameter, and (with `want_jac`) its Jacobian in the
+    /// scaled local parameter (`w` times the column scale of that E-block entry).
+    #[inline]
+    fn eval_cam_prior(&self, st: &State, i: usize, want_jac: bool) -> (f64, f64) {
+        let (c, q, target, w) = self.cam_priors[i];
+        let c = c as usize;
+        let pi = self.cam_var[c][q as usize];
+        let r = (st.cams[c].params[pi] - target) * w;
+        let j = if want_jac {
+            let ce = self.cam_e[c];
+            let s = if self.scaled && ce != NONE { self.scale_e[self.e_off[ce as usize] + q as usize] } else { 1.0 };
+            w * s
+        } else {
+            0.0
+        };
+        (r, j)
+    }
+
+    /// ½Σ(intrinsics prior residual)² at `st`.
+    fn cam_prior_cost(&self, st: &State) -> f64 {
+        let v: Vec<f64> = (0..self.cam_priors.len())
+            .map(|i| {
+                let r = self.eval_cam_prior(st, i, false).0;
+                r * r
+            })
+            .collect();
+        0.5 * det_sum(&v)
+    }
+
+    /// Cost at state st (½Σρ + position prior + intrinsics prior).
     pub(crate) fn cost_at(&self, st: &State) -> f64 {
         let costs: Vec<f64> = (0..self.num_obs()).into_par_iter().with_min_len(1024).map(|k| self.eval_obs(st, k, None).1).collect();
-        0.5 * det_sum(&costs)
+        0.5 * det_sum(&costs) + self.prior_cost(st) + self.cam_prior_cost(st)
     }
 
     fn evaluate_jacobians(&mut self) -> Option<f64> {
@@ -546,18 +644,31 @@ impl BaProblem {
         self.jc = jc;
         self.res = res;
         self.ocost = ocost;
-        let cost = 0.5 * det_sum(&self.ocost);
+        let mut pr = std::mem::take(&mut self.prior_r);
+        let mut pj = std::mem::take(&mut self.prior_j);
+        for i in 0..self.priors.len() {
+            pr[i] = self.eval_prior(&self.cur, i, Some(&mut pj[i]));
+        }
+        self.prior_r = pr;
+        self.prior_j = pj;
+        for i in 0..self.cam_priors.len() {
+            let (r, j) = self.eval_cam_prior(&self.cur, i, true);
+            self.cprior_r[i] = r;
+            self.cprior_j[i] = j;
+        }
+        let cost = 0.5 * det_sum(&self.ocost) + self.prior_cost(&self.cur) + self.cam_prior_cost(&self.cur);
         cost.is_finite().then_some(cost)
     }
 
-    /// B 블록, 교차 블록, g_E, 점별 V·g_p.
+    /// B blocks, cross blocks, g_E, per-point V·g_p.
     fn build_normal(&mut self) {
         let cs = self.cs;
         let nbd = self.bdiag.len();
         let ncr = self.cross_vals.len();
         let ne = self.n_e;
         let len = nbd + ncr + ne;
-        // 점 우선(관측 순서) 누적: 관측을 연속으로 읽고, 조각별 누적기를 정해진 순서로 합친다.
+        // Point-first (observation order) accumulation: read observations contiguously and combine the per-chunk accumulators in a fixed
+        // order.
         let mut b_acc = std::mem::take(&mut self.b_acc);
         b_acc.par_iter_mut().zip(self.b_chunks.par_iter()).for_each(|(acc, &(k0, k1))| {
             acc.clear();
@@ -622,6 +733,34 @@ impl BaProblem {
             self.g_e.copy_from_slice(&out[nbd + ncr..]);
         }
         self.b_acc = b_acc;
+        // Position priors: JᵀJ (upper triangle) and Jᵀr into the pose blocks.
+        for i in 0..self.priors.len() {
+            let pe = self.pose_e[self.priors[i].0 as usize];
+            if pe == NONE {
+                continue;
+            }
+            let a = pe as usize;
+            let (o, og) = (self.bdiag_off[a], self.e_off[a]);
+            let (j, r) = (&self.prior_j[i], &self.prior_r[i]);
+            for p in 0..6 {
+                self.g_e[og + p] += j[p] * r[0] + j[6 + p] * r[1] + j[12 + p] * r[2];
+                for q in p..6 {
+                    self.bdiag[o + p * 6 + q] += j[p] * j[q] + j[6 + p] * j[6 + q] + j[12 + p] * j[12 + q];
+                }
+            }
+        }
+        // Intrinsics priors: diagonal JᵀJ and Jᵀr into the camera blocks.
+        for i in 0..self.cam_priors.len() {
+            let (c, q) = (self.cam_priors[i].0 as usize, self.cam_priors[i].1 as usize);
+            let ce = self.cam_e[c];
+            if ce == NONE {
+                continue;
+            }
+            let a = ce as usize;
+            let (j, r) = (self.cprior_j[i], self.cprior_r[i]);
+            self.g_e[self.e_off[a] + q] += j * r;
+            self.bdiag[self.bdiag_off[a] + q * self.e_dim[a] + q] += j * j;
+        }
         for a in 0..self.e_dim.len() {
             let d = self.e_dim[a];
             let o = self.bdiag_off[a];
@@ -632,7 +771,7 @@ impl BaProblem {
                 self.hdiag_e[self.e_off[a] + p] = self.bdiag[o + p * d + p];
             }
         }
-        // 점: V, g_p, 카메라 교차 W_cj
+        // Points: V, g_p, camera cross W_cj
         let mut v = std::mem::take(&mut self.v);
         let mut gp = std::mem::take(&mut self.g_p);
         let mut pcw = std::mem::take(&mut self.pcw_vals);
@@ -681,10 +820,10 @@ impl BaProblem {
         self.g_p = gp;
     }
 
-    /// Schur 보수 한 블록 행(a) 조립. `vals` = 행 a 의 값, `rhs` = 행 a 의 우변.
+    /// Assembles one block row (a) of the Schur complement. `vals` = values of row a, `rhs` = right-hand side of row a.
     ///
-    /// 행 단위로 쓰기가 겹치지 않아 행 병렬·결정적이다. 자세-자세 항은 관측별 6×2·2×6,
-    /// 자세-카메라·카메라-카메라 항은 점별로 미리 합친 W_cj(3×nc) 로 계산한다.
+    /// Writes do not overlap across rows, so it is row-parallel and deterministic. Pose-pose terms use per-observation 6×2·2×6,
+    /// pose-camera and camera-camera terms use W_cj (3×nc) pre-summed per point.
     fn assemble_row(&self, a: usize, vals: &mut [f64], rhs: &mut [f64], damp_e: &[f64], slot: &mut [usize]) {
         let da = self.e_dim[a];
         let oa = self.e_off[a];
@@ -771,7 +910,8 @@ impl BaProblem {
             for i in 0..6 {
                 rhs[i] += rhs6[i];
             }
-            // 상수 성분: 야코비안 열이 0 이라 행·열이 0 → 대각 1, 우변 0 으로 두면 δ = 0.
+            // Constant components: the Jacobian column is 0, so row and column are 0 -> setting the diagonal to 1 and the right-hand side
+            // to 0 gives δ = 0.
             let p = self.e_src[a] as usize;
             for (i, &m) in self.pose_mask[p].iter().enumerate() {
                 if m {
@@ -832,7 +972,7 @@ impl BaProblem {
         s.sqrt()
     }
 
-    /// 후보 상태 = cur ⊞ δ (배율 해제). 반환: ‖x_후보 − x‖².
+    /// Candidate state = cur ⊞ δ (scaling undone). Returns: ‖x_candidate - x‖².
     fn make_candidate(&mut self) -> f64 {
         let mut sq = 0.0;
         for p in 0..self.cur.poses.len() {
@@ -898,7 +1038,7 @@ impl TrProblem for BaProblem {
         let cost = self.evaluate_jacobians()?;
         self.build_normal();
         if first {
-            // 야코비 열 배율 1/(1+‖열‖), 첫 평가에서 한 번 정한다(라이브러리 관례).
+            // Jacobian column scale 1/(1+‖column‖), set once at the first evaluation (library convention).
             for i in 0..self.n_e {
                 self.scale_e[i] = 1.0 / (1.0 + self.hdiag_e[i].sqrt());
             }
@@ -949,7 +1089,7 @@ impl TrProblem for BaProblem {
         const MIN_D: f64 = 1e-6;
         const MAX_D: f64 = 1e32;
         let damp_e: Vec<f64> = self.hdiag_e.iter().map(|&h| h.clamp(MIN_D, MAX_D) / radius).collect();
-        // 점 블록 역행렬(감쇠 포함)
+        // Point block inverses (including damping)
         let mut vinv = std::mem::take(&mut self.vinv);
         let ok = vinv
             .par_iter_mut()
@@ -994,7 +1134,7 @@ impl TrProblem for BaProblem {
 }
 
 impl BaProblem {
-    /// 행 우선 조립(블록 행 병렬, 행마다 독립 쓰기). S 가 커서 조각 사본을 못 둘 때.
+    /// Row-first assembly (block rows in parallel, independent writes per row). For when S is too large to keep chunk copies.
     fn assemble_row_major(&mut self, damp_e: &[f64]) {
         let mut vals = std::mem::take(&mut self.s.vals);
         let mut rhs = std::mem::take(&mut self.rhs);
@@ -1014,7 +1154,8 @@ impl BaProblem {
         self.rhs = rhs;
     }
 
-    /// 점 우선 조립: 점 범위 조각마다 S·우변 사본에 누적 → 조각 순서대로 합산 → 행별 B·감쇠 더함.
+    /// Point-first assembly: accumulate into S/right-hand-side copies per point-range chunk -> sum in chunk order -> add per-row B and
+    /// damping.
     fn assemble_point_major(&mut self, damp_e: &[f64]) {
         let mut s_acc = std::mem::take(&mut self.s_acc);
         let mut r_acc = std::mem::take(&mut self.r_acc);
@@ -1041,7 +1182,7 @@ impl BaProblem {
         }
         self.s_acc = s_acc;
         self.r_acc = r_acc;
-        // 행별 B·감쇠·교차·−g·상수 성분
+        // Per row: B, damping, cross terms, -g, constant components
         {
             let nrow = self.e_dim.len();
             let row_lens = (0..nrow).map(|a| self.s.row_val[a + 1] - self.s.row_val[a]);
@@ -1079,7 +1220,7 @@ impl BaProblem {
         self.rhs = rhs;
     }
 
-    /// 가변 점 v0..v1 의 Schur 기여(−W V⁻¹ Wᵀ, +W V⁻¹ g_p)를 acc·racc 에 더한다.
+    /// Adds the Schur contribution (-W V⁻¹ Wᵀ, +W V⁻¹ g_p) of variable points v0..v1 into acc and racc.
     fn schur_points(&self, v0: usize, v1: usize, acc: &mut [f64], racc: &mut [f64]) {
         let mut loc: Vec<(u32, usize, [f64; 18])> = Vec::new();
         let mut tc = [0.0; 3 * MAX_CAM_DIM];
@@ -1114,7 +1255,8 @@ impl BaProblem {
             for (pa, _, t) in loc.iter() {
                 let a = *pa as usize;
                 for (pb, kb, _) in loc.iter() {
-                    // 위삼각 블록만. 같은 블록 안의 관측 쌍은 두 순서 모두 더한다(W_a 합과 같음).
+                    // Upper-triangular blocks only. Observation pairs within the same block are added in both orders (equal to the W_a
+                    // sum).
                     if *pb < *pa {
                         continue;
                     }
@@ -1181,7 +1323,7 @@ impl BaProblem {
     }
 
     fn back_substitute_and_model(&mut self) -> Option<StepInfo> {
-        // 점 역대입: δp = V⁻¹(−g_p − Wᵀ δE)
+        // Point back-substitution: δp = V⁻¹(-g_p - Wᵀ δE)
         let cs = self.cs;
         let mut dp = std::mem::take(&mut self.delta_p);
         dp.par_iter_mut().enumerate().with_min_len(256).for_each(|(vi, out)| {
@@ -1204,7 +1346,7 @@ impl BaProblem {
         if !self.delta_p.iter().all(|d| d.iter().all(|x| x.is_finite())) {
             return None;
         }
-        // 모형 비용 변화 −(rᵀJδ + ½‖Jδ‖²)
+        // Model cost change -(rᵀJδ + ½‖Jδ‖²)
         let mc: Vec<f64> = (0..self.num_obs())
             .into_par_iter()
             .with_min_len(1024)
@@ -1221,7 +1363,29 @@ impl BaProblem {
                 -(r[0] * y[0] + r[1] * y[1] + 0.5 * (y[0] * y[0] + y[1] * y[1]))
             })
             .collect();
-        let model_cost_change = det_sum(&mc);
+        let mut model_cost_change = det_sum(&mc);
+        for i in 0..self.priors.len() {
+            let pe = self.pose_e[self.priors[i].0 as usize];
+            if pe == NONE {
+                continue;
+            }
+            let o = self.e_off[pe as usize];
+            let (j, r) = (&self.prior_j[i], &self.prior_r[i]);
+            let mut y = [0.0; 3];
+            for (row, yr) in y.iter_mut().enumerate() {
+                *yr = (0..6).map(|q| j[row * 6 + q] * self.delta_e[o + q]).sum();
+            }
+            model_cost_change -= r[0] * y[0] + r[1] * y[1] + r[2] * y[2] + 0.5 * (y[0] * y[0] + y[1] * y[1] + y[2] * y[2]);
+        }
+        for i in 0..self.cam_priors.len() {
+            let (c, q) = (self.cam_priors[i].0 as usize, self.cam_priors[i].1 as usize);
+            let ce = self.cam_e[c];
+            if ce == NONE {
+                continue;
+            }
+            let y = self.cprior_j[i] * self.delta_e[self.e_off[ce as usize] + q];
+            model_cost_change -= self.cprior_r[i] * y + 0.5 * y * y;
+        }
         let x_norm = self.x_norm();
         let step_norm = self.make_candidate().sqrt();
         Some(StepInfo { model_cost_change, step_norm, x_norm })
@@ -1278,6 +1442,8 @@ mod tests {
             obs_img: vec![0],
             obs_pt: vec![0],
             obs_xy: vec![xy],
+            pose_priors: vec![(0, Vec3::new(1.0, -2.0, 3.0), 0.5)],
+            cam_priors: Vec::new(),
             loss: Loss::Trivial,
             solver: LinearSolverType::DenseSchur,
             max_linear_solver_iterations: 10,
@@ -1352,6 +1518,64 @@ mod tests {
     }
 
     #[test]
+    fn prior_jacobian_matches_central_difference() {
+        let pose = Rigid3::new(Quat::from_rotation_vector(&Vec3::new(0.2, -0.3, 0.1)), Vec3::new(0.4, -0.2, 1.5));
+        let p = one_obs_problem(pose, None, Vec3::new(1.2, -0.8, 6.0), Vec2::new(500.0, 400.0));
+        let mut j = [0.0; 18];
+        let r0 = p.eval_prior(&p.cur, 0, Some(&mut j));
+        // Residual = (C − target)/σ with C = −Rᵀt.
+        let c = -(pose.rotation_matrix().transpose() * pose.translation);
+        assert!(((c.x - 1.0) / 0.5 - r0[0]).abs() < 1e-12);
+        let h = 1e-6;
+        for q in 0..6 {
+            let mut d = [0.0; 3];
+            let (pp, pm) = if q < 3 {
+                d[q] = h;
+                let qp = quat_plus(&pose.rotation, &d);
+                d[q] = -h;
+                (Rigid3::new(qp, pose.translation), Rigid3::new(quat_plus(&pose.rotation, &d), pose.translation))
+            } else {
+                let (mut tp, mut tm) = (pose.translation, pose.translation);
+                tp[q - 3] += h;
+                tm[q - 3] -= h;
+                (Rigid3::new(pose.rotation, tp), Rigid3::new(pose.rotation, tm))
+            };
+            let rp = p.eval_prior(&with_pose(&p.cur, pp), 0, None);
+            let rm = p.eval_prior(&with_pose(&p.cur, pm), 0, None);
+            for row in 0..3 {
+                let num = (rp[row] - rm[row]) / (2.0 * h);
+                let ana = j[row * 6 + q];
+                assert!((num - ana).abs() / ana.abs().max(1.0) < 1e-6, "param {q} row {row}: {num} vs {ana}");
+            }
+        }
+    }
+
+    #[test]
+    fn cam_prior_jacobian_matches_central_difference() {
+        let mut p = one_obs_problem(Rigid3::default(), None, Vec3::new(0.3, -0.2, 5.0), Vec2::new(520.0, 390.0));
+        // Prior on cam_var entries 0 (fx) and 3 (k2 slot 5), σ 2 and 0.01.
+        p.cam_priors = vec![(0, 0, 880.0, 0.5), (0, 3, -0.1, 100.0)];
+        p.cprior_r = vec![0.0; 2];
+        p.cprior_j = vec![0.0; 2];
+        p.cam_e[0] = 0;
+        p.e_off = vec![0];
+        p.scaled = true;
+        p.scale_e = vec![0.3, 1.0, 1.0, 0.7, 1.0, 1.0];
+        for i in 0..2 {
+            let (r, j) = p.eval_cam_prior(&p.cur, i, true);
+            let (c, q) = (p.cam_priors[i].0 as usize, p.cam_priors[i].1 as usize);
+            let pi = p.cam_var[c][q];
+            let h = 1e-6;
+            let (mut a, mut b) = (p.cur.clone(), p.cur.clone());
+            a.cams[c].params[pi] += h * p.scale_e[q];
+            b.cams[c].params[pi] -= h * p.scale_e[q];
+            let fd = (p.eval_cam_prior(&a, i, false).0 - p.eval_cam_prior(&b, i, false).0) / (2.0 * h);
+            assert!((fd - j).abs() < 1e-5 * j.abs().max(1.0), "prior {i}: fd {fd} analytic {j}");
+            assert!(r.is_finite());
+        }
+    }
+
+    #[test]
     fn projection_failure_gives_zero_residual_and_jacobian() {
         let p = one_obs_problem(Rigid3::identity(), None, Vec3::new(0.1, 0.2, -3.0), Vec2::new(10.0, 20.0));
         let (mut jp, mut jx) = ([1.0; 12], [1.0; 6]);
@@ -1364,7 +1588,7 @@ mod tests {
 
     #[test]
     fn point_major_and_row_major_schur_agree() {
-        // 무작위 다중 영상 문제(일부 자세 성분 고정, 상수 점·카메라 섞음).
+        // Random multi-image problem (some pose components fixed, constant points and cameras mixed).
         let mut seed = 12345u64;
         let mut rnd = || {
             seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
@@ -1390,7 +1614,7 @@ mod tests {
         for j in 0..npt {
             for i in 0..np {
                 if (i + j) % 3 != 0 || j % 7 == 0 {
-                    // 영상 i (자세 i, 카메라 i%2), 같은 자세 다른 영상도 섞이도록 영상 = 자세.
+                    // Image i (pose i, camera i%2); images = poses so that different images with the same pose are also mixed.
                     oi.push(i as u32);
                     op.push(j as u32);
                     ox.push(Vec2::new(500.0 + 300.0 * rnd(), 400.0 + 300.0 * rnd()));
@@ -1413,6 +1637,8 @@ mod tests {
             obs_img: oi.clone(),
             obs_pt: op.clone(),
             obs_xy: ox.clone(),
+            pose_priors: Vec::new(),
+            cam_priors: Vec::new(),
             loss: Loss::Cauchy(2.0),
             solver: LinearSolverType::DenseSchur,
             max_linear_solver_iterations: 10,

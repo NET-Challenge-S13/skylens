@@ -25,7 +25,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 축소 카메라 계통(Schur 보수) 저장과 세 풀이기: 밀집 Cholesky, 희소 Cholesky(faer), PCG.
+//! Reduced camera system (Schur complement) storage and three solvers: dense Cholesky, sparse Cholesky (faer), PCG.
 
 use crate::LinearSolverType;
 use faer::linalg::solvers::Solve;
@@ -35,24 +35,24 @@ use faer::{MatMut, Side};
 use nalgebra::DMatrix;
 use rayon::prelude::*;
 
-/// 블록 대칭 행렬의 위삼각(대각 포함) 블록 행 저장. 블록은 행 우선.
+/// Upper-triangular (including diagonal) block-row storage of a block-symmetric matrix. Blocks are row-major.
 pub(crate) struct BlockSym {
     pub dims: Vec<usize>,
     pub offs: Vec<usize>,
     pub n: usize,
-    /// 블록 행 a 의 항목 범위(첫 항목 = 대각).
+    /// Entry range of block row a (first entry = diagonal).
     pub row_ptr: Vec<usize>,
     pub cols: Vec<u32>,
     pub val_off: Vec<usize>,
-    /// 블록 행 a 의 값 범위 시작(길이 = 행 수 + 1).
+    /// Start of the value range of block row a (length = number of rows + 1).
     pub row_val: Vec<usize>,
     pub vals: Vec<f64>,
-    /// 블록 수가 적당할 때 (a, b) → vals 오프셋 직접 표(없으면 이분 탐색).
+    /// Direct table (a, b) -> vals offset when the block count is moderate (otherwise binary search).
     table: Vec<u32>,
 }
 
 impl BlockSym {
-    /// `row_cols[a]` 는 정렬·중복 제거된 열 블록(≥ a, a 포함).
+    /// `row_cols[a]` is the sorted, deduplicated column blocks (>= a, including a).
     pub fn new(dims: Vec<usize>, row_cols: Vec<Vec<u32>>) -> Self {
         let mut offs = Vec::with_capacity(dims.len());
         let mut n = 0;
@@ -92,7 +92,7 @@ impl BlockSym {
         self.dims.len()
     }
 
-    /// 블록 (a, b ≥ a) 의 vals 절대 오프셋.
+    /// Absolute vals offset of block (a, b >= a).
     #[inline]
     pub fn offset(&self, a: usize, b: u32) -> usize {
         if !self.table.is_empty() {
@@ -126,7 +126,7 @@ impl BlockSym {
     }
 }
 
-/// 풀이기 상태(구조 의존 부분은 한 번만 만든다).
+/// Solver state (the structure-dependent part is built only once).
 pub(crate) enum SchurSolver {
     Dense,
     Sparse(Box<SparseState>),
@@ -148,7 +148,7 @@ pub(crate) struct IterState {
     max_iter: usize,
 }
 
-/// 위삼각 스칼라 항목을 (열 = 스칼라 행) 순서로 나열: (행 i, 열 j ≥ i, vals 인덱스).
+/// Lists upper-triangular scalar entries in (column = scalar row) order: (row i, column j >= i, vals index).
 fn upper_scalar_entries(s: &BlockSym, mut f: impl FnMut(usize, usize, usize)) {
     for a in 0..s.num_rows() {
         let da = s.dims[a];
@@ -171,7 +171,7 @@ impl SchurSolver {
         Some(match kind {
             LinearSolverType::DenseSchur | LinearSolverType::Auto => SchurSolver::Dense,
             LinearSolverType::SparseSchur => {
-                // 위삼각 행 = 아래삼각 열(CSC, Side::Lower).
+                // Upper-triangular row = lower-triangular column (CSC, Side::Lower).
                 let mut col_ptr = vec![0usize; s.n + 1];
                 let mut row_idx = Vec::new();
                 let mut gather = Vec::new();
@@ -189,7 +189,7 @@ impl SchurSolver {
                 SchurSolver::Sparse(Box::new(SparseState { sym, symbolic, gather, values }))
             }
             LinearSolverType::IterativeSchur => {
-                // 전체 대칭 CSR(행렬-벡터 곱을 행 병렬로).
+                // Full symmetric CSR (for row-parallel matrix-vector products).
                 let mut rows: Vec<Vec<(u32, usize)>> = vec![Vec::new(); s.n];
                 upper_scalar_entries(s, |i, j, g| {
                     rows[i].push((j as u32, g));
@@ -214,7 +214,7 @@ impl SchurSolver {
         })
     }
 
-    /// S x = rhs. 실패(양정치 아님·비유한)면 None.
+    /// S x = rhs. None on failure (not positive definite or non-finite).
     pub fn solve(&mut self, s: &BlockSym, rhs: &[f64]) -> Option<Vec<f64>> {
         if s.n == 0 {
             return Some(Vec::new());
@@ -246,17 +246,17 @@ impl SchurSolver {
 }
 
 fn dot(a: &[f64], b: &[f64]) -> f64 {
-    // 결정적 합: 고정 크기 조각 합을 순서대로.
+    // Deterministic sum: add fixed-size chunk sums in order.
     let parts: Vec<f64> = a.par_chunks(4096).zip(b.par_chunks(4096)).map(|(x, y)| x.iter().zip(y).map(|(p, q)| p * q).sum()).collect();
     parts.iter().sum()
 }
 
-/// 블록 야코비(Schur 대각 블록) 전처리 켤레기울기.
-/// 종료: 이차 모형 상대 감소(나시–소퍼, η = 0.1, 라이브러리 LM 기본) 또는 잔차 ≤ 1e−12‖b‖ 또는 반복 상한.
+/// Block-Jacobi (Schur diagonal blocks) preconditioned conjugate gradient.
+/// Termination: quadratic-model relative decrease (Nash-Sofer, η = 0.1, library LM default) or residual <= 1e-12‖b‖ or iteration cap.
 fn pcg(s: &BlockSym, row_ptr: &[usize], col_idx: &[u32], vals: &[f64], b: &[f64], max_iter: usize) -> Option<Vec<f64>> {
     const ETA: f64 = 0.1;
     let n = s.n;
-    // 대각 블록 역행렬.
+    // Diagonal block inverses.
     let pinv: Vec<DMatrix<f64>> = (0..s.num_rows())
         .into_par_iter()
         .map(|a| {

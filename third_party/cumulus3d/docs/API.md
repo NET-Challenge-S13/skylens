@@ -4,7 +4,6 @@ English | [한국어](API.ko.md)
 
 An overview of the whole workspace. The complete list of each crate's public items is in that crate's README.
 
-API doc comments are currently in Korean; English translation is planned.
 
 ## Crate dependencies
 

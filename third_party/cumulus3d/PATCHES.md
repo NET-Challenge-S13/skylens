@@ -1,6 +1,6 @@
 # cumulus3d 패치
 
-GitHub `AH100-1/cumulus3d` 리비전 `b9f4a9bda714fa31fc0fd395f821114b64fd2c1f`(0.3.1 이후 git head)를 그대로 가져와 SkyLens에 필요한 것만 고친다. 루트 `Cargo.toml`의 `[patch."https://github.com/AH100-1/cumulus3d"]`가 이 사본으로 바꿔 끼운다. 원본 라이선스는 Apache-2.0(`LICENSE`, `NOTICE`, `THIRD_PARTY_NOTICES.md`).
+GitHub `AH100-1/cumulus3d` 0.4.0 릴리스 커밋 `ef0803eeb8a935467b5bf1adad96c123f4a25441`을 그대로 가져와 SkyLens에 필요한 것만 고친다. 0.4.0으로 올릴 때(이전 기준 `b9f4a9b`) 아래 패치가 원본에 들어갔는지 확인했다. 0.4.0에는 CUDA 패치가 하나도 없어(원본 쪽 변경은 주석 영어화, BA 사전 제약, stable display, live diff stream v4, 법선 평활화) 모두 다시 적용했고, 원본이 같은 줄을 바꾼 곳은 원본 쪽(영어 주석, BA 사전 제약)을 살리고 패치를 그 위에 얹었다. 코드는 원본의 `rustfmt.toml`(폭 140)로 다시 정렬했다. 루트 `Cargo.toml`의 `[patch."https://github.com/AH100-1/cumulus3d"]`가 이 사본으로 바꿔 끼운다. 원본 라이선스는 Apache-2.0(`LICENSE`, `NOTICE`, `THIRD_PARTY_NOTICES.md`).
 
 | 변경 | 이유 |
 |---|---|
@@ -10,5 +10,10 @@ GitHub `AH100-1/cumulus3d` 리비전 `b9f4a9bda714fa31fc0fd395f821114b64fd2c1f`(
 | 희소 단계 백엔드: `TwoViewBackend`(matching), `AbsPoseBackend`·`TriangulationBackend`(sfm)와 CUDA 구현 `CudaSparse`(cuda, `kernels/sparse.cu`). 두 뷰 기하 검증은 블록 안 모든 짝의 E/F/H LO-RANSAC 가설을 라운드마다 커널 한 번으로 채점하고(`core::ransac::BatchedRansac`), 정합은 P3P 가설을 묶어 채점하고, 삼각측량은 후보 트랙마다 스레드 하나가 RANSAC 삼각측량(2점 DLT, 다중 뷰 LO, 깊이·각도 검사)을 하고 재투영 오차·깊이 필터 값을 한꺼번에 계산한다. 가설 생성·LO·모델 갱신은 CPU. 계획의 `sparse.backend`(cpu, cuda), `gpu()` 가 cuda 로 켠다 | 위치 하나(3장)에서 매칭·검증 약 0.56초, 정합 약 0.2초, 삼각측량 약 1.7초가 CPU에서 걸렸다. 채점 커널은 곱셈-덧셈 융합을 끄고 잔차를 CPU와 같은 순서로 계산해 인라이어 수가 같다(잔차 합은 블록 안에서 합치는 순서가 달라 마지막 자리가 다를 수 있다) |
 | 희소 단계 GPU 대기 줄이기. `CudaSparse` 스트림을 가장 높은 우선순위로 만들고(`CudaDevice::new_high_priority`), 업로드·내려받기를 고정 메모리 스테이징과 늘기만 하는 장치 버퍼로 한다. `BatchedRansac::propose` 의 묶음 크기를 min_batch 에서 시작해 두 배씩 늘린다(처음부터 512개를 내면 CPU가 수십 번에 멈출 RANSAC 을 수백 번 채점한다). 채점 커널은 스레드마다 모아 블록 끝에서 한 번 합친다. 삼각측량 문제는 관측 수 순으로 정렬해 올린다 | 같은 입력의 CPU 시간과 견주면(`CUMULUS3D_CUDA_COMPARE=1`) 삼각측량·관측 검사·기하 검증이 GPU에서 3~7배 느렸다 |
 | 장치에서 내려받는 모든 복사(`memcpy_dtoh`, `clone_dtoh`)를 스트림을 먼저 기다린 뒤 하도록(`device::SyncedCopy`) | 일반 메모리로 내려받는 `cuMemcpyDtoHAsync` 는 앞선 커널을 기다리는 동안 드라이버 전역 잠금을 쥔다. 조밀화가 수백 ms 커널 뒤에서 내려받으면 같은 프로세스의 UNet·희소 단계 CUDA 호출이 모두 그만큼 멈췄다(Nsight Systems 로 확인, 재현은 `examples/bench_contention.rs`) |
+| BA 사전 제약을 CUDA 번들 조정에도(`crates/cuda/src/ba.rs`, 커널 `ba_add_at`). 0.4.0의 `ProblemInput::pose_priors`(카메라 위치 사전 제약, stable display의 GPS 제약 σ 1 m)와 `cam_priors`(내부값 사전 제약)를 CPU 백엔드(`problem.rs`)와 같은 식으로 CPU가 잔차·야코비안을 계산하고(개수는 영상·카메라 수 정도), JᵀJ·Jᵀr를 장치의 H·g_E에 더한다. 비용·후보 비용·모형 비용 변화에도 같은 항을 더한다. 시험 `tests/ba_gpu.rs::gpu_ba_matches_cpu_with_priors`(GPU 필요) | stable display는 구역 정밀 BA마다 위치 사전 제약을 건다. GPU 백엔드가 이를 모르면 CPU와 다른 문제를 풀고, CPU로 돌리면 구역마다 7.7~22초가 다시 든다 |
+| 구성 층(`compose::NodeBuilder`)에 stable display를 연결(`crates/cli/src/compose.rs`): `stable_display(on)`, `settle(tol, max_zone)`, `live_stride(n)`, `stream_origin(lat, lon, alt)`. 세션 설정으로 넘기고, `output(dir, ..)`이 있으면 `Recon::run`과 같이 `SinkSet::all()`에 live diff stream을 켜서 `<dir>/live/stream/`에 쓴다. 시험 `tests/compose_synthetic.rs::stable_display_node_has_no_previews_and_writes_the_stream_folder` | 0.4.0은 stable display와 차분 스트림을 `Recon`(선언 계획)에서만 켠다. SkyLens는 라이브 입력에 `CompositionHost`를 쓰므로 이 연결 없이는 stable display도 차분 스트림도 쓸 수 없다. 차분은 여전히 파일 싱크로만 나오고(메모리 이벤트 없음), SkyLens 모델 서버가 그 디렉터리를 따라 읽는다 |
 
 cumulus3d를 새 리비전으로 올릴 때는 원본에 같은 기능이 들어갔는지 확인하고, 들어갔으면 패치를 지운다.
+
+원본에서 이미 실패하는 시험: Windows에서 `sinks::tests::timeline_table`(1 ns 단위 시각을 쓰는데 Windows `SystemTime`은 100 ns 단위다). 패치와 무관하다.
+

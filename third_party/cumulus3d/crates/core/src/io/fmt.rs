@@ -25,9 +25,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! printf 호환 숫자 서식(로캘 무관).
+//! printf-compatible number formatting (locale-independent).
 
-/// C `printf("%.{precision}g")` 와 같은 결과. 모델 텍스트 형식은 precision = 17.
+/// Same result as C `printf("%.{precision}g")`. The model text format uses precision = 17.
 pub fn format_g(v: f64, precision: usize) -> String {
     if v.is_nan() {
         return if v.is_sign_negative() { "-nan".into() } else { "nan".into() };
@@ -39,7 +39,7 @@ pub fn format_g(v: f64, precision: usize) -> String {
     if v == 0.0 {
         return if v.is_sign_negative() { "-0".into() } else { "0".into() };
     }
-    // %e 변환으로 지수 X 를 정한다(반올림 후 지수).
+    // The exponent X is determined by the %e conversion (the exponent after rounding).
     let e_str = format!("{:.*e}", p - 1, v);
     let (mant, exp) = e_str.split_once('e').expect("e 표기");
     let x: i32 = exp.parse().expect("지수");

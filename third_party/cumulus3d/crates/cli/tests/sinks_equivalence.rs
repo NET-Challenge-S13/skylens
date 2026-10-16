@@ -25,11 +25,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 기본 훅(sinks) 동일성: 합성 장면을 `run_stream` 으로 돌린 출력과, 그 timeline 으로 다시 만든 같은 이벤트 열을
-//! 기본 훅에 흘려 만든 출력이 같은지 본다. 시각 값은 비교에서 빼고 문구·순서·파일 목록·manifest·점 수를 비교한다.
+//! Default hook (sinks) equivalence: check that the output of running a synthetic scene through `run_stream` equals the output made by
+//! feeding the same event sequence,
+//! rebuilt from its timeline, to the default hooks. Time values are excluded; text, order, file list, manifest and point counts are
+//! compared.
 //!
-//! CUDA 가 없으면 조밀화가 없으므로, 구역 점군 대신 저장된 희소 모델의 3D 점을 쓰고
-//! 기존 파일 입력 후처리(`post::run`)로 기준 출력을 만든다.
+//! Without CUDA there is no densification, so use the 3D points of the saved sparse models instead of zone point clouds
+//! and make the reference output with the existing file-input post-processing (`post::run`).
 
 mod common;
 mod replay;
@@ -49,7 +51,7 @@ use std::sync::Arc;
 const SPAN: usize = 4;
 const OVL: usize = 1;
 
-/// 받은 이벤트를 그대로 내보내는 리듀서(재생용).
+/// A reducer that emits the received events as they are (for replay).
 struct Replay;
 impl Reducer for Replay {
     type Input = Event;
@@ -64,7 +66,7 @@ impl Reducer for Replay {
     }
 }
 
-/// 희소 모델의 3D 점 → 점군(조밀화가 없을 때 구역 점군 대신).
+/// 3D points of a sparse model -> point cloud (instead of a zone point cloud when there is no densification).
 fn sparse_cloud(out: &Path, kind: &str, k: usize) -> PointCloud {
     let m = replay::model(out, &format!("{kind}_{k}"));
     let mut c = PointCloud::default();
@@ -84,7 +86,7 @@ fn timeline_texts(dir: &Path) -> Vec<String> {
     std::fs::read_to_string(dir.join("timeline.txt")).unwrap().lines().map(|l| replay::parse_line(l).1).collect()
 }
 
-/// run.log 의 `[HH:MM:SS] 사건` 줄 중 사건 문구인 것.
+/// Those `[HH:MM:SS] event` lines of run.log that are event text.
 fn stamped_events(dir: &Path, texts: &BTreeSet<String>) -> Vec<String> {
     std::fs::read_to_string(dir.join("run.log"))
         .unwrap()
@@ -97,13 +99,13 @@ fn stamped_events(dir: &Path, texts: &BTreeSet<String>) -> Vec<String> {
         .collect()
 }
 
-/// run.log 의 후처리 요약 덩어리("== 구역별 시간" ~ "== 단계별 시간" 앞).
+/// The post-processing summary chunk of run.log (from the per-zone times header up to before the per-stage times header).
 fn post_block(dir: &Path) -> Vec<String> {
     let s = std::fs::read_to_string(dir.join("run.log")).unwrap();
     s.lines().skip_while(|l| !l.starts_with("== 구역별 시간")).take_while(|l| !l.starts_with("== 단계별 시간")).map(String::from).collect()
 }
 
-/// 후처리 산출 파일(상대 경로, 스냅샷 이름의 시각 부분 제거, snapshots/timeline.txt 제외) → 점 수.
+/// Post-processing output files (relative path, time part of the snapshot name removed, snapshots/timeline.txt excluded) -> point count.
 fn outputs(dir: &Path) -> BTreeMap<String, usize> {
     let mut m = BTreeMap::new();
     for sub in ["full", "aligned", "final_frame", "snapshots"] {
@@ -118,7 +120,7 @@ fn outputs(dir: &Path) -> BTreeMap<String, usize> {
                 }
                 let rel = p.strip_prefix(dir).unwrap().to_string_lossy().replace('\\', "/");
                 if rel == "snapshots/timeline.txt" {
-                    continue; // 따로 확인
+                    continue; // checked separately
                 }
                 let name = if rel.starts_with("snapshots/event_") {
                     let mut parts: Vec<&str> = rel.split('_').collect();
@@ -135,7 +137,7 @@ fn outputs(dir: &Path) -> BTreeMap<String, usize> {
     m
 }
 
-/// manifest.json 에서 시각 값 줄을 가린다.
+/// Mask the time-value lines in manifest.json.
 fn manifest_masked(dir: &Path) -> String {
     let s = std::fs::read_to_string(dir.join("snapshots/manifest.json")).unwrap();
     s.lines()
@@ -179,7 +181,8 @@ fn sinks_reproduce_stream_outputs() {
     run_stream(cfg).expect("run_stream");
     let layout = Layout::discover(&src, 1).unwrap();
 
-    // 기준 후처리 출력: 조밀화가 있으면 그 실행 폴더, 없으면 희소 점군 + 파일 입력 후처리.
+    // Reference post-processing output: the run folder if there is densification, otherwise sparse point cloud + file-input
+    // post-processing.
     let refpost = if dense {
         old.clone()
     } else {
@@ -230,7 +233,7 @@ fn sinks_reproduce_stream_outputs() {
     let events = replay::events_from_run(&old, &layout, &CAMS, &clouds);
     assert!(events.iter().any(|e| e.kind() == EventKind::ZoneRefinedPose));
 
-    // 1) 종류별 훅 목록을 동기로 직접 호출. 2) 파이프라인(비동기, on_any)으로.
+    // 1) Call the per-kind hook list directly in synchronous mode. 2) Through the pipeline (asynchronous, on_any).
     let opts = SinkOptions { echo: false, save_models: true };
     let new_sync = base.join("new_sync");
     let mut hooks = sinks::default_sinks(&new_sync, &opts).unwrap();
@@ -255,16 +258,16 @@ fn sinks_reproduce_stream_outputs() {
     let old_post = outputs(&refpost);
     assert!(old_post.keys().any(|k| k.starts_with("snapshots/event_")), "{old_post:?}");
     for new in [&new_sync, &new_async] {
-        // timeline: 문구·순서.
+        // timeline: text and order.
         assert_eq!(timeline_texts(new), old_tl, "{}", new.display());
-        // run.log: 사건 줄 순서, 후처리 요약.
+        // run.log: order of event lines, post-processing summary.
         assert_eq!(stamped_events(new, &texts), stamped_events(&old, &texts));
         let pb = post_block(&refpost);
         assert!(pb.len() > 5, "{pb:?}");
         assert_eq!(post_block(new), pb);
-        // 파일 목록 + 점 수.
+        // File list + point counts.
         assert_eq!(outputs(new), old_post);
-        // manifest(시각 값 제외).
+        // manifest (excluding time values).
         assert_eq!(manifest_masked(new), manifest_masked(&refpost));
         assert_eq!(model_dirs(new), model_dirs(&old));
         assert!(new.join("snapshots/timeline.txt").exists());

@@ -48,8 +48,8 @@ tonic-prost = "0.14"
 tonic-prost-build = "0.14"
 protox = "0.10" # pure-Rust protobuf compiler, so builds do not need protoc
 
-# reconstruction: live CompositionHost input is only on the git head, not in the 0.3.1 release
-cumulus3d-cli = { git = "https://github.com/AH100-1/cumulus3d", rev = "b9f4a9bda714fa31fc0fd395f821114b64fd2c1f" }
+# reconstruction: the 0.4.0 release commit (stable display, live diff stream v4); the SkyLens patches in third_party replace it
+cumulus3d-cli = { git = "https://github.com/AH100-1/cumulus3d", rev = "ef0803eeb8a935467b5bf1adad96c123f4a25441" }
 deltamesh = "0.1"
 
 # UNet inference links libtorch 2.13, downloaded at build time (CUDA flavour from
@@ -57,9 +57,10 @@ deltamesh = "0.1"
 tch = { version = "0.24", features = ["download-libtorch"] }
 
 # rendering and UI (skylens_client)
-# 0.2.1 carries the layers SkyLens needs (pass drawing, meshes, textures, lines, fog, background colour).
-pointblitz = "0.2.1"
-pointblitz-io = "0.2.1"
+# 0.3.0: the layers SkyLens needs (pass drawing, meshes, textures, lines, fog, background colour) and
+# slot scenes for the live diff stream (SlotScene, slots messages, decision 0052).
+pointblitz = "0.3.0"
+pointblitz-io = "0.3.0"
 # Blitz from git: the 0.3.0-beta.2 release renders with wgpu 29, pointblitz 0.2 needs wgpu 30.
 blitz-dom = { git = "https://github.com/DioxusLabs/blitz", rev = "45496d9288b063719ebeae4e0761273f7881b3d7" }
 blitz-html = { git = "https://github.com/DioxusLabs/blitz", rev = "45496d9288b063719ebeae4e0761273f7881b3d7" }
@@ -78,7 +79,7 @@ lto = "thin"
 deltamesh = { path = "third_party/deltamesh" }
 
 # cumulus3d with SkyLens changes kept in-repo (third_party/cumulus3d/PATCHES.md):
-# the per-position stages on CUDA.
+# the per-position stages on CUDA, and stable display with the live diff stream on the composition layer.
 [patch."https://github.com/AH100-1/cumulus3d"]
 cumulus3d-cli = { path = "third_party/cumulus3d/crates/cli" }
 cumulus3d-core = { path = "third_party/cumulus3d/crates/core" }

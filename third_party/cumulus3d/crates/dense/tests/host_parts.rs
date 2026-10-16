@@ -25,7 +25,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 커널 바깥 부분: 이웃 선택, 깊이 범위, 융합(참 깊이맵 입력), PLY, 상대 기하, 캐시.
+//! Parts outside the kernel: neighbor selection, depth range, fusion (ground-truth depth map input), PLY, relative geometry, cache.
 
 use cumulus3d_dense::fusion::{fuse, FusionInput};
 use cumulus3d_dense::neighbors::{depth_ranges, PairStats};
@@ -41,7 +41,7 @@ fn synth() -> &'static SynthScene {
 }
 
 fn bare_view(c: [f64; 3]) -> DenseView {
-    // 아래를 보는 카메라(세계 z 위).
+    // Camera looking down (above world z).
     let r = [[1.0, 0.0, 0.0], [0.0, -1.0, 0.0], [0.0, 0.0, -1.0]];
     let t = [-(r[0][0] * c[0]), -(r[1][1] * c[1]), -(r[2][2] * c[2])];
     let img = Arc::new(ImageBuffer::new(4, 4, 3));
@@ -60,7 +60,7 @@ fn bare_view(c: [f64; 3]) -> DenseView {
 
 #[test]
 fn neighbor_selection_by_shared_count_and_angle() {
-    // 뷰 0 (원점 위 10 m), 1 (옆 3 m: 큰 각), 2 (옆 0.05 m: 각 < 1°), 3 (옆 −3 m).
+    // View 0 (10 m above the origin), 1 (3 m aside: large angle), 2 (0.05 m aside: angle < 1°), 3 (−3 m aside).
     let views = vec![bare_view([0.0, 0.0, 10.0]), bare_view([3.0, 0.0, 10.0]), bare_view([0.05, 0.0, 10.0]), bare_view([-3.0, 0.0, 10.0])];
     let mut points = Vec::new();
     let add = |pts: &mut Vec<ScenePoint>, n: usize, a: u32, b: u32| {
@@ -106,7 +106,7 @@ fn synthetic_scene_is_consistent() {
     let s = synth();
     assert_eq!(s.scene.views.len(), 9);
     assert!(s.scene.points.len() > 1000);
-    // 참 깊이에서 세계로 되돌린 점은 장면 표면 위.
+    // Points returned from the ground-truth depth to the world lie on the scene surface.
     let v = &s.scene.views[4];
     let (w, h) = (v.width, v.height);
     for (x, y) in [(10, 10), (w / 2, h / 2), (w - 5, h - 7), (100, 200)] {
@@ -147,11 +147,11 @@ fn fusion_of_true_maps_lies_on_surfaces() {
     assert!(far * 1000 < n, "표면 밖 {far}/{n}");
     let multi = out.visibility.iter().filter(|v| v.len() >= 2).count();
     assert!(multi * 100 >= 95 * n, "가시 뷰 ≥ 2: {multi}/{n}");
-    // 병렬(원자적 점유)도 같은 규칙: 점 수가 거의 같고 모두 표면 위.
+    // Parallel (atomic occupation) follows the same rule: the point counts are nearly equal and all lie on the surface.
     let par = run_fusion(&s.depth, &s.normal, &p, 0);
     let d = (par.cloud.len() as f64 - n as f64).abs() / n as f64;
     assert!(d < 0.05, "병렬 점 수 {} vs {n}", par.cloud.len());
-    // 순차는 결정적.
+    // Sequential is deterministic.
     let again = run_fusion(&s.depth, &s.normal, &p, 1);
     assert_eq!(again.cloud, out.cloud);
 }
@@ -164,7 +164,7 @@ fn merged_with_others(out: &cumulus3d_dense::FusionOutput, v: u32) -> usize {
 fn fusion_depth_and_normal_tolerances() {
     let s = synth();
     let p = FusionParams { mode: FusionMode::Traversal, ..FusionParams::default() };
-    // 뷰 4 깊이 2% 키움 → 1% 허용치에 걸려 다른 뷰와 합쳐지지 않음.
+    // Scale view 4 depth by 2% → caught by the 1% tolerance, not merged with other views.
     let mut d = s.depth.clone();
     for x in d[4].iter_mut() {
         *x *= 1.02;
@@ -172,7 +172,7 @@ fn fusion_depth_and_normal_tolerances() {
     let base = merged_with_others(&run_fusion(&s.depth, &s.normal, &p, 1), 4);
     let scaled = merged_with_others(&run_fusion(&d, &s.normal, &p, 1), 4);
     assert!(scaled * 50 < base, "깊이 2%: {scaled} / {base}");
-    // 법선 회전: 15° 는 합쳐지지 않고 8° 는 합쳐진다.
+    // Normal rotation: 15° is not merged, 8° is merged.
     let rot = |deg: f64| {
         let mut n = s.normal.clone();
         let (sa, ca) = deg.to_radians().sin_cos();
@@ -182,10 +182,10 @@ fn fusion_depth_and_normal_tolerances() {
         }
         n
     };
-    // (카메라 y 축 회전이라 y 축에 가까운 법선(상자 옆면)은 덜 돈다.)
+    // (Since the rotation is about the camera y axis, normals close to the y axis (box sides) rotate less.)
     assert!(merged_with_others(&run_fusion(&s.depth, &rot(15.0), &p, 1), 4) * 20 < base);
     assert!(merged_with_others(&run_fusion(&s.depth, &rot(8.0), &p, 1), 4) * 2 > base);
-    // 최소 픽셀 수: 기여 4개인 점은 5 에서 나오지 않는다.
+    // Minimum pixel count: a point with 4 contributions does not appear at 5.
     let out = run_fusion(&s.depth, &s.normal, &FusionParams { min_num_pixels: 1, ..p.clone() }, 1);
     let mut counts = [0usize; 3];
     let strict = run_fusion(&s.depth, &s.normal, &p, 1);
@@ -240,10 +240,10 @@ fn consistency_fusion_of_true_maps() {
     let far = out.cloud.positions.iter().filter(|x| s.surface_distance([x[0] as f64, x[1] as f64, x[2] as f64]) > 2e-3).count();
     assert!(far * 100 < n, "표면 밖 {far}/{n}");
     assert!(out.visibility.iter().all(|v| v.len() >= 3));
-    // 결정적(스레드 수와 무관).
+    // Deterministic (independent of thread count).
     let one = run_fusion(&s.depth, &s.normal, &p, 1);
     assert_eq!(one.cloud, out.cloud);
-    // 표시를 끄면 점이 더 많다(같은 표면을 뷰마다 다시 낸다).
+    // Turning marks off gives more points (the same surface is emitted again per view).
     let nomark = run_fusion(&s.depth, &s.normal, &FusionParams { mark_used: false, ..p.clone() }, 0);
     assert!(nomark.cloud.len() > n);
 }

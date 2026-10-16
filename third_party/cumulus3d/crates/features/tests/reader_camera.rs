@@ -25,7 +25,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 이미지 읽기·카메라 초기화 검증.
+//! Verification of image reading and camera initialization.
 
 use cumulus3d_core::{CameraModelKind, FeatureStore, Keypoint};
 use cumulus3d_features::*;
@@ -36,7 +36,7 @@ fn gray_conversion_exact() {
     assert_eq!(rgb_to_gray(0, 255, 0), 182);
     assert_eq!(rgb_to_gray(0, 0, 255), 18);
     assert_eq!(rgb_to_gray(10, 20, 30), 19);
-    // DynamicImage 경로(RGB, RGBA 알파 버림)
+    // DynamicImage path (RGB, RGBA with alpha dropped)
     let rgb = image::RgbImage::from_raw(2, 1, vec![255, 0, 0, 10, 20, 30]).unwrap();
     let g = gray::to_gray(&image::DynamicImage::ImageRgb8(rgb)).unwrap();
     assert_eq!(g.data, vec![54, 19]);
@@ -71,7 +71,7 @@ fn focal_rules() {
     let f = infer_focal(&ExifInfo::default(), 4000, 3000, 1.2);
     assert_eq!(f.focal, 4800.0);
     assert!(!f.prior);
-    // 센서 폭 표
+    // Sensor width table
     let e = ExifInfo { focal_mm: Some(8.8), make: Some("DJI".into()), model: Some("FC6310".into()), ..Default::default() };
     let f = infer_focal(&e, 5472, 3648, 1.2);
     assert!((f.focal - 8.8 / 13.2 * 5472.0).abs() < 1e-9);
@@ -106,7 +106,7 @@ fn rotation_roundtrip_and_image_consistency() {
             assert!((a - b).abs() < 1e-5, "k={k}");
         }
     }
-    // 영상 회전과 점 회전 규칙 일치: 화소 (x,y) 중심이 같은 값을 가리킴.
+    // Image rotation matches the point rotation rule: the center of pixel (x,y) points to the same value.
     let img = GrayImage::from_f32(7, 5, |x, y| ((x * 31 + y * 17) % 255) as f32 / 255.0);
     for k in 0..4u32 {
         let r = img.rotate_ccw(k);
@@ -164,7 +164,7 @@ fn camera_binding_scenario() {
     assert_eq!(cam.model, CameraModelKind::OpenCv);
     assert_eq!((cam.width, cam.height), (96, 64));
 
-    // 위치 1: 카메라별 existing id
+    // Position 1: existing id per camera
     let mut o2 = ExtractionOptions::default();
     for (n, c) in [("camF/1.jpg", 1), ("camR/1.jpg", 3), ("camL/1.jpg", 2)] {
         o2.reader.camera_mode = CameraMode::Existing(c);
@@ -174,19 +174,19 @@ fn camera_binding_scenario() {
     assert_eq!(store.num_cameras(), 3);
     assert_eq!(store.image_id_by_name("camR/1.jpg"), Some(5));
 
-    // 같은 이름 재실행 → 건너뜀
+    // Re-run with the same names -> skipped
     let r = ex.extract_inputs(&store, vec![input("camR/1.jpg", 96, 64)], &o2).unwrap();
     assert!(matches!(r[0].status, ImageStatus::AlreadyExists { image_id: 5 }));
     assert_eq!(store.num_images(), 6);
 
-    // 없는 카메라 → 즉시 오류
+    // Nonexistent camera -> immediate error
     o2.reader.camera_mode = CameraMode::Existing(42);
     assert!(ex.extract_inputs(&store, vec![input("x/1.jpg", 96, 64)], &o2).is_err());
 }
 
 #[test]
 fn keypoints_scaled_to_camera_size() {
-    // 축소된 영상에서 추출한 좌표가 입력 영상 크기로 환산되는지(최대 크기 64 로 강제 축소).
+    // Checks that coordinates extracted from a downscaled image are converted to the input image size (forced downscale with max size 64).
     let store = FeatureStore::new();
     let ex = FeatureExtractor::new();
     let mut opts = ExtractionOptions::default();
@@ -213,7 +213,7 @@ fn read_files_from_disk() {
     let store = FeatureStore::new();
     let r = FeatureExtractor::new().extract_files(&store, &dir, &names, &ExtractionOptions::default()).unwrap();
     assert_eq!(r.len(), 2);
-    // 사전순: missing < p0
+    // Lexicographic order: missing < p0
     assert!(matches!(r[0].status, ImageStatus::Failed { .. }));
     assert!(matches!(r[1].status, ImageStatus::Extracted { .. }));
     assert_eq!(gray::read_gray(&dir.join("camA/p0.png")).unwrap(), g);

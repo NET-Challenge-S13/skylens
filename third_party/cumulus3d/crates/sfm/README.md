@@ -4,7 +4,6 @@ English | [한국어](https://github.com/AH100-1/cumulus3d/blob/main/crates/sfm/
 
 SfM crate that builds camera poses and sparse 3D points from features and matches (global SfM, new-image registration, triangulation).
 
-API doc comments are currently in Korean; English translation is planned.
 
 **Pipeline stage**: takes the `FeatureStore` filled by `cumulus3d-matching` (features and two-view geometry) and the `MatchGraph` built from it,
 and produces a sparse reconstruction (`Reconstruction`). The first model is built by global SfM (relative poses → rotation averaging → tracks →

@@ -25,7 +25,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 합성 장면 통합 테스트: 전역 매퍼(BA 0회) → 위치별 등록 + 삼각측량.
+//! Synthetic-scene integration test: global mapper (0 BA iterations), then per-position registration + triangulation.
 
 use cumulus3d_core::{ImageId, MatchGraph, MatchGraphOptions, Reconstruction, Vec3};
 use cumulus3d_sfm::global_mapper::{global_mapper, GlobalSfmOptions};
@@ -39,7 +39,7 @@ fn graph_up_to(scene: &Scene, n: usize) -> MatchGraph {
     MatchGraph::from_store(&scene.store, &opts)
 }
 
-/// 상사 정렬 후 (중심 오차 중앙값/장면 범위, 회전 오차 중앙값 도).
+/// After similarity alignment: (median center error / scene extent, median rotation error in degrees).
 fn pose_errors(rec: &Reconstruction, scene: &Scene) -> (f64, f64) {
     let ids: Vec<ImageId> = rec.registered_images();
     let est: Vec<Vec3> = ids.iter().map(|i| rec.projection_center(*i).unwrap()).collect();
@@ -55,7 +55,7 @@ fn pose_errors(rec: &Reconstruction, scene: &Scene) -> (f64, f64) {
         }
         (hi - lo).norm()
     };
-    // 회전은 전역 회전 하나(R_est ≈ R_true·G)로 따로 정렬.
+    // Rotations are aligned separately by a single global rotation (R_est ≈ R_true·G).
     let mut sum = cumulus3d_core::Mat3::zeros();
     for i in &ids {
         sum += scene.truth[i].rotation_matrix().transpose() * rec.world_to_cam(*i).unwrap().rotation_matrix();

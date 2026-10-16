@@ -29,28 +29,28 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 5점 essential (Nistér 방식)과 8점 essential(재맞춤용).
+//! 5-point essential (Nistér method) and 8-point essential (for re-fitting).
 
 use crate::linalg::{mat3_from_row_major, null_space_9, null_vector3, singular_values_9, svd3};
 use crate::poly::{poly_add, poly_mul, roots_companion};
 use cumulus3d_core::{Mat3, Vec3};
 use nalgebra::SMatrix;
 
-/// 에피폴라 제약 행 bᵀ M a = 0 (행 우선 9-벡터).
+/// Epipolar constraint row bᵀ M a = 0 (row-major 9-vector).
 #[inline]
 pub fn epipolar_row(a: &Vec3, b: &Vec3) -> [f64; 9] {
     [b.x * a.x, b.x * a.y, b.x * a.z, b.y * a.x, b.y * a.y, b.y * a.z, b.z * a.x, b.z * a.y, b.z * a.z]
 }
 
-// ---- x, y, z 다항식(3차 이하) ----
+// ---- x, y, z polynomials (degree 3 or less) ----
 type P1 = [f64; 4]; // x, y, z, 1
 type P2 = [f64; 10];
 type P3 = [f64; 20];
 
 const M1: [[u8; 3]; 4] = [[1, 0, 0], [0, 1, 0], [0, 0, 1], [0, 0, 0]];
 const M2: [[u8; 3]; 10] = [[2, 0, 0], [1, 1, 0], [0, 2, 0], [1, 0, 1], [0, 1, 1], [0, 0, 2], [1, 0, 0], [0, 1, 0], [0, 0, 1], [0, 0, 0]];
-/// A 의 열 순서: 앞 10개(x 또는 y 포함) + 뒤 10개 [xz², xz, x, yz², yz, y, z³, z², z, 1].
-/// 앞쪽 마지막 6개는 (x²z, x²), (y²z, y²), (xyz, xy) 짝으로 B(z) 를 만든다.
+/// Column order of A: first 10 (containing x or y) + last 10 [xz², xz, x, yz², yz, y, z³, z², z, 1].
+/// The last 6 of the first group form B(z) from the pairs (x²z, x²), (y²z, y²), (xyz, xy).
 const M3: [[u8; 3]; 20] = [
     [3, 0, 0],
     [0, 3, 0],
@@ -148,8 +148,8 @@ fn add3(a: &mut P3, b: &P3, s: f64) {
     }
 }
 
-/// 5점(또는 N ≥ 5점) essential 해들(프로베니우스 노름 1, 최대 10개).
-/// `rays1`, `rays2` 는 단위 광선(영상1, 영상2). 제약: r2ᵀ E r1 = 0.
+/// 5-point (or N >= 5 points) essential solutions (Frobenius norm 1, at most 10).
+/// `rays1`, `rays2` are unit rays (image 1, image 2). Constraint: r2ᵀ E r1 = 0.
 pub fn essential_five_point(rays1: &[Vec3], rays2: &[Vec3]) -> Vec<Mat3> {
     let n = rays1.len();
     if n < 5 || rays2.len() != n {
@@ -157,10 +157,10 @@ pub fn essential_five_point(rays1: &[Vec3], rays2: &[Vec3]) -> Vec<Mat3> {
     }
     let rows: Vec<[f64; 9]> = rays1.iter().zip(rays2).map(|(a, b)| epipolar_row(a, b)).collect();
     let Some(basis) = null_space_9(&rows, 4) else { return Vec::new() };
-    // basis[0] 이 가장 작은 특이값. X, Y, Z, W 순서는 해 집합에 영향 없음.
+    // basis[0] has the smallest singular value. The order X, Y, Z, W does not affect the solution set.
     let (bx, by, bz, bw) = (basis[3], basis[2], basis[1], basis[0]);
 
-    // E 원소별 1차 다항식.
+    // Degree-1 polynomial per E element.
     let mut e = [[0.0f64; 4]; 9];
     for k in 0..9 {
         e[k] = [bx[k], by[k], bz[k], bw[k]];
@@ -219,8 +219,8 @@ pub fn essential_five_point(rays1: &[Vec3], rays2: &[Vec3]) -> Vec<Mat3> {
         return Vec::new();
     }
 
-    // B(z): 행 쌍 (4,5), (6,7), (8,9). 앞 + G·뒤 = 0.
-    // 각 원소 = 오름차순 z 계수. x 계수(3차), y 계수(3차), 상수(4차).
+    // B(z): row pairs (4,5), (6,7), (8,9). first + G·last = 0.
+    // Each element = ascending z coefficients. x coefficient (cubic), y coefficient (cubic), constant (quartic).
     let mut bmat: [[Vec<f64>; 3]; 3] = Default::default();
     for (r, (ei, fi)) in [(4usize, 5usize), (6, 7), (8, 9)].into_iter().enumerate() {
         let ge = |c: usize| g[(ei, c)];
@@ -277,7 +277,7 @@ pub fn essential_five_point(rays1: &[Vec3], rays2: &[Vec3]) -> Vec<Mat3> {
     out
 }
 
-/// 3×3 의 최소 우특이벡터(일반 SVD).
+/// Smallest right singular vector of a 3×3 (general SVD).
 fn smallest_right_singular(m: &Mat3) -> Vec3 {
     match svd3(m) {
         Some((_, _, v)) => v.column(2).into_owned(),
@@ -285,7 +285,8 @@ fn smallest_right_singular(m: &Mat3) -> Vec3 {
     }
 }
 
-/// 8점(이상) essential: 정규화 없이 단위 광선, 최소 특이벡터 후 rank-2 강제(두 특이값 같게 만들지 않음).
+/// 8-point (or more) essential: unit rays without normalization, smallest singular vector, then enforce rank 2
+/// (without equalizing the two singular values).
 pub fn essential_eight_point(rays1: &[Vec3], rays2: &[Vec3]) -> Option<Mat3> {
     if rays1.len() < 8 || rays1.len() != rays2.len() {
         return None;

@@ -25,10 +25,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 두 재구성 간 공유 3D 점 대응(후처리).
+//! Shared 3D point correspondences between two reconstructions (post-processing).
 //!
-//! 같은 이름의 영상에서 같은 2D 점 인덱스가 A 의 3D 점 i, B 의 3D 점 j 를 가리키면 (i, j) 쌍.
-//! 초벌은 정밀본과 같은 특징을 공유하므로(BA 전 사본) 인덱스가 그대로 대응한다.
+//! If the same 2D point index in an image of the same name refers to 3D point i of A and 3D point j of B, then (i, j) is a pair.
+//! The preview shares the same features as the refined one (a copy from before BA), so the indices correspond directly.
 
 use crate::error::{AlignError, Result};
 use crate::umeyama::{robust_umeyama, RobustUmeyamaOptions, RobustUmeyamaResult};
@@ -37,15 +37,15 @@ use std::collections::HashMap;
 use std::ops::Range;
 use std::sync::Arc;
 
-/// 영상 이름 필터 함수.
+/// Image name filter function.
 pub type NameFilter = Arc<dyn Fn(&str) -> bool + Send + Sync>;
 
-/// 대응 수집 옵션.
+/// Correspondence collection options.
 #[derive(Clone, Default)]
 pub struct SharedPointOptions {
-    /// 위치 인덱스(이름의 마지막 숫자열, [`position_index_from_name`]) 범위. 범위 밖 영상은 건너뜀.
+    /// Range of position index (the last digit string of the name, [`position_index_from_name`]). Images outside the range are skipped.
     pub position_range: Option<Range<u32>>,
-    /// 추가 이름 필터(true = 사용).
+    /// Additional name filter (true = use).
     pub name_filter: Option<NameFilter>,
 }
 
@@ -70,7 +70,7 @@ impl SharedPointOptions {
     }
 }
 
-/// 영상 이름에서 위치 인덱스: 파일 줄기(stem)의 마지막 숫자열. 예 `camF/camF_0012.jpg` → 12.
+/// Position index from an image name: the last digit string of the file stem. E.g. `camF/camF_0012.jpg` → 12.
 pub fn position_index_from_name(name: &str) -> Option<u32> {
     let file = name.rsplit(['/', '\\']).next().unwrap_or(name);
     let stem = file.rsplit_once('.').map_or(file, |(s, _)| s);
@@ -79,7 +79,7 @@ pub fn position_index_from_name(name: &str) -> Option<u32> {
     stem[start..end].parse().ok()
 }
 
-/// 공유 3D 점 쌍 (A 점 id, B 점 id). 중복 제거, 정렬된 결정적 순서.
+/// Shared 3D point pairs (A point id, B point id). Duplicates removed, in a sorted deterministic order.
 pub fn shared_point_correspondences(a: &Reconstruction, b: &Reconstruction, opts: &SharedPointOptions) -> Vec<(Point3DId, Point3DId)> {
     let b_by_name: HashMap<&str, _> = b.images().map(|im| (im.name.as_str(), im)).collect();
     let mut pairs = Vec::new();
@@ -88,7 +88,8 @@ pub fn shared_point_correspondences(a: &Reconstruction, b: &Reconstruction, opts
             continue;
         }
         let Some(ib) = b_by_name.get(ia.name.as_str()) else { continue };
-        // 설계 결정: 두 영상의 2D 점 수가 다르면(다른 특징 추출) 공통 인덱스 구간만 본다.
+        // Design decision: if the two images have different 2D point counts (different feature extraction),
+        // only the common index range is examined.
         for (pa, pb) in ia.points2d().iter().zip(ib.points2d()) {
             if pa.has_point3d() && pb.has_point3d() {
                 pairs.push((pa.point3d_id, pb.point3d_id));
@@ -100,7 +101,8 @@ pub fn shared_point_correspondences(a: &Reconstruction, b: &Reconstruction, opts
     pairs
 }
 
-/// 공유 점 대응 + 견고 Umeyama 로 `src_to_dst` Sim3 추정(초벌 → 정밀, 이전 정밀 → 새 정밀).
+/// Estimates the `src_to_dst` Sim3 from shared point correspondences + robust Umeyama
+/// (preview → refined, previous refined → new refined).
 pub fn align_reconstructions(
     src: &Reconstruction,
     dst: &Reconstruction,
@@ -149,19 +151,20 @@ mod tests {
 
     #[test]
     fn correspondences_and_alignment() {
-        // A: 점 k 가 영상 1·2 의 2D 인덱스 k 에 관측. B: 같은 관측을 다른 id(k+100), 다른 좌표계.
+        // A: point k is observed at 2D index k of images 1 and 2.
+        // B: the same observations with different ids (k+100) and a different coordinate frame.
         let truth = random_sim3(&mut cumulus3d_core::ransac::make_rng(Some(4)));
         let (mut a, mut b) = (base(3, 30), base(3, 30));
         for k in 0..30u32 {
             let x = Vec3::new(k as f64, (k * k % 7) as f64, (k % 5) as f64 * 2.0);
             let ta = vec![TrackEntry::new(1, k), TrackEntry::new(2, k)];
             a.add_point3d_with_id(k as u64 + 1, cumulus3d_core::Point3D { xyz: x, color: [0; 3], error: -1.0, track: ta }).unwrap();
-            // B 는 영상 2·3 에서 관측, 영상 2 만 공유. 앞 25개만.
+            // B is observed in images 2 and 3, only image 2 is shared. Only the first 25.
             if k < 25 {
                 let tb = vec![TrackEntry::new(2, k), TrackEntry::new(3, k)];
                 let mut y = truth.transform_point(&x);
                 if k == 0 {
-                    y += Vec3::new(1000.0, 0.0, 0.0); // 이상치
+                    y += Vec3::new(1000.0, 0.0, 0.0); // outlier
                 }
                 b.add_point3d_with_id(k as u64 + 100, cumulus3d_core::Point3D { xyz: y, color: [0; 3], error: -1.0, track: tb }).unwrap();
             }
@@ -169,7 +172,7 @@ mod tests {
         let pairs = shared_point_correspondences(&a, &b, &Default::default());
         assert_eq!(pairs.len(), 25);
         assert!(pairs.iter().all(|(i, j)| *j == *i + 99));
-        // 위치 범위 필터: 영상 2 = 위치 1. 범위 [2,3) 이면 공유 없음.
+        // Position range filter: image 2 = position 1. With range [2,3) there is no sharing.
         let none = shared_point_correspondences(&a, &b, &SharedPointOptions { position_range: Some(2..3), ..Default::default() });
         assert!(none.is_empty());
         let one = shared_point_correspondences(&a, &b, &SharedPointOptions { position_range: Some(1..2), ..Default::default() });
@@ -183,7 +186,7 @@ mod tests {
 
     #[test]
     fn dedup_pairs() {
-        // 같은 점 쌍이 두 영상에서 반복 관측되면 한 번만.
+        // If the same point pair is observed repeatedly in two images, count it only once.
         let (mut a, mut b) = (base(2, 5), base(2, 5));
         for k in 0..5u32 {
             let t = vec![TrackEntry::new(1, k), TrackEntry::new(2, k)];

@@ -25,8 +25,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 합성 장면 생성기(테스트·벤치용): 드론 3대 직선 비행, 위치마다 3장, OPENCV 카메라,
-//! 지면 근처 점, 2D 잡음, 파이프라인 짝 규칙(같은 카메라 간격 1..5,8,16 / 다른 카메라 위치 차 0..4).
+//! Synthetic scene generator (for tests and benchmarks): 3 drones flying straight lines, 3 images per position, OPENCV cameras,
+//! points near the ground, 2D noise, and the pipeline pairing rule
+//! (same camera: gap 1..5, 8, 16 / different cameras: position difference 0..4).
 
 use crate::math::{gaussian, so3_exp};
 use cumulus3d_core::{
@@ -35,7 +36,7 @@ use cumulus3d_core::{
 use rand::{RngExt, SeedableRng};
 use std::collections::{BTreeMap, HashMap};
 
-/// 장면 설정.
+/// Scene settings.
 #[derive(Clone, Debug)]
 pub struct SceneConfig {
     pub num_positions: usize,
@@ -43,7 +44,7 @@ pub struct SceneConfig {
     pub altitude: f64,
     pub num_points: usize,
     pub noise_px: f64,
-    /// 매칭 중 무작위 오대응 비율.
+    /// Fraction of random mismatches among the matches.
     pub outlier_ratio: f64,
     pub seed: u64,
 }
@@ -54,19 +55,19 @@ impl Default for SceneConfig {
     }
 }
 
-/// 생성된 장면.
+/// Generated scene.
 pub struct Scene {
     pub store: FeatureStore,
     pub truth: BTreeMap<ImageId, Rigid3>,
     pub points: Vec<Vec3>,
-    /// (영상, 키포인트) → 점 번호.
+    /// (image, keypoint) to point index.
     pub kp_point: HashMap<(ImageId, u32), usize>,
-    /// 위치별 영상 id (카메라 순).
+    /// Image ids per position (in camera order).
     pub images_by_position: Vec<Vec<ImageId>>,
     pub image_names: BTreeMap<ImageId, String>,
 }
 
-/// 카메라 3대(전방·우·좌) 의 OPENCV 내부값.
+/// OPENCV intrinsics of the 3 cameras (forward, right, left).
 pub fn opencv_camera(id: u32) -> Camera {
     let mut c = Camera::new(id, CameraModelKind::OpenCv, 1920, 1080, vec![1500.0, 1500.0, 960.0, 540.0, -0.1, 0.02, 0.001, 0.001])
         .expect("파라미터 수");
@@ -74,9 +75,9 @@ pub fn opencv_camera(id: u32) -> Camera {
     c
 }
 
-/// 아래를 보는 기본 자세(카메라 z = 세계 −Z, x = 세계 +X)에 롤·피치 기울기.
+/// Roll/pitch tilt applied to the default downward-looking pose (camera z = world −Z, x = world +X).
 fn drone_pose(center: Vec3, roll_deg: f64, pitch_deg: f64) -> Rigid3 {
-    // cam_to_world: 열 = 카메라 축의 세계 표현.
+    // cam_to_world: columns = camera axes expressed in the world frame.
     let base = cumulus3d_core::Mat3::new(1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, -1.0);
     let tilt = so3_exp(&Vec3::new(pitch_deg.to_radians(), roll_deg.to_radians(), 0.0));
     let cam_to_world = base * tilt;
@@ -84,7 +85,7 @@ fn drone_pose(center: Vec3, roll_deg: f64, pitch_deg: f64) -> Rigid3 {
     Rigid3::from_rotation_matrix(&r, -(r * center))
 }
 
-/// 장면 생성. 영상 id 는 위치 → 카메라 순으로 1 부터.
+/// Scene generation. Image ids start at 1, ordered by position and then camera.
 pub fn generate(cfg: &SceneConfig) -> Scene {
     let mut rng = rand_pcg::Pcg64::seed_from_u64(cfg.seed);
     let store = FeatureStore::new();
@@ -96,7 +97,7 @@ pub fn generate(cfg: &SceneConfig) -> Scene {
     let points: Vec<Vec3> = (0..cfg.num_points)
         .map(|_| Vec3::new(rng.random_range(-25.0..len + 25.0), rng.random_range(-30.0..30.0), rng.random_range(0.0..10.0)))
         .collect();
-    // 카메라별 (y 오프셋, 롤, 피치).
+    // Per-camera (y offset, roll, pitch).
     let rigs = [(0.0, 0.0, 20.0), (8.0, 25.0, 5.0), (-8.0, -25.0, 5.0)];
     let mut truth = BTreeMap::new();
     let mut images_by_position = Vec::new();
@@ -132,7 +133,7 @@ pub fn generate(cfg: &SceneConfig) -> Scene {
         }
         images_by_position.push(ids);
     }
-    // 짝 규칙.
+    // Pairing rule.
     let mut pairs = Vec::new();
     for p in 0..cfg.num_positions {
         for k in 0..3 {
@@ -168,7 +169,7 @@ pub fn generate(cfg: &SceneConfig) -> Scene {
         if matches.len() < 15 {
             continue;
         }
-        // 기하 검증이 저장했을 E (참 자세에서).
+        // The E that the geometric verification would have stored (from the true poses).
         let rel = truth[&b] * truth[&a].inverse();
         let e = cumulus3d_core::geometry::skew(&rel.translation.normalize()) * rel.rotation_matrix();
         let tvg = TwoViewGeometry {
@@ -186,7 +187,7 @@ pub fn generate(cfg: &SceneConfig) -> Scene {
 }
 
 impl Scene {
-    /// 위치 0..n 영상 이름 집합(대응 그래프 이름 필터용).
+    /// Set of image names for positions 0..n (for filtering the correspondence graph by name).
     pub fn names_up_to(&self, n: usize) -> std::collections::HashSet<String> {
         self.images_by_position[..n.min(self.images_by_position.len())].iter().flatten().map(|id| self.image_names[id].clone()).collect()
     }

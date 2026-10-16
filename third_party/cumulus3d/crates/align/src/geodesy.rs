@@ -29,25 +29,25 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! WGS84 측지 변환. 각도 입력·출력은 도(degree).
+//! WGS84 geodetic conversion. Angular inputs and outputs are in degrees.
 
 use cumulus3d_core::{Mat3, Vec3};
 
-/// 장반경 a (m).
+/// Semi-major axis a (m).
 pub const WGS84_A: f64 = 6378137.0;
-/// 편평률 f.
+/// Flattening f.
 pub const WGS84_F: f64 = 1.0 / 298.257223563;
-/// 단반경 b = (1 − f) a (m).
+/// Semi-minor axis b = (1 − f) a (m).
 pub const WGS84_B: f64 = (1.0 - WGS84_F) * WGS84_A;
-/// 제1이심률 제곱 e² = f (2 − f).
+/// First eccentricity squared e² = f (2 − f).
 pub const WGS84_E2: f64 = WGS84_F * (2.0 - WGS84_F);
 
-/// 묘유선 곡률반경 N(φ).
+/// Prime vertical radius of curvature N(φ).
 fn prime_vertical_radius(sin_lat: f64) -> f64 {
     WGS84_A / (1.0 - WGS84_E2 * sin_lat * sin_lat).sqrt()
 }
 
-/// (위도°, 경도°, 타원체고 m) → ECEF (m).
+/// (latitude°, longitude°, ellipsoidal height m) to ECEF (m).
 pub fn lla_to_ecef(lat_deg: f64, lon_deg: f64, alt: f64) -> Vec3 {
     let (sp, cp) = lat_deg.to_radians().sin_cos();
     let (sl, cl) = lon_deg.to_radians().sin_cos();
@@ -55,14 +55,14 @@ pub fn lla_to_ecef(lat_deg: f64, lon_deg: f64, alt: f64) -> Vec3 {
     Vec3::new((n + alt) * cp * cl, (n + alt) * cp * sl, (n * (1.0 - WGS84_E2) + alt) * sp)
 }
 
-/// ECEF → (위도°, 경도°, 고도 m). 반복법(최대 100회, 변화 < 1e−12 에서 종료).
+/// ECEF to (latitude°, longitude°, altitude m). Iterative (at most 100 iterations, stops when the change < 1e−12).
 pub fn ecef_to_lla(p: &Vec3) -> (f64, f64, f64) {
     let (x, y, z) = (p.x, p.y, p.z);
     let rho = (x * x + y * y).sqrt();
     let lon = y.atan2(x);
     let mut lat = z.atan2(rho);
     let mut alt = 0.0f64;
-    // 설계 결정: 극점(ρ=0)에서 반복식이 0으로 나눈다. 그 경우 닫힌 해(±90°, |Z| − b)를 쓴다.
+    // Design decision: at the poles (ρ=0) the iteration divides by zero. In that case use the closed-form solution (±90°, |Z| − b).
     if rho < 1e-9 {
         let lat = if z >= 0.0 { 90.0 } else { -90.0 };
         return (lat, lon.to_degrees(), z.abs() - WGS84_B);
@@ -82,20 +82,20 @@ pub fn ecef_to_lla(p: &Vec3) -> (f64, f64, f64) {
     (lat.to_degrees(), lon.to_degrees(), alt)
 }
 
-/// ENU 국소 좌표계(원점 고정). `p_enu = R (p_ecef − r0)`.
+/// Local ENU coordinate frame (fixed origin). `p_enu = R (p_ecef − r0)`.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct EnuFrame {
-    /// 원점 (위도°, 경도°, 고도 m) — 입력값.
+    /// Origin (latitude°, longitude°, altitude m) — input values.
     pub origin_lla: (f64, f64, f64),
-    /// 원점 ECEF.
+    /// Origin in ECEF.
     pub origin_ecef: Vec3,
-    /// ECEF → ENU 회전(행: E, N, U).
+    /// ECEF to ENU rotation (rows: E, N, U).
     pub rotation: Mat3,
 }
 
 impl EnuFrame {
-    /// 원점 LLA 로 생성. 원점 위경도를 ECEF 에서 반복법으로 다시 구해 회전을 만든다
-    /// (입력과 수치적으로 같으며, 결과의 비트 단위 재현성을 위한 기본 동작).
+    /// Creates from the origin LLA. Recomputes the origin latitude/longitude from ECEF iteratively to build the rotation
+    /// (numerically equal to the input; default behavior for bitwise reproducibility of results).
     pub fn new(lat_deg: f64, lon_deg: f64, alt: f64) -> Self {
         let r0 = lla_to_ecef(lat_deg, lon_deg, alt);
         let (lat0, lon0, _) = ecef_to_lla(&r0);
@@ -109,7 +109,7 @@ impl EnuFrame {
         );
         Self { origin_lla: (lat_deg, lon_deg, alt), origin_ecef: r0, rotation }
     }
-    /// ECEF → 이 좌표계의 ENU.
+    /// ECEF to ENU of this frame.
     pub fn ecef_to_enu(&self, p: &Vec3) -> Vec3 {
         self.rotation * (p - self.origin_ecef)
     }
@@ -117,11 +117,11 @@ impl EnuFrame {
     pub fn enu_to_ecef(&self, e: &Vec3) -> Vec3 {
         self.rotation.transpose() * e + self.origin_ecef
     }
-    /// (위도°, 경도°, 타원체고 m) → ENU.
+    /// (latitude°, longitude°, ellipsoidal height m) to ENU.
     pub fn lla_to_enu(&self, lat_deg: f64, lon_deg: f64, alt: f64) -> Vec3 {
         self.ecef_to_enu(&lla_to_ecef(lat_deg, lon_deg, alt))
     }
-    /// ENU → (위도°, 경도°, 타원체고 m).
+    /// ENU to (latitude°, longitude°, ellipsoidal height m).
     pub fn enu_to_lla(&self, e: &Vec3) -> (f64, f64, f64) {
         ecef_to_lla(&self.enu_to_ecef(e))
     }
@@ -156,7 +156,8 @@ mod tests {
         close(&f.lla_to_enu(37.5001, 127.0001, 60.0), &Vec3::new(8.8426, 11.0988, 10.0000), 1e-3);
     }
 
-    /// 같은 위도·고도에서 경도만 Δ 이동: 정확해 E = (N+h)cosφ sinΔ, N = −sinφ·(N+h)cosφ(cosΔ−1), U = (N+h)cos²φ(cosΔ−1).
+    /// Shifting only the longitude by Δ at the same latitude and altitude:
+    /// exact E = (N+h)cosφ sinΔ, N = −sinφ·(N+h)cosφ(cosΔ−1), U = (N+h)cos²φ(cosΔ−1).
     #[test]
     fn enu_one_degree_east() {
         let (lat, lon, h) = (37.5f64, 127.0f64, 50.0f64);
@@ -167,7 +168,7 @@ mod tests {
         let d = 1.0f64.to_radians();
         let expect = Vec3::new(nh * cp * d.sin(), -sp * nh * cp * (d.cos() - 1.0), nh * cp * cp * (d.cos() - 1.0));
         close(&e, &expect, 1e-6);
-        // 근사: 동쪽 1° ≈ 88.4 km, 위로 약 −0.6 km (지구 곡률).
+        // Approximation: 1° east ≈ 88.4 km, about −0.6 km up (Earth curvature).
         assert!((e.x - 88_400.0).abs() < 200.0, "{e:?}");
         assert!(e.z < 0.0 && e.y > 0.0);
     }

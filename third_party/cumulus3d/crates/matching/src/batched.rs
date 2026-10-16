@@ -37,14 +37,11 @@
 //! 나란히 진행하면서, 라운드마다 모든 짝의 가설을 채점기 호출 한 번으로 채점한다. 표본·최소 해법·
 //! 판정·LO 는 CPU 경로와 같으므로 채점 결과가 같으면 검증 결과도 같다.
 
-use crate::estimators::{
-    EssentialFivePointEstimator, Fundamental7PtEstimator, FundamentalEightPointEstimator, HomographyEstimator,
-};
+use crate::estimators::{EssentialFivePointEstimator, Fundamental7PtEstimator, FundamentalEightPointEstimator, HomographyEstimator};
 use crate::pipeline::verify_pair;
 use crate::two_view::{
-    assemble_calibrated, assemble_homography_only, assemble_uncalibrated, calibrated_inputs, degenerate, derive_seed,
-    estimate_two_view, filter_stationary, finalize_geometry, gather_points, path_of, ransac_opts, EstimationPath, TwoViewOptions,
-    SALT_E, SALT_F, SALT_H,
+    assemble_calibrated, assemble_homography_only, assemble_uncalibrated, calibrated_inputs, degenerate, derive_seed, estimate_two_view,
+    filter_stationary, finalize_geometry, gather_points, path_of, ransac_opts, EstimationPath, TwoViewOptions, SALT_E, SALT_F, SALT_H,
 };
 use cumulus3d_core::ransac::{BatchedRansac, Estimator, RandomSubsetSampler, RansacReport, Support};
 use cumulus3d_core::{pair_id_of, Camera, FeatureMatch, FeatureStore, ImageId, Keypoint, Mat3, TwoViewGeometry, Vec2, Vec3};
@@ -313,7 +310,14 @@ pub fn verify_pairs_batched(
         if r.path == EstimationPath::Calibrated {
             let e = EssentialFivePointEstimator;
             let ro = ransac_opts(o, r.e_err, SALT_E);
-            steppers.push(Stepper::E(BatchedRansac::new(e, Some(e), RandomSubsetSampler::new(e.min_num_samples()), &ro, &r.r1[..], &r.r2[..])));
+            steppers.push(Stepper::E(BatchedRansac::new(
+                e,
+                Some(e),
+                RandomSubsetSampler::new(e.min_num_samples()),
+                &ro,
+                &r.r1[..],
+                &r.r2[..],
+            )));
             sets.push(ResidualSet::EssentialRays(&r.r1, &r.r2));
             owner.push((i, 0));
         }
@@ -416,7 +420,12 @@ pub fn verify_pairs_batched(
 /// 시험용 합성 저장소: 같은 핀홀 카메라(초점 사전값 있음)로 찍은 영상 `n_images` 장과,
 /// 이웃 영상 짝마다 참 대응 + 무작위 이상치 매칭. (저장소, [(id1, id2, 매칭)]).
 #[doc(hidden)]
-pub fn synthetic_pairs(seed: u64, n_images: usize, n_points: usize, outlier_ratio: f64) -> (FeatureStore, Vec<(ImageId, ImageId, Vec<FeatureMatch>)>) {
+pub fn synthetic_pairs(
+    seed: u64,
+    n_images: usize,
+    n_points: usize,
+    outlier_ratio: f64,
+) -> (FeatureStore, Vec<(ImageId, ImageId, Vec<FeatureMatch>)>) {
     use cumulus3d_core::CameraModelKind;
     use rand::{RngExt, SeedableRng};
     let mut r = rand_pcg::Pcg64::seed_from_u64(seed);

@@ -29,7 +29,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 왜곡 보정: PINHOLE 카메라 계산, 카메라별 재표본 맵 캐시, 영상 재표본, 희소 모델 변환.
+//! Undistortion: PINHOLE camera computation, per-camera resampling-map cache, image resampling, sparse model conversion.
 
 use crate::image::{GrayImage, ImageBuffer, Integral};
 use cumulus3d_core::interop;
@@ -40,28 +40,28 @@ use std::hash::{Hash, Hasher};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-/// 왜곡 보정 옵션(파이프라인은 `max_image_size = 960`).
+/// Undistortion options (the pipeline uses `max_image_size = 960`).
 #[derive(Clone, Debug, PartialEq)]
 pub struct UndistortOptions {
-    /// 가장자리 빈 픽셀 허용 비율(0 = 빈 픽셀 없음, 1 = 입력 전체 포함).
+    /// Allowed fraction of blank pixels at the border (0 = no blank pixels, 1 = whole input included).
     pub blank_pixels: f64,
-    /// 출력 크기 배율 하한.
+    /// Lower bound of the output size scale.
     pub min_scale: f64,
-    /// 출력 크기 배율 상한.
+    /// Upper bound of the output size scale.
     pub max_scale: f64,
-    /// ≤ 0 이면 제한 없음(관례상 −1).
+    /// No limit if ≤ 0 (conventionally −1).
     pub max_image_size: i64,
-    /// 관심 영역 왼쪽(영상 너비 비율).
+    /// Region of interest, left (fraction of image width).
     pub roi_min_x: f64,
-    /// 관심 영역 위쪽(영상 높이 비율).
+    /// Region of interest, top (fraction of image height).
     pub roi_min_y: f64,
-    /// 관심 영역 오른쪽(영상 너비 비율).
+    /// Region of interest, right (fraction of image width).
     pub roi_max_x: f64,
-    /// 관심 영역 아래쪽(영상 높이 비율).
+    /// Region of interest, bottom (fraction of image height).
     pub roi_max_y: f64,
-    /// patch-match.cfg 에 쓰는 원천(이웃) 영상 수.
+    /// Number of source (neighbor) images written to patch-match.cfg.
     pub num_patch_match_src_images: usize,
-    /// JPEG 품질(−1 = 100).
+    /// JPEG quality (−1 = 100).
     pub jpeg_quality: i32,
 }
 
@@ -83,7 +83,7 @@ impl Default for UndistortOptions {
 }
 
 impl UndistortOptions {
-    /// 사용자 파이프라인 값(max_image_size 960).
+    /// User pipeline values (max_image_size 960).
     pub fn pipeline() -> Self {
         Self { max_image_size: 960, ..Self::default() }
     }
@@ -99,7 +99,7 @@ impl UndistortOptions {
 }
 
 fn is_perspective(m: CameraModelKind) -> bool {
-    // 이 크레이트가 아는 모델(0..4)은 모두 원근 모델이다.
+    // All models this crate knows (0..4) are perspective models.
     matches!(
         m,
         CameraModelKind::SingleFocalPinhole
@@ -114,7 +114,7 @@ fn has_no_distortion(cam: &Camera) -> bool {
     cam.model.extra_param_slots().iter().all(|&i| cam.params[i].abs() <= 1e-8)
 }
 
-/// 왜곡 없는 PINHOLE 카메라 계산. 카메라 id 는 유지.
+/// Computes the distortion-free PINHOLE camera. The camera id is kept.
 pub fn undistorted_camera(cam: &Camera, opts: &UndistortOptions) -> Result<Camera> {
     if !is_perspective(cam.model) {
         return Err(Error::Unsupported(format!("왜곡 보정: 모델 {}", cam.model.name())));
@@ -197,7 +197,7 @@ pub fn undistorted_camera(cam: &Camera, opts: &UndistortOptions) -> Result<Camer
     Ok(out)
 }
 
-/// max_image_size 규칙: 줄이기만, 반올림은 0 에서 먼 쪽.
+/// max_image_size rule: only shrinks; rounding goes away from 0.
 fn apply_max_image_size(cam: &mut Camera, max_size: i64) {
     if max_size <= 0 {
         return;
@@ -211,19 +211,19 @@ fn apply_max_image_size(cam: &mut Camera, max_size: i64) {
     }
 }
 
-/// 카메라 하나의 보정 결과: PINHOLE 카메라 + 입력 해상도 재표본 맵.
+/// Undistortion result of one camera: PINHOLE camera + resampling map at the input resolution.
 #[derive(Debug)]
 pub struct CameraUndistortion {
-    /// 입력(왜곡 있는) 카메라.
+    /// Input (distorted) camera.
     pub source: Camera,
-    /// 보정된 PINHOLE 카메라.
+    /// Undistorted PINHOLE camera.
     pub pinhole: Camera,
-    /// 보조 카메라(입력 크기) 픽셀마다 입력 영상 표본 위치 (sx−0.5, sy−0.5). 실패는 NaN.
+    /// For each pixel of the auxiliary camera (input size), the input image sample position (sx−0.5, sy−0.5). NaN on failure.
     lut: Vec<[f32; 2]>,
 }
 
 impl CameraUndistortion {
-    /// 카메라 계산 + LUT 구성.
+    /// Camera computation + LUT construction.
     pub fn new(source: &Camera, opts: &UndistortOptions) -> Result<Self> {
         let pinhole = undistorted_camera(source, opts)?;
         let (sw, sh) = (source.width as usize, source.height as usize);
@@ -243,7 +243,7 @@ impl CameraUndistortion {
         Ok(Self { source: source.clone(), pinhole, lut })
     }
 
-    /// 영상 재표본: 입력 해상도에서 쌍선형 변형(범위 밖 검정) → 면적 평균 축소.
+    /// Image resampling: bilinear warp at the input resolution (black outside the range) → area-average downscale.
     pub fn undistort_image(&self, img: &ImageBuffer) -> Result<ImageBuffer> {
         let (sw, sh) = (self.source.width as usize, self.source.height as usize);
         if img.width != sw || img.height != sh {
@@ -278,7 +278,7 @@ impl CameraUndistortion {
         if ow == sw && oh == sh {
             return Ok(warped);
         }
-        // 설계 결정: 축소는 정확한 면적 평균으로 한다.
+        // Design decision: downscaling uses an exact area average.
         let mut out = ImageBuffer::new(ow, oh, ch);
         let planes: Vec<Vec<f32>> = (0..ch)
             .into_par_iter()
@@ -308,18 +308,18 @@ fn camera_key(cam: &Camera, opts: &UndistortOptions) -> u64 {
     h.finish()
 }
 
-/// 카메라 매개변수 해시 → 보정 결과(LUT 포함) 캐시. 구역 사이에 공유한다.
+/// Camera parameter hash → undistortion result (with LUT) cache. Shared between zones.
 #[derive(Default)]
 pub struct UndistortCache {
     map: Mutex<HashMap<u64, Arc<CameraUndistortion>>>,
 }
 
 impl UndistortCache {
-    /// 빈 캐시.
+    /// Empty cache.
     pub fn new() -> Self {
         Self::default()
     }
-    /// 캐시에서 찾거나 새로 계산.
+    /// Looks up in the cache or computes anew.
     pub fn get(&self, cam: &Camera, opts: &UndistortOptions) -> Result<Arc<CameraUndistortion>> {
         let key = camera_key(cam, opts);
         if let Some(v) = self.map.lock().unwrap_or_else(|e| e.into_inner()).get(&key) {
@@ -329,25 +329,25 @@ impl UndistortCache {
         self.map.lock().unwrap_or_else(|e| e.into_inner()).insert(key, v.clone());
         Ok(v)
     }
-    /// 캐시된 카메라 수.
+    /// Number of cached cameras.
     pub fn len(&self) -> usize {
         self.map.lock().unwrap_or_else(|e| e.into_inner()).len()
     }
-    /// 비어 있는지.
+    /// Whether it is empty.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
 }
 
-/// 희소 모델 변환: 카메라를 PINHOLE 로, 2D 관측을 새 카메라 좌표로(실패 NaN).
-/// 자세·3D 점·트랙·이름·id 는 그대로.
+/// Sparse model conversion: cameras become PINHOLE, 2D observations are mapped to the new camera coordinates (NaN on failure).
+/// Poses, 3D points, tracks, names and ids are unchanged.
 pub fn undistort_reconstruction(rec: &Reconstruction, opts: &UndistortOptions, cache: &UndistortCache) -> Result<Reconstruction> {
     let mut new_cams: BTreeMap<CameraId, Camera> = BTreeMap::new();
     for (id, cam) in rec.cameras() {
         let nc = if has_no_distortion(cam) && opts.max_image_size <= 0 {
             cam.clone()
         } else {
-            // 캐시는 매개변수 해시로 공유되므로(같은 값의 다른 카메라) id 는 이 카메라 것으로 되돌린다.
+            // The cache is shared by parameter hash (different cameras with equal values), so restore the id to this camera's.
             let mut c = cache.get(cam, opts)?.pinhole.clone();
             c.camera_id = *id;
             c
@@ -398,24 +398,24 @@ pub fn undistort_reconstruction(rec: &Reconstruction, opts: &UndistortOptions, c
     Ok(out)
 }
 
-/// 메모리 내 왜곡 보정 결과.
+/// In-memory undistortion result.
 pub struct UndistortResult {
-    /// 변환된 희소 모델(PINHOLE).
+    /// Converted sparse model (PINHOLE).
     pub reconstruction: Reconstruction,
-    /// 등록 영상별 보정 영상. 읽기 실패한 영상은 없다.
+    /// Undistorted image per registered image. Images that failed to read are absent.
     pub images: BTreeMap<ImageId, Arc<ImageBuffer>>,
-    /// 처리 실패(영상 읽기 실패 등)한 영상 id.
+    /// Ids of images whose processing failed (e.g. read failure).
     pub failed: Vec<ImageId>,
 }
 
-/// 등록 영상 전부를 보정한다. `load` 는 입력 영상을 돌려준다(없으면 실패 처리).
+/// Undistorts all registered images. `load` returns the input image (treated as a failure if absent).
 pub fn undistort<F>(rec: &Reconstruction, opts: &UndistortOptions, cache: &UndistortCache, load: F) -> Result<UndistortResult>
 where
     F: Fn(&Image) -> Option<Arc<ImageBuffer>> + Sync,
 {
     let reconstruction = undistort_reconstruction(rec, opts, cache)?;
     let ids = rec.registered_images();
-    // 카메라 LUT 를 먼저 채워 영상 병렬 처리 중 중복 계산을 막는다.
+    // Fill the camera LUTs first to avoid duplicate computation during parallel image processing.
     for im in ids.iter().filter_map(|i| rec.image(*i)) {
         cache.get(&rec.cameras()[&im.camera_id], opts)?;
     }
@@ -442,7 +442,7 @@ where
     Ok(UndistortResult { reconstruction, images, failed })
 }
 
-/// 입력 영상 폴더에서 읽어 보정.
+/// Reads from the input image folder and undistorts.
 pub fn undistort_from_dir(
     rec: &Reconstruction,
     image_dir: impl AsRef<Path>,
@@ -453,9 +453,9 @@ pub fn undistort_from_dir(
     undistort(rec, opts, cache, |im| ImageBuffer::load(dir.join(&im.name)).ok().map(Arc::new))
 }
 
-/// 보정 결과를 조밀 복원 작업 폴더로 쓴다: images/(하위 폴더 포함), sparse/(이진 모델),
-/// stereo/{depth_maps,normal_maps,consistency_graphs}/ 빈 폴더와 설정 파일.
-/// 폴더 구성·파일 형식은 [`cumulus3d_core::interop`] 가 정한다.
+/// Writes the undistortion result as a dense reconstruction working folder: images/ (including subfolders), sparse/ (binary model),
+/// empty stereo/{depth_maps,normal_maps,consistency_graphs}/ folders and config files.
+/// Folder layout and file formats are defined by [`cumulus3d_core::interop`].
 pub fn write_undistorted_workspace(result: &UndistortResult, out_dir: impl AsRef<Path>, opts: &UndistortOptions) -> Result<()> {
     let out = out_dir.as_ref();
     let rec = &result.reconstruction;
@@ -512,10 +512,10 @@ mod tests {
 
     #[test]
     fn lut_maps_pinhole_to_source() {
-        // 작은 카메라에서 보정 영상 위치를 입력 카메라로 다시 투영하면 LUT 와 같아야 한다.
+        // Reprojecting the undistorted image positions of a small camera back to the input camera must match the LUT.
         let cam = Camera::new(1, CameraModelKind::OpenCv, 200, 120, vec![160.0, 160.0, 100.0, 60.0, 0.05, -0.02, 0.001, 0.0005]).unwrap();
         let u = CameraUndistortion::new(&cam, &UndistortOptions::default()).unwrap();
-        // 입력 크기의 체커보드 → 보정 영상의 기하 정합 확인: 중심 근처 픽셀값 일치.
+        // Checkerboard of input size → check the geometric alignment of the undistorted image: pixel values near the center match.
         let mut img = ImageBuffer::new(200, 120, 1);
         for y in 0..120 {
             for x in 0..200 {
@@ -524,7 +524,7 @@ mod tests {
         }
         let out = u.undistort_image(&img).unwrap();
         assert_eq!((out.width as u64, out.height as u64), (u.pinhole.width, u.pinhole.height));
-        // 보정 영상의 중심 픽셀 → 입력 위치
+        // Center pixel of the undistorted image → input position
         let (x, y) = (u.pinhole.width as f64 / 2.0, u.pinhole.height as f64 / 2.0);
         let uv = u.pinhole.img_to_normalized(&Vec2::new(x, y)).unwrap();
         let p = cam.normalized_to_img(&uv);

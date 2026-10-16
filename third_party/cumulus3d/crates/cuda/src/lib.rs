@@ -25,28 +25,32 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! CUDA 백엔드(cudarc + NVRTC 런타임 컴파일). CUDA 가 없는 기계에서도 빌드되고(동적 로딩),
-//! 실행 시 장치가 없으면 [`is_available`] 이 거짓이다.
+//! CUDA backend (cudarc + NVRTC runtime compilation). Builds on machines without CUDA (dynamic loading),
+//! and at run time [`is_available`] is false if there is no device.
 //!
-//! - [`CudaPatchMatch`]: `cumulus3d_dense::PatchMatchBackend` 구현(다중 스케일 조밀화의 스케일별 실행·평가·판독).
-//! - [`CudaMatcher`]: `cumulus3d_matching::MatcherBackend` 구현(정수 내적 top-2).
-//! - [`CudaSift`]: `cumulus3d_features::SiftEngine` 구현(스케일 공간·검출·방향·선택·기술자 모두 GPU, CpuSift 와 같은 품질이나 비트 단위로 같지는 않음).
-//! - [`CudaBundleAdjuster`]: `cumulus3d_ba::BaBackend` 구현(잔차·야코비안·Schur 조립·축소 계통 풀이·역대입을 GPU 에서, LM 루프는 CPU).
-//! - [`CudaSparse`]: `cumulus3d_matching::TwoViewBackend`(두 뷰 기하 가설 채점), `cumulus3d_sfm::AbsPoseBackend`
-//!   (절대 자세 가설 채점), `cumulus3d_sfm::TriangulationBackend`(RANSAC 삼각측량·관측 검사) 구현.
+//! - [`CudaPatchMatch`]: implementation of `cumulus3d_dense::PatchMatchBackend` (per-scale run, evaluation and readout of multi-scale
+//!   densification).
+//! - [`CudaMatcher`]: implementation of `cumulus3d_matching::MatcherBackend` (integer dot product top-2).
+//! - [`CudaSift`]: implementation of `cumulus3d_features::SiftEngine` (scale space, detection, orientation, selection and descriptors
+//!   all on the GPU; same quality as CpuSift but not bit-identical).
+//! - [`CudaBundleAdjuster`]: implementation of `cumulus3d_ba::BaBackend` (residuals, Jacobians, Schur assembly, reduced system solve
+//!   and back-substitution on the GPU, the LM loop on the CPU).
+//! - [`CudaSparse`]: implementation of `cumulus3d_matching::TwoViewBackend` (two-view geometry hypothesis scoring),
+//!   `cumulus3d_sfm::AbsPoseBackend` (absolute pose hypothesis scoring) and `cumulus3d_sfm::TriangulationBackend` (RANSAC
+//!   triangulation, observation checks).
 //!
-//! `unsafe` 는 cudarc 가 unsafe 로 둔 곳(커널 발사, 고정 호스트 메모리 할당, `DeviceRepr` 표시)에만 쓴다.
+//! `unsafe` is used only where cudarc marks things unsafe (kernel launch, pinned host memory allocation, `DeviceRepr` marking).
 //!
-//! # 사용 예
+//! # Usage example
 //!
 //! ```
 //! use cumulus3d_cuda::{is_available, CudaMatcher};
 //! use cumulus3d_matching::MatcherBackend;
 //!
-//! // CUDA 가 없는 기계에서는 거짓이므로 아무것도 하지 않는다.
+//! // On machines without CUDA this is false, so nothing is done.
 //! if is_available() {
 //!     let matcher = CudaMatcher::try_default().expect("CUDA 장치 0");
-//!     let (d1, d2) = (vec![1u8; 128 * 4], vec![1u8; 128 * 3]); // 128바이트 SIFT 기술자 4개, 3개
+//!     let (d1, d2) = (vec![1u8; 128 * 4], vec![1u8; 128 * 3]); // 4 and 3 128-byte SIFT descriptors
 //!     let (rows, cols) = matcher.top2(&d1, 4, &d2, 3);
 //!     assert_eq!((rows.len(), cols.len()), (4, 3));
 //! }
@@ -57,7 +61,7 @@
 //! use cumulus3d_dense::{densify, DenseScene, DensifyOptions};
 //!
 //! fn run(scene: &DenseScene) -> Result<(), Box<dyn std::error::Error>> {
-//!     let pm = CudaPatchMatch::try_default()?; // 장치 0, 기본 옵션
+//!     let pm = CudaPatchMatch::try_default()?; // device 0, default options
 //!     let out = densify(scene, &DensifyOptions::default(), &pm, None)?;
 //!     println!("조밀 점 {}개", out.cloud.len());
 //!     Ok(())
@@ -79,9 +83,10 @@ pub use patchmatch::{CudaPatchMatch, CudaPatchMatchOptions};
 pub use sift::CudaSift;
 pub use sparse::CudaSparse;
 
-/// 모든 커널을 장치 없이 NVRTC 로 컴파일해 본다(CI 검사용). `arch` 예: `"compute_70"`.
-/// 실제 실행 때와 같은 옵션·정의 조합(patchmatch: 창 간격 1·2, 하드웨어 보간 켬·끔, 빠른 수학 켬·끔)을 쓴다.
-/// 성공하면 (커널 이름, PTX 바이트 수) 목록, 실패하면 첫 오류. NVRTC 라이브러리는 있어야 한다.
+/// Tries compiling all kernels with NVRTC without a device (for CI checks). `arch` example: `"compute_70"`.
+/// Uses the same options and define combinations as real runs (patchmatch: window step 1 and 2, hardware interpolation on and off, fast
+/// math on and off).
+/// On success returns the list of (kernel name, PTX byte count); on failure the first error. The NVRTC library must exist.
 pub fn check_kernels(arch: &'static str) -> Result<Vec<(String, usize)>, String> {
     use cudarc::nvrtc::compile_ptx_with_opts;
     let compile = |name: String, src: &str, fmad: bool, fast: bool, defs: &[String]| {

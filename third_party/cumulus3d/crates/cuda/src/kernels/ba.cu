@@ -38,6 +38,7 @@
 // - ba_s_init / ba_schur / ba_symmetrize / ba_fix_mask: 축소 계통 S = H + D − W V⁻¹ Wᵀ, 우변 −g_E + W V⁻¹ g_p.
 // - ba_matvec / ba_precond / ba_dot* / ba_axpy2 / ba_xpby: 블록 야코비 PCG.
 // - ba_backsub / ba_model_cost: 점 역대입과 모형 비용 변화.
+// - ba_add_at: CPU 가 만든 사전 제약 항(JᵀJ, Jᵀr)을 H·g_E 에 더한다.
 //
 // 부분합은 고정 격자(블록 256)의 블록별 합을 호스트가 블록 순서대로 더한다(같은 입력이면 같은 값).
 // H·S·우변 누적은 원자적 덧셈이라 합산 순서가 실행마다 다를 수 있다(마지막 자리 수준 차이).
@@ -700,4 +701,9 @@ extern "C" __global__ void ba_gp_max(int nvp, const double* __restrict__ gp, con
     double m = 0.0;
     for (int i = blockIdx.x * blockDim.x + threadIdx.x; i < 3 * nvp; i += gridDim.x * blockDim.x) m = fmax(m, fabs(gp[i] / scale_p[i]));
     block_max(m, partial);
+}
+
+// a[idx[t]] += val[t] (index repeats allowed). Adds the CPU-built prior terms into H and g_E.
+extern "C" __global__ void ba_add_at(int n, const int* __restrict__ idx, const double* __restrict__ val, double* a) {
+    for (int t = blockIdx.x * blockDim.x + threadIdx.x; t < n; t += gridDim.x * blockDim.x) atomic_add_f64(&a[idx[t]], val[t]);
 }

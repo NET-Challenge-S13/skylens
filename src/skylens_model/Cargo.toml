@@ -28,7 +28,8 @@ tonic = { workspace = true, features = ["transport", "router"] }
 prost.workspace = true
 cumulus3d-cli.workspace = true
 deltamesh.workspace = true
-pointblitz-io.workspace = true
+# `stream`: reading the live diff stream directory (models/skylens/slotstream.rs).
+pointblitz-io = { workspace = true, features = ["stream"] }
 tch.workspace = true
 # Compute capability for the default precision. Already in the graph through cumulus3d-cuda; driver only, loaded at run time.
 cudarc = { version = "0.19", default-features = false, features = ["std", "driver", "dynamic-loading", "cuda-12040"] }
@@ -39,7 +40,7 @@ tokio-stream = "0.1"
 ctrlc = { version = "3", features = ["termination"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "tiff"] }
 # Types cumulus3d-cli exposes in its events (Reconstruction, PointCloud, Vec3); same git revision as cumulus3d-cli.
-cumulus3d-core = { git = "https://github.com/AH100-1/cumulus3d", rev = "b9f4a9bda714fa31fc0fd395f821114b64fd2c1f" }
+cumulus3d-core = { git = "https://github.com/AH100-1/cumulus3d", rev = "ef0803eeb8a935467b5bf1adad96c123f4a25441" }
 
 [target.'cfg(windows)'.dependencies]
 # Loads libtorch's CUDA backend at startup (see app.rs load_torch_cuda).

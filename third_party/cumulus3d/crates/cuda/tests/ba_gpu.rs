@@ -75,7 +75,8 @@ fn make_problem(np: usize, npt: usize, loss: Loss, seed: u64) -> ProblemInput {
         }
     }
     let len = np as f64 * 0.5;
-    let pts_true: Vec<Vec3> = (0..npt).map(|_| Vec3::new((len + 4.0) * (rng.u() + 0.5) - 2.0, 6.0 * rng.u(), 9.0 + 2.0 * rng.u())).collect();
+    let pts_true: Vec<Vec3> =
+        (0..npt).map(|_| Vec3::new((len + 4.0) * (rng.u() + 0.5) - 2.0, 6.0 * rng.u(), 9.0 + 2.0 * rng.u())).collect();
     let (mut obs_img, mut obs_pt, mut obs_xy) = (Vec::new(), Vec::new(), Vec::new());
     let mut points = Vec::new();
     let mut point_const = Vec::new();
@@ -136,6 +137,8 @@ fn make_problem(np: usize, npt: usize, loss: Loss, seed: u64) -> ProblemInput {
         obs_img,
         obs_pt,
         obs_xy,
+        pose_priors: Vec::new(),
+        cam_priors: Vec::new(),
         loss,
         solver: LinearSolverType::DenseSchur,
         max_linear_solver_iterations: 500,
@@ -250,4 +253,27 @@ fn backend_trait_runs_on_gpu() {
     let s = gpu.solve(&input, &opts).unwrap();
     assert!(s.result.termination != Termination::Failure);
     assert!(s.result.final_cost < s.result.initial_cost);
+}
+
+#[test]
+fn gpu_ba_matches_cpu_with_priors() {
+    if !is_available() {
+        eprintln!("CUDA 장치 없음: 건너뜀");
+        return;
+    }
+    let gpu = CudaBundleAdjuster::try_default().expect("CUDA BA");
+    let opts = TrOptions::new(200, 1e-12, 1e-10, 1e-14);
+    let mut input = make_problem(12, 1500, Loss::Cauchy(2.0), 17);
+    // 위치 사전 제약: 고정 자세(0), 성분 고정 자세(1), 나머지 몇 개. 목표는 현재 중심에서 조금 옮긴 값.
+    for p in [0usize, 1, 4, 7, 11] {
+        let pose = input.poses[p];
+        let c = -(pose.rotation_matrix().transpose() * pose.translation);
+        input.pose_priors.push((p, c + Vec3::new(0.05, -0.03, 0.02), 0.5));
+    }
+    // 내부값 사전 제약: 카메라 0 의 fx(슬롯 0), 카메라 1 의 k(슬롯 3), cam_var 에 없는 슬롯(무시돼야 함).
+    input.cam_priors = vec![(0, 0, 905.0, 1.0 / 2.0), (1, 3, 0.02, 1.0 / 0.01), (1, 1, 500.0, 1.0)];
+    let c = CpuBaBackend.solve(&input, &opts).unwrap();
+    let g = gpu.solve_gpu(&input, &opts).expect("GPU BA");
+    assert_eq!(g.linear_solver, LinearSolverType::DenseSchur);
+    compare(&input, &c, &g, 1e-7, 1e-6, 1e-5);
 }

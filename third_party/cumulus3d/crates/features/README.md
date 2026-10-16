@@ -4,8 +4,6 @@ English | [한국어](https://github.com/AH100-1/cumulus3d/blob/main/crates/feat
 
 Image reading (decoding, EXIF, grayscale conversion, downscaling, orientation rotation), initial camera parameter selection, and deterministic SIFT feature extraction.
 
-> API doc comments are currently in Korean; English translation is planned.
-
 **Pipeline stage**: the first stage (feature extraction). Takes a batch of images, assigns cameras, and incrementally writes keypoints and descriptors
 to `cumulus3d_core::FeatureStore`. `cumulus3d-matching` reads this store.
 SIFT computation sits behind the `SiftEngine` trait, so it can be swapped for a GPU backend (`CudaSift` in `cumulus3d-cuda`).

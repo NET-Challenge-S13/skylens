@@ -25,10 +25,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 작은 수학 도구: 결정적 해시, 오차 함수, 가시 확률 방출, 기하 사전확률, 분위수.
-//! 커널 쪽 식과 같은 정의를 두어 손계산 기준값과 단위 시험의 기준으로 쓴다.
+//! Small math tools: deterministic hash, error function, visibility probability emission, geometric priors, quantile.
+//! Defined the same as the kernel-side formulas, serving as the reference for hand-computed values and unit tests.
 
-/// FNV-1a 64비트(실행·기계와 무관한 결정적 해시).
+/// FNV-1a 64-bit (deterministic hash independent of run and machine).
 pub fn hash_bytes(b: &[u8]) -> u64 {
     let mut h: u64 = 0xcbf2_9ce4_8422_2325;
     for &x in b {
@@ -38,7 +38,7 @@ pub fn hash_bytes(b: &[u8]) -> u64 {
     h
 }
 
-/// 64비트 값 섞기(splitmix64 마무리 단계).
+/// 64-bit value mixing (splitmix64 finalizer).
 #[inline]
 pub fn mix64(mut z: u64) -> u64 {
     z = (z ^ (z >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
@@ -46,7 +46,7 @@ pub fn mix64(mut z: u64) -> u64 {
     z ^ (z >> 31)
 }
 
-/// 오차 함수(테일러 급수, |x| ≤ 5 에서 상대 1e−12 수준; 밖은 ±1).
+/// Error function (Taylor series, relative error around 1e−12 for |x| ≤ 5; ±1 outside).
 pub fn erf(x: f64) -> f64 {
     if x.abs() > 5.0 {
         return x.signum();
@@ -65,23 +65,23 @@ pub fn erf(x: f64) -> f64 {
     sum * 2.0 / std::f64::consts::PI.sqrt()
 }
 
-/// 비용 \[0,2\] 위 절단 반정규 밀도의 정규화 상수 A(σ).
+/// Normalization constant A(σ) of the half-normal density truncated on cost \[0,2\].
 pub fn emission_norm(sigma: f64) -> f64 {
     2.0 / ((2.0 * std::f64::consts::PI).sqrt() * sigma * erf(2.0 / (sigma * std::f64::consts::SQRT_2)))
 }
 
-/// "보임" 상태 방출 밀도 E(c) = A·exp(−c²/(2σ²)).
+/// "Visible" state emission density E(c) = A·exp(−c²/(2σ²)).
 pub fn emission(cost: f64, sigma: f64) -> f64 {
     emission_norm(sigma) * (-cost * cost / (2.0 * sigma * sigma)).exp()
 }
 
-/// 방출만 쓴 가시 사후확률 E1/(E1 + 0.5).
+/// Visibility posterior using only the emission, E1/(E1 + 0.5).
 pub fn visibility_probability(cost: f64, sigma: f64) -> f64 {
     let e = emission(cost, sigma);
     e / (e + 0.5)
 }
 
-/// 삼각측량 사전: cosθ 가 cos(θ_min) 보다 크면(각이 작으면) 감쇠.
+/// Triangulation prior: attenuate when cosθ is larger than cos(θ_min) (i.e. the angle is small).
 pub fn triangulation_prior(cos_theta: f64, min_angle_rad: f64) -> f64 {
     let cmin = min_angle_rad.cos();
     if cos_theta > cmin {
@@ -92,19 +92,19 @@ pub fn triangulation_prior(cos_theta: f64, min_angle_rad: f64) -> f64 {
     }
 }
 
-/// 입사각 사전: x = 1 − max(0, cosφ), exp(−x²/(2σ²)).
+/// Incidence angle prior: x = 1 − max(0, cosφ), exp(−x²/(2σ²)).
 pub fn incident_prior(cos_phi: f64, sigma: f64) -> f64 {
     let x = 1.0 - cos_phi.max(0.0);
     (-x * x / (2.0 * sigma * sigma)).exp()
 }
 
-/// 3×3 호모그래피(행 우선)로 점 하나 옮기기.
+/// Move one point by a 3×3 homography (row-major).
 pub fn apply_h(h: &[f64; 9], x: f64, y: f64) -> (f64, f64) {
     let z = h[6] * x + h[7] * y + h[8];
     ((h[0] * x + h[1] * y + h[2]) / z, (h[3] * x + h[4] * y + h[5]) / z)
 }
 
-/// 해상도 사전: 창 네 모서리를 옮긴 사각형 넓이와 (2R+1)² 의 비 min(a/b, b/a).
+/// Resolution prior: min(a/b, b/a), the ratio of the quadrilateral area from the four moved window corners to (2R+1)².
 pub fn resolution_prior(h: &[f64; 9], x: f64, y: f64, radius: f64) -> f64 {
     let c = [(x - radius, y - radius), (x - radius, y + radius), (x + radius, y + radius), (x + radius, y - radius)];
     let p: Vec<(f64, f64)> = c.iter().map(|&(a, b)| apply_h(h, a, b)).collect();
@@ -122,7 +122,7 @@ pub fn resolution_prior(h: &[f64; 9], x: f64, y: f64, radius: f64) -> f64 {
     (a_src / a_ref).min(a_ref / a_src)
 }
 
-/// 정렬된 값의 선형 보간 분위수 q∈\[0,1\] (위치 q·(n−1)).
+/// Linearly interpolated quantile q∈\[0,1\] of sorted values (position q·(n−1)).
 pub fn quantile_sorted(v: &[f64], q: f64) -> f64 {
     if v.is_empty() {
         return 0.0;
@@ -134,14 +134,15 @@ pub fn quantile_sorted(v: &[f64], q: f64) -> f64 {
     v[lo] + (v[hi] - v[lo]) * f
 }
 
-/// 중앙값(짝수 개면 가운데 두 값의 평균). 입력을 정렬한다.
+/// Median (mean of the two middle values for an even count). Sorts the input.
 pub fn median_in_place(v: &mut [f64]) -> f64 {
     v.sort_by(|a, b| a.total_cmp(b));
     quantile_sorted(v, 0.5)
 }
 
-/// 이웃 평면 전달: 픽셀 q 의 가설(깊이 dq, 법선 n)이 정하는 평면과 광선 ray_p 의 교점 깊이.
-/// 평면이 광선과 거의 평행하거나 교점이 카메라 뒤면 None.
+/// Neighbor plane transfer: depth of the intersection of the ray ray_p with the plane defined by the hypothesis (depth dq, normal n) of
+/// pixel q.
+/// None if the plane is nearly parallel to the ray or the intersection is behind the camera.
 pub fn plane_transfer(dq: f64, n: [f64; 3], ray_q: [f64; 3], ray_p: [f64; 3]) -> Option<f64> {
     let num = n[0] * ray_q[0] + n[1] * ray_q[1] + n[2] * ray_q[2];
     let den = n[0] * ray_p[0] + n[1] * ray_p[1] + n[2] * ray_p[2];
@@ -197,7 +198,7 @@ mod tests {
 
     #[test]
     fn plane_transfer_matches_ray_plane_intersection() {
-        // 평면 z = 10 − 0.2 x (카메라 좌표), 법선은 카메라를 향함.
+        // Plane z = 10 − 0.2 x (camera coordinates), normal faces the camera.
         let n = {
             let v = [0.2f64, 0.0, 1.0];
             let l = (v[0] * v[0] + v[2] * v[2]).sqrt();

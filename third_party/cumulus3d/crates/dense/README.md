@@ -4,8 +4,6 @@ English | [한국어](https://github.com/AH100-1/cumulus3d/blob/main/crates/dens
 
 Undistortion and multi-view densification: estimates, filters, and fuses depth maps from a registered sparse model and its images to produce a dense point cloud (PLY).
 
-> API doc comments are currently in Korean; English translation is planned.
-
 **Pipeline stage**: the last stage, after SfM (`cumulus3d-sfm`) and GPS alignment (`cumulus3d-align`).
 Sparse model → undistortion (PINHOLE) → densification scene → neighbor views and depth ranges → multi-scale PatchMatch depth maps →
 filtering and post-processing → fusion → dense point cloud.

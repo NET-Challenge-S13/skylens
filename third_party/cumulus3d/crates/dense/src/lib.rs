@@ -25,26 +25,29 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 왜곡 보정과 다시점 조밀화.
+//! Undistortion and multi-view densification.
 //!
-//! - [`undistort`](mod@undistort): 왜곡 있는 카메라 → PINHOLE 카메라 계산, 카메라별 재표본 맵 캐시, 영상 재표본, 희소 모델 변환.
-//! - [`image`]: 영상 버퍼와 재표본 도구.
-//! - [`scene`]: 조밀화 장면(뷰 K·자세·영상, 희소점).
-//! - [`neighbors`]: 이웃 뷰 선택과 깊이 범위.
-//! - [`kernel`]: PatchMatch 백엔드 경계(한 스케일의 전파·뷰 선택·정제는 백엔드가 수행).
-//! - [`densify`](mod@densify): 다중 스케일 진행, 세부 복원, 필터, 융합 연결.
-//! - [`fusion`], [`fusion_score`]: 깊이맵 융합(일치·확장 중앙값·점수 융합).
-//! - [`postproc`], [`upsample`], [`math`], [`params`]: 후처리, 상향 표본, 수치 도구, 설정.
-//! - [`stats`]: 점군 품질 통계.
-//! - [`cache`]: 겹치는 구역용 깊이맵 캐시.
-//! - [`synthetic`]: 시험용 합성 장면.
+//! - [`undistort`](mod@undistort): distorted camera → PINHOLE camera computation, per-camera resampling-map cache, image resampling, sparse
+//!   model conversion.
+//! - [`image`]: image buffers and resampling tools.
+//! - [`scene`]: densification scene (view K, pose, image; sparse points).
+//! - [`neighbors`]: neighbor view selection and depth ranges.
+//! - [`kernel`]: PatchMatch backend boundary (propagation, view selection and refinement at one scale are done by the backend).
+//! - [`densify`](mod@densify): multi-scale progression, detail restoration, filters, fusion hookup.
+//! - [`fusion`], [`fusion_score`]: depth map fusion (agreement, extended median, score fusion).
+//! - [`smooth`]: normal-direction bilateral smoothing of the fused cloud.
+//! - [`visibility`]: free-space (visibility) filter that removes fused points in front of surfaces other views observed.
+//! - [`postproc`], [`upsample`], [`math`], [`params`]: post-processing, upsampling, numeric tools, settings.
+//! - [`stats`]: point cloud quality statistics.
+//! - [`cache`]: depth map cache for overlapping zones.
+//! - [`synthetic`]: synthetic scenes for tests.
 //!
-//! 이 크레이트에는 PatchMatch 백엔드 구현이 없다. [`densify()`] 에는 [`PatchMatchBackend`] 구현
-//! (예: `cumulus3d-cuda` 의 GPU 백엔드 `CudaPatchMatch`)을 넘겨야 한다.
+//! This crate has no PatchMatch backend implementation. [`densify()`] needs a [`PatchMatchBackend`] implementation
+//! (e.g. the GPU backend `CudaPatchMatch` of `cumulus3d-cuda`).
 //!
-//! # 사용 예
+//! # Usage example
 //!
-//! 합성 장면의 참 깊이맵을 CPU 에서 융합한다(백엔드 불필요).
+//! Fuse the ground-truth depth maps of a synthetic scene on the CPU (no backend needed).
 //!
 //! ```
 //! use cumulus3d_dense::neighbors::PairStats;
@@ -61,7 +64,7 @@
 //! assert!(out.cloud.len() > 0);
 //! ```
 //!
-//! 실제 조밀화(왜곡 보정 → 장면 → 깊이맵 → 융합 → PLY). 백엔드는 GPU 구현을 넘긴다.
+//! Real densification (undistortion → scene → depth maps → fusion → PLY). Pass a GPU implementation as the backend.
 //!
 //! ```no_run
 //! use cumulus3d_dense::{densify, undistort_from_dir, DenseScene, DensifyOptions, PatchMatchBackend, SceneOptions, UndistortCache, UndistortOptions};
@@ -89,10 +92,12 @@ pub mod neighbors;
 pub mod params;
 pub mod postproc;
 pub mod scene;
+pub mod smooth;
 pub mod stats;
 pub mod synthetic;
 pub mod undistort;
 pub mod upsample;
+pub mod visibility;
 
 pub use cache::{CachedDepth, DepthMapCache};
 pub use densify::{compute_depth_maps, densify, fuse_depth_maps, pair_geometry, DenseOutput, DenseTimings, DepthMapResult, DepthMapSet};
@@ -107,8 +112,10 @@ pub use params::{
 };
 pub use postproc::PostParams;
 pub use scene::{DenseScene, DenseView, SceneOptions, ScenePoint};
+pub use smooth::{smooth_along_normals, SmoothParams};
 pub use stats::{cloud_stats, CloudStats};
 pub use undistort::{
     undistort, undistort_from_dir, undistort_reconstruction, undistorted_camera, write_undistorted_workspace, CameraUndistortion,
     UndistortCache, UndistortOptions, UndistortResult,
 };
+pub use visibility::{filter_visibility, VisibilityParams};

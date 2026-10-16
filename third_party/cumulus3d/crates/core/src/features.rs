@@ -29,36 +29,36 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 특징·매칭 자료형.
+//! Feature and matching data types.
 
 use crate::error::{Error, Result};
 use crate::geometry::{Mat3, Rigid3};
 
-/// SIFT 기술자 차원.
+/// SIFT descriptor dimension.
 pub const DESCRIPTOR_DIM: usize = 128;
 
-/// 키포인트: 입력 영상 해상도 픽셀 좌표 (x, y) + 아핀 형상 A = [[a11, a12], [a21, a22]] (f32).
+/// Keypoint: pixel coordinates (x, y) at input image resolution + affine shape A = [[a11, a12], [a21, a22]] (f32).
 ///
-/// 픽셀 원점은 좌상단 모서리, 좌상단 화소 중심 = (0.5, 0.5).
-/// A 의 열은 키포인트 국소 좌표축을 영상 좌표로 보낸 벡터.
+/// The pixel origin is the top-left corner; the top-left pixel center = (0.5, 0.5).
+/// The columns of A are the keypoint's local coordinate axes mapped into image coordinates.
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
 pub struct Keypoint {
-    /// x 픽셀 좌표.
+    /// x pixel coordinate.
     pub x: f32,
-    /// y 픽셀 좌표.
+    /// y pixel coordinate.
     pub y: f32,
-    /// 아핀 형상 A 의 (1,1) 원소.
+    /// The (1,1) element of the affine shape A.
     pub a11: f32,
-    /// 아핀 형상 A 의 (1,2) 원소.
+    /// The (1,2) element of the affine shape A.
     pub a12: f32,
-    /// 아핀 형상 A 의 (2,1) 원소.
+    /// The (2,1) element of the affine shape A.
     pub a21: f32,
-    /// 아핀 형상 A 의 (2,2) 원소.
+    /// The (2,2) element of the affine shape A.
     pub a22: f32,
 }
 
 impl Keypoint {
-    /// A = 단위행렬.
+    /// A = identity matrix.
     pub fn new(x: f32, y: f32) -> Self {
         Self { x, y, a11: 1.0, a12: 0.0, a21: 0.0, a22: 1.0 }
     }
@@ -67,7 +67,7 @@ impl Keypoint {
         let (s, c) = orientation.sin_cos();
         Self { x, y, a11: scale * c, a12: -scale * s, a21: scale * s, a22: scale * c }
     }
-    /// DB 행(열 수 2, 4, 6) 해석.
+    /// Interprets a DB row (2, 4 or 6 columns).
     pub fn from_row(row: &[f32]) -> Result<Self> {
         match row.len() {
             2 => Ok(Self::new(row[0], row[1])),
@@ -76,31 +76,31 @@ impl Keypoint {
             n => Err(Error::Format(format!("키포인트 열 수 {n} 는 지원하지 않음"))),
         }
     }
-    /// 6열 행 `[x, y, a11, a12, a21, a22]`.
+    /// 6-column row `[x, y, a11, a12, a21, a22]`.
     pub fn to_row(&self) -> [f32; 6] {
         [self.x, self.y, self.a11, self.a12, self.a21, self.a22]
     }
-    /// 첫 축 스케일 ‖(a11, a21)‖.
+    /// Scale of the first axis ‖(a11, a21)‖.
     pub fn scale_x(&self) -> f32 {
         (self.a11 * self.a11 + self.a21 * self.a21).sqrt()
     }
-    /// 둘째 축 스케일 ‖(a12, a22)‖.
+    /// Scale of the second axis ‖(a12, a22)‖.
     pub fn scale_y(&self) -> f32 {
         (self.a12 * self.a12 + self.a22 * self.a22).sqrt()
     }
-    /// 평균 스케일.
+    /// Mean scale.
     pub fn scale(&self) -> f32 {
         0.5 * (self.scale_x() + self.scale_y())
     }
-    /// 방향(라디안).
+    /// Orientation (radians).
     pub fn orientation(&self) -> f32 {
         self.a21.atan2(self.a11)
     }
-    /// 전단 각(라디안).
+    /// Shear angle (radians).
     pub fn shear(&self) -> f32 {
         (-self.a12).atan2(self.a22) - self.orientation()
     }
-    /// 해상도 환산: x·sx, y·sy, 첫 열(a11,a21)·sx, 둘째 열(a12,a22)·sy.
+    /// Resolution conversion: x·sx, y·sy, first column (a11,a21)·sx, second column (a12,a22)·sy.
     pub fn rescale(&mut self, sx: f32, sy: f32) {
         self.x *= sx;
         self.y *= sy;
@@ -111,110 +111,110 @@ impl Keypoint {
     }
 }
 
-/// 영상 하나의 uint8 기술자 묶음(N × 128, 행 우선).
+/// uint8 descriptor set of one image (N × 128, row-major).
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct Descriptors {
     data: Vec<u8>,
 }
 
 impl Descriptors {
-    /// 빈 묶음.
+    /// Empty set.
     pub fn new() -> Self {
         Self::default()
     }
-    /// n 개 용량으로 생성.
+    /// Creates with capacity for n descriptors.
     pub fn with_capacity(n: usize) -> Self {
         Self { data: Vec::with_capacity(n * DESCRIPTOR_DIM) }
     }
-    /// 길이가 128 의 배수여야 한다.
+    /// The length must be a multiple of 128.
     pub fn from_vec(data: Vec<u8>) -> Result<Self> {
         if !data.len().is_multiple_of(DESCRIPTOR_DIM) {
             return Err(Error::Format(format!("기술자 바이트 수 {} 가 128 의 배수가 아님", data.len())));
         }
         Ok(Self { data })
     }
-    /// 기술자 개수.
+    /// Number of descriptors.
     pub fn len(&self) -> usize {
         self.data.len() / DESCRIPTOR_DIM
     }
-    /// 비었는지.
+    /// Whether it is empty.
     pub fn is_empty(&self) -> bool {
         self.data.is_empty()
     }
-    /// i 번째 기술자(128 바이트).
+    /// The i-th descriptor (128 bytes).
     pub fn row(&self, i: usize) -> &[u8] {
         &self.data[i * DESCRIPTOR_DIM..(i + 1) * DESCRIPTOR_DIM]
     }
-    /// i 번째 기술자(가변).
+    /// The i-th descriptor (mutable).
     pub fn row_mut(&mut self, i: usize) -> &mut [u8] {
         &mut self.data[i * DESCRIPTOR_DIM..(i + 1) * DESCRIPTOR_DIM]
     }
-    /// 기술자 하나 추가.
+    /// Appends one descriptor.
     pub fn push(&mut self, d: &[u8; DESCRIPTOR_DIM]) {
         self.data.extend_from_slice(d);
     }
-    /// 행 우선 바이트 전체.
+    /// All bytes, row-major.
     pub fn as_slice(&self) -> &[u8] {
         &self.data
     }
-    /// 바이트 벡터로 변환.
+    /// Converts to a byte vector.
     pub fn into_vec(self) -> Vec<u8> {
         self.data
     }
-    /// 앞 n 개만 남김.
+    /// Keeps only the first n.
     pub fn truncate(&mut self, n: usize) {
         self.data.truncate(n * DESCRIPTOR_DIM);
     }
 }
 
-/// 두 영상 키포인트 인덱스 쌍 (영상1 idx, 영상2 idx).
+/// Pair of keypoint indices in two images (image1 idx, image2 idx).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
 pub struct FeatureMatch {
-    /// 영상1 키포인트 인덱스.
+    /// Keypoint index in image 1.
     pub idx1: u32,
-    /// 영상2 키포인트 인덱스.
+    /// Keypoint index in image 2.
     pub idx2: u32,
 }
 
 impl FeatureMatch {
-    /// 인덱스 쌍으로 생성.
+    /// Creates from an index pair.
     pub fn new(idx1: u32, idx2: u32) -> Self {
         Self { idx1, idx2 }
     }
-    /// 두 인덱스를 맞바꾼 매칭.
+    /// Match with the two indices swapped.
     pub fn swapped(&self) -> Self {
         Self { idx1: self.idx2, idx2: self.idx1 }
     }
 }
 
-/// 두 뷰 기하 구성 종류(DB config 값).
+/// Kind of two-view geometry configuration (DB config value).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 pub enum TwoViewGeometryConfig {
     #[default]
-    /// 미정(검증 안 됨·실패).
+    /// Undefined (not verified or failed).
     Undefined = 0,
-    /// 퇴화(쓸 수 없음).
+    /// Degenerate (unusable).
     Degenerate = 1,
-    /// 보정됨(E 모델).
+    /// Calibrated (E model).
     Calibrated = 2,
-    /// 비보정(F 모델).
+    /// Uncalibrated (F model).
     Uncalibrated = 3,
-    /// 평면(H 모델, 기선 있음).
+    /// Planar (H model, with baseline).
     Planar = 4,
-    /// 순수 회전(H 모델, 기선 없음).
+    /// Pure rotation (H model, no baseline).
     Panoramic = 5,
-    /// 평면 또는 순수 회전.
+    /// Planar or pure rotation.
     PlanarOrRotation = 6,
-    /// 워터마크(영상 테두리 고정 패턴).
+    /// Watermark (fixed pattern at the image border).
     Watermark = 7,
-    /// 여러 모델.
+    /// Multiple models.
     Multiple = 8,
-    /// rig 보정.
+    /// Rig calibrated.
     CalibratedRig = 9,
 }
 
 impl TwoViewGeometryConfig {
-    /// 정수 값 → 종류.
+    /// Integer value -> kind.
     pub fn from_i32(v: i32) -> Option<Self> {
         use TwoViewGeometryConfig::*;
         Some(match v {
@@ -231,33 +231,33 @@ impl TwoViewGeometryConfig {
             _ => return None,
         })
     }
-    /// 저장용 정수 값.
+    /// Integer value used for storage.
     pub fn as_i32(self) -> i32 {
         self as i32
     }
 }
 
-/// 짝 하나의 두 뷰 기하. 행렬은 "영상1 → 영상2" 방향(x2ᵀ F x1 = 0, x2 ~ H x1).
+/// Two-view geometry of one pair. Matrices are in the "image1 -> image2" direction (x2ᵀ F x1 = 0, x2 ~ H x1).
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct TwoViewGeometry {
-    /// 구성 종류.
+    /// Configuration kind.
     pub config: TwoViewGeometryConfig,
-    /// 본질 행렬 E.
+    /// Essential matrix E.
     pub e: Option<Mat3>,
-    /// 기초 행렬 F.
+    /// Fundamental matrix F.
     pub f: Option<Mat3>,
-    /// 호모그래피 H.
+    /// Homography H.
     pub h: Option<Mat3>,
-    /// 상대 자세(영상1 카메라 → 영상2 카메라).
+    /// Relative pose (image1 camera -> image2 camera).
     pub cam1_to_cam2: Option<Rigid3>,
-    /// 인라이어 매칭.
+    /// Inlier matches.
     pub inlier_matches: Vec<FeatureMatch>,
-    /// 삼각측량 각 중앙값(라디안). 저장되지 않는 부가 정보.
+    /// Median triangulation angle (radians). Auxiliary information that is not stored.
     pub tri_angle: Option<f64>,
 }
 
 impl TwoViewGeometry {
-    /// 방향 반전: F → Fᵀ, E → Eᵀ, H → H⁻¹, 자세 → 역, 인라이어 열 교환.
+    /// Direction reversal: F -> Fᵀ, E -> Eᵀ, H -> H⁻¹, pose -> inverse, inlier columns swapped.
     pub fn inverted(&self) -> Self {
         Self {
             config: self.config,
@@ -269,7 +269,7 @@ impl TwoViewGeometry {
             tri_angle: self.tri_angle,
         }
     }
-    /// 제자리 방향 반전(`inverted` 참고).
+    /// In-place direction reversal (see `inverted`).
     pub fn invert(&mut self) {
         *self = self.inverted();
     }

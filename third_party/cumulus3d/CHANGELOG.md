@@ -7,7 +7,7 @@ Developed under the name skyrecon up to and including 0.3.0.
 This project follows [Semantic Versioning](https://semver.org/). During 0.x, minor versions (0.1 → 0.2) may contain breaking changes.
 The date of each version is the actual work/commit date.
 
-## [0.4.0] — planned (in progress)
+## [0.4.0] — 2026-10-16
 ### Changed
 - CI: CUDA kernels compiled with NVRTC in a CUDA container on every push (no GPU needed; `cumulus3d_cuda::check_kernels`,
   example `check_kernels`), required `rustfmt` check (`rustfmt.toml`: width 140), content-policy scan, runners pinned
@@ -53,6 +53,32 @@ The date of each version is the actual work/commit date.
 - `cumulus3d stream` (`stream::run_stream`) now runs through the declarative layer (`Plan::from_stream` → `Recon`). Outputs are unchanged.
   Plan problems are now reported before anything runs; in particular, densification without a CUDA device fails at the start with a
   clear message instead of at the first zone.
+
+### Added
+- Bundle adjustment priors: `BaConfig::position_priors` (camera position priors with σ; replace the automatic gauge fix) and
+  `BaConfig::intrinsics_priors` (residual `(p - p0) / σ`; focal σ relative, distortion σ absolute). New CLI options
+  `--intrinsics-prior <json>`, `--intrinsics-prior-sigma` (default 0.005), `--intrinsics-prior-dist-sigma` (default 0.01); loader
+  in `crates/cli/src/intrinsics.rs`.
+- Stable display mode (`--stable-display`, `--settle-tol`, `--settle-max-zone`): intrinsics are refined until they settle and then
+  frozen, each zone is re-anchored to the previous map with a robust Sim3 over shared 3D points, and the final output is always
+  ENU-aligned.
+- Live diff stream format v4 (`crates/cli/src/blocks.rs`): `live/stream/manifest.json`, `packs/e_NNNN.bin` (add/move 20 B,
+  remove 4 B records) and a `status.json` heartbeat. New option `--live-stride` (default 6).
+- Densification: normal-direction bilateral smoothing of the fused cloud (`crates/dense/src/smooth.rs`, `--fusion-smooth-iters`,
+  `--fusion-smooth-radius`, `--fusion-smooth-range`, `--fusion-smooth-normal`), visibility filter
+  (`crates/dense/src/visibility.rs`, `--visibility-views`, `--visibility-tau`, `--visibility-min-violations`), `--max-levels`.
+- `PointCloud::keys` (`image << 32 | v << 16 | u`, the source pixel of each point), carried through fusion, smoothing and the
+  visibility filter.
+- Example `frame_hook_plan` (runs a TOML plan and reports the frames received by the frame hook).
+### Changed
+- Every source comment and the `cumulus3d --help` text are now English (code unchanged). Log and error string literals are still Korean.
+- Key-hash (splitmix64) thinning; sticky voxel ownership when zones are merged; duplicate keys keep the lowest zone.
+- Fast profile tuning for densification.
+- `plan --print-default` prints an annotated plan.
+- API doc comments are English; the "comments are Korean" notes were removed from the READMEs.
+### Breaking
+- `PointCloud` has a new public field `keys`; code that builds it with a struct literal must set it.
+- Workspace version is 0.4.0 (all crates).
 
 ## [0.3.1] — 2026-10-09
 ### Changed

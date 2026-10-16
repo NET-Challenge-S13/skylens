@@ -25,34 +25,34 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 내부 수치 유틸: SO(3) 지수/로그, 점 정렬(Kabsch/Umeyama), 다항식 근, 희소 행렬.
+//! Internal numeric utilities: SO(3) exp/log, point alignment (Kabsch/Umeyama), polynomial roots, sparse matrices.
 
 use cumulus3d_core::{Mat3, Quat, Sim3, Vec3};
 use nalgebra::{DMatrix, DVector, Matrix3};
 
-/// 회전 벡터 → 회전 행렬.
+/// Rotation vector to rotation matrix.
 pub(crate) fn so3_exp(w: &Vec3) -> Mat3 {
     Quat::from_rotation_vector(w).to_rotation_matrix()
 }
 
-/// 회전 행렬 → 회전 벡터(각 ∈ [0, π]).
+/// Rotation matrix to rotation vector (angle ∈ [0, π]).
 pub(crate) fn so3_log(r: &Mat3) -> Vec3 {
     Quat::from_rotation_matrix(r).to_rotation_vector()
 }
 
-/// 두 회전 행렬 사이 각(라디안).
+/// Angle between two rotation matrices (radians).
 #[allow(dead_code)]
 pub(crate) fn rotation_angle_between(a: &Mat3, b: &Mat3) -> f64 {
     so3_log(&(a.transpose() * b)).norm()
 }
 
-/// 3×3 SVD (U, σ 내림차순, V). nalgebra 일반 SVD 는 중복 특이값 3×3 에서 가끔 틀려
-/// matching 의 단측 야코비 구현을 쓴다.
+/// 3×3 SVD (U, σ in descending order, V). The general nalgebra SVD is sometimes wrong for 3×3 matrices with repeated singular values,
+/// so this uses the one-sided Jacobi implementation in matching.
 pub(crate) fn svd3(m: &Mat3) -> Option<(Mat3, Vec3, Mat3)> {
     cumulus3d_matching::linalg::svd3(m)
 }
 
-/// 3×3 행렬을 가장 가까운 회전으로(SVD).
+/// Nearest rotation to a 3×3 matrix (SVD).
 pub(crate) fn nearest_rotation(m: &Mat3) -> Mat3 {
     let Some((u, _, v)) = svd3(m) else { return Mat3::identity() };
     let vt = v.transpose();
@@ -63,7 +63,7 @@ pub(crate) fn nearest_rotation(m: &Mat3) -> Mat3 {
     u * d * vt
 }
 
-/// dst ≈ R·src + t 의 최소제곱 강체 정렬(Kabsch). 점 3개 이상.
+/// Least-squares rigid alignment dst ≈ R·src + t (Kabsch). Needs at least 3 points.
 pub(crate) fn kabsch(src: &[Vec3], dst: &[Vec3]) -> Option<(Mat3, Vec3)> {
     let n = src.len();
     if n < 3 || dst.len() != n {
@@ -76,7 +76,7 @@ pub(crate) fn kabsch(src: &[Vec3], dst: &[Vec3]) -> Option<(Mat3, Vec3)> {
         h += (s - cs) * (d - cd).transpose();
     }
     let (u, _, v) = svd3(&h)?;
-    // 특이값은 내림차순: 반사 보정은 가장 작은(마지막) 성분에.
+    // Singular values are in descending order: the reflection correction goes on the smallest (last) component.
     let mut d = Mat3::identity();
     if (v * u.transpose()).determinant() < 0.0 {
         d[(2, 2)] = -1.0;
@@ -88,7 +88,7 @@ pub(crate) fn kabsch(src: &[Vec3], dst: &[Vec3]) -> Option<(Mat3, Vec3)> {
     Some((r, cd - r * cs))
 }
 
-/// dst ≈ s·R·src + t 상사 정렬(Umeyama). 평가·테스트용.
+/// Similarity alignment dst ≈ s·R·src + t (Umeyama). For evaluation and tests.
 pub fn umeyama(src: &[Vec3], dst: &[Vec3]) -> Option<Sim3> {
     let n = src.len();
     if n < 3 || dst.len() != n {
@@ -119,7 +119,7 @@ pub fn umeyama(src: &[Vec3], dst: &[Vec3]) -> Option<Sim3> {
     Some(Sim3::new(s, Quat::from_rotation_matrix(&r), t))
 }
 
-/// 표준 정규 난수(박스-뮬러). 합성 자료·테스트용.
+/// Standard normal random number (Box-Muller). For synthetic data and tests.
 pub fn gaussian<R: rand::Rng + ?Sized>(rng: &mut R) -> f64 {
     use rand::RngExt;
     let u1: f64 = rng.random_range(1e-12..1.0);
@@ -127,7 +127,7 @@ pub fn gaussian<R: rand::Rng + ?Sized>(rng: &mut R) -> f64 {
     (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos()
 }
 
-/// 실근: a x² + b x + c = 0 (a≈0 이면 일차).
+/// Real roots of a x² + b x + c = 0 (linear if a≈0).
 pub(crate) fn solve_quadratic_real(a: f64, b: f64, c: f64) -> Vec<f64> {
     let scale = a.abs().max(b.abs()).max(c.abs());
     if scale == 0.0 {
@@ -141,14 +141,14 @@ pub(crate) fn solve_quadratic_real(a: f64, b: f64, c: f64) -> Vec<f64> {
     }
     let disc = b * b - 4.0 * a * c;
     if disc < 0.0 {
-        // 수치 잡음으로 살짝 음수면 중근 처리.
+        // If slightly negative due to numeric noise, treat as a double root.
         if disc > -1e-12 * b * b {
             return vec![-b / (2.0 * a)];
         }
         return Vec::new();
     }
     let sq = disc.sqrt();
-    // 소거 오차를 피하는 형태.
+    // Form that avoids cancellation error.
     let q = -0.5 * (b + b.signum() * sq);
     if q == 0.0 {
         return vec![0.0];
@@ -156,7 +156,7 @@ pub(crate) fn solve_quadratic_real(a: f64, b: f64, c: f64) -> Vec<f64> {
     vec![q / a, c / q]
 }
 
-/// 실근: c3 x³ + c2 x² + c1 x + c0 = 0, 뉴턴 보정 포함.
+/// Real roots of c3 x³ + c2 x² + c1 x + c0 = 0, including Newton refinement.
 pub(crate) fn solve_cubic_real(c3: f64, c2: f64, c1: f64, c0: f64) -> Vec<f64> {
     let scale = c3.abs().max(c2.abs()).max(c1.abs()).max(c0.abs());
     if scale == 0.0 {
@@ -197,10 +197,10 @@ pub(crate) fn solve_cubic_real(c3: f64, c2: f64, c1: f64, c0: f64) -> Vec<f64> {
     roots
 }
 
-/// 3×3 대칭 행렬의 수반 행렬(adjugate).
+/// Adjugate of a 3×3 symmetric matrix.
 pub(crate) fn adjugate3(m: &Matrix3<f64>) -> Matrix3<f64> {
     let c = |r0: usize, r1: usize, c0: usize, c1: usize| m[(r0, c0)] * m[(r1, c1)] - m[(r0, c1)] * m[(r1, c0)];
-    // 여인자 행렬의 전치.
+    // Transpose of the cofactor matrix.
     Matrix3::new(
         c(1, 2, 1, 2),
         -c(0, 2, 1, 2),
@@ -214,27 +214,27 @@ pub(crate) fn adjugate3(m: &Matrix3<f64>) -> Matrix3<f64> {
     )
 }
 
-/// 행 압축(CSR) 희소 행렬. 회전 평균의 계수 행렬처럼 행마다 원소가 몇 개뿐인 경우용.
+/// Compressed sparse row (CSR) matrix. For cases such as the rotation-averaging coefficient matrix, where each row has only a few entries.
 #[derive(Clone, Debug, Default)]
 pub struct CsrMatrix {
-    /// 행 수.
+    /// Number of rows.
     pub nrows: usize,
-    /// 열 수.
+    /// Number of columns.
     pub ncols: usize,
-    /// 행 시작 위치(길이 nrows+1).
+    /// Row start offsets (length nrows+1).
     pub row_ptr: Vec<usize>,
-    /// 원소별 열 인덱스.
+    /// Column index of each entry.
     pub col_idx: Vec<usize>,
-    /// 원소 값.
+    /// Entry values.
     pub values: Vec<f64>,
 }
 
 impl CsrMatrix {
-    /// 열 수만 정한 빈 행렬.
+    /// Empty matrix with only the column count set.
     pub fn new(ncols: usize) -> Self {
         Self { nrows: 0, ncols, row_ptr: vec![0], col_idx: Vec::new(), values: Vec::new() }
     }
-    /// 행 하나 추가: (열, 값) 목록.
+    /// Append one row: list of (column, value).
     pub fn push_row(&mut self, entries: &[(usize, f64)]) {
         for &(c, v) in entries {
             debug_assert!(c < self.ncols);
@@ -244,7 +244,7 @@ impl CsrMatrix {
         self.row_ptr.push(self.col_idx.len());
         self.nrows += 1;
     }
-    /// 밀집 행렬에서 0 아닌 원소만 담아 만든다.
+    /// Builds a matrix from a dense matrix, keeping only the nonzero entries.
     pub fn from_dense(m: &DMatrix<f64>) -> Self {
         let mut s = Self::new(m.ncols());
         for r in 0..m.nrows() {
@@ -279,7 +279,7 @@ impl CsrMatrix {
         }
         x
     }
-    /// Aᵀ W A + λ I (밀집). `w` 는 행 가중(None = 1).
+    /// Aᵀ W A + λ I (dense). `w` is the per-row weight (None = 1).
     pub fn weighted_normal(&self, w: Option<&[f64]>, lambda: f64) -> DMatrix<f64> {
         let mut n = DMatrix::zeros(self.ncols, self.ncols);
         for r in 0..self.nrows {

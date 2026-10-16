@@ -29,9 +29,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 외부 SfM 도구(COLMAP) 단계별 명령 호환 하위 명령(얇은 래퍼). 하위 명령 이름과 옵션 문자열은 그 도구의 명령줄을 따른다.
-//! 단계 사이 상태는 `--database_path` (FeatureStore 이진 파일)와 모델 폴더([`cumulus3d_core::interop`] 형식)로 잇는다.
-//! GPU 관련 옵션(`--FeatureExtraction.use_gpu` 등)은 받기만 하고 무시한다.
+//! Stage-by-stage subcommands compatible with an external SfM tool (COLMAP) (thin wrappers). Subcommand names and option strings follow
+//! that tool's command line.
+//! State between stages is carried by `--database_path` (a FeatureStore binary file) and model folders ([`cumulus3d_core::interop`]
+//! format).
+//! GPU-related options (`--FeatureExtraction.use_gpu` etc.) are accepted and ignored.
 
 use crate::densewrap::{dense_model, make_pm_backend, parse_profile, DenseConfig};
 use clap::{Args, Subcommand};
@@ -57,7 +59,7 @@ fn e<E: std::fmt::Display>(x: E) -> String {
     x.to_string()
 }
 
-/// `1/0/true/false` 를 받는다(명령줄 관례).
+/// Accepts `1/0/true/false` (command-line convention).
 pub fn parse_flag(s: &str) -> Result<bool, String> {
     match s.to_ascii_lowercase().as_str() {
         "1" | "true" | "yes" | "on" => Ok(true),
@@ -66,414 +68,437 @@ pub fn parse_flag(s: &str) -> Result<bool, String> {
     }
 }
 
-/// 단계별 하위 명령(명령 이름은 `feature_extractor` 등 밑줄 형식).
+/// Stage subcommands (command names use the underscore form such as `feature_extractor`).
 #[derive(Subcommand, Debug)]
 pub enum InteropCmd {
-    /// 영상 폴더 → 특징 저장소(SIFT 추출, 카메라 초기화).
+    /// Image folder -> feature store (SIFT extraction, camera initialization).
     #[command(name = "feature_extractor")]
     FeatureExtractor(FeatureExtractorArgs),
-    /// 짝 목록 파일 → 기술자 매칭 + 두 뷰 기하 검증.
+    /// Pair list file -> descriptor matching + two-view geometry verification.
     #[command(name = "matches_importer")]
     MatchesImporter(MatchesImporterArgs),
-    /// 특징 저장소 → 전역 SfM 모델(`output_path/0`).
+    /// Feature store -> global SfM model (`output_path/0`).
     #[command(name = "global_mapper")]
     GlobalMapper(GlobalMapperArgs),
-    /// 기존 모델에 아직 등록되지 않은 영상을 등록.
+    /// Register images not yet registered to an existing model.
     #[command(name = "image_registrator")]
     ImageRegistrator(ImageRegistratorArgs),
-    /// 등록된 자세로 3D 점 삼각측량.
+    /// Triangulate 3D points with the registered poses.
     #[command(name = "point_triangulator")]
     PointTriangulator(PointTriangulatorArgs),
-    /// 모델 번들 조정.
+    /// Model bundle adjustment.
     #[command(name = "bundle_adjuster")]
     BundleAdjuster(BundleAdjusterArgs),
-    /// 모델을 GPS ENU 좌표계로 정렬.
+    /// Align the model to the GPS ENU frame.
     #[command(name = "model_aligner")]
     ModelAligner(ModelAlignerArgs),
-    /// 모델 통계 출력.
+    /// Print model statistics.
     #[command(name = "model_analyzer")]
     ModelAnalyzer(ModelAnalyzerArgs),
-    /// 모델 형식 변환(BIN/TXT/PLY).
+    /// Model format conversion (BIN/TXT/PLY).
     #[command(name = "model_converter")]
     ModelConverter(ModelConverterArgs),
-    /// 모델에서 영상 삭제.
+    /// Delete images from a model.
     #[command(name = "image_deleter")]
     ImageDeleter(ImageDeleterArgs),
-    /// 왜곡 보정 작업 폴더 생성.
+    /// Create the undistortion work folder.
     #[command(name = "image_undistorter")]
     ImageUndistorter(ImageUndistorterArgs),
-    /// 조밀화: image_undistorter 출력 폴더 → dense.ply.
+    /// Densification: image_undistorter output folder -> dense.ply.
     #[command(name = "densify")]
     Densify(Box<DensifyArgs>),
 }
 
-/// `feature_extractor` 인자.
+/// Arguments of `feature_extractor`.
 #[derive(Args, Debug)]
 pub struct FeatureExtractorArgs {
-    /// 특징 저장소 파일 경로(없으면 새로 만든다).
+    /// Feature store file path (created if missing).
     #[arg(long = "database_path")]
     pub database_path: PathBuf,
-    /// 입력 영상 폴더.
+    /// Input image folder.
     #[arg(long = "image_path")]
     pub image_path: PathBuf,
-    /// 처리할 영상 이름 목록 파일(없으면 폴더 전체).
+    /// File listing the image names to process (the whole folder if absent).
     #[arg(long = "image_list_path")]
     pub image_list_path: Option<PathBuf>,
-    /// 카메라 모델 이름.
+    /// Camera model name.
     #[arg(long = "ImageReader.camera_model", default_value = "SIMPLE_RADIAL")]
     pub camera_model: String,
-    /// 모든 영상이 카메라 하나를 공유.
+    /// All images share a single camera.
     #[arg(long = "ImageReader.single_camera", default_value = "0", value_parser = parse_flag, action = clap::ArgAction::Set)]
     pub single_camera: bool,
-    /// 폴더마다 카메라 하나.
+    /// One camera per folder.
     #[arg(long = "ImageReader.single_camera_per_folder", default_value = "0", value_parser = parse_flag, action = clap::ArgAction::Set)]
     pub single_camera_per_folder: bool,
-    /// 기존 카메라 id 사용(≥ 0 일 때).
+    /// Use an existing camera id (when >= 0).
     #[arg(long = "ImageReader.existing_camera_id")]
     pub existing_camera_id: Option<i64>,
-    /// 카메라 파라미터 직접 지정(쉼표 구분).
+    /// Specify camera parameters directly (comma separated).
     #[arg(long = "ImageReader.camera_params")]
     pub camera_params: Option<String>,
-    /// EXIF 초점이 없을 때 초점 = 계수 × max(w, h).
+    /// Focal length = factor x max(w, h) when there is no EXIF focal length.
     #[arg(long = "ImageReader.default_focal_length_factor", default_value_t = 1.2)]
     pub default_focal_length_factor: f64,
-    /// 영상당 최대 특징 수.
+    /// Maximum number of features per image.
     #[arg(long = "SiftExtraction.max_num_features", default_value_t = 8192)]
     pub max_num_features: usize,
-    /// SIFT 입력 최대 크기(픽셀).
+    /// Maximum SIFT input size (pixels).
     #[arg(long = "SiftExtraction.max_image_size", default_value_t = 3200)]
     pub max_image_size: usize,
-    /// GPU 사용 여부(받기만 하고 무시).
+    /// Whether to use the GPU (accepted and ignored).
     #[arg(long = "FeatureExtraction.use_gpu", value_parser = parse_flag)]
     pub use_gpu: Option<bool>,
-    /// GPU 사용 여부(받기만 하고 무시).
+    /// Whether to use the GPU (accepted and ignored).
     #[arg(long = "SiftExtraction.use_gpu", value_parser = parse_flag)]
     pub sift_use_gpu: Option<bool>,
 }
 
-/// `matches_importer` 인자.
+/// Arguments of `matches_importer`.
 #[derive(Args, Debug)]
 pub struct MatchesImporterArgs {
-    /// 특징 저장소 파일 경로.
+    /// Feature store file path.
     #[arg(long = "database_path")]
     pub database_path: PathBuf,
-    /// 짝 목록 파일(줄마다 `이름1 이름2`).
+    /// Pair list file (`name1 name2` per line).
     #[arg(long = "match_list_path")]
     pub match_list_path: PathBuf,
-    /// 매칭 종류(`pairs` 만 지원).
+    /// Matching type (only `pairs` is supported).
     #[arg(long = "match_type", default_value = "pairs")]
     pub match_type: String,
-    /// GPU 사용 여부(받기만 하고 무시).
+    /// Whether to use the GPU (accepted and ignored).
     #[arg(long = "FeatureMatching.use_gpu", value_parser = parse_flag)]
     pub use_gpu: Option<bool>,
-    /// GPU 사용 여부(받기만 하고 무시).
+    /// Whether to use the GPU (accepted and ignored).
     #[arg(long = "SiftMatching.use_gpu", value_parser = parse_flag)]
     pub sift_use_gpu: Option<bool>,
-    /// 짝당 최대 매칭 수.
+    /// Maximum number of matches per pair.
     #[arg(long = "SiftMatching.max_num_matches", default_value_t = 32768)]
     pub max_num_matches: usize,
 }
 
-/// `global_mapper` 인자.
+/// Arguments of `global_mapper`.
 #[derive(Args, Debug)]
 pub struct GlobalMapperArgs {
-    /// 특징 저장소 파일 경로.
+    /// Feature store file path.
     #[arg(long = "database_path")]
     pub database_path: PathBuf,
-    /// 영상 폴더(주면 점 색 추출).
+    /// Image folder (if given, point colors are extracted).
     #[arg(long = "image_path")]
     pub image_path: Option<PathBuf>,
-    /// 출력 폴더(모델은 `0/` 아래).
+    /// Output folder (the model goes under `0/`).
     #[arg(long = "output_path")]
     pub output_path: PathBuf,
-    /// 전역 BA 반복 횟수.
+    /// Number of global BA iterations.
     #[arg(long = "GlobalMapper.ba_num_iterations")]
     pub ba_num_iterations: Option<usize>,
-    /// 재삼각측량 생략.
+    /// Skip re-triangulation.
     #[arg(long = "GlobalMapper.skip_retriangulation", value_parser = parse_flag)]
     pub skip_retriangulation: Option<bool>,
-    /// 유지할 최대 트랙 수.
+    /// Maximum number of tracks to keep.
     #[arg(long = "GlobalMapper.keep_max_num_tracks")]
     pub keep_max_num_tracks: Option<usize>,
 }
 
-/// `image_registrator` 인자.
+/// Arguments of `image_registrator`.
 #[derive(Args, Debug)]
 pub struct ImageRegistratorArgs {
-    /// 특징 저장소 파일 경로.
+    /// Feature store file path.
     #[arg(long = "database_path")]
     pub database_path: PathBuf,
-    /// 입력 모델 폴더.
+    /// Input model folder.
     #[arg(long = "input_path")]
     pub input_path: PathBuf,
-    /// 출력 모델 폴더.
+    /// Output model folder.
     #[arg(long = "output_path")]
     pub output_path: PathBuf,
 }
 
-/// `point_triangulator` 인자.
+/// Arguments of `point_triangulator`.
 #[derive(Args, Debug)]
 pub struct PointTriangulatorArgs {
-    /// 특징 저장소 파일 경로.
+    /// Feature store file path.
     #[arg(long = "database_path")]
     pub database_path: PathBuf,
-    /// 영상 폴더(주면 점 색 추출).
+    /// Image folder (if given, point colors are extracted).
     #[arg(long = "image_path")]
     pub image_path: Option<PathBuf>,
-    /// 입력 모델 폴더.
+    /// Input model folder.
     #[arg(long = "input_path")]
     pub input_path: PathBuf,
-    /// 출력 모델 폴더.
+    /// Output model folder.
     #[arg(long = "output_path")]
     pub output_path: PathBuf,
-    /// 기존 3D 점을 지우고 다시 삼각측량.
+    /// Delete existing 3D points and triangulate again.
     #[arg(long = "clear_points", default_value = "1", value_parser = parse_flag, action = clap::ArgAction::Set)]
     pub clear_points: bool,
 }
 
-/// `bundle_adjuster` 인자.
+/// Arguments of `bundle_adjuster`.
 #[derive(Args, Debug)]
 pub struct BundleAdjusterArgs {
-    /// 입력 모델 폴더.
+    /// Input model folder.
     #[arg(long = "input_path")]
     pub input_path: PathBuf,
-    /// 출력 모델 폴더.
+    /// Output model folder.
     #[arg(long = "output_path")]
     pub output_path: PathBuf,
-    /// 최대 반복 수.
+    /// Maximum number of iterations.
     #[arg(long = "BundleAdjustment.max_num_iterations", default_value_t = 100)]
     pub max_num_iterations: usize,
-    /// 초점 거리 정제.
+    /// Refine the focal length.
     #[arg(long = "BundleAdjustment.refine_focal_length", default_value = "1", value_parser = parse_flag, action = clap::ArgAction::Set)]
     pub refine_focal_length: bool,
-    /// 주점 정제.
+    /// Refine the principal point.
     #[arg(long = "BundleAdjustment.refine_principal_point", default_value = "0", value_parser = parse_flag, action = clap::ArgAction::Set)]
     pub refine_principal_point: bool,
-    /// 왜곡 등 추가 파라미터 정제.
+    /// Refine extra parameters such as distortion.
     #[arg(long = "BundleAdjustment.refine_extra_params", default_value = "1", value_parser = parse_flag, action = clap::ArgAction::Set)]
     pub refine_extra_params: bool,
 }
 
-/// `model_aligner` 인자.
+/// Arguments of `model_aligner`.
 #[derive(Args, Debug)]
 pub struct ModelAlignerArgs {
-    /// 입력 모델 폴더.
+    /// Input model folder.
     #[arg(long = "input_path")]
     pub input_path: PathBuf,
-    /// 출력 모델 폴더.
+    /// Output model folder.
     #[arg(long = "output_path")]
     pub output_path: PathBuf,
-    /// 기준 GPS 파일(줄: `이름 위도 경도 고도`).
+    /// Reference GPS file (line: `name latitude longitude altitude`).
     #[arg(long = "ref_images_path")]
     pub ref_images_path: PathBuf,
-    /// 기준이 GPS 인지(1 만 지원).
+    /// Whether the reference is GPS (only 1 is supported).
     #[arg(long = "ref_is_gps", default_value = "1", value_parser = parse_flag, action = clap::ArgAction::Set)]
     pub ref_is_gps: bool,
-    /// 정렬 좌표계(`enu` 만 지원).
+    /// Alignment frame (only `enu` is supported).
     #[arg(long = "alignment_type", default_value = "enu")]
     pub alignment_type: String,
-    /// 견고 추정 최대 오차(미터, 0 = 견고 추정 없음).
+    /// Maximum error of the robust estimate (meters, 0 = no robust estimation).
     #[arg(long = "alignment_max_error", default_value_t = 0.0)]
     pub alignment_max_error: f64,
-    /// 정렬에 필요한 최소 공통 영상 수.
+    /// Minimum number of common images required for alignment.
     #[arg(long = "min_common_images", default_value_t = 3)]
     pub min_common_images: usize,
 }
 
-/// `model_analyzer` 인자.
+/// Arguments of `model_analyzer`.
 #[derive(Args, Debug)]
 pub struct ModelAnalyzerArgs {
-    /// 모델 폴더.
+    /// Model folder.
     #[arg(long = "path")]
     pub path: PathBuf,
-    /// 자세한 통계 출력.
+    /// Print detailed statistics.
     #[arg(long = "verbose", default_value = "0", value_parser = parse_flag, action = clap::ArgAction::Set)]
     pub verbose: bool,
 }
 
-/// `model_converter` 인자.
+/// Arguments of `model_converter`.
 #[derive(Args, Debug)]
 pub struct ModelConverterArgs {
-    /// 입력 모델 폴더.
+    /// Input model folder.
     #[arg(long = "input_path")]
     pub input_path: PathBuf,
-    /// 출력 폴더 또는 파일.
+    /// Output folder or file.
     #[arg(long = "output_path")]
     pub output_path: PathBuf,
-    /// 출력 형식(BIN|TXT|PLY).
+    /// Output format (BIN|TXT|PLY).
     #[arg(long = "output_type")]
     pub output_type: String,
 }
 
-/// `image_deleter` 인자.
+/// Arguments of `image_deleter`.
 #[derive(Args, Debug)]
 pub struct ImageDeleterArgs {
-    /// 입력 모델 폴더.
+    /// Input model folder.
     #[arg(long = "input_path")]
     pub input_path: PathBuf,
-    /// 출력 모델 폴더.
+    /// Output model folder.
     #[arg(long = "output_path")]
     pub output_path: PathBuf,
-    /// 지울 영상 id 목록 파일.
+    /// File listing the image ids to delete.
     #[arg(long = "image_ids_path")]
     pub image_ids_path: Option<PathBuf>,
-    /// 지울 영상 이름 목록 파일.
+    /// File listing the image names to delete.
     #[arg(long = "image_names_path")]
     pub image_names_path: Option<PathBuf>,
 }
 
-/// `image_undistorter` 인자.
+/// Arguments of `image_undistorter`.
 #[derive(Args, Debug)]
 pub struct ImageUndistorterArgs {
-    /// 입력 영상 폴더.
+    /// Input image folder.
     #[arg(long = "image_path")]
     pub image_path: PathBuf,
-    /// 입력 모델 폴더.
+    /// Input model folder.
     #[arg(long = "input_path")]
     pub input_path: PathBuf,
-    /// 출력 작업 폴더.
+    /// Output work folder.
     #[arg(long = "output_path")]
     pub output_path: PathBuf,
-    /// 출력 형식(이 값만 지원).
+    /// Output format (only this value is supported).
     #[arg(long = "output_type", default_value = "COLMAP")]
     pub output_type: String,
-    /// 왜곡 보정 영상 최대 크기(-1 = 제한 없음).
+    /// Maximum size of undistorted images (-1 = unlimited).
     #[arg(long = "max_image_size", default_value_t = -1)]
     pub max_image_size: i64,
 }
 
-/// `densify` 인자.
+/// Arguments of `densify`.
 #[derive(Args, Debug)]
 pub struct DensifyArgs {
-    /// image_undistorter 출력 폴더(images/, sparse/). `--image_path` 를 주면 대신 왜곡 있는 모델(`--input_path`)을 메모리에서 보정.
+    /// image_undistorter output folder (images/, sparse/). If `--image_path` is given, the model with distortion (`--input_path`) is
+    /// undistorted in memory instead.
     #[arg(long = "input_path", short = 'i')]
     pub input_path: PathBuf,
-    /// 출력 PLY.
+    /// Output PLY.
     #[arg(long = "output_path", short = 'o')]
     pub output_path: PathBuf,
-    /// 주면 `input_path` 를 왜곡 있는 입력 모델로 보고 이 폴더의 영상을 메모리에서 보정한다.
+    /// If given, `input_path` is treated as an input model with distortion and the images in this folder are undistorted in memory.
     #[arg(long = "image_path")]
     pub image_path: Option<PathBuf>,
-    /// 왜곡 보정 최대 크기(메모리 보정 경로).
+    /// Maximum undistortion size (in-memory undistortion path).
     #[arg(long = "max_image_size", default_value_t = 960)]
     pub max_image_size: i64,
-    /// 기준 뷰당 원천 뷰 수(≤ 32).
+    /// Number of source views per reference view (<= 32).
     #[arg(long = "number-views", default_value_t = 10)]
     pub number_views: usize,
-    /// PatchMatch 백엔드(cuda).
+    /// PatchMatch backend (cuda).
     #[arg(long = "pm-backend", default_value = "cuda")]
     pub pm_backend: String,
-    /// 프로파일(fast|quality).
+    /// Profile (fast|quality).
     #[arg(long = "mvs-profile", default_value = "fast")]
     pub mvs_profile: String,
-    /// 비용 창 반경(기본: 프로파일 값 5).
+    /// Cost window radius (default: profile value 5).
     #[arg(long = "window-radius")]
     pub window_radius: Option<i32>,
-    /// 비용 창 표본 간격 1|2(기본: fast 2, quality 1).
+    /// Cost window sample stride 1|2 (default: fast 2, quality 1).
     #[arg(long = "window-step")]
     pub window_step: Option<i32>,
-    /// 스케일 수 상한.
+    /// Upper bound on the number of scales.
     #[arg(long = "max-levels")]
     pub max_levels: Option<usize>,
-    /// 등록 순서로 앞 N 장만(`--image_path` 사용 시).
+    /// Only the first N images in registration order (when using `--image_path`).
     #[arg(long = "max-images")]
     pub max_images: Option<usize>,
-    /// 융합 방식(consistency|traversal|score).
+    /// Fusion mode (consistency|traversal|score).
     #[arg(long = "fusion-mode")]
     pub fusion_mode: Option<String>,
-    /// 일치 융합: 기준 외 일치 뷰 최소 수.
+    /// Consistent fusion: minimum number of agreeing views besides the reference.
     #[arg(long = "fusion-min-views")]
     pub fusion_min_views: Option<usize>,
-    /// 융합 상대 깊이 허용치.
+    /// Fusion relative depth tolerance.
     #[arg(long = "fusion-depth-error")]
     pub fusion_depth_error: Option<f64>,
-    /// 융합 법선 허용 각(도).
+    /// Fusion normal tolerance angle (degrees).
     #[arg(long = "fusion-normal-error")]
     pub fusion_normal_error: Option<f64>,
-    /// 융합 재투영 허용치(픽셀).
+    /// Fusion reprojection tolerance (pixels).
     #[arg(long = "fusion-reproj-error")]
     pub fusion_reproj_error: Option<f64>,
-    /// 일치 융합 남은 픽셀 처리(none|release|second-pass).
+    /// Handling of remaining pixels in consistent fusion (none|release|second-pass).
     #[arg(long = "fusion-residual")]
     pub fusion_residual: Option<String>,
-    /// 2차 융합: 기준 외 일치 뷰 최소 수(기본 2).
+    /// Second-pass fusion: minimum number of agreeing views besides the reference (default 2).
     #[arg(long = "residual-min-views")]
     pub residual_min_views: Option<usize>,
-    /// 2차 융합: 상대 깊이 허용치(기본 1차의 0.5배).
+    /// Second-pass fusion: relative depth tolerance (default 0.5x the first pass).
     #[arg(long = "residual-depth-error")]
     pub residual_depth_error: Option<f64>,
-    /// 2차 융합: 법선 허용 각(도, 기본 1차의 0.67배).
+    /// Second-pass fusion: normal tolerance angle (degrees, default 0.67x the first pass).
     #[arg(long = "residual-normal-error")]
     pub residual_normal_error: Option<f64>,
-    /// 2차 융합: 1차 점과 이 거리(GSD 배수, 기본 0.5) 이내인 2차 점은 버림.
+    /// Second-pass fusion: second-pass points within this distance of a first-pass point (GSD multiple, default 0.5) are discarded.
     #[arg(long = "residual-min-dist")]
     pub residual_min_dist: Option<f64>,
-    /// 일치 융합: 쓰인 픽셀 표시(1|0).
+    /// Consistent fusion: mark used pixels (1|0).
     #[arg(long = "fusion-mark-used", value_parser = parse_flag)]
     pub fusion_mark_used: Option<bool>,
-    /// 일치 융합: 표시 반경(픽셀).
+    /// Consistent fusion: marking radius (pixels).
     #[arg(long = "fusion-mark-radius")]
     pub fusion_mark_radius: Option<usize>,
-    /// 일치 융합: 검사할 겹침 뷰 수.
+    /// Consistent fusion: number of overlapping views to check.
     #[arg(long = "fusion-num-images")]
     pub fusion_num_images: Option<usize>,
-    /// 모든 스케일의 기하 실행 반복 수 덮어쓰기.
+    /// Override the number of geometric iterations at all scales.
     #[arg(long = "geo-iters")]
     pub geo_iters: Option<u32>,
-    /// 기하 실행 회차 수 덮어쓰기.
+    /// Override the number of geometric run rounds.
     #[arg(long = "geo-rounds")]
     pub geo_rounds: Option<u32>,
-    /// 일치 융합: 역분산 가중(1|0).
+    /// Consistent fusion: inverse-variance weighting (1|0).
     #[arg(long = "fusion-inverse-variance", value_parser = parse_flag)]
     pub fusion_inverse_variance: Option<bool>,
-    /// 깊이맵 필터: 일치 뷰 최소 수.
+    /// Fused-cloud smoothing along normals: iterations (0 = off).
+    #[arg(long = "fusion-smooth-iters")]
+    pub fusion_smooth_iters: Option<usize>,
+    /// Fused-cloud smoothing: neighbour radius (GSD multiple).
+    #[arg(long = "fusion-smooth-radius")]
+    pub fusion_smooth_radius: Option<f64>,
+    /// Fused-cloud smoothing: range sigma along the normal (GSD multiple).
+    #[arg(long = "fusion-smooth-range")]
+    pub fusion_smooth_range: Option<f64>,
+    /// Fused-cloud smoothing: neighbour normal gate (degrees).
+    #[arg(long = "fusion-smooth-normal")]
+    pub fusion_smooth_normal: Option<f64>,
+    /// Free-space visibility filter: neighbouring views checked per fused point (0 = off).
+    #[arg(long = "visibility-views")]
+    pub visibility_views: Option<usize>,
+    /// Free-space visibility filter: relative depth tolerance.
+    #[arg(long = "visibility-tau")]
+    pub visibility_tau: Option<f64>,
+    /// Free-space visibility filter: minimum violating views to remove a point.
+    #[arg(long = "visibility-min-violations")]
+    pub visibility_min_violations: Option<usize>,
+    /// Depth map filter: minimum number of agreeing views.
     #[arg(long = "filter-min-views")]
     pub filter_min_views: Option<u32>,
-    /// 깊이맵 필터: 순·역 재투영 허용치(픽셀).
+    /// Depth map filter: forward/backward reprojection tolerance (pixels).
     #[arg(long = "filter-geom-error")]
     pub filter_geom_error: Option<f32>,
-    /// 깊이맵 필터: 최소 NCC.
+    /// Depth map filter: minimum NCC.
     #[arg(long = "filter-min-ncc")]
     pub filter_min_ncc: Option<f32>,
-    /// 작은 조각 제거(1|0).
+    /// Remove small fragments (1|0).
     #[arg(long = "remove-speckles", value_parser = parse_flag)]
     pub remove_speckles: Option<bool>,
-    /// 경계 인식 틈 메우기(1|0).
+    /// Boundary-aware gap filling (1|0).
     #[arg(long = "fill-holes", value_parser = parse_flag)]
     pub fill_holes: Option<bool>,
-    /// 이웃 선택 방향 다양성 감쇠(1 = 끔).
+    /// Direction-diversity damping of neighbor selection (1 = off).
     #[arg(long = "diversity-decay")]
     pub diversity_decay: Option<f64>,
-    /// 거친 스케일 후보를 더할 기준 패치 분산 문턱(0 = 끔).
+    /// Reference patch variance threshold for adding coarse-scale candidates (0 = off).
     #[arg(long = "weak-texture-var")]
     pub weak_texture_var: Option<f32>,
-    /// 판독 전 5×5 중앙값 평면 필터(1|0).
+    /// 5x5 median plane filter before readout (1|0).
     #[arg(long = "median-filter", value_parser = parse_flag)]
     pub median_filter: Option<bool>,
-    /// 결과 점군 통계(간격·이상점·중복) 출력.
+    /// Print statistics of the resulting point cloud (spacing, outliers, duplicates).
     #[arg(long = "stats")]
     pub stats: bool,
-    /// 점수 융합: 채택 문턱 τ(기본 2.0).
+    /// Score fusion: acceptance threshold tau (default 2.0).
     #[arg(long = "score-tau")]
     pub score_tau: Option<f64>,
-    /// 점수 융합: 재투영 오차 가중 σ_e(픽셀, 기본 1.0).
+    /// Score fusion: reprojection error weight sigma_e (pixels, default 1.0).
     #[arg(long = "score-sigma-e")]
     pub score_sigma_e: Option<f64>,
-    /// 점수 융합: 시선 사잇각 가중 σ_θ(도, 기본 2.0).
+    /// Score fusion: viewing-angle weight sigma_theta (degrees, default 2.0).
     #[arg(long = "score-sigma-theta")]
     pub score_sigma_theta: Option<f64>,
-    /// 점수 융합: 자유공간 위반 벌점 계수 λ(기본 1.0).
+    /// Score fusion: free-space violation penalty coefficient lambda (default 1.0).
     #[arg(long = "score-lambda")]
     pub score_lambda: Option<f64>,
-    /// 2차 융합 점만 따로 쓸 PLY(`--fusion-residual second-pass` 일 때).
+    /// PLY for the second-pass fusion points only (when `--fusion-residual second-pass`).
     #[arg(long = "residual-out")]
     pub residual_out: Option<PathBuf>,
-    /// 융합 변형 파일(줄마다 `이름|융합 플래그들`). 깊이맵은 한 번만 만들고 변형마다 `<output_path 폴더>/<이름>.ply` 를 쓴다.
+    /// Fusion variants file (`name|fusion flags` per line). The depth maps are built once and a `<output_path folder>/<name>.ply` is
+    /// written per variant.
     #[arg(long = "fusion-variants")]
     pub fusion_variants: Option<PathBuf>,
 }
 
-/// 조밀화 하위 명령 옵션을 설정에 반영.
+/// Apply the densify subcommand options to the settings.
 pub(crate) fn apply_densify_args(a: &DensifyArgs, o: &mut cumulus3d_dense::DensifyOptions) -> R {
     if let Some(r) = a.window_radius {
         o.pm.window_radius = r;
@@ -533,6 +558,27 @@ pub(crate) fn apply_densify_args(a: &DensifyArgs, o: &mut cumulus3d_dense::Densi
     if let Some(v) = a.fusion_inverse_variance {
         f.inverse_variance = v;
     }
+    if let Some(v) = a.fusion_smooth_iters {
+        f.smooth.iterations = v;
+    }
+    if let Some(v) = a.fusion_smooth_radius {
+        f.smooth.radius_gsd = v;
+    }
+    if let Some(v) = a.fusion_smooth_range {
+        f.smooth.sigma_range_gsd = v;
+    }
+    if let Some(v) = a.fusion_smooth_normal {
+        f.smooth.normal_deg = v;
+    }
+    if let Some(v) = a.visibility_views {
+        f.visibility.check_views = v;
+    }
+    if let Some(v) = a.visibility_tau {
+        f.visibility.tau = v;
+    }
+    if let Some(v) = a.visibility_min_violations {
+        f.visibility.min_violations = v;
+    }
     if let Some(v) = a.filter_min_views {
         o.filter.min_num_consistent = v;
     }
@@ -583,8 +629,10 @@ fn has_score_args(a: &DensifyArgs) -> bool {
     a.score_tau.is_some() || a.score_sigma_e.is_some() || a.score_sigma_theta.is_some() || a.score_lambda.is_some()
 }
 
-/// 점수 융합 설정. `--fusion-mode score` 면 `o.fusion`(다른 융합 플래그 반영 후)의 허용치를 이어받고 `--score-*` 를 덮어쓴다.
-/// `base` 는 융합 변형에서 densify 명령 자체의 인자: 변형 줄에 `--fusion-mode` 가 없으면 그 방식을 따르고, 그 `--score-*` 를 먼저 반영한다.
+/// Score fusion settings. With `--fusion-mode score`, it inherits the tolerances of `o.fusion` (after the other fusion flags are applied)
+/// and overrides them with `--score-*`.
+/// `base` is the densify command's own arguments in a fusion variant: if the variant line has no `--fusion-mode`, that mode is followed,
+/// and its `--score-*` are applied first.
 pub(crate) fn score_options(
     a: &DensifyArgs,
     o: &cumulus3d_dense::DensifyOptions,
@@ -626,7 +674,7 @@ fn graph_of(store: &FeatureStore) -> MatchGraph {
     MatchGraph::from_store(store, &MatchGraphOptions::default())
 }
 
-/// 영상 폴더에서 3D 점 색 추출(모델을 쓰는 명령들의 공통 마무리 단계).
+/// Extract 3D point colors from the image folder (the common final step of the commands that use a model).
 pub fn extract_colors(rec: &mut Reconstruction, image_path: &Path) {
     rec.extract_colors(|im| {
         let img = image::open(image_path.join(&im.name)).ok()?.to_rgb8();
@@ -658,7 +706,7 @@ fn list_images(root: &Path) -> Vec<String> {
     v
 }
 
-/// 하위 명령 하나를 실행한다.
+/// Run one subcommand.
 pub fn run(cmd: InteropCmd) -> R {
     let t = Instant::now();
     match cmd {
@@ -851,7 +899,7 @@ pub fn run(cmd: InteropCmd) -> R {
             cfg.densify.neighbors.num_views = a.number_views;
             apply_densify_args(&a, &mut cfg.densify)?;
             cfg.score = score_options(&a, &cfg.densify, None)?;
-            // 변형 파일은 깊이 추정 전에 검사한다.
+            // Validate the variants file before depth estimation.
             let variants =
                 a.fusion_variants.as_deref().map(|vp| crate::fusion_variants::read_variants(vp, &a, &cfg.densify)).transpose()?;
             let backend = cfg.backend.clone()?;
@@ -899,12 +947,15 @@ pub fn run(cmd: InteropCmd) -> R {
             }
             eprintln!("[time] PLY 쓰기 {:.2}s", tw.elapsed().as_secs_f64());
             println!(
-                "점 {} (2차 {}) 융합 {:.2}s (1차 {:.2}s 2차 {:.2}s)",
+                "점 {} (2차 {}) 융합 {:.2}s (1차 {:.2}s 2차 {:.2}s 평활 {:.2}s, 가시성 {:.2}s, 제거 {})",
                 out.cloud.len(),
                 out.num_residual(),
                 tm.fusion.as_secs_f64(),
                 tm.fusion_pass1.as_secs_f64(),
-                tm.fusion_pass2.as_secs_f64()
+                tm.fusion_pass2.as_secs_f64(),
+                tm.fusion_smooth.as_secs_f64(),
+                tm.fusion_visibility.as_secs_f64(),
+                tm.fusion_visibility_removed
             );
             if a.stats {
                 let ts = Instant::now();

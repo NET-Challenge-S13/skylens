@@ -25,30 +25,30 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 영상 버퍼와 재표본 도구(u8 컬러, f32 회색, 적분영상 면적 평균, 쌍선형·3차 보간).
+//! Image buffers and resampling tools (u8 color, f32 gray, integral-image area average, bilinear and bicubic interpolation).
 
 use cumulus3d_core::{Error, Result};
 use std::path::Path;
 
-/// 8비트 영상(채널 1 또는 3, 행 우선, 채널 섞어 저장).
+/// 8-bit image (1 or 3 channels, row-major, channels interleaved).
 #[derive(Clone, Debug, PartialEq)]
 pub struct ImageBuffer {
-    /// 너비(픽셀).
+    /// Width (pixels).
     pub width: usize,
-    /// 높이(픽셀).
+    /// Height (pixels).
     pub height: usize,
-    /// 채널 수(1 또는 3).
+    /// Number of channels (1 or 3).
     pub channels: usize,
-    /// 픽셀 값(행 우선, 채널 섞어 저장).
+    /// Pixel values (row-major, channels interleaved).
     pub data: Vec<u8>,
 }
 
 impl ImageBuffer {
-    /// 0 으로 채운 영상.
+    /// Image filled with 0.
     pub fn new(width: usize, height: usize, channels: usize) -> Self {
         Self { width, height, channels, data: vec![0; width * height * channels] }
     }
-    /// 파일에서 읽기(회색이면 1채널, 그 밖은 RGB 3채널).
+    /// Reads from a file (1 channel if gray, otherwise 3-channel RGB).
     pub fn load(path: impl AsRef<Path>) -> Result<Self> {
         let img = image::open(path.as_ref()).map_err(|e| Error::Format(format!("{}: {e}", path.as_ref().display())))?;
         Ok(match img {
@@ -63,7 +63,7 @@ impl ImageBuffer {
             }
         })
     }
-    /// 확장자로 형식을 정해 저장. JPEG 는 `jpeg_quality`(1~100) 로 쓴다.
+    /// Saves with the format chosen by the extension. JPEG is written with `jpeg_quality` (1-100).
     pub fn save(&self, path: impl AsRef<Path>, jpeg_quality: u8) -> Result<()> {
         let path = path.as_ref();
         let ct = if self.channels == 1 { image::ExtendedColorType::L8 } else { image::ExtendedColorType::Rgb8 };
@@ -77,12 +77,12 @@ impl ImageBuffer {
             image::save_buffer(path, &self.data, self.width as u32, self.height as u32, ct).map_err(map)
         }
     }
-    /// 픽셀 값(채널 c).
+    /// Pixel value (channel c).
     #[inline]
     pub fn get(&self, x: usize, y: usize, c: usize) -> u8 {
         self.data[(y * self.width + x) * self.channels + c]
     }
-    /// RGB 값(회색이면 복제).
+    /// RGB value (replicated if gray).
     #[inline]
     pub fn rgb(&self, x: usize, y: usize) -> [u8; 3] {
         let i = (y * self.width + x) * self.channels;
@@ -92,7 +92,7 @@ impl ImageBuffer {
             [self.data[i]; 3]
         }
     }
-    /// 회색 float \[0,1\]: (0.299R + 0.587G + 0.114B)/255.
+    /// Gray float \[0,1\]: (0.299R + 0.587G + 0.114B)/255.
     pub fn to_gray(&self) -> GrayImage {
         let n = self.width * self.height;
         let mut data = vec![0.0f32; n];
@@ -108,7 +108,7 @@ impl ImageBuffer {
         }
         GrayImage { width: self.width, height: self.height, data }
     }
-    /// 면적 평균으로 크기 변경(축소용; 확대 시에도 면적 적분으로 동작).
+    /// Resize by area average (for shrinking; also works by area integration when enlarging).
     pub fn resize_area(&self, nw: usize, nh: usize) -> ImageBuffer {
         let mut out = ImageBuffer::new(nw, nh, self.channels);
         for c in 0..self.channels {
@@ -123,44 +123,44 @@ impl ImageBuffer {
     }
 }
 
-/// f32 회색 영상.
+/// f32 gray image.
 #[derive(Clone, Debug, PartialEq)]
 pub struct GrayImage {
-    /// 너비(픽셀).
+    /// Width (pixels).
     pub width: usize,
-    /// 높이(픽셀).
+    /// Height (pixels).
     pub height: usize,
-    /// 픽셀 값(행 우선).
+    /// Pixel values (row-major).
     pub data: Vec<f32>,
 }
 
 impl GrayImage {
-    /// 0 으로 채운 영상.
+    /// Image filled with 0.
     pub fn new(width: usize, height: usize) -> Self {
         Self { width, height, data: vec![0.0; width * height] }
     }
     #[inline]
-    /// 정수 좌표 픽셀 값.
+    /// Pixel value at integer coordinates.
     pub fn at(&self, x: usize, y: usize) -> f32 {
         self.data[y * self.width + x]
     }
-    /// 정수 좌표(가장자리 고정).
+    /// Integer coordinates (edge clamped).
     #[inline]
     pub fn at_clamped(&self, x: i32, y: i32) -> f32 {
         let xi = x.clamp(0, self.width as i32 - 1) as usize;
         let yi = y.clamp(0, self.height as i32 - 1) as usize;
         self.data[yi * self.width + xi]
     }
-    /// 정수 중심 규약 쌍선형(가장자리 고정, CUDA 텍스처 clamp 와 같은 동작).
+    /// Bilinear in the integer-center convention (edge clamped, same behavior as CUDA texture clamp).
     #[inline]
     pub fn bilinear_clamped(&self, x: f32, y: f32) -> f32 {
         bilinear_clamped(&self.data, self.width, self.height, x, y)
     }
-    /// 면적 평균 크기 변경(적분영상 사용).
+    /// Area-average resize (uses the integral image).
     pub fn resize_area(&self, nw: usize, nh: usize) -> GrayImage {
         Integral::new(self).resample(nw, nh)
     }
-    /// 3차(Keys a=−0.5) 보간 크기 변경(확대용, 정수 중심 규약).
+    /// Bicubic (Keys a=−0.5) interpolation resize (for enlarging, integer-center convention).
     pub fn resize_cubic(&self, nw: usize, nh: usize) -> GrayImage {
         let sx = self.width as f32 / nw as f32;
         let sy = self.height as f32 / nh as f32;
@@ -188,7 +188,7 @@ impl GrayImage {
         }
         out
     }
-    /// 비율 s 로 크기 변경: 축소는 면적 평균, 확대는 3차 보간. 크기는 반올림.
+    /// Resize by ratio s: shrinking uses area average, enlarging uses bicubic interpolation. Size is rounded.
     pub fn rescale(&self, s: f64) -> GrayImage {
         let nw = ((self.width as f64 * s).round() as usize).max(1);
         let nh = ((self.height as f64 * s).round() as usize).max(1);
@@ -215,14 +215,14 @@ fn cubic_weights(t: f32) -> [f32; 4] {
     [f(1.0 + t), f(t), f(1.0 - t), f(2.0 - t)]
 }
 
-/// 정수 중심 규약 쌍선형, 가장자리 고정.
+/// Bilinear in the integer-center convention, edge clamped.
 #[inline]
 pub fn bilinear_clamped(data: &[f32], w: usize, h: usize, x: f32, y: f32) -> f32 {
     let xm = (w - 1) as f32;
     let ym = (h - 1) as f32;
     let x = x.clamp(0.0, xm);
     let y = y.clamp(0.0, ym);
-    let x0 = x as usize; // x ≥ 0 이므로 floor
+    let x0 = x as usize; // x ≥ 0, so this is floor
     let y0 = y as usize;
     let x1 = (x0 + 1).min(w - 1);
     let y1 = (y0 + 1).min(h - 1);
@@ -235,18 +235,18 @@ pub fn bilinear_clamped(data: &[f32], w: usize, h: usize, x: f32, y: f32) -> f32
     a + fy * (b - a)
 }
 
-/// 적분영상(합계표, (w+1)×(h+1), f64). 임의 실수 상자 합을 쌍선형 보간으로 정확히 구한다.
+/// Integral image (summed-area table, (w+1)×(h+1), f64). Gives the exact sum over an arbitrary real box via bilinear interpolation.
 #[derive(Clone, Debug)]
 pub struct Integral {
-    /// 입력 영상 너비.
+    /// Input image width.
     pub width: usize,
-    /// 입력 영상 높이.
+    /// Input image height.
     pub height: usize,
     sums: Vec<f64>,
 }
 
 impl Integral {
-    /// 회색 영상의 적분영상을 만든다.
+    /// Builds the integral image of a gray image.
     pub fn new(img: &GrayImage) -> Self {
         let (w, h) = (img.width, img.height);
         let mut sums = vec![0.0f64; (w + 1) * (h + 1)];
@@ -259,7 +259,7 @@ impl Integral {
         }
         Self { width: w, height: h, sums }
     }
-    /// 모서리 좌표 (x, y) ∈ [0,w]×[0,h] 의 누적합(조각 상수 영상에서 쌍선형이 정확).
+    /// Cumulative sum at corner coordinates (x, y) ∈ [0,w]×[0,h] (bilinear is exact for a piecewise-constant image).
     #[inline]
     fn s(&self, x: f64, y: f64) -> f64 {
         let x = x.clamp(0.0, self.width as f64);
@@ -275,7 +275,7 @@ impl Integral {
         let d = self.sums[(y0 + 1) * w1 + x0 + 1];
         a * (1.0 - fx) * (1.0 - fy) + b * fx * (1.0 - fy) + c * (1.0 - fx) * fy + d * fx * fy
     }
-    /// 모서리 좌표 상자 [x0,x1)×[y0,y1) 평균.
+    /// Mean of the box [x0,x1)×[y0,y1) in corner coordinates.
     #[inline]
     pub fn box_mean(&self, x0: f64, y0: f64, x1: f64, y1: f64) -> f64 {
         let area = (x1 - x0) * (y1 - y0);
@@ -284,7 +284,7 @@ impl Integral {
         }
         (self.s(x1, y1) - self.s(x0, y1) - self.s(x1, y0) + self.s(x0, y0)) / area
     }
-    /// 면적 평균 재표본(출력 픽셀 발자국 = 입력 위 상자).
+    /// Area-average resampling (output pixel footprint = a box on the input).
     pub fn resample(&self, nw: usize, nh: usize) -> GrayImage {
         let sx = self.width as f64 / nw as f64;
         let sy = self.height as f64 / nh as f64;
@@ -309,7 +309,7 @@ mod tests {
         g.data = vec![1.0, 3.0, 5.0, 7.0, 1.0, 3.0, 5.0, 7.0];
         let r = g.resize_area(2, 1);
         assert!((r.data[0] - 2.0).abs() < 1e-6 && (r.data[1] - 6.0).abs() < 1e-6);
-        let r = g.resize_area(3, 1); // 비정수 축척: 첫 칸 = (1 + 3/3)/(4/3)
+        let r = g.resize_area(3, 1); // non-integer scale: first cell = (1 + 3/3)/(4/3)
         assert!((r.data[0] - (1.0 + 3.0 / 3.0) / (4.0 / 3.0)).abs() < 1e-5);
     }
 

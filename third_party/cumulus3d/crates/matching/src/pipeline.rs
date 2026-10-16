@@ -29,7 +29,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 짝 목록 기반 매칭 → 두 뷰 기하 검증 → FeatureStore 기록.
+//! Pair-list-based matching -> two-view geometry verification -> FeatureStore writes.
 
 use crate::batched::{CpuTwoView, TwoViewBackend, VerifyJob};
 use crate::descriptor::{DescriptorMatchOptions, MatcherBackend};
@@ -40,18 +40,18 @@ use rayon::prelude::*;
 use std::collections::HashSet;
 use std::path::Path;
 
-/// 짝 매칭 전체 옵션.
+/// Full options for pair matching.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PairMatchingOptions {
-    /// 기술자 매칭 옵션.
+    /// Descriptor matching options.
     pub sift: DescriptorMatchOptions,
-    /// 두 뷰 기하 검증 옵션.
+    /// Two-view geometry verification options.
     pub geometry: TwoViewOptions,
-    /// 실제 사용값 = min(이 값, 저장소 영상별 키포인트 수 최댓값).
+    /// Actual value used = min(this value, maximum per-image keypoint count in the store).
     pub max_num_matches: usize,
-    /// 한 번에 처리하는 짝 수.
+    /// Number of pairs processed at a time.
     pub block_size: usize,
-    /// 참이면 원시 매칭만 기록(기하 검증 생략).
+    /// If true, record only raw matches (skip geometry verification).
     pub skip_geometric_verification: bool,
 }
 
@@ -67,20 +67,20 @@ impl Default for PairMatchingOptions {
     }
 }
 
-/// 처리 통계.
+/// Processing statistics.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct MatchingStats {
-    /// 이미 매칭·기하가 모두 있어 건너뛴 짝.
+    /// Pairs skipped because both matches and geometry already exist.
     pub num_skipped_existing: usize,
-    /// 기술자 매칭을 수행한 짝.
+    /// Pairs for which descriptor matching was performed.
     pub num_matched: usize,
-    /// 기존 원시 매칭으로 검증만 한 짝.
+    /// Pairs verified only, using existing raw matches.
     pub num_verified_only: usize,
-    /// 인라이어 ≥ min_num_inliers 로 유효 기하가 기록된 짝.
+    /// Pairs recorded with a valid geometry, with inliers >= min_num_inliers.
     pub num_valid_geometries: usize,
 }
 
-/// (id1, id2, 원시 매칭, 기하, 기술자 매칭 수행 여부).
+/// (id1, id2, raw matches, geometry, whether descriptor matching was performed).
 type PairResult = (ImageId, ImageId, Vec<FeatureMatch>, Option<TwoViewGeometry>, bool);
 
 struct Task {
@@ -89,8 +89,8 @@ struct Task {
     pre: Option<Vec<FeatureMatch>>,
 }
 
-/// 짝 목록을 매칭해 저장소에 기록한다. 위치가 도착할 때마다 누적 짝 목록을 넘겨도
-/// 이미 처리된 짝(원시 매칭과 기하가 모두 있는 짝)은 비용 없이 건너뛴다.
+/// Matches a pair list and records it in the store. Even if the accumulated pair list is passed each time a position arrives,
+/// already processed pairs (pairs with both raw matches and geometry) are skipped at no cost.
 pub fn match_pairs(
     store: &FeatureStore,
     pairs: &[(ImageId, ImageId)],
@@ -112,7 +112,7 @@ pub fn match_pairs_with(
     let max_num_matches = opts.max_num_matches.min(store.largest_keypoint_count());
     let min_inl = opts.geometry.min_num_inliers;
     for block in pairs.chunks(opts.block_size.max(1)) {
-        // 1) 블록 안 짝 처리 규칙.
+        // 1) Pair handling rules within a block.
         let mut seen = HashSet::new();
         let mut tasks = Vec::new();
         for &(id1, id2) in block {
@@ -141,7 +141,7 @@ pub fn match_pairs_with(
                 (false, false) => tasks.push(Task { id1, id2, pre: None }),
             }
         }
-        // 필요한 자료 확인.
+        // Check the required data.
         for t in &tasks {
             for id in [t.id1, t.id2] {
                 let img = store.image(id).ok_or_else(|| Error::NotFound(format!("영상 {id}")))?;
@@ -204,7 +204,7 @@ pub fn match_pairs_with(
     Ok(stats)
 }
 
-/// 짝 하나 검증(저장소에서 카메라·키포인트를 읽음). 최소 인라이어 규칙 적용 후 결과.
+/// Verifies one pair (reads camera and keypoints from the store). Result after applying the minimum-inlier rule.
 pub fn verify_pair(store: &FeatureStore, id1: ImageId, id2: ImageId, matches: &[FeatureMatch], opts: &TwoViewOptions) -> TwoViewGeometry {
     if matches.len() < opts.min_num_inliers {
         return TwoViewGeometry::default();
@@ -222,7 +222,7 @@ pub fn verify_pair(store: &FeatureStore, id1: ImageId, id2: ImageId, matches: &[
     finalize_geometry(g, opts.min_num_inliers)
 }
 
-/// 짝 목록 파일을 읽어 매칭(`matches_importer --match_type pairs` 대응).
+/// Reads a pair list file and matches (corresponds to `matches_importer --match_type pairs`).
 pub fn match_pair_list_file(
     store: &FeatureStore,
     path: impl AsRef<Path>,

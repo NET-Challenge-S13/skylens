@@ -25,16 +25,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 공통 기반: 카메라 모델, 기하, 재구성 자료 구조, 대응 그래프, 특징 저장소, RANSAC, 입출력.
+//! Common foundation: camera models, geometry, reconstruction data structures, correspondence graph, feature store, RANSAC, I/O.
 //!
-//! 규약 요약(모듈별 공개 항목은 크레이트 `README.md`):
-//! - 자세는 `world_to_cam`(세계 → 카메라), 쿼터니언은 해밀턴, 저장 순서 w,x,y,z.
-//! - 카메라 좌표계: x 오른쪽, y 아래, z 앞. 픽셀 좌표: 좌상단 화소 중심 = (0.5, 0.5).
-//! - id: 카메라/rig/프레임/영상 = u32, 3D 점 = u64, 짝 = u64. 무효값은 각 자료형의 최댓값.
+//! Convention summary (public items per module are in the crate `README.md`):
+//! - Poses are `world_to_cam` (world -> camera); quaternions are Hamilton, stored in w,x,y,z order.
+//! - Camera frame: x right, y down, z forward. Pixel coordinates: top-left pixel center = (0.5, 0.5).
+//! - ids: camera/rig/frame/image = u32, 3D point = u64, pair = u64. The invalid value is the maximum of each type.
 //!
-//! # 사용 예
+//! # Usage example
 //!
-//! 두 영상과 3D 점 하나로 재구성을 만들고, 재투영 오차를 계산한 뒤 모델 파일로 저장·적재한다.
+//! Builds a reconstruction from two images and one 3D point, computes the reprojection error, then saves and loads it as a model file.
 //!
 //! ```
 //! use cumulus3d_core::analyzer::ModelStats;
@@ -46,7 +46,7 @@
 //! let mut rec = Reconstruction::new();
 //! rec.add_camera_own_rig(cam.clone())?;
 //!
-//! // 세계 점 하나를 두 카메라(기선 1 m)에 투영해 2D 관측을 만든다.
+//! // Project one world point into the two cameras (1 m baseline) to produce 2D observations.
 //! let x = Vec3::new(0.2, -0.1, 5.0);
 //! for (id, tx) in [(1u32, 0.0), (2, -1.0)] {
 //!     let world_to_cam = Rigid3::new(Quat::IDENTITY, Vec3::new(tx, 0.0, 0.0));

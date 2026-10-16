@@ -25,47 +25,47 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 오류 타입.
+//! Error type.
 
 use std::path::PathBuf;
 
-/// core 전반의 오류.
+/// Errors across core.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("입출력 오류: {0}")]
-    /// 입출력 실패.
+    /// I/O failure.
     Io(#[from] std::io::Error),
     #[error("구문 오류 ({path}:{line}): {msg}")]
-    /// 텍스트 파일 구문 오류(위치 포함).
+    /// Text file syntax error (with location).
     Parse {
-        /// 파일 경로.
+        /// File path.
         path: PathBuf,
-        /// 줄 번호(1부터).
+        /// Line number (1-based).
         line: usize,
-        /// 오류 설명.
+        /// Error description.
         msg: String,
     },
     #[error("형식 오류: {0}")]
-    /// 파일 형식 위반.
+    /// File format violation.
     Format(String),
     #[error("잘못된 인자: {0}")]
-    /// 잘못된 인자.
+    /// Invalid argument.
     InvalidArgument(String),
     #[error("찾을 수 없음: {0}")]
-    /// 대상(id·이름)을 찾지 못함.
+    /// Target (id or name) not found.
     NotFound(String),
     #[error("이미 존재: {0}")]
-    /// 이미 존재하는 대상을 다시 추가함.
+    /// Attempt to add a target that already exists.
     AlreadyExists(String),
     #[error("불변식 위반: {0}")]
-    /// 자료 구조 불변식 위반.
+    /// Data structure invariant violation.
     Invariant(String),
     #[error("지원하지 않음: {0}")]
-    /// 지원하지 않는 기능·모델.
+    /// Unsupported feature or model.
     Unsupported(String),
 }
 
-/// core 전반의 `Result` 별칭.
+/// `Result` alias used across core.
 pub type Result<T> = std::result::Result<T, Error>;
 
 impl Error {

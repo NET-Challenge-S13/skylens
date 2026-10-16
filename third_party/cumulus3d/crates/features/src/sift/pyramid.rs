@@ -29,19 +29,19 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 가우시안 스케일 공간. 분리형 f32 블러, 행 단위 rayon 병렬.
+//! Gaussian scale space. Separable f32 blur, rayon-parallel per row.
 
 use rayon::prelude::*;
 use std::sync::Mutex;
 
-/// f32 버퍼 재사용 풀(영상 간 피라미드 할당 재사용).
+/// f32 buffer reuse pool (reuses pyramid allocations across images).
 #[derive(Default)]
 pub struct BufferPool {
     bufs: Mutex<Vec<Vec<f32>>>,
 }
 
 impl BufferPool {
-    /// 길이 `len` 버퍼(내용은 덮어쓰기 전제). 용량이 맞는 것을 우선 재사용.
+    /// Buffer of length `len` (contents assumed to be overwritten). Prefers reusing one with matching capacity.
     pub fn take(&self, len: usize) -> Vec<f32> {
         let mut g = self.bufs.lock().unwrap_or_else(|e| e.into_inner());
         let pos = g.iter().enumerate().filter(|(_, b)| b.capacity() >= len).min_by_key(|(_, b)| b.capacity()).map(|(i, _)| i);
@@ -55,20 +55,20 @@ impl BufferPool {
         v
     }
 
-    /// 버퍼를 풀에 돌려준다.
+    /// Returns a buffer to the pool.
     pub fn give(&self, v: Vec<f32>) {
         if v.capacity() == 0 {
             return;
         }
         let mut g = self.bufs.lock().unwrap_or_else(|e| e.into_inner());
-        // 무한 증가 방지: 오래된 것은 버림.
+        // Prevent unbounded growth: discard old ones.
         if g.len() < 64 {
             g.push(v);
         }
     }
 }
 
-/// 1D 가우시안 커널: 반폭 r = ceil(4σ − 0.5), 폭 2r+1 을 [5, 33] 로 제한, 합 1 정규화.
+/// 1D Gaussian kernel: half-width r = ceil(4σ - 0.5), width 2r+1 clamped to [5, 33], normalized to sum 1.
 pub fn gaussian_kernel(sigma: f32) -> Vec<f32> {
     let r = ((4.0 * sigma - 0.5).ceil() as i64).clamp(2, 16) as usize;
     let mut k: Vec<f32> = (0..=2 * r)
@@ -82,12 +82,12 @@ pub fn gaussian_kernel(sigma: f32) -> Vec<f32> {
     k
 }
 
-/// 분리형 가우시안 블러(가장자리 복제). `tmp` 는 같은 크기 작업 버퍼.
+/// Separable Gaussian blur (edge replication). `tmp` is a work buffer of the same size.
 #[allow(clippy::needless_range_loop)]
 pub fn gaussian_blur(src: &[f32], dst: &mut [f32], tmp: &mut [f32], w: usize, h: usize, sigma: f32) {
     let k = gaussian_kernel(sigma);
     let r = k.len() / 2;
-    // 가로: 패딩한 행에 대해 out[x] += k_i · pad[x + i] (벡터화되는 형태).
+    // Horizontal: for a padded row, out[x] += k_i · pad[x + i] (vectorizable form).
     tmp.par_chunks_mut(w).zip(src.par_chunks(w)).for_each_init(
         || vec![0f32; w + 2 * r],
         |pad, (out, row)| {
@@ -110,7 +110,7 @@ pub fn gaussian_blur(src: &[f32], dst: &mut [f32], tmp: &mut [f32], w: usize, h:
             }
         },
     );
-    // 세로: out 행 y = Σ k_i · tmp 행 clamp(y + i − r).
+    // Vertical: out row y = Σ k_i · tmp row clamp(y + i - r).
     let tmp: &[f32] = tmp;
     dst.par_chunks_mut(w).enumerate().for_each(|(y, out)| {
         let row = |yy: isize| -> &[f32] {
@@ -132,8 +132,8 @@ pub fn gaussian_blur(src: &[f32], dst: &mut [f32], tmp: &mut [f32], w: usize, h:
     });
 }
 
-/// 2배 업샘플: 출력 (2r+a, 2c+b) = 입력 (r,c) 주변 쌍선형(가중치 a/2, b/2), 가장자리 복제.
-// 설계 결정: 마지막 행/열의 범위 밖 이웃은 가장자리 복제.
+/// 2x upsample: output (2r+a, 2c+b) = bilinear around input (r,c) (weights a/2, b/2), edge replication.
+// Design decision: out-of-range neighbors of the last row/column use edge replication.
 pub fn upsample2(src: &[f32], w: usize, h: usize, dst: &mut [f32]) {
     let w2 = 2 * w;
     dst.par_chunks_mut(w2).enumerate().for_each(|(yy, out)| {
@@ -154,8 +154,8 @@ pub fn upsample2(src: &[f32], w: usize, h: usize, dst: &mut [f32]) {
     });
 }
 
-/// 짝수 행·열만 취해 1/2 축소(평균 없음). 출력 크기 (w/2, h/2).
-// 설계 결정: 홀수 크기는 내림 크기 사용.
+/// Takes only even rows/columns for 1/2 downscale (no averaging). Output size (w/2, h/2).
+// Design decision: odd sizes use the rounded-down size.
 pub fn decimate2(src: &[f32], w: usize, dst: &mut [f32], w2: usize) {
     dst.par_chunks_mut(w2).enumerate().for_each(|(y, out)| {
         let row = &src[2 * y * w..];
@@ -165,48 +165,48 @@ pub fn decimate2(src: &[f32], w: usize, dst: &mut [f32], w2: usize) {
     });
 }
 
-/// 옥타브 하나: 가우시안 레벨 l = −1..=S+1 (S+3 장).
+/// One octave: Gaussian levels l = -1..=S+1 (S+3 images).
 pub struct Octave {
-    /// 옥타브 번호 o (첫 옥타브 −1 이면 −1부터).
+    /// Octave index o (starts from -1 if the first octave is -1).
     pub o: i32,
-    /// 옥타브 너비.
+    /// Octave width.
     pub w: usize,
-    /// 옥타브 높이.
+    /// Octave height.
     pub h: usize,
-    /// 가우시안 레벨 영상들(l = −1..=S+1 순).
+    /// Gaussian level images (in order l = -1..=S+1).
     pub gauss: Vec<Vec<f32>>,
 }
 
 impl Octave {
-    /// 가우시안 레벨 l (−1..=S+1).
+    /// Gaussian level l (-1..=S+1).
     #[inline]
     pub fn level(&self, l: i32) -> &[f32] {
         &self.gauss[(l + 1) as usize]
     }
 }
 
-/// 스케일 공간 상수.
+/// Scale-space constants.
 #[derive(Clone, Copy, Debug)]
 pub struct ScaleSpace {
-    /// 옥타브당 검출 레벨 수 S.
+    /// Number of detection levels per octave S.
     pub s: usize,
-    /// 레벨 간 배율 k = 2^(1/S).
+    /// Inter-level factor k = 2^(1/S).
     pub k: f32,
-    /// 기준 σ₀.
+    /// Base σ₀.
     pub sigma0: f32,
 }
 
 impl ScaleSpace {
-    /// 검출 레벨 수 S 로 상수를 계산.
+    /// Computes the constants from the detection level count S.
     pub fn new(s: usize) -> Self {
         let k = 2f32.powf(1.0 / s as f32);
         Self { s, k, sigma0: 1.6 * k }
     }
-    /// 옥타브 내 상대 σ(l) = σ₀ k^l.
+    /// Relative σ(l) = σ₀ k^l within an octave.
     pub fn sigma(&self, l: f32) -> f32 {
         self.sigma0 * self.k.powf(l)
     }
-    /// 레벨 l−1 → l 증분 σ.
+    /// Increment σ from level l-1 -> l.
     pub fn sigma_inc(&self, l: i32) -> f32 {
         let a = self.sigma(l as f32);
         let b = self.sigma(l as f32 - 1.0);
@@ -214,14 +214,14 @@ impl ScaleSpace {
     }
 }
 
-/// 옥타브 수 자동 결정: max(1, floor(log2(min(W₀,H₀))) − 3).
+/// Automatic octave count: max(1, floor(log2(min(W₀,H₀))) - 3).
 pub fn auto_num_octaves(w0: usize, h0: usize) -> usize {
     let m = w0.min(h0).max(1);
     let l = (usize::BITS - 1 - m.leading_zeros()) as i64;
     (l - 3).max(1) as usize
 }
 
-/// 피라미드 구성. `base` 는 첫 옥타브 해상도의 블러 전 영상(업샘플 완료).
+/// Builds the pyramid. `base` is the pre-blur image at first-octave resolution (upsampling done).
 #[allow(clippy::too_many_arguments)]
 pub fn build_pyramid(
     base: Vec<f32>,
@@ -253,7 +253,7 @@ pub fn build_pyramid(
             }
             gauss.push(g0);
         } else {
-            // 이전 옥타브 레벨 S−1 (σ = 2·1.6) 을 데시메이트.
+            // Decimate level S-1 (σ = 2·1.6) of the previous octave.
             let prev = &octaves[oi - 1];
             let (pw, ph) = (prev.w, prev.h);
             let (nw, nh) = (pw / 2, ph / 2);

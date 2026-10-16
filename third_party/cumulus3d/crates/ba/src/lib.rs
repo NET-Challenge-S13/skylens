@@ -25,20 +25,23 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 번들 조정.
+//! Bundle adjustment.
 //!
-//! 이 파일의 공개 시그니처는 sfm 크레이트와의 계약이다. 구현 중 바꾸지 말 것(필드 추가는 가능).
+//! The public signatures of this file are a contract with the sfm crate. Do not change them during implementation (adding fields is
+//! allowed).
 //!
-//! 구성: 신뢰 영역 LM(`tr`), Schur 보수 조립·역대입(`problem`), 축소 계통 풀이기(`linsolve`),
-//! 단일 자세 정제(`abspose`), 견고 손실(`loss`), 풀이 백엔드(`backend`: CPU 기본, GPU 는 다른 크레이트가 구현).
+//! Components: trust-region LM (`tr`), Schur complement assembly and back-substitution (`problem`), reduced camera system solvers
+//! (`linsolve`),
+//! single-pose refinement (`abspose`), robust losses (`loss`), solver backends (`backend`: CPU by default, GPU implemented in
+//! another crate).
 //!
-//! # 사용 예
+//! # Usage example
 //!
 //! ```
 //! use cumulus3d_ba::{refine_abs_pose, Loss};
 //! use cumulus3d_core::{Camera, CameraModelKind, Quat, Rigid3, Vec2, Vec3};
 //!
-//! // 합성 장면: 참 자세로 3D 점을 투영해 2D 관측을 만든다.
+//! // Synthetic scene: project 3D points with the true poses to create 2D observations.
 //! let cam = Camera::from_focal(CameraModelKind::Pinhole, 1000.0, 1920, 1080);
 //! let truth = Rigid3::new(Quat::from_axis_angle(&Vec3::y(), 0.1), Vec3::new(0.2, -0.1, 6.0));
 //! let pts3d: Vec<Vec3> = (0..60)
@@ -50,7 +53,7 @@
 //! let pts2d: Vec<Vec2> = pts3d.iter().map(|p| cam.cam_to_img(&truth.transform_point(p)).unwrap()).collect();
 //! let mask = vec![true; pts3d.len()];
 //!
-//! // 흐트러진 초기 자세에서 절대 자세 정제.
+//! // Absolute pose refinement from a perturbed initial pose.
 //! let mut pose = Rigid3::new(Quat::from_axis_angle(&Vec3::y(), 0.12), Vec3::new(0.25, -0.05, 5.9));
 //! let summary = refine_abs_pose(&cam, &pts2d, &pts3d, &mask, &mut pose, Loss::Cauchy(1.0), 100).unwrap();
 //! assert!(summary.is_usable());
@@ -64,7 +67,7 @@
 //! println!("RMS {:.3} px, 반복 {}", summary.rms_reprojection_error(), summary.num_iterations);
 //! ```
 #![warn(missing_docs)]
-// 수치 커널은 인덱스 루프가 읽기 쉽다.
+// Numerical kernels are easier to read with index loops.
 #![allow(clippy::needless_range_loop)]
 
 mod abspose;
@@ -79,102 +82,111 @@ pub use problem::{quat_plus, ProblemInput};
 pub use tr::{minimize, StepInfo, TrOptions, TrProblem, TrResult};
 
 use cumulus3d_core::{CameraId, Error, FrameId, ImageId, Point3DId, Reconstruction, Rigid3, SensorKey, Vec2, Vec3};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
-/// 견고 손실 함수. 스케일은 잔차(픽셀) 단위.
+/// Robust loss function. The scale is in residual (pixel) units.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Loss {
-    /// 손실 없음(제곱 오차 그대로).
+    /// No loss (squared error as is).
     Trivial,
-    /// Soft L1 손실(인자 = 스케일).
+    /// Soft L1 loss (argument = scale).
     SoftL1(f64),
-    /// Cauchy 손실(인자 = 스케일).
+    /// Cauchy loss (argument = scale).
     Cauchy(f64),
-    /// Huber 손실(인자 = 스케일).
+    /// Huber loss (argument = scale).
     Huber(f64),
 }
 
-/// 축소 카메라 계통 풀이기.
+/// Reduced camera system solver.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum LinearSolverType {
-    /// 영상 수로 자동 선택.
+    /// Chosen automatically by image count.
     #[default]
     Auto,
-    /// 밀집 Schur + 밀집 촐레스키.
+    /// Dense Schur + dense Cholesky.
     DenseSchur,
-    /// 희소 Schur + 희소 촐레스키(faer).
+    /// Sparse Schur + sparse Cholesky (faer).
     SparseSchur,
-    /// 반복 Schur: PCG + Schur 블록 야코비 전처리.
+    /// Iterative Schur: PCG + Schur block-Jacobi preconditioner.
     IterativeSchur,
 }
 
-/// 최적화 종료 상태. `Failure` 외에는 결과를 쓸 수 있다.
+/// Optimization termination state. The result is usable except for `Failure`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum Termination {
-    /// 허용오차 조건으로 수렴.
+    /// Converged by a tolerance condition.
     Convergence,
     #[default]
-    /// 최대 반복에 도달(결과는 사용 가능).
+    /// Reached the maximum iterations (result is usable).
     NoConvergence,
-    /// 수치 실패(결과를 쓰면 안 됨).
+    /// Numerical failure (the result must not be used).
     Failure,
 }
 
-/// 어떤 변수를 정제·고정할지.
+/// Which variables to refine or fix.
 #[derive(Clone, Debug)]
 pub struct BaConfig {
-    /// 초점 거리 정제 여부.
+    /// Whether to refine the focal length.
     pub refine_focal_length: bool,
-    /// 주점 정제 여부.
+    /// Whether to refine the principal point.
     pub refine_principal_point: bool,
-    /// 추가 파라미터(왜곡 등) 정제 여부.
+    /// Whether to refine extra parameters (distortion, etc.).
     pub refine_extra_params: bool,
-    /// 영상(프레임) 자세 정제 여부.
+    /// Whether to refine image (frame) poses.
     pub refine_poses: bool,
-    /// 3D 점 위치 정제 여부.
+    /// Whether to refine 3D point positions.
     pub refine_points: bool,
-    /// 견고 손실 함수.
+    /// Robust loss function.
     pub loss: Loss,
-    /// 최대 LM 반복 수.
+    /// Maximum number of LM iterations.
     pub max_num_iterations: usize,
-    /// 상대 비용 감소 허용오차(0 이면 끔).
+    /// Relative cost-decrease tolerance (0 = off).
     pub function_tolerance: f64,
-    /// 기울기 허용오차.
+    /// Gradient tolerance.
     pub gradient_tolerance: f64,
-    /// 파라미터 변화 허용오차(0 이면 끔).
+    /// Parameter-change tolerance (0 = off).
     pub parameter_tolerance: f64,
-    /// 대상 영상. 비면 등록된 영상 전부.
+    /// Target images. If empty, all registered images.
     pub images: HashSet<ImageId>,
-    /// 자세를 고정할 영상.
+    /// Images whose poses are held fixed.
     pub constant_poses: HashSet<ImageId>,
-    /// 내부 파라미터를 고정할 카메라.
+    /// Cameras whose intrinsics are held fixed.
     pub constant_cameras: HashSet<CameraId>,
-    /// 위치를 고정할 3D 점.
+    /// 3D points whose positions are held fixed.
     pub constant_points: HashSet<Point3DId>,
-    /// 게이지 고정을 자동으로 할지(두 영상 고정 규칙). constant_poses 가 비었을 때만 의미 있음.
+    /// Whether to fix the gauge automatically (two-image fixing rule). Meaningful only when constant_poses is empty.
     pub auto_gauge: bool,
-    /// 스레드 수(0 이면 전역 rayon 풀).
+    /// Number of threads (0 = global rayon pool).
     pub num_threads: usize,
-    /// 모든 자세의 회전 고정(이동만 정제).
+    /// Fix the rotation of all poses (refine translation only).
     pub constant_world_to_rig_rotation: bool,
-    /// > 0 이면 트랙 길이가 이보다 짧은 점은 문제에서 제외.
+    /// If > 0, points whose track length is shorter than this are excluded from the problem.
     pub min_track_length: usize,
-    /// 축소 계통 풀이기 종류.
+    /// Reduced system solver type.
     pub linear_solver: LinearSolverType,
-    /// 반복 풀이기(PCG) 최대 반복.
+    /// Maximum iterations of the iterative solver (PCG).
     pub max_linear_solver_iterations: usize,
-    /// `Auto` 에서 밀집 풀이기를 쓰는 최대 영상 수.
+    /// Maximum image count for which `Auto` uses the dense solver.
     pub dense_solver_image_limit: usize,
-    /// `Auto` 에서 희소 풀이기를 쓰는 최대 영상 수.
+    /// Maximum image count for which `Auto` uses the sparse solver.
     pub sparse_solver_image_limit: usize,
-    /// BA 전에 깊이 < ε 관측 삭제(사전 처리).
+    /// Delete observations with depth < ε before BA (preprocessing).
     pub filter_negative_depth: bool,
-    /// BA 후 모든 3D 점의 평균 재투영 오차(`Point3D::error`) 재계산.
+    /// After BA, recompute the mean reprojection error (`Point3D::error`) of all 3D points.
     pub update_point_errors: bool,
+    /// Camera position priors: image → (target projection center in world coordinates, standard deviation in world
+    /// units). Adds the residual `(C − target) / σ` per image (reference-sensor images only). When non-empty the
+    /// priors fix the gauge and `auto_gauge` is not applied.
+    pub position_priors: HashMap<ImageId, (Vec3, f64)>,
+    /// Intrinsics priors: camera → (target parameter vector in the camera model's order, per-parameter σ in parameter
+    /// units; σ ≤ 0 or NaN skips that parameter). Adds the residual `(p − target)/σ` for every parameter that is refined
+    /// in this run (focal / principal point / extra, per the flags above); parameters of constant cameras are skipped.
+    /// Vectors shorter than the model's parameter count cover only the leading parameters.
+    pub intrinsics_priors: HashMap<CameraId, (Vec<f64>, Vec<f64>)>,
 }
 
 impl Default for BaConfig {
-    /// 단독 번들 조정 기본값.
+    /// Default values for standalone bundle adjustment.
     fn default() -> Self {
         Self {
             refine_focal_length: true,
@@ -201,45 +213,47 @@ impl Default for BaConfig {
             sparse_solver_image_limit: 1000,
             filter_negative_depth: true,
             update_point_errors: true,
+            position_priors: HashMap::new(),
+            intrinsics_priors: HashMap::new(),
         }
     }
 }
 
-/// 번들 조정 결과 요약.
+/// Bundle adjustment result summary.
 #[derive(Clone, Debug, Default)]
 pub struct BaSummary {
-    /// 수행한 반복 수.
+    /// Number of iterations performed.
     pub num_iterations: usize,
-    /// 초기 비용(½·잔차 제곱합).
+    /// Initial cost (½·sum of squared residuals).
     pub initial_cost: f64,
-    /// 최종 비용(½·잔차 제곱합).
+    /// Final cost (½·sum of squared residuals).
     pub final_cost: f64,
-    /// 잔차 수(관측 수 × 2).
+    /// Number of residuals (observations × 2).
     pub num_residuals: usize,
-    /// `termination == Convergence` 여부.
+    /// Whether `termination == Convergence`.
     pub converged: bool,
-    /// 종료 상태.
+    /// Termination state.
     pub termination: Termination,
-    /// 채택된(성공한) 단계 수.
+    /// Number of accepted (successful) steps.
     pub num_successful_steps: usize,
-    /// 실제로 쓴 선형 풀이기.
+    /// Linear solver actually used.
     pub linear_solver: LinearSolverType,
-    /// 문제에 들어간 영상 수.
+    /// Number of images in the problem.
     pub num_images: usize,
-    /// 문제에 들어간 3D 점 수.
+    /// Number of 3D points in the problem.
     pub num_points: usize,
-    /// 가변(고정 아님) 3D 점 수.
+    /// Number of variable (non-fixed) 3D points.
     pub free_point_count: usize,
-    /// 사전 필터가 지운 관측 수.
+    /// Number of observations removed by the pre-filter.
     pub dropped_observations: usize,
 }
 
 impl BaSummary {
-    /// 결과를 쓸 수 있는지(종료 상태가 실패가 아님).
+    /// Whether the result is usable (the termination state is not a failure).
     pub fn is_usable(&self) -> bool {
         self.termination != Termination::Failure
     }
-    /// 최종 RMS 재투영 오차(픽셀, 손실 없을 때 의미 있음): √(2·비용 / 관측 수).
+    /// Final RMS reprojection error (pixels, meaningful when there is no loss): √(2·cost / number of observations).
     pub fn rms_reprojection_error(&self) -> f64 {
         if self.num_residuals == 0 {
             0.0
@@ -249,7 +263,7 @@ impl BaSummary {
     }
 }
 
-/// 영상 수로 풀이기 선택(CPU).
+/// Chooses the solver by image count (CPU).
 pub fn select_linear_solver(num_images: usize, config: &BaConfig) -> LinearSolverType {
     match config.linear_solver {
         LinearSolverType::Auto => {
@@ -265,8 +279,9 @@ pub fn select_linear_solver(num_images: usize, config: &BaConfig) -> LinearSolve
     }
 }
 
-/// 주어진 등록 영상들에서 깊이(카메라 z) < ε 인 관측 삭제. 트랙 ≤ 2 면 점째 삭제(core 규칙).
-/// 반환: 삭제한 관측 수.
+/// Deletes observations with depth (camera z) < ε in the given registered images. If the track is <= 2, the whole point is deleted (core
+/// rule).
+/// Returns: the number of observations deleted.
 pub fn filter_negative_depth_observations(rec: &mut Reconstruction, images: &[ImageId]) -> cumulus3d_core::Result<usize> {
     let mut del = Vec::new();
     for &id in images {
@@ -288,7 +303,7 @@ pub fn filter_negative_depth_observations(rec: &mut Reconstruction, images: &[Im
     }
     let mut n = 0;
     for (id, idx) in del {
-        // 앞선 삭제로 점이 사라졌을 수 있다.
+        // A point may have disappeared through earlier deletions.
         if rec.image(id).is_some_and(|im| im.point2d(idx).has_point3d()) {
             rec.delete_observation(id, idx)?;
             n += 1;
@@ -297,11 +312,11 @@ pub fn filter_negative_depth_observations(rec: &mut Reconstruction, images: &[Im
     Ok(n)
 }
 
-/// 재구성에 번들 조정을 적용한다. 점·자세·카메라를 제자리에서 갱신.
+/// Applies bundle adjustment to the reconstruction. Updates points, poses, and cameras in place.
 ///
-/// 풀이기가 `Failure` 로 끝나도 마지막으로 채택된 해를 써 넣고 `Ok` 를 돌려준다
-/// (`summary.termination` 으로 확인). 자명하지 않은 rig 는 프레임 자세를 변수로 두고
-/// rig_to_sensor 는 상수로 둔다.
+/// Even if the solver ends in `Failure`, writes back the last accepted solution and returns `Ok`
+/// (check via `summary.termination`). A non-trivial rig keeps the frame poses as variables
+/// and rig_to_sensor as constants.
 pub fn bundle_adjust(rec: &mut Reconstruction, config: &BaConfig) -> cumulus3d_core::Result<BaSummary> {
     bundle_adjust_with(rec, config, &CpuBaBackend)
 }
@@ -362,7 +377,7 @@ fn bundle_adjust_impl(rec: &mut Reconstruction, config: &BaConfig, backend: &dyn
     summary.final_cost = r.final_cost;
     summary.termination = r.termination;
     summary.converged = r.termination == Termination::Convergence;
-    // 써 넣기: 자세는 전부(사전 정규화 반영), 카메라·점은 가변인 것만.
+    // Write back: all poses (reflecting the prior normalization), only the variable cameras and points.
     for (p, fid) in frame_ids.iter().enumerate() {
         rec.set_frame_pose(*fid, Some(sol.poses[p]))?;
     }
@@ -386,7 +401,7 @@ fn bundle_adjust_impl(rec: &mut Reconstruction, config: &BaConfig, backend: &dyn
 
 fn build_problem(rec: &Reconstruction, config: &BaConfig, images: &[ImageId]) -> Option<Built> {
     let in_set: HashSet<ImageId> = images.iter().copied().collect();
-    // 관측 수집 (점 id, 영상 순번, xy)
+    // Collect observations (point id, image index, xy)
     let mut raw: Vec<(Point3DId, u32, Vec2)> = Vec::new();
     let mut img_ok: Vec<bool> = vec![false; images.len()];
     for (ii, &id) in images.iter().enumerate() {
@@ -408,8 +423,8 @@ fn build_problem(rec: &Reconstruction, config: &BaConfig, images: &[ImageId]) ->
         }
     }
     raw.sort_unstable_by(|a, b| (a.0, a.1).cmp(&(b.0, b.1)).then(a.2.x.total_cmp(&b.2.x)));
-    // 점 선택
-    let mut obs: Vec<(u32, u32, Vec2)> = Vec::with_capacity(raw.len()); // (점 순번, 영상 순번, xy)
+    // Point selection
+    let mut obs: Vec<(u32, u32, Vec2)> = Vec::with_capacity(raw.len()); // (point index, image index, xy)
     let mut point_ids: Vec<Point3DId> = Vec::new();
     let mut points: Vec<Vec3> = Vec::new();
     let mut point_const: Vec<bool> = Vec::new();
@@ -441,7 +456,7 @@ fn build_problem(rec: &Reconstruction, config: &BaConfig, images: &[ImageId]) ->
     if obs.is_empty() {
         return None;
     }
-    // 관측 있는 영상만 문제에 넣는다.
+    // Only images with observations go into the problem.
     let mut used = vec![false; images.len()];
     for o in &obs {
         used[o.1 as usize] = true;
@@ -486,7 +501,7 @@ fn build_problem(rec: &Reconstruction, config: &BaConfig, images: &[ImageId]) ->
         }
         (a, b, c)
     };
-    // 자세(정제 전 쿼터니언 정규화)
+    // Poses (quaternion normalization before refinement)
     let poses: Vec<Rigid3> = frame_ids
         .iter()
         .map(|f| {
@@ -502,7 +517,7 @@ fn build_problem(rec: &Reconstruction, config: &BaConfig, images: &[ImageId]) ->
     }
     let rot_mask = config.constant_world_to_rig_rotation;
     let mut pose_mask = vec![[rot_mask, rot_mask, rot_mask, false, false, false]; poses.len()];
-    // 카메라
+    // Cameras
     let cams: Vec<cumulus3d_core::Camera> = cam_ids.iter().map(|c| rec.camera(*c).cloned()).collect::<Option<_>>()?;
     let cam_var: Vec<Vec<usize>> = cams
         .iter()
@@ -525,8 +540,28 @@ fn build_problem(rec: &Reconstruction, config: &BaConfig, images: &[ImageId]) ->
             v
         })
         .collect();
-    // 게이지 고정
-    if config.auto_gauge {
+    // Position prior (reference-sensor images only): (pose index, target center, σ).
+    let mut pose_priors: Vec<(usize, Vec3, f64)> = Vec::new();
+    for (k, id) in prob_images.iter().enumerate() {
+        if let (Some(&(c, sigma)), None) = (config.position_priors.get(id), img_sensor[k]) {
+            if sigma > 0.0 && c.iter().all(|x| x.is_finite()) {
+                pose_priors.push((img_pose[k] as usize, c, sigma));
+            }
+        }
+    }
+    // Intrinsics prior: (camera index, parameter slot, target, 1/σ). Only slots being refined (filtered on the problem side).
+    let mut cam_priors: Vec<(usize, usize, f64, f64)> = Vec::new();
+    for (ci, cam) in cams.iter().enumerate() {
+        if let Some((target, sigma)) = config.intrinsics_priors.get(&cam.camera_id) {
+            for (slot, (&t, &s)) in target.iter().zip(sigma.iter()).enumerate().take(cam.params.len()) {
+                if s > 0.0 && s.is_finite() && t.is_finite() {
+                    cam_priors.push((ci, slot, t, 1.0 / s));
+                }
+            }
+        }
+    }
+    // Gauge fixing
+    if config.auto_gauge && pose_priors.is_empty() {
         let n_const_frames = pose_const.iter().filter(|&&c| c).count();
         if n_const_frames < 2 {
             let world_to_cam = |k: usize| -> Rigid3 {
@@ -539,7 +574,7 @@ fn build_problem(rec: &Reconstruction, config: &BaConfig, images: &[ImageId]) ->
             let mut image1: Option<usize> = None;
             let mut image2: Option<(usize, usize)> = None;
             for k in 0..prob_images.len() {
-                // 설계 결정: 비자명 rig 에서는 기준 센서 영상만 자격(프레임 고정 = 영상 고정이 되도록).
+                // Design decision: for a non-trivial rig only reference-sensor images qualify (so that frame fixing = image fixing).
                 if img_sensor[k].is_some() {
                     continue;
                 }
@@ -565,7 +600,7 @@ fn build_problem(rec: &Reconstruction, config: &BaConfig, images: &[ImageId]) ->
                     pose_mask[img_pose[k2] as usize][3 + d] = true;
                 }
                 _ => {
-                    // 세 점 고정 대체.
+                    // Substitute fixing three points.
                     let mut fixed: Vec<Vec3> = (0..points.len()).filter(|&j| point_const[j]).map(|j| points[j]).collect();
                     let mut count = fixed.len();
                     let mut j = 0;
@@ -603,6 +638,8 @@ fn build_problem(rec: &Reconstruction, config: &BaConfig, images: &[ImageId]) ->
             obs_img,
             obs_pt,
             obs_xy,
+            pose_priors,
+            cam_priors,
             loss: config.loss,
             solver,
             max_linear_solver_iterations: config.max_linear_solver_iterations,
@@ -614,7 +651,7 @@ fn build_problem(rec: &Reconstruction, config: &BaConfig, images: &[ImageId]) ->
     })
 }
 
-/// 열벡터(원점 기준, 중심화 안 함) 행렬의 계수.
+/// Rank of a matrix of column vectors (relative to the origin, not centered).
 fn rank3(pts: &[Vec3]) -> usize {
     if pts.is_empty() {
         return 0;
@@ -625,10 +662,11 @@ fn rank3(pts: &[Vec3]) -> usize {
     sv.iter().filter(|&&s| s > 1e-9 * mx.max(1e-300)).count()
 }
 
-/// 자세 하나만 정제(등록 직후 절대 자세 정제용). 2D 점(픽셀)과 3D 점 대응, 인라이어 마스크.
+/// Refines a single pose only (for absolute pose refinement right after registration). 2D points (pixels) and 3D point correspondences,
+/// inlier mask.
 ///
-/// 3D 점·내부 파라미터 고정, 자세 6자유도. 허용치: 기울기 1.0, 함수 1e−6, 파라미터 1e−8.
-/// 풀이기 실패면 `Err` 이고 자세는 그대로다.
+/// 3D points and intrinsics fixed, pose 6 DoF. Tolerances: gradient 1.0, function 1e-6, parameter 1e-8.
+/// If the solver fails, returns `Err` and the pose is unchanged.
 pub fn refine_abs_pose(
     camera: &cumulus3d_core::Camera,
     points2d: &[cumulus3d_core::Vec2],
@@ -654,7 +692,7 @@ pub fn refine_abs_pose(
     let n = x2.len();
     let pose = Rigid3::new(world_to_cam.rotation.normalized(), world_to_cam.translation);
     let mut prob = abspose::AbsPoseProblem::new(camera, x2, x3, loss, pose);
-    // 설계 결정: 함수·파라미터 허용치는 일반적인 기본값(1e−6, 1e−8).
+    // Design decision: the function and parameter tolerances are common defaults (1e-6, 1e-8).
     let opts = TrOptions::new(max_num_iterations, 1e-6, 1.0, 1e-8);
     let r = tr::minimize(&mut prob, &opts);
     if r.termination == Termination::Failure {

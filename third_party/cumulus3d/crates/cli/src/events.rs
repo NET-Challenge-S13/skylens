@@ -25,304 +25,309 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 파이프라인 이벤트. 새 프레임 묶음이 처리될 때마다 단계별로 분해된 결과를 내보낸다.
-//! 이 파일은 세 모듈(session·pipeline·sinks)의 공용 계약이다. 필드 추가는 가능, 기존 필드 변경·삭제는 금지.
+//! Pipeline events. Each time a new frame bundle is processed, the result decomposed by stage is emitted.
+//! This file is the shared contract of three modules (session, pipeline, sinks). Adding fields is allowed; changing or removing existing
+//! fields is forbidden.
 
 use cumulus3d_core::io::ply::PointCloud;
 use cumulus3d_core::{ImageId, Reconstruction, Rigid3, Sim3};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
-/// 모든 이벤트에 붙는 머리말.
+/// Header attached to every event.
 #[derive(Clone, Debug)]
 pub struct Meta {
-    /// 세션 버전(이벤트를 낸 상태의 단조 증가 번호).
+    /// Session version (a monotonically increasing number of the state that emitted the event).
     pub version: u64,
-    /// 발생 시각.
+    /// Time of occurrence.
     pub at: SystemTime,
 }
 
-/// 구역 번호와 위치 범위 [lo, hi).
+/// Zone index and position range [lo, hi).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ZoneRange {
-    /// 구역 번호.
+    /// Zone index.
     pub zone: usize,
-    /// 첫 위치(포함).
+    /// First position (inclusive).
     pub lo: usize,
-    /// 끝 위치(제외).
+    /// End position (exclusive).
     pub hi: usize,
 }
 
-/// 디코딩된 입력 프레임(카메라 한 장). 처리(특징·매칭·등록) 전에 [`Event::FrameDecoded`] 로 먼저 전달된다.
+/// A decoded input frame (one camera image). It is delivered first as [`Event::FrameDecoded`], before processing (features, matching,
+/// registration).
 #[derive(Clone, Debug)]
 pub struct Frame {
-    /// 위치 번호.
+    /// Position index.
     pub position: usize,
-    /// 카메라 이름(예: `camF`).
+    /// Camera name (e.g. `camF`).
     pub camera: String,
-    /// 영상 이름(`image_root` 기준 상대 경로).
+    /// Image name (path relative to `image_root`).
     pub name: String,
-    /// 영상 파일 경로.
+    /// Image file path.
     pub path: std::path::PathBuf,
-    /// 가로 화소 수.
+    /// Width in pixels.
     pub width: u32,
-    /// 세로 화소 수.
+    /// Height in pixels.
     pub height: u32,
-    /// RGB8 화소(행 우선, 길이 `width * height * 3`). 훅 사이에서 복사 없이 공유된다.
+    /// RGB8 pixels (row-major, length `width * height * 3`). Shared between hooks without copying.
     pub rgb: Arc<[u8]>,
-    /// 이 영상의 GPS 기록(있으면).
+    /// GPS record of this image (if any).
     pub gps: Option<cumulus3d_core::io::GpsRecord>,
 }
 
-/// 파이프라인 이벤트(단계별 결과). 모든 변형에 [`Meta`] 가 붙는다.
+/// Pipeline events (per-stage results). Every variant carries a [`Meta`].
 #[derive(Clone, Debug)]
 pub enum Event {
-    /// 위치 하나의 프레임 묶음이 들어옴.
+    /// The frame bundle of one position has arrived.
     FrameIngested {
-        /// 공통 머리말.
+        /// Common header.
         meta: Meta,
-        /// 위치 번호.
+        /// Position index.
         position: usize,
-        /// 이 위치의 영상 이름들.
+        /// Image names of this position.
         images: Vec<String>,
     },
-    /// 입력 프레임 한 장 디코딩 완료. 위치 처리 전에 먼저 나온다(`SessionConfig::decode_frames` 가 켜졌을 때만).
+    /// Decoding of one input frame is complete. Comes first, before the position is processed (only when `SessionConfig::decode_frames`
+    /// is on).
     FrameDecoded {
-        /// 공통 머리말.
+        /// Common header.
         meta: Meta,
-        /// 디코딩된 프레임.
+        /// Decoded frame.
         frame: Arc<Frame>,
     },
-    /// 세션 시작(첫 입력 때 한 번). `positions` = 알려진 전체 위치 수. (session 추가)
+    /// Session start (once, at the first input). `positions` = total number of known positions. (added by session)
     Started {
-        /// 공통 머리말.
+        /// Common header.
         meta: Meta,
-        /// 알려진 전체 위치 수(모르면 None).
+        /// Total number of known positions (None if unknown).
         positions: Option<usize>,
     },
-    /// run.log 한 줄. `stamped` 이면 `[HH:MM:SS] ` 머리(meta.at 현지 시각)를 붙여 쓴다. (session 추가)
+    /// One run.log line. If `stamped`, it is written with a `[HH:MM:SS] ` prefix (meta.at local time). (added by session)
     Log {
-        /// 공통 머리말.
+        /// Common header.
         meta: Meta,
-        /// 기록할 줄.
+        /// Line to record.
         line: String,
-        /// `[HH:MM:SS] ` 머리를 붙일지.
+        /// Whether to add the `[HH:MM:SS] ` prefix.
         stamped: bool,
     },
-    /// 영상 하나의 특징 추출 완료.
+    /// Feature extraction of one image is complete.
     FeaturesExtracted {
-        /// 공통 머리말.
+        /// Common header.
         meta: Meta,
-        /// 영상 이름.
+        /// Image name.
         image: String,
-        /// 추출한 특징 수.
+        /// Number of extracted features.
         count: usize,
-        /// 위치 번호.
+        /// Position index.
         position: usize,
-        /// 영상 id.
+        /// Image id.
         image_id: ImageId,
     },
-    /// 새 짝 매칭 결과.
-    /// `pairs` = 이번 위치에서 매칭한 짝 수, `verified` = 유효 기하 짝 수, `matched` = 기술자 매칭을 수행한 짝 수.
+    /// Result of matching new pairs.
+    /// `pairs` = pairs matched at this position, `verified` = pairs with valid geometry, `matched` = pairs for which descriptor matching
+    /// was performed.
     PairsMatched {
-        /// 공통 머리말.
+        /// Common header.
         meta: Meta,
-        /// 이번 위치에서 매칭한 짝 수.
+        /// Pairs matched at this position.
         pairs: usize,
-        /// 유효 기하 짝 수.
+        /// Pairs with valid geometry.
         verified: usize,
-        /// 위치 번호.
+        /// Position index.
         position: usize,
-        /// 기술자 매칭을 수행한 짝 수.
+        /// Pairs for which descriptor matching was performed.
         matched: usize,
     },
-    /// 첫 모델이 만들어짐.
+    /// The first model has been built.
     ModelInitialized {
-        /// 공통 머리말.
+        /// Common header.
         meta: Meta,
-        /// 등록된 영상 수.
+        /// Number of registered images.
         registered: usize,
-        /// 위치 번호.
+        /// Position index.
         position: usize,
-        /// 관련 모델 사본.
+        /// Copy of the relevant model.
         model: Arc<Reconstruction>,
     },
-    /// 영상이 모델에 등록됨.
+    /// An image has been registered to the model.
     FrameRegistered {
-        /// 공통 머리말.
+        /// Common header.
         meta: Meta,
-        /// 위치 번호.
+        /// Position index.
         position: usize,
-        /// 영상 이름.
+        /// Image name.
         image: String,
-        /// 영상 id.
+        /// Image id.
         image_id: ImageId,
-        /// 등록된 자세(world → 카메라).
+        /// Registered pose (world -> camera).
         cam_from_world: Rigid3,
     },
-    /// 위치 하나의 등록·삼각측량이 끝남.
+    /// Registration and triangulation of one position are finished.
     PositionDone {
-        /// 공통 머리말.
+        /// Common header.
         meta: Meta,
-        /// 위치 번호.
+        /// Position index.
         position: usize,
-        /// 등록된 영상 수.
+        /// Number of registered images.
         registered: usize,
-        /// 이 위치까지 기대한 영상 수.
+        /// Number of images expected up to this position.
         expected: usize,
     },
-    /// 구역의 마지막 위치가 도착함.
-    /// `model` = 그 시점 체인 모델 사본(정렬 전).
+    /// The last position of a zone has arrived.
+    /// `model` = copy of the chain model at that point (before alignment).
     ZoneArrived {
-        /// 공통 머리말.
+        /// Common header.
         meta: Meta,
-        /// 구역 범위.
+        /// Zone range.
         range: ZoneRange,
-        /// 관련 모델 사본.
+        /// Copy of the relevant model.
         model: Arc<Reconstruction>,
     },
-    /// 구역 초벌 점군(BA 없음).
-    /// `model` = 초벌 모델(구역 0 은 GPS 정렬본), `dense` = 거짓이면 조밀화를 하지 않았거나 실패해 `cloud` 가 빈 자리표시.
-    /// `frame` = 점군 좌표계("gps" | "refined_K" | "unaligned").
+    /// Zone preview point cloud (no BA).
+    /// `model` = preview model (zone 0 is the GPS-aligned one), `dense` = false means densification was not run or failed and `cloud` is
+    /// an empty placeholder.
+    /// `frame` = point-cloud coordinate frame ("gps" | "refined_K" | "unaligned").
     ZonePreview {
-        /// 공통 머리말.
+        /// Common header.
         meta: Meta,
-        /// 구역 범위.
+        /// Zone range.
         range: ZoneRange,
-        /// 점군(조밀화가 없으면 빈 자리표시).
+        /// Point cloud (an empty placeholder if there is no densification).
         cloud: Arc<PointCloud>,
-        /// 관련 모델 사본.
+        /// Copy of the relevant model.
         model: Arc<Reconstruction>,
-        /// 조밀화를 실제로 했는지.
+        /// Whether densification was actually performed.
         dense: bool,
-        /// 점군 좌표계("gps" | "refined_K" | "unaligned").
+        /// Point-cloud coordinate frame ("gps" | "refined_K" | "unaligned").
         frame: String,
     },
-    /// 정밀 작업 시작(배경). (session 추가)
+    /// Refinement job start (background). (added by session)
     RefineStarted {
-        /// 공통 머리말.
+        /// Common header.
         meta: Meta,
-        /// 구역 번호.
+        /// Zone index.
         zone: usize,
     },
-    /// 정밀 작업의 BA 직후 모델(GPS 정렬 전). (session 추가)
+    /// Model right after BA of the refinement job (before GPS alignment). (added by session)
     ZoneAdjusted {
-        /// 공통 머리말.
+        /// Common header.
         meta: Meta,
-        /// 구역 번호.
+        /// Zone index.
         zone: usize,
-        /// 관련 모델 사본.
+        /// Copy of the relevant model.
         model: Arc<Reconstruction>,
     },
-    /// 구역 정밀 자세 확정(BA + GPS 정렬).
-    /// `model` = BA + GPS 정렬된 정밀 모델.
+    /// Zone refined pose finalized (BA + GPS alignment).
+    /// `model` = refined model after BA + GPS alignment.
     ZoneRefinedPose {
-        /// 공통 머리말.
+        /// Common header.
         meta: Meta,
-        /// 구역 범위.
+        /// Zone range.
         range: ZoneRange,
-        /// 등록된 영상 수.
+        /// Number of registered images.
         registered: usize,
-        /// 평균 재투영 오차(픽셀).
+        /// Mean reprojection error (pixels).
         mean_reproj_px: f64,
-        /// 관련 모델 사본.
+        /// Copy of the relevant model.
         model: Arc<Reconstruction>,
     },
-    /// 구역 정밀 점군. 같은 구역 초벌을 대체한다.
-    /// `dense` = 거짓이면 `cloud` 는 빈 자리표시.
+    /// Zone refined point cloud. It replaces the preview of the same zone.
+    /// `dense` = false means `cloud` is an empty placeholder.
     ZoneRefined {
-        /// 공통 머리말.
+        /// Common header.
         meta: Meta,
-        /// 구역 범위.
+        /// Zone range.
         range: ZoneRange,
-        /// 점군(조밀화가 없으면 빈 자리표시).
+        /// Point cloud (an empty placeholder if there is no densification).
         cloud: Arc<PointCloud>,
-        /// 관련 모델 사본.
+        /// Copy of the relevant model.
         model: Arc<Reconstruction>,
-        /// 조밀화를 실제로 했는지.
+        /// Whether densification was actually performed.
         dense: bool,
     },
-    /// 정밀 모델이 다음 등록의 기준으로 채택됨.
+    /// The refined model was adopted as the reference for subsequent registration.
     BaseAdopted {
-        /// 공통 머리말.
+        /// Common header.
         meta: Meta,
-        /// 구역 번호.
+        /// Zone index.
         zone: usize,
     },
-    /// 이미 보낸 구역의 좌표계 변환(점군은 다시 보내지 않음): new_from_old.
+    /// Coordinate-frame transform of an already sent zone (the point cloud is not sent again): new_from_old.
     Reanchored {
-        /// 공통 머리말.
+        /// Common header.
         meta: Meta,
-        /// 구역 번호.
+        /// Zone index.
         zone: usize,
-        /// new_from_old 변환.
+        /// new_from_old transform.
         transform: Sim3,
     },
-    /// 화면용 스냅샷(사건 순서 번호와 합성 점군).
+    /// Snapshot for display (event sequence number and composite point cloud).
     Snapshot {
-        /// 공통 머리말.
+        /// Common header.
         meta: Meta,
-        /// 사건 순서 번호.
+        /// Event sequence number.
         index: usize,
-        /// 점군(조밀화가 없으면 빈 자리표시).
+        /// Point cloud (an empty placeholder if there is no densification).
         cloud: Arc<PointCloud>,
     },
-    /// 모든 위치 처리 완료.
+    /// All positions processed.
     AllPositionsDone {
-        /// 공통 머리말.
+        /// Common header.
         meta: Meta,
     },
-    /// 모든 정밀 작업 완료.
-    /// `chain` = 최종 체인 모델.
+    /// All refinement jobs complete.
+    /// `chain` = final chain model.
     AllRefinedDone {
-        /// 공통 머리말.
+        /// Common header.
         meta: Meta,
-        /// 최종 체인 모델.
+        /// Final chain model.
         chain: Option<Arc<Reconstruction>>,
     },
-    /// 세션 종료 요약(모든 이벤트의 마지막). `stage_times` = (단계, 누적 시간, 횟수) 단계 이름순,
-    /// `pipeline_secs` = 시작 ~ 모든 정밀 완료, `chain_stats` = 최종 체인 모델 통계 줄. (session 추가)
+    /// Session end summary (the last of all events). `stage_times` = (stage, accumulated time, count) in stage-name order,
+    /// `pipeline_secs` = start to all refinements complete, `chain_stats` = statistics line of the final chain model. (added by session)
     Finished {
-        /// 공통 머리말.
+        /// Common header.
         meta: Meta,
-        /// 시작 ~ 모든 정밀 완료(초).
+        /// Start to all refinements complete (seconds).
         pipeline_secs: f64,
-        /// (단계, 누적 시간, 횟수) 단계 이름순.
+        /// (stage, accumulated time, count) in stage-name order.
         stage_times: Vec<(String, Duration, usize)>,
-        /// 최종 체인 모델 통계 줄.
+        /// Statistics line of the final chain model.
         chain_stats: Vec<String>,
     },
-    /// `Command::ResetFrom` 처리됨. (session 추가)
+    /// `Command::ResetFrom` was handled. (added by session)
     Reset {
-        /// 공통 머리말.
+        /// Common header.
         meta: Meta,
-        /// 위치 번호.
+        /// Position index.
         position: usize,
     },
-    /// `Command::InvalidateZone` 처리됨. (session 추가)
+    /// `Command::InvalidateZone` was handled. (added by session)
     ZoneInvalidated {
-        /// 공통 머리말.
+        /// Common header.
         meta: Meta,
-        /// 구역 번호.
+        /// Zone index.
         zone: usize,
     },
-    /// 경고.
+    /// Warning.
     Warning {
-        /// 공통 머리말.
+        /// Common header.
         meta: Meta,
-        /// 메시지.
+        /// Message.
         message: String,
     },
-    /// 오류(훅 패닉 포함).
+    /// Error (including hook panics).
     Error {
-        /// 공통 머리말.
+        /// Common header.
         meta: Meta,
-        /// 메시지.
+        /// Message.
         message: String,
     },
 }
 
-/// 이벤트 종류(훅 등록·필터링용).
+/// Event kind (for hook registration and filtering).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum EventKind {
     /// [`Event::FrameIngested`].
@@ -378,7 +383,7 @@ pub enum EventKind {
 }
 
 impl Event {
-    /// 이벤트 종류.
+    /// Event kind.
     pub fn kind(&self) -> EventKind {
         use Event::*;
         match self {
@@ -409,7 +414,7 @@ impl Event {
             Error { .. } => EventKind::Error,
         }
     }
-    /// 공통 머리말.
+    /// Common header.
     pub fn meta(&self) -> &Meta {
         use Event::*;
         match self {
@@ -443,7 +448,7 @@ impl Event {
 }
 
 impl Event {
-    /// timeline.txt 의 사건 문구(없으면 None). 문구·형식은 기존 기록과 같다.
+    /// Event text for timeline.txt (None if there is none). The wording and format are the same as the existing record.
     pub fn timeline_text(&self) -> Option<String> {
         use Event::*;
         Some(match self {
@@ -468,11 +473,11 @@ impl Event {
     }
 }
 
-/// 리듀서에 넣는 명령.
+/// Commands fed into the reducer.
 #[derive(Clone, Debug)]
 pub enum Command {
-    /// 이 위치부터 다시 처리(그 이후 상태 폐기).
+    /// Reprocess from this position (discard later state).
     ResetFrom(usize),
-    /// 구역 결과를 무효화하고 다시 만들게 함.
+    /// Invalidate the zone result and have it rebuilt.
     InvalidateZone(usize),
 }

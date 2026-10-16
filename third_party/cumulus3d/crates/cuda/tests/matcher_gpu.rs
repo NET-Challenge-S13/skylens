@@ -25,7 +25,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! CUDA 매칭 top-2 가 CPU 와 비트 단위로 같은지. 장치가 없으면 건너뛴다.
+//! Checks that CUDA matching top-2 is bit-identical to the CPU. Skipped if there is no device.
 
 use cumulus3d_cuda::{is_available, CudaMatcher};
 use cumulus3d_matching::{CpuMatcher, MatcherBackend};
@@ -36,7 +36,7 @@ fn descriptors(n: usize, seed: u64) -> Vec<u8> {
     (0..n * 128)
         .map(|_| {
             s = s.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
-            // 작은 값 위주 + 가끔 큰 값(SIFT 기술자 분포 흉내), 동점도 생기게 양자화.
+            // Mostly small values + occasional large ones (mimicking the SIFT descriptor distribution), quantized so that ties also occur.
             let v = (s >> 33) as u32 % 64;
             (if v > 56 { v * 3 } else { v / 4 * 4 }) as u8
         })

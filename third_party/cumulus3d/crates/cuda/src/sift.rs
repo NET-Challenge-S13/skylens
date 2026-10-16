@@ -47,9 +47,7 @@ use crate::device::{CudaDevice, GpuError, SyncedCopy};
 use cudarc::driver::{CudaFunction, CudaSlice, CudaStream, DevicePtr, DriverError, LaunchConfig, PushKernelArg};
 use cumulus3d_core::{Descriptors, Error, Result};
 use cumulus3d_features::sift::pyramid::{self, ScaleSpace};
-use cumulus3d_features::{
-    CpuSift, DescriptorNormalization, FeatureSelection, GrayImage, SiftEngine, SiftFeature, SiftOptions, SiftOutput,
-};
+use cumulus3d_features::{CpuSift, DescriptorNormalization, FeatureSelection, GrayImage, SiftEngine, SiftFeature, SiftOptions, SiftOutput};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
@@ -867,11 +865,7 @@ mod tests {
                 blob_img(640, 480, 4),
                 SiftOptions { max_num_features: 300, selection: FeatureSelection::TopK, ..SiftOptions::default() },
             ),
-            (
-                "얼룩 640×480 CompatLevels 400",
-                blob_img(640, 480, 5),
-                SiftOptions { max_num_features: 400, ..SiftOptions::default() },
-            ),
+            ("얼룩 640×480 CompatLevels 400", blob_img(640, 480, 5), SiftOptions { max_num_features: 400, ..SiftOptions::default() }),
             (
                 "얼룩 640×480 격자 500 직립",
                 blob_img(640, 480, 6),

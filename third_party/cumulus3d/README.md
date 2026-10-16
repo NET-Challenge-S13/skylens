@@ -11,7 +11,6 @@ While video arrives position by position, it chains feature extraction → match
 produces a fast preview (no BA) and a refined result (with BA) for every zone, and stacks per-step snapshots on the refined map (ENU).
 Stages hand data to each other through in-memory data structures, with no intermediate database or on-disk model folders.
 
-API doc comments are currently in Korean; English translation is planned.
 
 ## Crates
 

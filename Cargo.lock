@@ -1099,7 +1099,7 @@ dependencies = [
 
 [[package]]
 name = "cumulus3d-align"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "cumulus3d-core",
  "nalgebra",
@@ -1109,7 +1109,7 @@ dependencies = [
 
 [[package]]
 name = "cumulus3d-ba"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "cumulus3d-core",
  "faer",
@@ -1120,7 +1120,7 @@ dependencies = [
 
 [[package]]
 name = "cumulus3d-cli"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "clap",
  "cumulus3d-align",
@@ -1140,7 +1140,7 @@ dependencies = [
 
 [[package]]
 name = "cumulus3d-core"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "nalgebra",
  "rand 0.10.3",
@@ -1151,7 +1151,7 @@ dependencies = [
 
 [[package]]
 name = "cumulus3d-cuda"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "cudarc",
  "cumulus3d-ba",
@@ -1167,7 +1167,7 @@ dependencies = [
 
 [[package]]
 name = "cumulus3d-dense"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "cumulus3d-core",
  "image",
@@ -1178,7 +1178,7 @@ dependencies = [
 
 [[package]]
 name = "cumulus3d-features"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "cumulus3d-core",
  "image",
@@ -1190,7 +1190,7 @@ dependencies = [
 
 [[package]]
 name = "cumulus3d-matching"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "cumulus3d-core",
  "nalgebra",
@@ -1202,7 +1202,7 @@ dependencies = [
 
 [[package]]
 name = "cumulus3d-sfm"
-version = "0.3.1"
+version = "0.4.0"
 dependencies = [
  "cumulus3d-ba",
  "cumulus3d-core",
@@ -4103,9 +4103,9 @@ dependencies = [
 
 [[package]]
 name = "pointblitz"
-version = "0.2.1"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "28321f634491d37bf5bf505c92fd549fbe8c80c75e58a9906249c1a8d6674a1a"
+checksum = "711012669865163b2de5d05a3b2c3ffd524dee687d3fb405d70db343e92fd64f"
 dependencies = [
  "pointblitz-core",
  "pointblitz-io",
@@ -4113,9 +4113,9 @@ dependencies = [
 
 [[package]]
 name = "pointblitz-core"
-version = "0.2.1"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a817bb80478d1d0433c92c65cf0d756a417022313e496534feac59e8a040b8e"
+checksum = "f8a84fb2bb755a33327d7b0aa57837af72f3f0e487b6b7d3175654f89ebd28ea"
 dependencies = [
  "bytemuck",
  "glam 0.34.1",
@@ -4125,9 +4125,12 @@ dependencies = [
 
 [[package]]
 name = "pointblitz-io"
-version = "0.2.1"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e579b6b224d176162d1e1b82a8d2eb9b2f8eb0d9056d17d02cfee2bf9c371e0a"
+checksum = "0b0ba76cecaf68f819502a611791ec2adc9fe090e1f7bda3d5ad76362aace934"
+dependencies = [
+ "serde_json",
+]
 
 [[package]]
 name = "polling"

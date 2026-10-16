@@ -25,7 +25,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 입출력: PLY, GPS 참조 파일, 숫자 서식·이진 도우미. 모델 파일 형식은 [`crate::interop`].
+//! I/O: PLY, GPS reference files, number formatting and binary helpers. The model file format is in [`crate::interop`].
 
 pub(crate) mod binary;
 pub mod fmt;

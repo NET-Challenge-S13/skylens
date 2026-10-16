@@ -25,7 +25,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 왜곡 보정 검증: 카메라 계산, LUT 기하 정합, 희소 모델 변환, 작업 폴더 출력.
+//! Undistortion verification: camera computation, LUT geometric alignment, sparse model conversion, working folder output.
 
 use cumulus3d_core::interop::read_model;
 use cumulus3d_core::{Camera, CameraModelKind, Image, Reconstruction, Rigid3, TrackEntry, Vec2, Vec3};
@@ -36,7 +36,7 @@ fn cam() -> Camera {
     Camera::new(1, CameraModelKind::OpenCv, 640, 360, vec![503.0, 502.5, 320.0, 180.0, 0.0824, -0.0849, 0.0022, 0.0007]).unwrap()
 }
 
-/// 정규화 좌표의 매끄러운 무늬(정합 확인용).
+/// Smooth pattern in normalized coordinates (for alignment checks).
 fn pattern(u: f64, v: f64) -> f64 {
     128.0 + 60.0 * (u * 9.0).sin() + 50.0 * (v * 7.0).cos()
 }
@@ -60,7 +60,7 @@ fn build() -> (Reconstruction, Arc<ImageBuffer>) {
     for (k, p) in pts.iter().enumerate() {
         rec.add_point3d(*p, vec![TrackEntry::new(1, k as u32), TrackEntry::new(2, k as u32)], [10, 20, 30]).unwrap();
     }
-    // 입력 영상: 픽셀 중심을 역왜곡한 정규화 좌표의 무늬.
+    // Input image: pattern of the normalized coordinates obtained by undistorting the pixel centers.
     let mut img = ImageBuffer::new(640, 360, 1);
     for y in 0..360 {
         for x in 0..640 {
@@ -84,7 +84,7 @@ fn undistort_model_images_and_folder() {
     assert_eq!(pc.model, CameraModelKind::Pinhole);
     assert_eq!(pc.width.max(pc.height), 320);
 
-    // 2D 점 = 입력 카메라 역투영 → PINHOLE 투영, 자세·3D 점 그대로.
+    // 2D point = input camera unprojection → PINHOLE projection, poses and 3D points unchanged.
     let src = cam();
     let mut err_sum = 0.0;
     let mut n = 0;
@@ -96,7 +96,7 @@ fn undistort_model_images_and_folder() {
             let e = pc.normalized_to_img(&uv);
             assert!((e - p1.xy).norm() < 1e-9);
             assert_eq!(p0.point3d_id, p1.point3d_id);
-            // 자기검증: 3D 점을 새 카메라로 투영한 위치와 변환 관측이 맞아야 한다.
+            // Self-check: the position of the 3D point projected with the new camera must match the converted observation.
             let x = rec.point3d(p0.point3d_id).unwrap().xyz;
             let proj = pc.cam_to_img(&out.world_to_cam(iid).unwrap().transform_point(&x)).unwrap();
             err_sum += (proj - p1.xy).norm();
@@ -111,7 +111,8 @@ fn undistort_model_images_and_folder() {
         assert_eq!(p.track, q.track);
     }
 
-    // 영상 기하 정합: 보정 영상 픽셀 (x+0.5, y+0.5) 의 PINHOLE 정규화 좌표 무늬와 비교(가장자리 2px 제외).
+    // Image geometric alignment: compare with the PINHOLE normalized-coordinate pattern at undistorted image pixels (x+0.5, y+0.5)
+    // (excluding 2px at the edge).
     let u = &res.images[&1];
     assert_eq!((u.width as u64, u.height as u64), (pc.width, pc.height));
     let mut diff = Vec::new();
@@ -126,7 +127,7 @@ fn undistort_model_images_and_folder() {
     eprintln!("보정 영상 무늬 오차 중앙값 {med:.3}, 95% {:.3}", diff[diff.len() * 95 / 100]);
     assert!(med < 1.5, "{med}");
 
-    // 폴더 출력과 다시 읽기 → 조밀화 장면 변환.
+    // Folder output and re-read → densification scene conversion.
     let dir = std::env::temp_dir().join(format!("cumulus3d_undist_{}", std::process::id()));
     std::fs::remove_dir_all(&dir).ok();
     write_undistorted_workspace(&res, &dir, &opts).unwrap();
@@ -150,14 +151,14 @@ fn undistort_model_images_and_folder() {
     assert_eq!(back.camera(1).unwrap(), pc);
     let scene = DenseScene::from_workspace_dir(&dir, &SceneOptions::default()).unwrap();
     assert_eq!(scene.views.len(), 2);
-    // 장면은 정수 중심 규약: 주점 −0.5.
+    // The scene uses the integer-center convention: principal point −0.5.
     assert!((scene.views[0].k[2] - (pc.params[2] - 0.5)).abs() < 1e-12);
     assert!((scene.views[0].k[3] - (pc.params[3] - 0.5)).abs() < 1e-12);
     assert!(!scene.points.is_empty() && scene.points.iter().all(|p| p.views.len() == 2));
     std::fs::remove_dir_all(&dir).ok();
 }
 
-/// 매개변수가 같은 카메라 여럿(드론 3대 초기값): 캐시를 공유해도 카메라 id 가 유지돼야 한다.
+/// Several cameras with equal parameters (initial values of 3 drones): the camera id must be kept even when sharing the cache.
 #[test]
 fn identical_cameras_keep_ids() {
     let (rec0, img) = build();
@@ -168,7 +169,7 @@ fn identical_cameras_keep_ids() {
         rec.add_camera_own_rig(c).unwrap();
     }
     for im in rec0.images() {
-        let cam_id = im.image_id; // 영상 1 → 카메라 1, 영상 2 → 카메라 2
+        let cam_id = im.image_id; // image 1 → camera 1, image 2 → camera 2
         let ni = Image::new(im.image_id, im.name.clone(), cam_id, im.points2d().iter().map(|p| p.xy));
         rec.add_image_own_frame(ni, rec0.world_to_cam(im.image_id)).unwrap();
         rec.register_image(im.image_id).unwrap();

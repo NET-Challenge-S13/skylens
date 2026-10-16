@@ -25,41 +25,42 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 재고정(reanchor): 새 정밀 모델이 나올 때마다 이전 구역들을 최신 좌표계로 다시 잇는 연쇄 Sim3.
+//! Reanchor: a chained Sim3 that reconnects earlier zones to the latest coordinate frame whenever a new refined model appears.
 //!
-//! 구역 k 의 정밀 모델이 도착하면, 직전 최신 좌표계 → 새 좌표계 Sim3 `T_k` 를(공유 3D 점 정렬로) 구하고
-//! 모든 이전 구역의 `zone_to_latest[j]` 앞에 `T_k` 를 합성한다. 새 구역 자신은 항등.
+//! When the refined model of zone k arrives, computes the Sim3 `T_k` from the previous latest frame to the new frame
+//! (by shared 3D point alignment) and composes `T_k` in front of `zone_to_latest[j]` of every earlier zone.
+//! The new zone itself is identity.
 
 use crate::error::Result;
 use crate::shared::{align_reconstructions, SharedPointOptions};
 use crate::umeyama::{RobustUmeyamaOptions, RobustUmeyamaResult};
 use cumulus3d_core::{Reconstruction, Sim3};
 
-/// 구역별 "최신 좌표계 ← 구역 좌표계" 변환 묶음.
+/// Bundle of per-zone "latest frame ← zone frame" transforms.
 #[derive(Clone, Debug, Default)]
 pub struct AnchorChain {
     zone_to_latest: Vec<Sim3>,
-    /// 각 구역이 직전 구역과 연결됐는지(첫 구역은 false).
+    /// Whether each zone is connected to the previous zone (false for the first zone).
     linked: Vec<bool>,
 }
 
 impl AnchorChain {
-    /// 빈 체인.
+    /// Empty chain.
     pub fn new() -> Self {
         Self::default()
     }
-    /// 등록된 구역 수.
+    /// Number of registered zones.
     pub fn len(&self) -> usize {
         self.zone_to_latest.len()
     }
-    /// 구역이 없으면 참.
+    /// True if there are no zones.
     pub fn is_empty(&self) -> bool {
         self.zone_to_latest.is_empty()
     }
 
-    /// 새 정밀 구역 추가. `new_from_prev` = 직전 최신 좌표계 → 새 좌표계.
-    /// None(연결 실패)이면 이전 구역 변환은 그대로 두고 새 구역은 자기 좌표계(항등)로 둔다.
-    /// 반환: 새 구역 인덱스.
+    /// Adds a new refined zone. `new_from_prev` = previous latest frame → new frame.
+    /// If None (connection failed), earlier zone transforms are left as they are and the new zone keeps its own frame (identity).
+    /// Returns: the new zone index.
     pub fn push(&mut self, new_from_prev: Option<Sim3>) -> usize {
         if let Some(t) = new_from_prev {
             for s in &mut self.zone_to_latest {
@@ -71,8 +72,9 @@ impl AnchorChain {
         self.zone_to_latest.len() - 1
     }
 
-    /// 직전 정밀 모델 `prev` 와 새 정밀 모델 `new` 의 공유 3D 점으로 연결 Sim3 를 구해 추가.
-    /// 정렬이 실패해도 구역은 추가되고(연결 없음) 오류를 돌려준다.
+    /// Finds the connecting Sim3 from the shared 3D points of the previous refined model `prev`
+    /// and the new refined model `new`, and adds it.
+    /// Even if alignment fails, the zone is added (not connected) and an error is returned.
     pub fn push_model(
         &mut self,
         prev: Option<&Reconstruction>,
@@ -96,11 +98,11 @@ impl AnchorChain {
         }
     }
 
-    /// 구역 `zone` 좌표 → 최신 좌표.
+    /// Zone `zone` coordinates to latest coordinates.
     pub fn zone_to_latest(&self, zone: usize) -> Option<Sim3> {
         self.zone_to_latest.get(zone).copied()
     }
-    /// 구역 `zone` 이 직전 구역과 연결됐는지.
+    /// Whether zone `zone` is connected to the previous zone.
     pub fn is_linked(&self, zone: usize) -> bool {
         self.linked.get(zone).copied().unwrap_or(false)
     }
@@ -115,7 +117,7 @@ mod tests {
     #[test]
     fn chain_maps_all_zones_to_latest() {
         let mut rng = cumulus3d_core::ransac::make_rng(Some(31));
-        // 구역 k 좌표계 = Z_k ∘ 세계. 진짜 zone_j_to_latest = Z_last ∘ Z_j⁻¹.
+        // Zone k frame = Z_k ∘ world. The true zone_j_to_latest = Z_last ∘ Z_j⁻¹.
         let zs: Vec<Sim3> = (0..4).map(|_| random_sim3(&mut rng)).collect();
         let mut chain = AnchorChain::new();
         chain.push(None);
@@ -131,7 +133,7 @@ mod tests {
             assert!((got - want).norm() / want.norm().max(1.0) < 1e-9, "zone {j}");
         }
         assert!(!chain.is_linked(0) && chain.is_linked(3));
-        // 연결 실패: 이전 변환 유지, 새 구역 항등.
+        // Connection failed: keep earlier transforms, new zone is identity.
         let before = chain.zone_to_latest(1).unwrap();
         chain.push(None);
         assert_eq!(chain.zone_to_latest(1).unwrap(), before);

@@ -25,8 +25,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 규모 벤치마크: 80 위치 × 3 대 = 240 장, 3D 점 20만, OPENCV, 잡음 0.5 px, 초기 섭동.
-//! 실행: cargo run --release -p cumulus3d-ba --example ba_bench [-- 위치수 점수 풀이기(auto|dense|sparse|iterative)]
+//! Scale benchmark: 80 positions × 3 units = 240 images, 200k 3D points, OPENCV, noise 0.5 px, initial perturbation.
+//! Run: cargo run --release -p cumulus3d-ba --example ba_bench [-- positions points solver(auto|dense|sparse|iterative)]
 
 #[path = "../tests/common/mod.rs"]
 mod common;
