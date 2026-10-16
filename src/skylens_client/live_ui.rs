@@ -7,12 +7,12 @@
 use crate::anyrender::{self, PaintScene as _};
 use crate::delta_log::DeltaLog;
 use crate::panels_live::{
-    self as pl, Cmd, ColorMode, Control, LiveSettings, Phase, Replay, RowState, Snapshot,
+    self as pl, Cmd, ColorMode, Control, LiveSettings, Phase, Replay, Snapshot,
 };
 use crate::peniko::kurbo::{Affine, Rect};
 use crate::peniko::{Color, Fill};
 use blitz_dom::node::ComputedStyles;
-use blitz_dom::{NodeId, ScrollBehavior, Widget};
+use blitz_dom::Widget;
 use skylens_viewer::shell::UiInput;
 use skylens_viewer::{Dom, q};
 use std::cell::{Cell, RefCell};
@@ -126,9 +126,6 @@ const FLASH_MS: f64 = 1200.0;
 struct Shown {
     wait_sub: String,
     mon: Option<pl::MonitorText>,
-    counters: Option<Option<pl::Counters>>,
-    bar: (String, i64),
-    follow: String,
     play: String,
     size: String,
     speed: u32,
@@ -147,9 +144,6 @@ pub struct LivePanels {
     wait_started_ms: f64,
     last_sig: (usize, usize, Option<u32>),
     last_change_ms: f64,
-    rows: Vec<(NodeId, RowState)>,
-    events: Option<NodeId>,
-    scroll_to_current: bool,
     flash_until: f64,
     shown: Shown,
     mounted: bool,
@@ -167,9 +161,6 @@ impl LivePanels {
             wait_started_ms: skylens_viewer::now_ms(),
             last_sig: (0, 0, None),
             last_change_ms: skylens_viewer::now_ms(),
-            rows: Vec::new(),
-            events: None,
-            scroll_to_current: false,
             flash_until: 0.0,
             shown: Shown::default(),
             mounted: false,
@@ -186,7 +177,6 @@ impl LivePanels {
         if let Some(c) = dom.find("live-monitor-wave") {
             dom.mount_widget(c, WaveWidget::boxed(self.mon_cfg.clone(), 50, 30, 1.7));
         }
-        self.events = dom.find("live-events");
         self.mounted = true;
     }
 
@@ -211,14 +201,6 @@ impl LivePanels {
     pub fn input(&mut self, input: &UiInput, dom: &mut Dom<'_>, log: &mut DeltaLog) -> bool {
         if !input.is_click() || !self.mounted {
             return false;
-        }
-        if let Some((_, seq)) = input.closest_data("seq")
-            && input.closest_id("live-events").is_some()
-            && let Ok(seq) = seq.parse::<u32>()
-        {
-            let cmds = self.replay.control(Control::Row(seq), &Self::snapshot(log));
-            Self::apply(log, &cmds);
-            return true;
         }
         let Some((_, what)) = input.closest_data("live") else { return false };
         let control = match what {
@@ -354,86 +336,18 @@ impl LivePanels {
         dom.toggle_class("live-monitor", "is-flash", now < self.flash_until);
     }
 
+    /// The controls bar opens with the first event; there is no event list on the board.
     fn render_timeline(&mut self, dom: &mut Dom<'_>, snap: &Snapshot<'_>) {
         let open = !snap.entries.is_empty();
         if self.shown.timeline_open != Some(open) {
-            dom.toggle_class("live-timeline", "is-open", open);
             dom.toggle_class("live-controls", "is-open", open);
             self.shown.timeline_open = Some(open);
-        }
-        // Rows: rebuild after a shrink, append what is new, restyle what changed.
-        if self.rows.len() > snap.entries.len() {
-            dom.set_html("live-events", "");
-            self.rows.clear();
-        }
-        if self.rows.len() < snap.entries.len() {
-            let from = self.rows.len();
-            let markup: String = (from..snap.entries.len()).map(|i| pl::row_markup(snap.entries, i, snap.applied)).collect();
-            let added = dom.append_html("live-events", &markup);
-            for (k, node) in added.into_iter().enumerate() {
-                self.rows.push((node, pl::row_state(from + k, snap.applied)));
-            }
-            self.scroll_to_current = true;
-        }
-        let mut cursor_moved = false;
-        for (i, (node, state)) in self.rows.iter_mut().enumerate() {
-            let want = pl::row_state(i, snap.applied);
-            if *state != want {
-                dom.set_attr(*node, "class", pl::row_class(want));
-                *state = want;
-                cursor_moved = true;
-            }
-        }
-        if cursor_moved || self.scroll_to_current {
-            self.scroll_current_into_view(dom, snap.applied);
-        }
-        // Header, counters, bar.
-        let (class, text) = pl::follow_indicator(snap);
-        let follow = format!("{class}|{text}");
-        if self.shown.follow != follow {
-            dom.set_attr("live-follow", "class", class);
-            dom.set_text("live-follow", text);
-            self.shown.follow = follow;
         }
         let glyph = pl::play_glyph(self.replay.shows_pause(snap));
         if self.shown.play != glyph {
             dom.set_text("live-play", glyph);
             self.shown.play = glyph.to_string();
         }
-        let cnt = snap.current().map(pl::counters);
-        if self.shown.counters != Some(cnt) {
-            dom.set_html("live-cnt", &cnt.map(|c| pl::counters_markup(&c)).unwrap_or_default());
-            self.shown.counters = Some(cnt);
-        }
-        let (label, frac) = pl::progress(snap);
-        let pct = (frac * 100.0).round() as i64;
-        if self.shown.bar != (label.clone(), pct) {
-            dom.set_text("live-bar-label", &label);
-            dom.set_text("live-bar-pct", &format!("{pct}%"));
-            dom.set_style("live-bar-fill", "width", &format!("{pct}%"));
-            self.shown.bar = (label, pct);
-        }
-    }
-
-    /// Centres the row of the entry on screen in the list (the viewer's `scrollIntoView`). Layout
-    /// of fresh rows only exists after the next frame, so a failed attempt is retried.
-    fn scroll_current_into_view(&mut self, dom: &mut Dom<'_>, applied: usize) {
-        let (Some(list), Some(i)) = (self.events, applied.checked_sub(1)) else {
-            self.scroll_to_current = false;
-            return;
-        };
-        let Some((row, _)) = self.rows.get(i) else { return };
-        let (top, row_h, list_h) = {
-            let doc = dom.doc_ref();
-            let (Some(r), Some(l)) = (doc.get_node(*row), doc.get_node(list)) else { return };
-            (r.final_layout().location.y, r.final_layout().size.height, l.final_layout().size.height)
-        };
-        if list_h <= 0.0 {
-            return; // not laid out yet
-        }
-        let y = (f64::from(top) + f64::from(row_h) / 2.0 - f64::from(list_h) / 2.0).max(0.0);
-        dom.doc().scroll_to(list, 0.0, y, ScrollBehavior::Instant);
-        self.scroll_to_current = false;
     }
 }
 

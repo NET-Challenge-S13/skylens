@@ -520,13 +520,6 @@ pub fn live_markup(settings: &LiveSettings) -> String {
         concat!(
             "<div id=\"live-wait\" class=\"live-wait\"><canvas id=\"live-wait-wave\" class=\"live-wait__wave\"></canvas><div class=\"live-wait__cap\"><div class=\"live-wait__big\">{title}</div><div class=\"live-wait__sub\" id=\"live-wait-sub\"></div></div></div>",
             "<div id=\"live-monitor\" class=\"live-monitor\"><canvas id=\"live-monitor-wave\" class=\"live-monitor__wave\"></canvas><div class=\"live-monitor__label\" id=\"live-mon-label\"></div><div class=\"live-monitor__sub\" id=\"live-mon-sub\"></div><div class=\"live-monitor__age\" id=\"live-mon-age\"></div></div>",
-            "<div id=\"live-timeline\" class=\"sl-surface sl-surface--panel live-timeline\">",
-            "<div class=\"live-timeline__head\"><span class=\"live-timeline__title\">EVENTS</span><button type=\"button\" id=\"live-follow\" class=\"live-follow is-live\" data-live=\"golive\">LIVE</button></div>",
-            "<div class=\"live-cnt\" id=\"live-cnt\"></div>",
-            "<div class=\"live-bar-row\"><span class=\"live-bar-row__l\" id=\"live-bar-label\"></span><span class=\"live-bar-row__r\" id=\"live-bar-pct\"></span></div>",
-            "<div class=\"live-bar\"><i id=\"live-bar-fill\"></i></div>",
-            "<div class=\"live-events\" id=\"live-events\"></div>",
-            "</div>",
             "<div id=\"live-controls\" class=\"sl-surface sl-surface--panel live-controls\">",
             "<button type=\"button\" class=\"live-btn live-ic\" id=\"live-prev\" data-live=\"prev\" title=\"한 단계 뒤로\">|\u{25C0}</button>",
             "<button type=\"button\" class=\"live-btn live-ic\" id=\"live-play\" data-live=\"play\" title=\"재생 / 일시정지\">||</button>",
@@ -790,7 +783,7 @@ mod tests {
         let m = live_markup(&LiveSettings::default());
         for id in [
             "live-wait", "live-wait-wave", "live-wait-sub", "live-monitor", "live-monitor-wave", "live-mon-label", "live-mon-sub",
-            "live-mon-age", "live-timeline", "live-follow", "live-cnt", "live-bar-label", "live-bar-pct", "live-bar-fill", "live-events",
+            "live-mon-age",
             "live-controls", "live-prev", "live-play", "live-next", "live-speed", "live-size", "live-fit",
         ] {
             assert!(m.contains(&format!("id=\"{id}\"")), "{id}");
