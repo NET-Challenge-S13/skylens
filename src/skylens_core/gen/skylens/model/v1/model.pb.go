@@ -248,6 +248,13 @@ const (
 	ChunkKind_CHUNK_KIND_DETECTIONS  ChunkKind = 3 // skylens.payload.v1.DetectionBatch
 	ChunkKind_CHUNK_KIND_TERRAIN     ChunkKind = 4 // skylens.payload.v1.TerrainTile, from the core terrain feed (control tower only)
 	ChunkKind_CHUNK_KIND_BUILDINGS   ChunkKind = 5 // skylens.payload.v1.BuildingSet, from the core terrain feed (control tower only)
+	// pointblitz slot diff message: the 32-byte "PBSD" header in front of one event pack of the
+	// cumulus3d live diff stream v4 (stable display). Every shown point owns a slot id; adds and
+	// moves write slots, removes hide them. Not compacted: a viewer applies every message of a
+	// stream in order. segment = the zone that triggered the event, level = refined,
+	// version = the message seq (1, 2, ...), generation = the stream id (one per model run; a new
+	// id starts a new stream at seq 1).
+	ChunkKind_CHUNK_KIND_POINT_SLOTS ChunkKind = 6
 )
 
 // Enum value maps for ChunkKind.
@@ -259,6 +266,7 @@ var (
 		3: "CHUNK_KIND_DETECTIONS",
 		4: "CHUNK_KIND_TERRAIN",
 		5: "CHUNK_KIND_BUILDINGS",
+		6: "CHUNK_KIND_POINT_SLOTS",
 	}
 	ChunkKind_value = map[string]int32{
 		"CHUNK_KIND_UNSPECIFIED": 0,
@@ -267,6 +275,7 @@ var (
 		"CHUNK_KIND_DETECTIONS":  3,
 		"CHUNK_KIND_TERRAIN":     4,
 		"CHUNK_KIND_BUILDINGS":   5,
+		"CHUNK_KIND_POINT_SLOTS": 6,
 	}
 )
 
@@ -1468,8 +1477,8 @@ type Chunk struct {
 	Segment       uint32                 `protobuf:"varint,3,opt,name=segment,proto3" json:"segment,omitempty"`
 	Level         Level                  `protobuf:"varint,4,opt,name=level,proto3,enum=skylens.model.v1.Level" json:"level,omitempty"`
 	BlockId       []int32                `protobuf:"varint,5,rep,packed,name=block_id,json=blockId,proto3" json:"block_id,omitempty"` // [x, y, z] for mesh blocks
-	Version       uint32                 `protobuf:"varint,6,opt,name=version,proto3" json:"version,omitempty"`                       // mesh block version; keep only if newer
-	Generation    uint32                 `protobuf:"varint,7,opt,name=generation,proto3" json:"generation,omitempty"`                 // refined snapshot generation; replaces older ones
+	Version       uint32                 `protobuf:"varint,6,opt,name=version,proto3" json:"version,omitempty"`                       // mesh block version; keep only if newer. Point slots: message seq
+	Generation    uint32                 `protobuf:"varint,7,opt,name=generation,proto3" json:"generation,omitempty"`                 // refined snapshot generation; replaces older ones. Point slots: stream id
 	Payload       []byte                 `protobuf:"bytes,8,opt,name=payload,proto3" json:"payload,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1683,14 +1692,15 @@ const file_skylens_model_v1_model_proto_rawDesc = "" +
 	"\x18IMAGE_FORMAT_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11IMAGE_FORMAT_JPEG\x10\x01\x12\x14\n" +
 	"\x10IMAGE_FORMAT_PNG\x10\x02\x12\x15\n" +
-	"\x11IMAGE_FORMAT_RGB8\x10\x03*\xa6\x01\n" +
+	"\x11IMAGE_FORMAT_RGB8\x10\x03*\xc2\x01\n" +
 	"\tChunkKind\x12\x1a\n" +
 	"\x16CHUNK_KIND_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11CHUNK_KIND_POINTS\x10\x01\x12\x19\n" +
 	"\x15CHUNK_KIND_MESH_BLOCK\x10\x02\x12\x19\n" +
 	"\x15CHUNK_KIND_DETECTIONS\x10\x03\x12\x16\n" +
 	"\x12CHUNK_KIND_TERRAIN\x10\x04\x12\x18\n" +
-	"\x14CHUNK_KIND_BUILDINGS\x10\x052\xea\x03\n" +
+	"\x14CHUNK_KIND_BUILDINGS\x10\x05\x12\x1a\n" +
+	"\x16CHUNK_KIND_POINT_SLOTS\x10\x062\xea\x03\n" +
 	"\fModelService\x12O\n" +
 	"\vSubmitRecon\x12!.skylens.model.v1.ReconJobRequest\x1a\x1d.skylens.model.v1.JobAccepted\x12Q\n" +
 	"\fSubmitDetect\x12\".skylens.model.v1.DetectJobRequest\x1a\x1d.skylens.model.v1.JobAccepted\x12F\n" +
