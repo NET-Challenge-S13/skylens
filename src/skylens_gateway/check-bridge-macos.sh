@@ -6,6 +6,7 @@ cd "$(dirname "$0")"; cd "$(pwd -P)"
 
 HTTP_PORT=80; SRT_PORT=10890; DAEJEON_HOST=116.89.187.181; DAEJEON_PORT=26022
 WEB_DIR=/opt/skylens/web
+HTTPS_PORT=443
 [ -f bridge.env ] && . ./bridge.env
 TUNNEL_PORT=20889
 PROXY_TUNNEL_PORT=20882
@@ -61,12 +62,17 @@ fi
 echo "== 현황판 정적 파일 =="
 if [ -f "$WEB_DIR/status.html" ]; then
   pass "$WEB_DIR/status.html 있음 ($(find "$WEB_DIR" -type f 2>/dev/null | wc -l | tr -d ' ') 개 파일)"
-  code=$(curl -s -o /dev/null -w '%{http_code}' -m 3 "http://127.0.0.1:$HTTP_PORT/" || echo 000)
-  [ "$code" = 200 ] && pass "nginx 가 / 를 200 으로 준다" || fail "/ 가 HTTP $code"
+  # The board is served over TLS (WebGPU needs a secure context) and plain HTTP
+  # redirects there, so follow the redirect and accept the self-signed cert.
+  code=$(curl -s -o /dev/null -k -L -w '%{http_code}' -m 5 "http://127.0.0.1:$HTTP_PORT/" || echo 000)
+  [ "$code" = 200 ] && pass "nginx 가 / 를 200 으로 준다 (http → https 따라감)" || fail "/ 가 HTTP $code"
+  code=$(curl -s -o /dev/null -k -w '%{http_code}' -m 5 "https://127.0.0.1:$HTTPS_PORT/" || echo 000)
+  [ "$code" = 200 ] && pass "TLS :$HTTPS_PORT 에서 현황판 200" || fail "https :$HTTPS_PORT 가 HTTP $code"
+  [ -s "$BASE/tls/board.crt" ] && info "인증서 만료 $(openssl x509 -noout -enddate -in "$BASE/tls/board.crt" 2>/dev/null | cut -d= -f2)"
   wasm=$(find "$WEB_DIR" -name '*.wasm' | head -1)
   if [ -n "$wasm" ]; then
     rel="${wasm#"$WEB_DIR"}"
-    ctype=$(curl -s -o /dev/null -w '%{content_type}' -m 5 "http://127.0.0.1:$HTTP_PORT$rel" || echo '')
+    ctype=$(curl -s -o /dev/null -k -w '%{content_type}' -m 5 "https://127.0.0.1:$HTTPS_PORT$rel" || echo '')
     case "$ctype" in
       application/wasm*) pass "wasm MIME 정상 ($rel)";;
       *)                 fail "wasm 이 $ctype 로 나간다 — 브라우저가 거부한다 (nginx 설정 확인)";;
