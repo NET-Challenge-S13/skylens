@@ -62,7 +62,8 @@ authInternalUsers:
       - action: publish
   - user: any
     pass:
-    ips: ['127.0.0.1/32', '::1/128', '116.89.187.181/32']
+    # viewers behind nginx /live/ reach MediaMTX with their real IP (webrtcTrustedProxies + X-Forwarded-For), so LAN/VPN ranges must be allowed for anonymous WHEP read
+    ips: ['127.0.0.1/32', '::1/128', '116.89.187.181/32', '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16']
     permissions:
       - action: read
 
