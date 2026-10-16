@@ -63,6 +63,8 @@ pub struct Spec {
     pub cwd: PathBuf,
     /// Exiting stops the whole demo (everything except the native windows).
     pub critical: bool,
+    /// Wait this long before starting the process (zero: start right away).
+    pub delay: Duration,
 }
 
 pub struct Running {
@@ -100,6 +102,46 @@ async fn pipe<R: AsyncRead + Unpin>(tag: String, stream: R) {
 /// Start a child. Its stdout and stderr are logged under its tag; when it
 /// exits on its own an [`Event::Exited`] goes to `events`.
 pub fn spawn(spec: Spec, events: Events) -> anyhow::Result<Running> {
+    if !spec.delay.is_zero() {
+        return Ok(spawn_later(spec, events));
+    }
+    let child = start(&spec)?;
+    Ok(watch(spec.name, spec.critical, child, events))
+}
+
+/// A child that starts after `spec.delay`; a start failure is reported as [`Event::Failed`].
+fn spawn_later(spec: Spec, events: Events) -> Running {
+    let (kill_tx, mut kill_rx) = oneshot::channel::<()>();
+    let name = spec.name.clone();
+    let task = tokio::spawn(async move {
+        tokio::select! {
+            _ = tokio::time::sleep(spec.delay) => {}
+            _ = &mut kill_rx => return,
+        }
+        match start(&spec) {
+            Ok(mut child) => {
+                let exited = tokio::select! {
+                    status = child.wait() => Some(status),
+                    _ = &mut kill_rx => None,
+                };
+                match exited {
+                    Some(status) => {
+                        let code = status.ok().and_then(|s| s.code());
+                        let _ = events.send(Event::Exited { name: spec.name, critical: spec.critical, code });
+                    }
+                    None => terminate(&mut child).await,
+                }
+            }
+            Err(e) => {
+                let _ = events.send(Event::Failed { name: spec.name, error: format!("{e:#}") });
+            }
+        }
+    });
+    Running { name, kill: Some(kill_tx), task }
+}
+
+/// Launch the process and attach its output to the log.
+fn start(spec: &Spec) -> anyhow::Result<tokio::process::Child> {
     let mut cmd = Command::new(&spec.program);
     cmd.args(&spec.args)
         .current_dir(&spec.cwd)
@@ -130,8 +172,12 @@ pub fn spawn(spec: Spec, events: Events) -> anyhow::Result<Running> {
     if let Some(err) = child.stderr.take() {
         tokio::spawn(pipe(spec.tag.clone(), err));
     }
+    Ok(child)
+}
+
+fn watch(name: String, critical: bool, mut child: tokio::process::Child, events: Events) -> Running {
     let (kill_tx, kill_rx) = oneshot::channel::<()>();
-    let (name, critical) = (spec.name.clone(), spec.critical);
+    let run_name = name.clone();
     let task = tokio::spawn(async move {
         let exited = tokio::select! {
             status = child.wait() => Some(status),
@@ -140,12 +186,12 @@ pub fn spawn(spec: Spec, events: Events) -> anyhow::Result<Running> {
         match exited {
             Some(status) => {
                 let code = status.ok().and_then(|s| s.code());
-                let _ = events.send(Event::Exited { name, critical, code });
+                let _ = events.send(Event::Exited { name: run_name, critical, code });
             }
             None => terminate(&mut child).await,
         }
     });
-    Ok(Running { name: spec.name, kill: Some(kill_tx), task })
+    Running { name, kill: Some(kill_tx), task }
 }
 
 async fn terminate(child: &mut tokio::process::Child) {
@@ -273,6 +319,7 @@ mod tests {
             env: vec![],
             cwd: std::env::temp_dir(),
             critical: true,
+            delay: Duration::ZERO,
         };
         let _quick = spawn(spec("quick", quick), tx.clone()).unwrap();
         match tokio::time::timeout(Duration::from_secs(10), rx.recv()).await.unwrap().unwrap() {

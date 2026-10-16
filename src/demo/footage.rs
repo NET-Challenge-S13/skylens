@@ -282,6 +282,11 @@ pub fn clip_time(elapsed: f64, duration: f64) -> f64 {
     if duration > 0.0 { elapsed.max(0.0).rem_euclid(duration) } else { 0.0 }
 }
 
+/// Seconds into a clip that plays once: past the end it stays on the last instant.
+pub fn clip_time_once(elapsed: f64, duration: f64) -> f64 {
+    if duration > 0.0 { elapsed.max(0.0).min(duration) } else { 0.0 }
+}
+
 fn gps_of(r: &Row) -> Gps {
     Gps { lat: r.lat, lon: r.lon, alt: 0.0 }
 }
@@ -550,6 +555,14 @@ mod tests {
         assert!(close(clip_time(82.1 + 5.0, 82.1), 5.0, 1e-9));
         assert!(close(clip_time(-3.0, 82.1), 0.0, 1e-12));
         assert_eq!(clip_time(5.0, 0.0), 0.0);
+    }
+
+    #[test]
+    fn clip_time_once_stops_at_the_end() {
+        assert!(close(clip_time_once(10.0, 82.1), 10.0, 1e-12));
+        assert!(close(clip_time_once(82.1 + 5.0, 82.1), 82.1, 1e-12));
+        assert!(close(clip_time_once(-3.0, 82.1), 0.0, 1e-12));
+        assert_eq!(clip_time_once(5.0, 0.0), 0.0);
     }
 
     #[test]

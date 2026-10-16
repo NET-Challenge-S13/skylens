@@ -43,6 +43,11 @@ pub struct Options {
     pub auto: bool,
     /// Fly the operator's waypoints instead of the footage track.
     pub follow_route: bool,
+    /// Play the footage once instead of looping it; the drones hold their last fix afterwards.
+    pub no_loop: bool,
+    /// Seconds to wait before the footage starts playing (the drones follow the clip, so they
+    /// wait too); lets the drones come online before the first frame is published.
+    pub publish_delay: f64,
     /// SkyLensNet checkpoint for the model server.
     pub checkpoint: Option<PathBuf>,
     /// Go core executable; searched for when absent.
@@ -83,6 +88,8 @@ impl Default for Options {
             native: false,
             auto: false,
             follow_route: false,
+            no_loop: false,
+            publish_delay: 0.0,
             checkpoint: None,
             core_bin: None,
             profile: None,
@@ -116,6 +123,10 @@ pub const USAGE: &str = "usage: cargo run -p skylens-demo -- [options]
   --native             also open the native control tower and status board
   --auto               assign the pre-planned route automatically (unattended run)
   --follow-route       drones fly the assigned waypoints instead of the footage track
+  --no-loop            play the footage once instead of looping it (drones then hold
+                       their last position)
+  --publish-delay S    wait S seconds before the footage starts (e.g. until the drones
+                       are online)
   --synthetic          old clips (res/static/video/demo_*.mp4) on a synthetic track
                        instead of the recorded flight in data/demo
   --footage-url URL    where to download the recorded footage zip from
@@ -166,6 +177,13 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<Options, St
             "--remote-core" => o.remote_core = Some(host_port("--remote-core", value("--remote-core")?)?),
             "--feed-tcp" => o.feed_tcp = Some(host_port("--feed-tcp", value("--feed-tcp")?)?),
             "--srt-addr" => o.srt_addr = Some(host_port("--srt-addr", value("--srt-addr")?)?),
+            "--publish-delay" => {
+                let v = value("--publish-delay")?;
+                o.publish_delay = match v.parse::<f64>() {
+                    Ok(x) if x.is_finite() && x >= 0.0 => x,
+                    _ => return Err(format!("--publish-delay needs a number of seconds, got {v}")),
+                };
+            }
             "--fps" => {
                 let v = value("--fps")?;
                 o.fps = match v.parse::<f64>() {
@@ -209,7 +227,7 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<Options, St
                 }
                 o.site = Some(v);
             }
-            "--no-model" | "--native" | "--auto" | "--follow-route" | "--synthetic" | "--no-fetch" | "-h" | "--help"
+            "--no-model" | "--native" | "--auto" | "--follow-route" | "--no-loop" | "--synthetic" | "--no-fetch" | "-h" | "--help"
                 if inline.is_some() =>
             {
                 return Err(format!("{flag} takes no value"));
@@ -218,6 +236,7 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<Options, St
             "--native" => o.native = true,
             "--auto" => o.auto = true,
             "--follow-route" => o.follow_route = true,
+            "--no-loop" => o.no_loop = true,
             "--synthetic" => o.synthetic = true,
             "--no-fetch" => o.no_fetch = true,
             "-h" | "--help" => o.help = true,
@@ -251,7 +270,7 @@ mod tests {
         assert_eq!((o.core_port, o.board_port), (8080, 8090));
         assert_eq!(o.fps, 2.0);
         assert_eq!(o.frame_width, 1920);
-        assert!(!o.no_model && !o.native && !o.auto && !o.follow_route && !o.synthetic);
+        assert!(!o.no_model && !o.native && !o.auto && !o.follow_route && !o.no_loop && !o.synthetic);
     }
 
     #[test]

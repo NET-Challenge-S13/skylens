@@ -74,5 +74,7 @@ wgpu = "30"
 codegen-units = 1
 lto = "thin"
 
+# pointblitz-core 0.2.1 with the animated point layer kept in-repo (third_party/pointblitz/PATCHES.md).
 [patch.crates-io]
+pointblitz-core = { path = "third_party/pointblitz/pointblitz-core" }
 deltamesh = { path = "third_party/deltamesh" }

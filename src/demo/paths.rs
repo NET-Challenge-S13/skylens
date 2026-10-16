@@ -103,13 +103,14 @@ pub fn tcp_publish_url(base: &str, drone: &Drone) -> String {
     }
 }
 
-/// ffmpeg arguments that publish a file to MediaMTX in a loop, at real time,
-/// without re-encoding.
-pub fn publisher_args(file: &Path, url: &str) -> Vec<String> {
-    [
-        "-hide_banner", "-nostats", "-loglevel", "warning", "-re", "-stream_loop", "-1", "-i",
-    ]
+/// ffmpeg arguments that publish a file to MediaMTX at real time, without re-encoding;
+/// in a loop unless `looped` is false (then it plays once).
+pub fn publisher_args(file: &Path, url: &str, looped: bool) -> Vec<String> {
+    let loop_args: &[&str] = if looped { &["-stream_loop", "-1"] } else { &[] };
+    ["-hide_banner", "-nostats", "-loglevel", "warning", "-re"]
     .iter()
+    .chain(loop_args)
+    .chain(["-i"].iter())
     .map(|s| s.to_string())
     .chain([file.display().to_string()])
     .chain(["-an", "-c:v", "copy", "-f", "mpegts"].iter().map(|s| s.to_string()))
@@ -273,11 +274,19 @@ paths:
 
     #[test]
     fn publisher_copies_video_in_a_real_time_loop() {
-        let args = publisher_args(Path::new("demo_left.mp4"), &srt_publish_url("127.0.0.1:10890", &FORMATION[0]));
+        let args = publisher_args(Path::new("demo_left.mp4"), &srt_publish_url("127.0.0.1:10890", &FORMATION[0]), true);
         let joined = args.join(" ");
         assert!(joined.contains("-re -stream_loop -1 -i demo_left.mp4"));
         assert!(joined.contains("-an -c:v copy -f mpegts"));
         assert_eq!(args.last().unwrap(), "srt://127.0.0.1:10890?streamid=publish:drone1&pkt_size=1316");
+    }
+
+    #[test]
+    fn publisher_plays_once_without_looping() {
+        let args = publisher_args(Path::new("demo_left.mp4"), "tcp://127.0.0.1:19101", false);
+        let joined = args.join(" ");
+        assert!(joined.contains("-re -i demo_left.mp4"));
+        assert!(!joined.contains("-stream_loop"));
     }
 
     #[test]

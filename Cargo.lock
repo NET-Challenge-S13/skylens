@@ -4130,8 +4130,6 @@ dependencies = [
 [[package]]
 name = "pointblitz-core"
 version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a817bb80478d1d0433c92c65cf0d756a417022313e496534feac59e8a040b8e"
 dependencies = [
  "bytemuck",
  "glam 0.34.1",
