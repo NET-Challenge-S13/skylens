@@ -8,7 +8,8 @@
 
 | 모듈 | 하는 일 |
 |---|---|
-| `shell` | HTML 템플릿 + 이전 CSS(수정 없이) + 번들 폰트로 Blitz 문서를 만든다. `ScreenApp` 트레이트, `ScreenDocument`, 네이티브 창(`run_native`, 창 아이콘 `res/icon/skylens-256.png`)과 wasm 진입(`run_web`) |
+| `shell` | HTML 템플릿 + 이전 CSS(수정 없이) + 번들 폰트로 Blitz 문서를 만든다. `ScreenApp` 트레이트, `ScreenDocument`, 네이티브 창(`run_native`, 창 아이콘 `res/icon/skylens-256.png`), Android 진입(`run_android`, NativeActivity 위에서 같은 창), wasm 진입(`run_web`) |
+| `android` | Android 전용 도우미. 명령줄 대신 설정을 시스템 속성 `debug.skylens.<키>`, 외부·내부 파일 폴더의 `<키>.txt` 순서로 읽고(`setting`), 로그를 logcat 태그 `skylens`로 보낸다. 파일 형식 해석은 모든 플랫폼에서 테스트한다 |
 | `dom` | `Dom`: id·class·선택자로 요소를 찾고 텍스트·class·속성·인라인 스타일·자식 마크업을 바꾼다. 바뀌지 않는 쓰기는 건너뛴다 |
 | `widgets` | 로딩 화면, 토스트, 패널 라벨(`sl-surface`), 연결 배지, 탐지 카드. 이전 TS가 만들던 DOM 그대로 |
 | `link` | 코어와의 WebSocket 하나(`/control` 또는 `/viewer`). 바이너리 `viewer.v1.Envelope`, 재접속(0.8초에서 두 배씩 최대 8초), 이전 문구의 연결 상태 |

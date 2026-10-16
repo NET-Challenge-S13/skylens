@@ -13,14 +13,16 @@
 //!    shapes over it.
 //!
 //! Pointer and wheel events on the view reach [`ViewScreen::input`] as [`ViewInput`], in CSS
-//! pixels relative to the view, with clicks (press and release within 4 px) recognised.
+//! pixels relative to the view, with clicks (press and release within 4 px) recognised. On a
+//! touch screen one finger acts like the main mouse button (orbit, tap = click) and a two-finger
+//! pinch arrives as wheel steps (see [`Touches`]).
 
 use crate::camera::Projector;
 use crate::chunks::{ChunkStore, MeshEntry};
 use anyrender::{PaintRef, PaintScene as _, ResourceId};
 use blitz_dom::Widget;
 use blitz_dom::node::ComputedStyles;
-use blitz_traits::events::{BlitzWheelDelta, MouseEventButton, UiEvent};
+use blitz_traits::events::{BlitzPointerId, BlitzWheelDelta, MouseEventButton, UiEvent};
 use peniko::kurbo::{Affine, Rect};
 use peniko::{Fill, ImageBrush, ImageSampler};
 use pointblitz::Camera;
@@ -431,14 +433,99 @@ pub struct View3d<S: ViewScreen> {
     gpu: Option<GpuState>,
     last_paint_ms: Option<f64>,
     press: Option<(f32, f32, u8)>,
+    touches: Touches,
 }
 
 /// Movement under which a press and release still count as a click (CSS px).
 const CLICK_SLOP: f32 = 4.0;
 
+/// Change in the distance between two fingers that makes one wheel step (CSS px). The screens'
+/// cameras zoom a fixed factor per wheel event, so a pinch is cut into steps of this size.
+const PINCH_STEP: f32 = 16.0;
+
+/// Fingers on the view. One finger is left to the mouse path (it behaves like the main button:
+/// orbit, tap = click). From the second finger on, the gesture is a pinch: the first finger's drag
+/// ends, the change in distance between the first two fingers becomes wheel steps, and nothing
+/// counts as a click until every finger has lifted.
+///
+/// Fingers are tracked here rather than from the event's `buttons`, which Blitz keeps as one
+/// shared bit for all touches.
+#[derive(Debug, Default)]
+pub struct Touches {
+    fingers: Vec<(u64, f32, f32)>,
+    /// The gesture had two fingers or more at some point.
+    multi: bool,
+    /// Distance between the first two fingers at the last step, and the change not yet sent.
+    pinch: Option<(f32, f32)>,
+}
+
+impl Touches {
+    fn spread(&self) -> Option<(f32, f32, f32)> {
+        let [(_, ax, ay), (_, bx, by), ..] = self.fingers.as_slice() else { return None };
+        Some((((bx - ax).powi(2) + (by - ay).powi(2)).sqrt(), (ax + bx) / 2.0, (ay + by) / 2.0))
+    }
+
+    /// A finger went down. `None`: leave it to the mouse path; `Some`: these inputs instead.
+    pub fn down(&mut self, id: u64, x: f32, y: f32) -> Option<Vec<ViewInput>> {
+        self.fingers.retain(|(f, _, _)| *f != id);
+        self.fingers.push((id, x, y));
+        if self.fingers.len() == 1 && !self.multi {
+            return None;
+        }
+        let mut out = Vec::new();
+        if !self.multi {
+            // The first finger was orbiting; end that drag where it is.
+            self.multi = true;
+            let (_, fx, fy) = self.fingers[0];
+            out.push(ViewInput::PointerUp { x: fx, y: fy, button: 0 });
+        }
+        self.pinch = self.spread().map(|(d, _, _)| (d, 0.0));
+        Some(out)
+    }
+
+    /// A finger moved. `None`: leave it to the mouse path.
+    pub fn moved(&mut self, id: u64, x: f32, y: f32) -> Option<Vec<ViewInput>> {
+        let Some(i) = self.fingers.iter().position(|(f, _, _)| *f == id) else {
+            // Not pressed on the view (e.g. the move Blitz sends before a press): hover only.
+            return Some(vec![ViewInput::PointerMove { x, y, pressed: false }]);
+        };
+        self.fingers[i] = (id, x, y);
+        if !self.multi {
+            return Some(vec![ViewInput::PointerMove { x, y, pressed: true }]);
+        }
+        let (Some((last, pending)), Some((d, cx, cy))) = (self.pinch, self.spread()) else { return Some(Vec::new()) };
+        // Fingers closing together zoom out, like a wheel turned down (delta_y > 0).
+        let mut pending = pending + (last - d);
+        let mut out = Vec::new();
+        while pending >= PINCH_STEP {
+            out.push(ViewInput::Wheel { x: cx, y: cy, delta_y: 1.0 });
+            pending -= PINCH_STEP;
+        }
+        while pending <= -PINCH_STEP {
+            out.push(ViewInput::Wheel { x: cx, y: cy, delta_y: -1.0 });
+            pending += PINCH_STEP;
+        }
+        self.pinch = Some((d, pending));
+        Some(out)
+    }
+
+    /// A finger lifted or was cancelled. `None`: leave it to the mouse path.
+    pub fn up(&mut self, id: u64) -> Option<Vec<ViewInput>> {
+        self.fingers.retain(|(f, _, _)| *f != id);
+        if !self.multi {
+            return None;
+        }
+        self.pinch = self.spread().map(|(d, _, _)| (d, 0.0));
+        if self.fingers.is_empty() {
+            self.multi = false;
+        }
+        Some(Vec::new())
+    }
+}
+
 impl<S: ViewScreen> View3d<S> {
     pub fn new(screen: Rc<RefCell<S>>) -> Self {
-        View3d { screen, gpu: None, last_paint_ms: None, press: None }
+        View3d { screen, gpu: None, last_paint_ms: None, press: None, touches: Touches::default() }
     }
 
     pub fn boxed(screen: Rc<RefCell<S>>) -> Box<dyn Widget> {
@@ -516,6 +603,31 @@ impl<S: ViewScreen> Widget for View3d<S> {
     }
 
     fn handle_event(&mut self, event: &UiEvent) {
+        let touch = match event {
+            UiEvent::PointerDown(e) | UiEvent::PointerMove(e) | UiEvent::PointerUp(e) | UiEvent::PointerCancel(e) => match e.id {
+                BlitzPointerId::Finger(id) => Some((id, e.coords.client_x, e.coords.client_y)),
+                _ => None,
+            },
+            _ => None,
+        };
+        if let Some((id, x, y)) = touch {
+            let handled = match event {
+                UiEvent::PointerDown(_) => self.touches.down(id, x, y),
+                UiEvent::PointerMove(_) => self.touches.moved(id, x, y),
+                _ => self.touches.up(id),
+            };
+            if let Some(inputs) = handled {
+                if matches!(event, UiEvent::PointerDown(_)) {
+                    // A pinch started: the first finger's press no longer counts as a click.
+                    self.press = None;
+                }
+                let mut screen = self.screen.borrow_mut();
+                for input in &inputs {
+                    screen.input(input);
+                }
+                return;
+            }
+        }
         let input = match event {
             UiEvent::PointerDown(e) => {
                 let (x, y) = (e.coords.client_x, e.coords.client_y);
@@ -651,6 +763,38 @@ mod tests {
         // Missing colours are left to the material (white).
         let bare = payload::MeshBlock { colors: vec![], ..block };
         assert!(mesh_block_data(&bare).colors.is_none());
+    }
+
+    #[test]
+    fn one_finger_is_a_mouse_and_two_fingers_pinch() {
+        let mut t = Touches::default();
+        // One finger: the mouse path handles press and release (orbit, tap = click).
+        assert_eq!(t.down(1, 100.0, 100.0), None);
+        assert_eq!(t.moved(1, 110.0, 100.0), Some(vec![ViewInput::PointerMove { x: 110.0, y: 100.0, pressed: true }]));
+        assert_eq!(t.up(1), None);
+
+        // Second finger: the first finger's drag ends, then spreading zooms in.
+        assert_eq!(t.down(1, 100.0, 100.0), None);
+        assert_eq!(t.down(2, 200.0, 100.0), Some(vec![ViewInput::PointerUp { x: 100.0, y: 100.0, button: 0 }]));
+        let out = t.moved(2, 200.0 + 2.5 * PINCH_STEP, 100.0).unwrap();
+        assert_eq!(out.len(), 2);
+        assert!(out.iter().all(|i| matches!(i, ViewInput::Wheel { delta_y, .. } if *delta_y < 0.0)));
+        // The half step left over counts towards the next ones; closing in zooms out.
+        let out = t.moved(2, 200.0 - 1.5 * PINCH_STEP, 100.0).unwrap();
+        assert_eq!(out.len(), 3);
+        assert!(out.iter().all(|i| matches!(i, ViewInput::Wheel { delta_y, .. } if *delta_y > 0.0)));
+
+        // Lifting: no click and no orbit until every finger is up.
+        assert_eq!(t.up(2), Some(Vec::new()));
+        assert_eq!(t.moved(1, 300.0, 300.0), Some(Vec::new()));
+        assert_eq!(t.up(1), Some(Vec::new()));
+        assert_eq!(t.down(3, 50.0, 50.0), None);
+    }
+
+    #[test]
+    fn a_finger_not_pressed_on_the_view_only_hovers() {
+        let mut t = Touches::default();
+        assert_eq!(t.moved(9, 5.0, 6.0), Some(vec![ViewInput::PointerMove { x: 5.0, y: 6.0, pressed: false }]));
     }
 
     #[test]

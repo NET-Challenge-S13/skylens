@@ -2,7 +2,8 @@
 //! (skylens_client): legacy shared/viewer CSS and widgets, core link, chunk store, pointblitz 3D view.
 //!
 //! - [`shell`]: a Blitz document from an HTML template plus the legacy CSS and the bundled fonts,
-//!   native window and wasm entry points, DOM event dispatch to a [`shell::ScreenApp`].
+//!   native window, Android and wasm entry points, DOM event dispatch to a [`shell::ScreenApp`].
+//! - [`android`]: settings without a command line (system properties, files) and logcat.
 //! - [`dom`]: small DOM helpers (text, classes, attributes, inline styles, child markup).
 //! - [`widgets`]: loading screen, toast, pane label, net badge, detection card, with the exact DOM
 //!   the legacy TypeScript produced.
@@ -14,6 +15,7 @@
 //! - [`view3d`]: the Blitz custom widget that owns the GPU and draws a frame with pointblitz.
 //! - [`config`]: legacy tuning constants and colours.
 
+pub mod android;
 pub mod camera;
 pub mod chunks;
 pub mod config;
@@ -54,9 +56,15 @@ pub fn now_ms() -> f64 {
 }
 
 /// Diagnostics: stderr on native, the browser console on web.
-#[cfg(not(target_arch = "wasm32"))]
+#[cfg(not(any(target_arch = "wasm32", target_os = "android")))]
 pub fn log(msg: &str) {
     eprintln!("{msg}");
+}
+
+/// Diagnostics: logcat on Android (tag `skylens`), where stderr goes nowhere.
+#[cfg(target_os = "android")]
+pub fn log(msg: &str) {
+    android::log(msg);
 }
 
 /// Diagnostics: stderr on native, the browser console on web.

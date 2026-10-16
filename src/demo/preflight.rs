@@ -108,7 +108,7 @@ pub fn resolve(o: &Options, repo: &Path) -> (Option<Plan>, Findings) {
     }
 
     // model server
-    let model = if o.no_model {
+    let model = if o.no_model || o.model_addr.is_some() {
         None
     } else {
         let release = target.join("release");
@@ -199,7 +199,7 @@ pub fn resolve(o: &Options, repo: &Path) -> (Option<Plan>, Findings) {
 /// answer the readiness checks and the demo would quietly run against old code.
 pub async fn ports_in_use(o: &Options) -> Vec<String> {
     let mut tcp = vec![(o.core_port, "코어"), (o.board_port, "현황판 서버"), (args::WHEP_PORT, "MediaMTX WHEP")];
-    if !o.no_model {
+    if !o.no_model && o.model_addr.is_none() {
         tcp.push((args::MODEL_REST_PORT, "모델 REST"));
         tcp.push((args::MODEL_GRPC_PORT, "모델 gRPC"));
     }

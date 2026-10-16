@@ -18,6 +18,10 @@ pub struct Options {
     pub board_port: u16,
     /// Run without the model server (core only, to look at the screens).
     pub no_model: bool,
+    /// gRPC address of a model server running elsewhere (e.g. behind an SSH tunnel). The
+    /// launcher then starts no model server of its own; it waits for the REST `/health`
+    /// of the same host on the model REST port.
+    pub model_addr: Option<String>,
     /// Frames per second the core extracts per drone.
     pub fps: f64,
     /// Width of extracted frames in px (0 keeps the source size).
@@ -60,6 +64,7 @@ impl Default for Options {
             core_port: 8080,
             board_port: 8090,
             no_model: false,
+            model_addr: None,
             fps: 2.0,
             frame_width: 1920,
             mediamtx: None,
@@ -84,6 +89,9 @@ pub const USAGE: &str = "usage: cargo run -p skylens-demo -- [options]
   --core-port N        core port (default 8080; the control tower is served here)
   --board-port N       status board server port (default 8090)
   --no-model           do not start the model server (look at the screens only)
+  --model-addr H:P     use a model server already running at gRPC host:port (e.g. an
+                       SSH tunnel to a GPU node) instead of starting one; its REST
+                       /health is expected on the same host, port 8100
   --fps X              frames per second extracted per drone (default 2)
   --frame-width N      extracted frame width in px, 0 = source size (default 1920)
   --mediamtx PATH      MediaMTX executable (default ~/tools/mediamtx/mediamtx, then PATH)
@@ -129,6 +137,14 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<Options, St
         match flag.as_str() {
             "--core-port" => o.core_port = port("--core-port", &value("--core-port")?)?,
             "--board-port" => o.board_port = port("--board-port", &value("--board-port")?)?,
+            "--model-addr" => {
+                let v = value("--model-addr")?;
+                let ok = v.rsplit_once(':').is_some_and(|(h, p)| !h.is_empty() && p.parse::<u16>().is_ok_and(|p| p > 0));
+                if !ok {
+                    return Err(format!("--model-addr: not host:port: {v}"));
+                }
+                o.model_addr = Some(v);
+            }
             "--fps" => {
                 let v = value("--fps")?;
                 o.fps = match v.parse::<f64>() {
@@ -281,6 +297,14 @@ mod tests {
         assert!(parse(&["--site", " "]).is_err());
         assert!(parse(&["--synthetic=1"]).is_err());
         assert!(parse(&["--no-fetch=yes"]).is_err());
+    }
+
+    #[test]
+    fn model_addr() {
+        assert_eq!(parse(&["--model-addr", "127.0.0.1:8101"]).unwrap().model_addr.as_deref(), Some("127.0.0.1:8101"));
+        assert!(parse(&["--model-addr", "8101"]).is_err());
+        assert!(parse(&["--model-addr=host:x"]).is_err());
+        assert!(parse(&["--model-addr"]).is_err());
     }
 
     #[test]

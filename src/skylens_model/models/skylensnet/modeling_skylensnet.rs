@@ -53,11 +53,15 @@
 //!   (`align_corners = false`, as the model itself does) to the frame size and
 //!   applies softmax. [`HazardMode::Tiles`] instead averages the per-tile
 //!   softmax of the person tiles, then resizes bilinearly.
-//! - **Precision.** On CUDA the weights, inputs and activations are bf16
-//!   ([`Precision::Bf16`], default), which halves the GPU memory of the weights
-//!   and the caching allocator. [`Precision::Fp16Autocast`] runs as
-//!   `eval_deploy.py` does (fp32 weights under fp16 autocast), for comparing
-//!   against its numbers. CPU always runs in fp32. Outputs are fp32 either way.
+//! - **Precision.** [`Precision::Auto`] (default) picks by the CUDA compute
+//!   capability when the model is loaded: >= 8.0 runs bf16 weights, inputs and
+//!   activations ([`Precision::Bf16`], halves the GPU memory of the weights and
+//!   the caching allocator); 7.x (V100, T4: fp16 tensor cores, no bf16
+//!   hardware) runs fp32 weights under fp16 autocast
+//!   ([`Precision::Fp16Autocast`], as `eval_deploy.py` does); anything older
+//!   or unknown runs fp32. CPU always runs in fp32. The choice and its reason
+//!   are logged once at load; `SKYLENS_PRECISION` (`fp32|fp16|bf16|auto`) or
+//!   `DetectorOptions::precision` overrides it. Outputs are fp32 either way.
 //! - **Decoding** runs on CPU in `utils::metrics::decode_heatmap_peaks`; score
 //!   ties are ordered by index where torch `topk` leaves them unspecified.
 
@@ -688,12 +692,93 @@ pub struct DetectorOptions {
 /// Arithmetic of a CUDA forward pass.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Precision {
+    /// Pick from the device at load time (see [`resolve_precision`]).
+    Auto,
     /// fp32 weights and activations.
     Fp32,
     /// fp32 weights under fp16 autocast, as `eval_deploy.py` runs.
     Fp16Autocast,
     /// bf16 weights, inputs and activations.
     Bf16,
+}
+
+impl std::str::FromStr for Precision {
+    type Err = String;
+
+    fn from_str(raw: &str) -> Result<Self, String> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "auto" | "" => Ok(Self::Auto),
+            "fp32" | "f32" | "float32" => Ok(Self::Fp32),
+            "fp16" | "f16" | "half" | "autocast" | "fp16-autocast" => Ok(Self::Fp16Autocast),
+            "bf16" | "bfloat16" => Ok(Self::Bf16),
+            other => Err(format!("unknown precision {other:?} (expected auto, fp32, fp16 or bf16)")),
+        }
+    }
+}
+
+impl std::fmt::Display for Precision {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Auto => "auto",
+            Self::Fp32 => "fp32",
+            Self::Fp16Autocast => "fp16-autocast",
+            Self::Bf16 => "bf16",
+        })
+    }
+}
+
+/// CUDA compute capability `(major, minor)` of device `ordinal`, read through
+/// the driver API (`cuDeviceGetAttribute`; tch does not expose it). `None`
+/// when the driver library is missing or the query fails.
+pub fn cuda_compute_capability(ordinal: i32) -> Option<(i32, i32)> {
+    use cudarc::driver::result;
+    use cudarc::driver::sys::CUdevice_attribute as A;
+    std::panic::catch_unwind(|| {
+        // SAFETY: only probes whether the driver library can be loaded.
+        if !unsafe { cudarc::driver::sys::is_culib_present() } {
+            return None;
+        }
+        result::init().ok()?;
+        let dev = result::device::get(ordinal).ok()?;
+        // SAFETY: `dev` comes from `device::get`.
+        let attr = |a| unsafe { result::device::get_attribute(dev, a) }.ok();
+        Some((
+            attr(A::CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR)?,
+            attr(A::CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR)?,
+        ))
+    })
+    .ok()
+    .flatten()
+}
+
+/// Precision for a CUDA device of the given compute capability, with the reason.
+pub fn precision_for_capability(capability: Option<(i32, i32)>) -> (Precision, String) {
+    match capability {
+        Some((major, minor)) if major >= 8 => {
+            (Precision::Bf16, format!("compute capability {major}.{minor} has bf16 tensor cores"))
+        }
+        Some((7, minor)) => (
+            Precision::Fp16Autocast,
+            format!("compute capability 7.{minor} has fp16 tensor cores but no bf16 hardware"),
+        ),
+        Some((major, minor)) => {
+            (Precision::Fp32, format!("compute capability {major}.{minor} has no half-precision tensor cores"))
+        }
+        None => (Precision::Fp32, "compute capability unknown".to_string()),
+    }
+}
+
+/// The concrete precision a `device` runs `requested` in, with the reason.
+/// CPU is always fp32; an explicit request on CUDA is honoured; `Auto` picks
+/// by compute capability.
+pub fn resolve_precision(requested: Precision, device: Device) -> (Precision, String) {
+    let Device::Cuda(ordinal) = device else {
+        return (Precision::Fp32, "cpu always runs fp32".to_string());
+    };
+    if requested != Precision::Auto {
+        return (requested, "set explicitly".to_string());
+    }
+    precision_for_capability(cuda_compute_capability(ordinal as i32))
 }
 
 impl Default for DetectorOptions {
@@ -708,7 +793,7 @@ impl Default for DetectorOptions {
             merge_iou: 0.5,
             merge_center_distance: 2.0,
             hazard: HazardMode::Squash { size: tiling::TILE_SIZE },
-            precision: Precision::Bf16,
+            precision: Precision::Auto,
         }
     }
 }
@@ -753,7 +838,10 @@ impl SkyLensNetDetector {
         Self::load_with_options(checkpoint, device, DetectorOptions::default())
     }
 
-    pub fn load_with_options(checkpoint: &Path, device: Device, options: DetectorOptions) -> Result<Self> {
+    pub fn load_with_options(checkpoint: &Path, device: Device, mut options: DetectorOptions) -> Result<Self> {
+        let (precision, reason) = resolve_precision(options.precision, device);
+        tracing::info!(?device, %precision, %reason, "SkyLensNet precision");
+        options.precision = precision;
         let config = SkyLensConfig::from_pretrained(checkpoint)?;
         ensure!(!config.use_timm_backbone, "timm backbones are not supported by the Rust model");
         ensure!(
@@ -1254,6 +1342,33 @@ mod tests {
         std::fs::write(dir.join(CONFIG_NAME), cfg.to_json_string().unwrap()).unwrap();
         let err = SkyLensNetDetector::load(&dir, Device::Cpu).unwrap_err().to_string();
         assert!(err.contains("offset_head"), "{err}");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn precision_follows_compute_capability() {
+        let pick = |cc| precision_for_capability(cc).0;
+        assert_eq!(pick(Some((9, 0))), Precision::Bf16);
+        assert_eq!(pick(Some((8, 0))), Precision::Bf16);
+        assert_eq!(pick(Some((8, 6))), Precision::Bf16);
+        assert_eq!(pick(Some((7, 5))), Precision::Fp16Autocast);
+        assert_eq!(pick(Some((7, 0))), Precision::Fp16Autocast);
+        assert_eq!(pick(Some((6, 1))), Precision::Fp32);
+        assert_eq!(pick(None), Precision::Fp32);
+    }
+
+    #[test]
+    fn precision_resolution_and_parsing() {
+        assert_eq!(resolve_precision(Precision::Auto, Device::Cpu).0, Precision::Fp32);
+        assert_eq!(resolve_precision(Precision::Bf16, Device::Cpu).0, Precision::Fp32);
+        assert_eq!(resolve_precision(Precision::Fp16Autocast, Device::Cuda(0)).0, Precision::Fp16Autocast);
+        assert_eq!("BF16".parse(), Ok(Precision::Bf16));
+        assert_eq!("fp16".parse(), Ok(Precision::Fp16Autocast));
+        assert_eq!("auto".parse(), Ok(Precision::Auto));
+        assert!("int8".parse::<Precision>().is_err());
+        let dir = tiny_checkpoint("prec", false, true);
+        let det = SkyLensNetDetector::load(&dir, Device::Cpu).unwrap();
+        assert_eq!(det.options().precision, Precision::Fp32);
         std::fs::remove_dir_all(&dir).ok();
     }
 
