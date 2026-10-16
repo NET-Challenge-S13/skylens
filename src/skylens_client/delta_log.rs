@@ -8,6 +8,8 @@
 //! While following live (the default) each new delta is applied as it arrives, animated; stepping
 //! back or seeking leaves live mode until [`DeltaLog::follow_live`].
 
+use std::rc::Rc;
+
 use skylens_viewer::skylens_shared::delta::{AddRec, MoveRec, iter_adds, iter_moves, iter_removes};
 use skylens_viewer::skylens_shared::proto::payload::v1::{DeltaKind as WireKind, PointsDelta};
 
@@ -49,12 +51,12 @@ pub struct Batch {
     pub animate: bool,
 }
 
-/// What the point layer must do, in order (see [`DeltaLog::take_ops`]).
+/// What the point layer must do, in order (see [`DeltaLog::ops_since`]).
 #[derive(Debug, Clone, PartialEq)]
 pub enum LayerOp {
     /// Empty every slot (new run, or the start of a seek replay).
     Reset,
-    Apply(Batch),
+    Apply(Rc<Batch>),
 }
 
 /// A live point of the slot table.
@@ -168,6 +170,8 @@ pub struct DeltaLog {
     live: bool,
     table: SlotTable,
     ops: Vec<LayerOp>,
+    /// Number of ops trimmed off the front of `ops` (cursors count from the start of the run of ops).
+    ops_base: u64,
     version: u64,
 }
 
@@ -237,24 +241,22 @@ impl DeltaLog {
         self.applied = 0;
         self.version += 1;
         self.live = true;
-        self.ops.clear();
-        self.ops.push(LayerOp::Reset);
+        self.reset_ops();
     }
 
     /// Applies entry `applied` and moves the cursor.
     fn apply_next(&mut self, animate: bool) {
-        let d = &self.deltas[self.applied];
-        if d.snapshot {
+        if self.deltas[self.applied].snapshot {
             // Full state: every live slot goes first, then the adds.
             self.table.clear();
-            self.ops.push(LayerOp::Reset);
+            self.reset_ops();
             self.undo.clear();
             self.undo.resize(self.applied, Batch::default());
         }
-        let b = batch_of(d, animate);
+        let b = batch_of(&self.deltas[self.applied], animate);
         let inv = self.table.apply(&b, true);
         self.undo.push(inv);
-        self.ops.push(LayerOp::Apply(b));
+        self.ops.push(LayerOp::Apply(Rc::new(b)));
         self.applied += 1;
         self.version += 1;
     }
@@ -323,8 +325,7 @@ impl DeltaLog {
         self.undo.clear();
         self.applied = 0;
         self.version += 1;
-        self.ops.clear();
-        self.ops.push(LayerOp::Reset);
+        self.reset_ops();
         while self.applied < target {
             self.apply_next(false);
         }
@@ -338,7 +339,7 @@ impl DeltaLog {
         }
         let inv = self.undo.pop().expect("one undo per applied delta");
         self.table.apply(&inv, true);
-        self.ops.push(LayerOp::Apply(inv));
+        self.ops.push(LayerOp::Apply(Rc::new(inv)));
         self.applied -= 1;
         self.version += 1;
     }
@@ -359,9 +360,42 @@ impl DeltaLog {
         self.live = true;
     }
 
-    /// Operations for the point layer since the last call.
-    pub fn take_ops(&mut self) -> Vec<LayerOp> {
-        std::mem::take(&mut self.ops)
+    /// Everything before a Reset is moot: drop the pending ops and start over with a Reset.
+    fn reset_ops(&mut self) {
+        self.ops_base += self.ops.len() as u64;
+        self.ops.clear();
+        self.ops.push(LayerOp::Reset);
+    }
+
+    /// Operations for a point layer since its `cursor`. A new layer (`None`) gets the whole
+    /// present state in one non-animated batch; after that each layer keeps its cursor, so the
+    /// main view and the point panel both follow. A layer that fell behind a Reset starts from it.
+    pub fn ops_since(&self, cursor: &mut Option<u64>) -> Vec<LayerOp> {
+        let end = self.ops_base + self.ops.len() as u64;
+        let out = match *cursor {
+            Some(c) => self.ops.get(c.saturating_sub(self.ops_base) as usize..).map(<[_]>::to_vec).unwrap_or_default(),
+            None if self.table.is_empty() => Vec::new(),
+            None => {
+                let adds = self
+                    .table
+                    .slots
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, s)| s.map(|s| AddRec { id: i as u32, xyz: s.xyz, rgb: s.rgb, zone: s.zone }))
+                    .collect();
+                let capacity = self.table.slots.len() as u32;
+                vec![LayerOp::Reset, LayerOp::Apply(Rc::new(Batch { adds, capacity, animate: false, ..Default::default() }))]
+            }
+        };
+        *cursor = Some(end);
+        out
+    }
+
+    /// Drops ops every layer has consumed (`upto` = the smallest cursor).
+    pub fn trim_ops(&mut self, upto: u64) {
+        let n = upto.saturating_sub(self.ops_base).min(self.ops.len() as u64) as usize;
+        self.ops.drain(..n);
+        self.ops_base += n as u64;
     }
 }
 
@@ -400,6 +434,15 @@ mod tests {
                 p.rgb = m.rgb;
             }
         }
+    }
+
+    /// Ops since the last call, through one layer cursor.
+    fn take(log: &mut DeltaLog) -> Vec<LayerOp> {
+        thread_local!(static CUR: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(Some(0)) });
+        let mut c = CUR.get();
+        let ops = log.ops_since(&mut c);
+        CUR.set(c);
+        ops
     }
 
     fn pt(id: u32, v: f32) -> AddRec {
@@ -504,9 +547,9 @@ mod tests {
         for d in sequence(1).into_iter().take(3) {
             log.push(d);
         }
-        log.take_ops();
+        take(&mut log);
         log.step_back();
-        let ops = log.take_ops();
+        let ops = take(&mut log);
         let LayerOp::Apply(b) = &ops[0] else { panic!("apply expected") };
         assert!(b.animate);
         assert_eq!(b.removes, vec![4, 9]); // the adds of the replace fade out
@@ -522,11 +565,11 @@ mod tests {
         for d in sequence(1) {
             log.push(d);
         }
-        log.take_ops();
+        take(&mut log);
         log.seek(2);
         assert_eq!(log.applied(), 2);
         assert!(!log.is_live());
-        let ops = log.take_ops();
+        let ops = take(&mut log);
         assert_eq!(ops[0], LayerOp::Reset);
         assert!(ops[1..].iter().all(|o| matches!(o, LayerOp::Apply(b) if !b.animate)));
         assert_eq!(ops.len(), 3);
@@ -548,10 +591,10 @@ mod tests {
         for d in sequence(1) {
             log.push(d);
         }
-        log.take_ops();
+        take(&mut log);
         let first = sequence(2).remove(0);
         assert_eq!(log.push(first), Pushed::NewRun);
-        let ops = log.take_ops();
+        let ops = take(&mut log);
         assert_eq!(ops[0], LayerOp::Reset);
         assert_eq!((log.len(), log.applied(), log.run_id()), (1, 1, Some(2)));
         assert_eq!(log.table().len(), 6);
@@ -563,7 +606,7 @@ mod tests {
     fn late_join_batch_animates_only_the_last() {
         let mut log = DeltaLog::new();
         log.push_batch(sequence(3));
-        let ops = log.take_ops();
+        let ops = take(&mut log);
         let anim: Vec<bool> = ops.iter().filter_map(|o| if let LayerOp::Apply(b) = o { Some(b.animate) } else { None }).collect();
         assert_eq!(anim, vec![false, false, false, true]);
         assert_eq!(log.applied(), 4);
@@ -575,10 +618,10 @@ mod tests {
         for d in sequence(1).into_iter().take(2) {
             log.push(d);
         }
-        log.take_ops();
+        take(&mut log);
         let snap = PointsDelta { seq: 3, snapshot: true, capacity: 4, run: 1, adds: pack_adds(&[pt(0, 0.0), pt(3, 3.0)]), ..Default::default() };
         log.push(snap);
-        let ops = log.take_ops();
+        let ops = take(&mut log);
         assert_eq!(ops[0], LayerOp::Reset);
         assert_eq!(log.table().len(), 2);
     }

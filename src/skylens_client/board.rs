@@ -25,6 +25,10 @@ const INTERIOR_SAMPLES: usize = 9_000;
 /// Samples per segment the point panel frames on (legacy `samplePoints(400)`).
 pub const FIT_SAMPLES_PER_SEGMENT: usize = 400;
 
+/// Feed indices of the two 3D views for [`Board::live_ops`].
+pub const LIVE_MAIN: usize = 0;
+pub const LIVE_INSET: usize = 1;
+
 /// A drone the pipeline reported (telemetry only; the board simulates nothing).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Drone {
@@ -58,6 +62,8 @@ pub struct Board {
     pub live: DeltaLog,
     live_pending: Vec<payload::PointsDelta>,
     live_seen: u64,
+    /// Each 3D view's position in the log's op feed (None = not synced yet).
+    live_feeds: [Option<u64>; 2],
     pub site: Option<SiteFrame>,
     pub drones: Vec<Drone>,
     pub active_drone: Option<u32>,
@@ -99,6 +105,7 @@ impl Board {
             live: DeltaLog::new(),
             live_pending: Vec::new(),
             live_seen: u64::MAX,
+            live_feeds: [None; 2],
             site: None,
             drones: Vec::new(),
             active_drone: None,
@@ -130,6 +137,7 @@ impl Board {
         self.live = DeltaLog::new();
         self.live_pending.clear();
         self.live_seen = u64::MAX;
+        self.live_feeds = [None; 2];
         self.segments.clear();
         self.local_chunks = 0;
         self.local_detections = 0;
@@ -192,6 +200,21 @@ impl Board {
             _ => {}
         }
         applied
+    }
+
+    /// What the point layer of view `who` (see [`LIVE_MAIN`], [`LIVE_INSET`]) must apply since it
+    /// last asked. A view that starts late receives the present state in one batch.
+    pub fn live_ops(&mut self, who: usize) -> Vec<crate::delta_log::LayerOp> {
+        let ops = self.live.ops_since(&mut self.live_feeds[who]);
+        if let Some(min) = self.live_feeds.iter().flatten().min() {
+            self.live.trim_ops(*min);
+        }
+        ops
+    }
+
+    /// The view lost its GPU: it starts over from the present state.
+    pub fn live_ops_reset(&mut self, who: usize) {
+        self.live_feeds[who] = None;
     }
 
     /// Whether any reconstruction has arrived.
