@@ -11,18 +11,23 @@
 //! - [`follow`], [`reveal`], [`markers`], [`points`]: camera rules, arrival fade, detection
 //!   markers, point chunk reading (pure, tested)
 //! - [`minimap`], [`card`], [`panels`]: the minimap widget, the detection card, panel text
+//! - [`live`], [`livepanel`], [`waves`]: the live points-delta display (state and text, DOM panels,
+//!   waiting and monitor waves)
 
 pub mod app;
 pub mod board;
 pub mod card;
 pub mod follow;
 pub mod inset;
+pub mod live;
+pub mod livepanel;
 pub mod markers;
 pub mod minimap;
 pub mod panels;
 pub mod points;
 pub mod reveal;
 pub mod scene;
+pub mod waves;
 
 // The versions skylens-viewer builds against.
 pub(crate) use skylens_viewer::{anyrender, glam, peniko, pointblitz};
@@ -59,10 +64,19 @@ fn android_main(activity: skylens_viewer::shell::AndroidApp) {
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen::prelude::wasm_bindgen(start)]
 pub fn start() -> Result<(), wasm_bindgen::JsValue> {
-    let opts = Options {
+    let mut opts = Options {
         core_url: skylens_viewer::shell::page_core_url(skylens_viewer::link::VIEWER_PATH),
         points_on: skylens_viewer::shell::query_param("points").as_deref() != Some("off"),
+        ..Options::default()
     };
+    // Start values of the live display: ?live-mode=zone&live-size=3&live-speed=60&live-pause-at=5
+    for name in ["mode", "size", "speed", "pause-at"] {
+        if let Some(v) = skylens_viewer::shell::query_param(&format!("live-{name}"))
+            && let Err(e) = opts.set_live(name, &v)
+        {
+            skylens_viewer::log(&format!("[skylens] {e}"));
+        }
+    }
     skylens_viewer::log(&format!("[skylens] 현황판 · core {}", opts.core_url));
     skylens_viewer::shell::run_web(StatusApp::document(&opts), "skylens")
 }

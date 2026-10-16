@@ -8,7 +8,7 @@
 //!    [`Gpu3d`] (point clouds, meshes, lines) and returns a [`FrameSpec`]: camera, background, fog.
 //! 2. The widget records one pass ([`pointblitz::core::begin_pass`]): opaque meshes, then every
 //!    point cloud (one pointblitz `Scene` per reconstruction segment, each with its own alpha for
-//!    reveal fades), then transparent meshes, then lines. All share the reversed-Z depth buffer.
+//!    reveal fades) and the slot cloud ([`Gpu3d::slot_cloud`], if any slots are in use), then transparent meshes, then lines. All share the reversed-Z depth buffer.
 //! 3. The image goes into the Blitz scene, and [`ViewScreen::paint_overlay`] may draw vector
 //!    shapes over it.
 //!
@@ -28,6 +28,7 @@ use peniko::{Fill, ImageBrush, ImageSampler};
 use pointblitz::Camera;
 use pointblitz::core::renderer::DEPTH_FORMAT;
 use pointblitz::core::{FrameStyle, Inserted, LineRenderer, Material, MeshData, MeshRenderer, PointSize, Renderer, Scene, begin_pass};
+use crate::slot_cloud::{SlotCloud, SlotParams};
 use pointblitz::io::chunk::{ChunkError, HEADER_LEN};
 use skylens_shared::proto::payload::v1 as payload;
 use std::cell::RefCell;
@@ -271,6 +272,12 @@ pub struct Gpu3d {
     pub clouds: PointClouds,
     pub meshes: MeshRenderer,
     pub lines: LineRenderer,
+    /// Slot-indexed cloud with per-point glide and fade (the status board's live display). Drawn
+    /// only while `used() > 0`; the screen fills it and sets [`Gpu3d::slot_params`] every frame.
+    pub slot_cloud: SlotCloud,
+    /// Clock, glide/fade times, colour mode and point size of [`Gpu3d::slot_cloud`]; read when the
+    /// frame is recorded, so set it in [`ViewScreen::frame`].
+    pub slot_params: SlotParams,
     mesh_uploaded: HashMap<[i32; 3], u64>,
 }
 
@@ -283,6 +290,8 @@ impl Gpu3d {
             points: Renderer::new(&device, COLOR_FORMAT),
             meshes: MeshRenderer::new(&device, COLOR_FORMAT),
             lines: LineRenderer::new(&device, COLOR_FORMAT),
+            slot_cloud: SlotCloud::new(&device, COLOR_FORMAT),
+            slot_params: SlotParams::default(),
             clouds: PointClouds::default(),
             mesh_uploaded: HashMap::new(),
             device,
@@ -551,7 +560,7 @@ impl<S: ViewScreen> View3d<S> {
         let color_view = target.texture.create_view(&wgpu::TextureViewDescriptor::default());
         let depth_view = gs.depth.as_ref().expect("created above").0.create_view(&wgpu::TextureViewDescriptor::default());
 
-        let Gpu3d { device, queue, points, clouds, meshes, lines, .. } = &mut gs.ctx;
+        let Gpu3d { device, queue, points, clouds, meshes, lines, slot_cloud, slot_params, .. } = &mut gs.ctx;
         if let Some(size) = spec.point_size {
             points.set_point_size(size);
         }
@@ -560,12 +569,16 @@ impl<S: ViewScreen> View3d<S> {
         points.prepare(device, queue, size, &spec.camera, &scenes, spec.style.fog);
         meshes.prepare(queue, size, &spec.camera, spec.style.fog);
         lines.prepare(queue, size, &spec.camera, spec.style.fog);
+        if slot_cloud.used() > 0 {
+            slot_cloud.prepare(queue, size, &spec.camera, spec.style.fog, slot_params);
+        }
 
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("skylens view") });
         {
             let mut pass = begin_pass(&mut encoder, &color_view, &depth_view, &spec.style);
             meshes.draw_opaque(&mut pass);
             points.draw(&mut pass, &scenes, Some(alphas.as_slice()));
+            slot_cloud.draw(&mut pass);
             meshes.draw_transparent(&mut pass);
             lines.draw(&mut pass);
         }

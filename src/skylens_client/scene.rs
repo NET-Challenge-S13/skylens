@@ -9,14 +9,19 @@
 //! camera waits. Otherwise the camera eases (`1 - exp(-2.5 dt)`) toward the focused detection
 //! (FOCUSING / LOCKED) or the follow pose of the active drone.
 
-use crate::board::Board;
+use crate::board::{self, Board};
+use crate::anyrender;
 use crate::follow::{self, FollowInput, Follower};
 use crate::glam::DVec3;
+use crate::live::{self, FLASH_S, PULSE_S};
 use crate::markers;
 use crate::pointblitz::core::{Blend, Fog, FrameStyle, Material, PointSize, Shading};
 use crate::reveal::RevealFade;
+use crate::waves;
 use skylens_viewer::camera::{UserOrbit, damp_factor};
 use skylens_viewer::config::{self, color};
+use skylens_viewer::slot_cloud::SlotParams;
+use skylens_viewer::delta_cloud::{FADE_S, MOVE_S, UPLOAD_BUDGET};
 use skylens_viewer::view3d::{SEGMENT_CLOUDS, segment_cloud};
 use skylens_viewer::{FrameInfo, FrameSpec, Gpu3d, ViewInput, ViewScreen};
 use std::cell::RefCell;
@@ -116,6 +121,78 @@ impl StatusScene {
         }
     }
 
+    /// The live delta cloud, once per frame: follow or replay the timeline, upload only what
+    /// changed, and describe the frame to the GPU (glide, fade, colour mode, size).
+    fn drive_live(&mut self, gpu: &mut Gpu3d, board: &mut Board, dt: f32) {
+        let now = board.time as f32;
+        let (lo, hi) = board.height_range().unwrap_or((0.0, 30.0));
+        let Board { store, live: state, .. } = board;
+        let cloud = store.delta_cloud();
+        if cloud.following {
+            cloud.advance(now);
+        } else if state.replay {
+            state.replay_t += f64::from(dt) * f64::from(state.speed);
+            while cloud.applied() < cloud.len() && cloud.events()[cloud.applied()].t_s <= state.replay_t {
+                cloud.step_forward(now);
+            }
+            if cloud.applied() >= cloud.len() {
+                cloud.go_live(now);
+                state.replay = false;
+            }
+        }
+        // Monitor flash and ladder pulse on every forward step.
+        let applied = cloud.applied();
+        if applied > state.prev_applied {
+            state.flash_until = now + FLASH_S;
+            for e in &cloud.events()[state.prev_applied..applied] {
+                if live::pulse_zone(Some((e.zone, e.kind))).is_some() {
+                    state.pulse_until.insert(e.zone, now + PULSE_S);
+                }
+            }
+        }
+        state.prev_applied = applied;
+        if applied > 0 {
+            state.ever_applied = true;
+        }
+        if cloud.is_empty() {
+            gpu.slot_cloud.set_used(0);
+            return;
+        }
+        // Upload: everything after a reallocation (either side), else only the dirty ranges.
+        let grew = gpu.slot_cloud.ensure_capacity(&gpu.device, cloud.capacity());
+        let full = cloud.take_full_upload();
+        if grew || full {
+            let all = 0..cloud.used();
+            gpu.slot_cloud.upload(&gpu.queue, cloud.slots(), std::slice::from_ref(&all));
+        }
+        let ranges = cloud.take_dirty(UPLOAD_BUDGET);
+        gpu.slot_cloud.upload(&gpu.queue, cloud.slots(), &ranges);
+        gpu.slot_cloud.set_used(cloud.used());
+        let diagonal = cloud.stats().bbox.map_or(0.0, |(a, b)| ((b[0] - a[0]).powi(2) + (b[1] - a[1]).powi(2) + (b[2] - a[2]).powi(2)).sqrt());
+        gpu.slot_params = SlotParams {
+            now,
+            glide_s: MOVE_S,
+            fade_s: FADE_S,
+            mode: state.mode.slot_mode(),
+            height_low: lo as f32,
+            height_high: hi as f32,
+            point_size: PointSize::Metres(live::size_metres(state.size, diagonal)),
+        };
+    }
+
+    /// "화면 맞춤": frame everything shown now, like the first geometry, and keep the automatic
+    /// camera off for the usual grace period.
+    fn fit_view(&mut self, board: &Board, now_ms: f64) {
+        let samples = board.fit_samples(board::FIT_SAMPLES_PER_SEGMENT);
+        let Some(f) = follow::Framing::from_samples(&samples) else { return };
+        let (lo, hi) = f.zoom_limits();
+        self.orbit.min_distance = lo;
+        self.orbit.max_distance = hi;
+        self.fog = f.base_fog();
+        self.orbit.set_pose(f.opening_pose());
+        self.orbit.wheel(0.0, now_ms);
+    }
+
     fn camera(&mut self, board: &Board, info: &FrameInfo) {
         if !self.framed && let Some(f) = board.framing {
             // First geometry: frame on it (legacy: on the placeholder cloud at load).
@@ -168,15 +245,22 @@ impl ViewScreen for StatusScene {
         let mut board = board_rc.borrow_mut();
         board.time += info.dt;
 
-        // Points: one scene per segment, faded in on arrival.
+        // The live delta cloud (points-delta chunks) replaces the per-segment clouds as soon as it
+        // has an event; without deltas the board is exactly the segment board.
+        self.drive_live(gpu, &mut board, info.dt as f32);
+        let deltas = board.has_deltas();
+        let shown = board.live.ever_applied || board.has_geometry();
+        board.live.tick_wait(shown, info.dt as f32);
+
+        // Points: one scene per segment, faded in on arrival (hidden while deltas are shown).
         gpu.sync_segments(&board.store, 0.0);
         for (seg, level) in board.store.levels() {
             self.fade.note_arrival(*seg, *level);
         }
         self.fade.update(info.dt);
-        board.first_progress = self.fade.first_progress();
+        board.first_progress = if deltas { None } else { self.fade.first_progress() };
         for (seg, a) in self.fade.segments() {
-            gpu.clouds.set_alpha(segment_cloud(seg), a);
+            gpu.clouds.set_alpha(segment_cloud(seg), if deltas { 0.0 } else { a });
         }
 
         // Mesh blocks, lit like the legacy scene, faded with their segment.
@@ -190,6 +274,9 @@ impl ViewScreen for StatusScene {
 
         self.sync_markers(gpu, &board);
         self.camera(&board, info);
+        if std::mem::take(&mut board.live.fit_requested) {
+            self.fit_view(&board, info.now_ms);
+        }
 
         let size = board.point_size_m;
         let point_size = (self.point_size != Some(size)).then(|| {
@@ -218,6 +305,20 @@ impl ViewScreen for StatusScene {
             ViewInput::PointerUp { .. } => self.orbit.pointer_up(now),
             ViewInput::Wheel { delta_y, .. } => self.orbit.wheel(delta_y, now),
             ViewInput::Click { .. } => {}
+        }
+    }
+
+    fn paint_overlay(&mut self, scene: &mut anyrender::Scene, info: &FrameInfo) {
+        let Ok(board) = self.board.try_borrow() else { return };
+        if board.live.waiting() {
+            waves::paint_wait(
+                scene,
+                f64::from(info.width_px),
+                f64::from(info.height_px),
+                info.scale.max(1e-6),
+                board.time,
+                f64::from(board.live.wait_fade),
+            );
         }
     }
 

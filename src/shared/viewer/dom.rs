@@ -394,6 +394,21 @@ impl<'a> Dom<'a> {
         true
     }
 
+    /// Scrolls a scrollable element (`overflow: auto`) to an absolute offset in CSS pixels, at once.
+    pub fn scroll_to<'s>(&mut self, sel: impl Into<Sel<'s>>, x: f64, y: f64) -> bool {
+        let Some(n) = self.find(sel) else { return false };
+        self.doc.scroll_to(n, x, y, blitz_dom::ScrollBehavior::Instant);
+        self.changed = true;
+        true
+    }
+
+    /// The element's laid-out size in CSS pixels, once it has been laid out.
+    pub fn size_of<'s>(&self, sel: impl Into<Sel<'s>>) -> Option<(f64, f64)> {
+        let n = self.find(sel)?;
+        let l = self.doc.get_node(n)?.final_layout();
+        Some((f64::from(l.size.width), f64::from(l.size.height)))
+    }
+
     /// Moves keyboard focus to an element.
     pub fn focus<'s>(&mut self, sel: impl Into<Sel<'s>>) -> bool {
         let Some(n) = self.find(sel) else { return false };

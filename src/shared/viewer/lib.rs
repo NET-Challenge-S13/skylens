@@ -13,17 +13,20 @@
 //! - [`chunks`]: chunk replacement rules and per-kind access.
 //! - [`camera`]: camera controllers ported from the legacy three.js viewers, and screen projection.
 //! - [`view3d`]: the Blitz custom widget that owns the GPU and draws a frame with pointblitz.
+//! - [`delta_cloud`]: slot buffer, replay timeline and dirty ranges of the live point cloud (CPU only).
 //! - [`config`]: legacy tuning constants and colours.
 
 pub mod android;
 pub mod camera;
 pub mod chunks;
 pub mod config;
+pub mod delta_cloud;
 pub mod dom;
 pub mod link;
 pub mod protocol;
 pub mod shell;
 pub mod site;
+pub mod slot_cloud;
 pub mod view3d;
 pub mod widgets;
 

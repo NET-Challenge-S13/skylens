@@ -36,6 +36,12 @@ cargo run -p skylens-client --release -- --core ws://127.0.0.1:8080/viewer
 |---|---|---|
 | `--core URL` | `ws://127.0.0.1:8080/viewer` | `host:port`나 `http://`도 받는다. 경로가 없으면 `/viewer`를 붙인다 |
 | `--points on\|off` | `on` | 점 패널을 연 채로 시작할지 |
+| `--live-mode rgb\|zone\|height` | `rgb` | 실시간 복원(아래)의 색 모드 시작값 |
+| `--live-size 0.5..10` | `2` | 점 크기 시작값 |
+| `--live-speed 1\|5\|20\|60` | `20` | 지난 이벤트 재생 배속 시작값 |
+| `--live-pause-at N` | 없음 | 델타 이벤트가 N개 들어오면 그 상태로 되감아 멈춘다(스크린샷용) |
+
+웹은 같은 값을 쿼리로 받는다: `?live-mode=zone&live-size=3&live-speed=60&live-pause-at=5`.
 
 폰트는 `skylens-viewer`에 들어 있어 웹과 네이티브가 같은 글꼴을 쓴다.
 
@@ -128,6 +134,21 @@ adb logcat -s skylens RustStdoutStderr AndroidRuntime
 - winit은 한 프로세스에 이벤트 루프를 하나만 허용한다. 그래서 액티비티가 끝나면(뒤로 가기) 프로세스를 끝내고, 회전·화면 크기 변경은 액티비티를 다시 만들지 않고 크기 변경으로 받는다(`config_changes`).
 - 에뮬레이터는 Vulkan이 켜진 x86_64 이미지(API 35 google_apis_playstore)와 호스트 GPU(`-gpu host`)가 필요하다. 소프트웨어 렌더러에서는 vello가 돌지 않을 수 있다.
 - 로그는 `adb logcat -s skylens`. 패닉도 같은 태그로 남는다.
+
+## 실시간 복원 (points-delta)
+
+코어가 `CHUNK_KIND_POINTS_DELTA` 청크를 보내면 보드가 구간별 점 구름 대신 cumulus3d 로컬 뷰어처럼 실시간 복원을 보여 준다. 델타 청크가 한 번도 오지 않으면 위의 구간 보드와 똑같이 동작한다. 청크 저장소의 `DeltaCloud`(슬롯 버퍼·타임라인·dirty 범위)를 `StatusScene`이 매 프레임 돌리고, GPU `SlotCloud`가 점마다 이동(0.7초)과 나타남/사라짐(0.15초)을 그린다.
+
+| 부분 | 내용 | 코드 |
+|---|---|---|
+| 렌더링 | 앞으로 가기·되감기·이동·추가·삭제. 이미 올린 구간은 다시 올리지 않고 dirty 범위만 프레임당 20만 점까지 올린다. 델타가 있으면 구간 점 구름은 숨긴다 | `scene.rs` |
+| 대기 화면 | 첫 델타가 적용되기 전(구간 점도 없을 때) SF 블루 점 물결과 `3D 공간 생성 중`, `위치 a/b · 경과 m:ss`. 적용되면 0.8초에 걸쳐 사라진다. `#board-waiting`의 `첫 구간 복원 대기 중`은 이것으로 대체된다 | `waves.rs`, `live.rs` |
+| 모니터 | 우상단 `#live-monitor`. `생성 중 · 구역 N`, `위치 a/b`(없으면 `이벤트 a/n`), `마지막 갱신 n초 전`. Final이면 `생성 완료 · 총 N점 · m:ss`와 잔잔한 물결. 이벤트가 적용될 때마다 테두리가 1.2초 번쩍인다 | `livepanel.rs` |
+| 컨트롤·이벤트 | 모니터 아래 `#live-panel`. 이전/재생·일시정지/다음/LIVE, 배속 1·5·20·60, 점 크기 -/+, 색 RGB·구역·고도, `화면 맞춤`, 진행 막대, MOVED/NEW/GONE, 이벤트 행(클릭하면 그 상태로 이동, 최대 200행) | `livepanel.rs`, `live.rs` |
+| 점 토글 | 델타 모드에서 `#point-toggle`은 고도색 on/off(= 색 모드 고도 / RGB) | `app.rs` |
+| 사다리 | 델타 모드에서는 구역별로 REFINED = 보임(미리보기 칸), REPLACE = 재조밀화(정제본 칸, 1.2초 강조), FINAL = 모든 구역 정제본. 탐지는 청크 저장소가 델타의 구역을 정제본 도착으로 표시하므로 그대로 공개된다 | `live.rs` `zone_levels` |
+
+슬라이더와 select는 Blitz가 값 변경 이벤트를 주지 않아 버튼(-/+, 분할 버튼)으로 만들었다. 재생은 받아 둔 이벤트를 `t_s` 간격대로 배속 재생하고, 끝에 닿으면 LIVE로 돌아간다. 되감기나 이벤트 클릭은 따라가기를 멈추고, `LIVE` 버튼이 다시 켠다.
 
 ## 테스트
 

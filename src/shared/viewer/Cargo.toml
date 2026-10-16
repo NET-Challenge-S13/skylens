@@ -15,6 +15,7 @@ skylens-shared.workspace = true
 prost.workspace = true
 anyhow.workspace = true
 pointblitz.workspace = true
+bytemuck = "1"
 wgpu.workspace = true
 anyrender.workspace = true
 # Same versions blitz and pointblitz resolve to (see Cargo.lock).

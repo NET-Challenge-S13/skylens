@@ -98,6 +98,7 @@ KOREN은 등록 IP 외 인바운드를 막고, 브리지 → 대전은 SSH 하�
 연산 서버. **REST 엔드포인트는 `app.py`와 같다**(§7). 같은 잡 API를 gRPC `ModelService`로도 열고, 코어는 gRPC로 붙는다. 라이브 입력(`PushFrames`)과 증분 출력(`SubscribeChunks`)은 gRPC 스트림에만 있다. 계약은 `src/shared/proto/skylens/model/v1/model.proto`. 내부는 세 층이다.
 
 1. **라이브 점군(cumulus3d).** `CompositionHost`에 `ReconNode`를 하나 띄워 두고, 코어가 넘긴 프레임 묶음을 `LiveFrameSet`으로 선언해 `compose`한다. 이미 받은 묶음의 재선언은 무시되고, 빠진 카메라가 있는 묶음은 기다린다. 구간(zone)마다 미리보기 점군이 먼저 나오고 정제본이 뒤따른다.
+   라이브 점 표시는 구간 점군 덩어리가 아니라 **점 단위 델타**(`POINTS_DELTA` 청크)로 나간다. cumulus3d가 합성한 표시 점군의 변화(추가·이동·삭제, 슬롯 id)를 앵커 기준 ENU로 실어 보내고, 모델 쪽 거울이 N개마다 스냅샷(세대 +1)을 만든다. `SKYLENS_POINTS_MODE`(`delta` 기본 · `segment` · `both`), `SKYLENS_DISPLAY_STRIDE`(기본 2: 옛 구간 청크 밀도의 절반, 근거는 `src/skylens_model/README.md`), `SKYLENS_DELTA_SNAPSHOT_EVERY`(기본 128, 0 = 안 만듦). 메시와 탐지는 모드와 무관하게 구간 점군에서 만든다.
 2. **UNet 훅.** 같은 노드에 `on_frame` 훅으로 UNet을 붙인다. 훅은 위치 계산 전에 디코딩된 RGB 프레임을 받아 별도 큐에서 돌므로 복원을 막지 않는다. 프레임마다 나온 위험구역 확률과 사람 점은 등록된 카메라 포즈로 점군에 투영하고, **여러 프레임의 결과를 confidence 가중으로 보간**해 최종 지도 좌표(GPS 기준 ENU)에 정렬한다.
 3. **메시 보정(deltamesh).** 구간 점군을 `ingest(segment, Preview|Refined, points)`로 넣고 `extract()`가 돌려준 **바뀐 블록만** 내보낸다. 정제본은 같은 구간의 미리보기를 정확히 대체한다. 블록마다 `version`이 있어 클라이언트는 더 새 버전만 받으면 된다.
 

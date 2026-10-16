@@ -9,6 +9,7 @@
 
 use crate::follow::{self, CorridorPath, DronePose, Framing, Interior};
 use crate::glam::DVec3;
+use crate::live::LiveState;
 use crate::points;
 use skylens_shared::proto::model::v1 as model;
 use skylens_shared::proto::payload::v1 as payload;
@@ -17,6 +18,9 @@ use skylens_viewer::camera::CameraSync;
 use skylens_viewer::{ChunkStore, SiteFrame};
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
+/// The pseudo segment the live delta cloud is sampled into (framing, follow, height range). Real
+/// segments are small indexes; deltas are zones of the same stream, not segments of their own.
+pub const DELTA_SEGMENT: u32 = u32::MAX;
 /// Samples kept per segment for heights, framing and the corridor analysis.
 const SAMPLES_PER_SEGMENT: usize = 2_000;
 /// Samples the interior analysis reads at most (legacy `sampleCenters(9000)`).
@@ -85,6 +89,8 @@ pub struct Board {
     pub point_layer_on: bool,
     /// Seconds since the board started (marker pulse).
     pub time: f64,
+    /// The live points-delta display (controls, waiting screen, replay).
+    pub live: LiveState,
 }
 
 impl Board {
@@ -113,6 +119,7 @@ impl Board {
             first_progress: None,
             point_layer_on,
             time: 0.0,
+            live: LiveState::default(),
         }
     }
 
@@ -185,7 +192,7 @@ impl Board {
         let mut changed = false;
         let live: BTreeSet<u32> = self.store.segments().map(|(s, _)| s).collect();
         let before = self.segments.len();
-        self.segments.retain(|s, _| live.contains(s));
+        self.segments.retain(|s, _| *s == DELTA_SEGMENT || live.contains(s));
         changed |= before != self.segments.len();
         for (seg, pts) in self.store.segments() {
             let key = (pts.epoch(), pts.payloads().len());
@@ -206,6 +213,7 @@ impl Board {
             self.segments.insert(seg, info);
             changed = true;
         }
+        changed |= self.refresh_delta();
         // Mesh block centres, per stored version.
         let ids: BTreeSet<[i32; 3]> = self.store.mesh_blocks().map(|(id, _)| id).collect();
         self.mesh_centers.retain(|id, _| ids.contains(id));
@@ -220,6 +228,52 @@ impl Board {
         if changed {
             self.analyse();
         }
+    }
+
+    /// Samples the live delta cloud into the pseudo segment [`DELTA_SEGMENT`] so the framing, the
+    /// follow camera and the height range work on it like on any segment. True when it changed.
+    fn refresh_delta(&mut self) -> bool {
+        let cloud = self.store.delta_cloud_ref();
+        if cloud.is_empty() || cloud.alive_count() == 0 {
+            return self.segments.remove(&DELTA_SEGMENT).is_some();
+        }
+        let key = ((u64::from(cloud.last_seq()) << 24) ^ cloud.applied() as u64, cloud.alive_count());
+        if self.segments.get(&DELTA_SEGMENT).is_some_and(|i| i.key == key) {
+            return false;
+        }
+        let step = (cloud.alive_count() / SAMPLES_PER_SEGMENT).max(1);
+        let mut samples = Vec::with_capacity(SAMPLES_PER_SEGMENT + 1);
+        let mut sum = DVec3::ZERO;
+        let mut n = 0usize;
+        for (id, s) in cloud.slots()[..cloud.used()].iter().enumerate() {
+            if !cloud.is_alive(id as u32) {
+                continue;
+            }
+            if n.is_multiple_of(step) {
+                let p = DVec3::new(f64::from(s.pos[0]), f64::from(s.pos[1]), f64::from(s.pos[2]));
+                sum += p;
+                samples.push(p);
+            }
+            n += 1;
+        }
+        let center = (!samples.is_empty()).then(|| sum / samples.len() as f64);
+        let info = SegmentInfo {
+            key,
+            range: points::height_range(&samples),
+            core: points::core_box(&samples),
+            center,
+            points: cloud.alive_count() as u64,
+            refined: cloud.stats().final_reached,
+            samples,
+        };
+        self.segments.insert(DELTA_SEGMENT, info);
+        true
+    }
+
+    /// Whether the live delta cloud has any event (the board then shows it instead of the
+    /// per-segment clouds).
+    pub fn has_deltas(&self) -> bool {
+        !self.store.delta_cloud_ref().is_empty()
     }
 
     fn analyse(&mut self) {
@@ -451,6 +505,32 @@ mod tests {
         assert_eq!(b.fit_samples(10).len(), 20);
         assert!(b.points_box().is_some());
         assert_eq!(b.local_chunks, 2);
+    }
+
+    #[test]
+    fn the_delta_cloud_is_sampled_as_a_pseudo_segment() {
+        use skylens_shared::delta::{AddRec, pack_adds, to_chunk};
+        let recs: Vec<AddRec> = (0..50).map(|i| AddRec { id: i, xyz: [i as f32, 0.0, (i % 5) as f32], rgb: [1, 2, 3], zone: 1 }).collect();
+        let d = payload::PointsDelta { seq: 1, zone: 3, capacity: 64, total_points: 50, adds: pack_adds(&recs), ..Default::default() };
+        let mut b = board();
+        assert!(!b.has_deltas());
+        b.chunk(&to_chunk(1, &d, 0));
+        assert!(b.has_deltas());
+        assert!(b.has_geometry(), "the delta's zone counts as arrived");
+        b.refresh();
+        assert!(b.segments.is_empty(), "nothing applied yet");
+        b.store.delta_cloud().advance(0.0);
+        b.refresh();
+        assert_eq!(b.segments.keys().copied().collect::<Vec<_>>(), vec![DELTA_SEGMENT]);
+        assert_eq!(b.total_points(), 50);
+        assert!(b.framing.is_some(), "the follow camera frames on the live cloud");
+        assert_eq!(b.segment_centers().len(), 1);
+        let (lo, hi) = b.height_range().unwrap();
+        assert!(lo >= 0.0 && hi <= 4.0 + 1e-6);
+        // Stepping back out of it removes the pseudo segment again.
+        b.store.delta_cloud().seek(0, 1.0);
+        b.refresh();
+        assert!(b.segments.is_empty());
     }
 
     #[test]

@@ -9,6 +9,8 @@
 use crate::board::Board;
 use crate::card::Card;
 use crate::inset::InsetScene;
+use crate::live;
+use crate::livepanel::LivePanel;
 use crate::minimap::{MapData, MinimapWidget};
 use crate::panels::{self, BannerInput, PanelState};
 use crate::scene::StatusScene;
@@ -52,11 +54,48 @@ pub struct Options {
     pub core_url: String,
     /// The point panel starts open (legacy `?points=off` starts it closed).
     pub points_on: bool,
+    /// Start values of the live display's controls (screenshots and demos; the buttons change
+    /// them at run time): colour mode, point size control, replay speed.
+    pub live_mode: Option<live::ColorMode>,
+    pub live_size: Option<f32>,
+    pub live_speed: Option<u32>,
+    /// Once this many delta events have arrived, step to exactly that state and stay there
+    /// (the stepped-back view, without a click).
+    pub live_pause_at: Option<usize>,
 }
 
 impl Default for Options {
     fn default() -> Self {
-        Options { core_url: DEFAULT_CORE.to_string(), points_on: true }
+        Options {
+            core_url: DEFAULT_CORE.to_string(),
+            points_on: true,
+            live_mode: None,
+            live_size: None,
+            live_speed: None,
+            live_pause_at: None,
+        }
+    }
+}
+
+impl Options {
+    /// Sets one live-display start value from its name (`mode`, `size`, `speed`, `pause-at`); the
+    /// web entry passes the page's query parameters, the command line `--live-<name>`.
+    pub fn set_live(&mut self, name: &str, value: &str) -> Result<(), String> {
+        let bad = || format!("--live-{name}: bad value {value}");
+        match name {
+            "mode" => self.live_mode = Some(live::ColorMode::from_key(value).ok_or_else(bad)?),
+            "size" => self.live_size = Some(value.parse::<f32>().map_err(|_| bad())?.clamp(live::SIZE_MIN, live::SIZE_MAX)),
+            "speed" => {
+                let v = value.parse::<u32>().map_err(|_| bad())?;
+                if !live::SPEEDS.contains(&v) {
+                    return Err(bad());
+                }
+                self.live_speed = Some(v);
+            }
+            "pause-at" => self.live_pause_at = Some(value.parse::<usize>().map_err(|_| bad())?),
+            _ => return Err(format!("unknown live option {name}")),
+        }
+        Ok(())
     }
 }
 
@@ -80,6 +119,7 @@ pub fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Options, Str
                     v => return Err(format!("--points on|off, not {v}")),
                 }
             }
+            k if k.starts_with("--live-") => o.set_live(&k["--live-".len()..], &value(k)?)?,
             "-h" | "--help" => return Err(USAGE.to_string()),
             other => return Err(format!("unknown argument {other}\n{USAGE}")),
         }
@@ -87,7 +127,7 @@ pub fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Options, Str
     Ok(o)
 }
 
-pub const USAGE: &str = "usage: skylens-client [--core ws://host:8080/viewer] [--points on|off]";
+pub const USAGE: &str = "usage: skylens-client [--core ws://host:8080/viewer] [--points on|off] [--live-mode rgb|zone|height] [--live-size 0.5..10] [--live-speed 1|5|20|60] [--live-pause-at N]";
 
 /// Options from loose settings that may be missing (Android has no command line and reads them
 /// from system properties or files, see README). `core` is normalised like `--core`; `points`
@@ -105,6 +145,7 @@ pub fn options_from_settings(core: Option<&str>, points: Option<&str>) -> Option
 
 /// Ladder row nodes, by segment index, in first-seen order.
 struct LadderRow {
+    root: NodeId,
     pips: Vec<NodeId>,
     note: NodeId,
 }
@@ -119,6 +160,7 @@ pub struct StatusApp {
     toasts: Toasts,
     badge: Option<NetBadge>,
     card: Option<Card>,
+    live: Option<LivePanel>,
     ladder: BTreeMap<u32, LadderRow>,
     minimap_size: Option<(i64, i64, u32, u32)>,
     /// The point panel's inline placement last written (outer None: not written yet).
@@ -126,12 +168,24 @@ pub struct StatusApp {
     site_seen: bool,
     last_poll_ms: Option<f64>,
     gpu_alert: GpuLossAlert,
+    pause_at: Option<usize>,
 }
 
 impl StatusApp {
     pub fn new(opts: &Options) -> StatusApp {
-        let board = Rc::new(RefCell::new(Board::new(opts.points_on)));
+        let mut b = Board::new(opts.points_on);
+        if let Some(m) = opts.live_mode {
+            b.live.mode = m;
+        }
+        if let Some(v) = opts.live_size {
+            b.live.size = v;
+        }
+        if let Some(v) = opts.live_speed {
+            b.live.set_speed(v);
+        }
+        let board = Rc::new(RefCell::new(b));
         StatusApp {
+            pause_at: opts.live_pause_at,
             link: CoreLink::start(opts.core_url.clone()),
             scene: Rc::new(RefCell::new(StatusScene::new(board.clone()))),
             board,
@@ -141,6 +195,7 @@ impl StatusApp {
             toasts: Toasts::new(),
             badge: None,
             card: None,
+            live: None,
             ladder: BTreeMap::new(),
             minimap_size: None,
             inset_place: None,
@@ -219,6 +274,19 @@ impl StatusApp {
         }
     }
 
+    /// `--live-pause-at N`: once N delta events are in, seek to that state and stay (once).
+    fn apply_pause_at(&mut self) {
+        let Some(n) = self.pause_at else { return };
+        let mut b = self.board.borrow_mut();
+        let now = b.time as f32;
+        let cloud = b.store.delta_cloud();
+        if cloud.len() >= n {
+            cloud.seek(n, now);
+            b.live.replay = false;
+            self.pause_at = None;
+        }
+    }
+
     // ---- detections and camera ------------------------------------------------------------------
 
     fn step_detections(&mut self, dom: &mut Dom<'_>, now: f64, dt: f64) {
@@ -280,9 +348,27 @@ impl StatusApp {
             let mission = b.mission.as_ref().map(|m| (m.message.as_str(), m.drones_online));
             dom.set_text(*line, &panels::link_line(state, mission, status.badge_text()));
         }
-        // Ladder: one row per segment the core reports, appended in first-seen order.
-        let segments: Vec<(u32, u32)> =
-            core.map(|c| c.segments.iter().map(|s| (s.index, panels::level_number(s.level()))).collect()).unwrap_or_default();
+        // Ladder: one row per segment the core reports, appended in first-seen order. With a
+        // points-delta stream the rows are zones and their levels come from the applied deltas
+        // (see `live.rs`), since the core reports every delta zone as refined.
+        let deltas = b.has_deltas();
+        let pulse_now = b.time as f32;
+        let mut segments: Vec<(u32, u32)> = if deltas {
+            let cloud = b.store.delta_cloud_ref();
+            let applied = &cloud.events()[..cloud.applied()];
+            live::zone_levels(applied.iter().map(|e| (e.zone, e.kind))).into_iter().collect()
+        } else {
+            core.map(|c| c.segments.iter().map(|s| (s.index, panels::level_number(s.level()))).collect()).unwrap_or_default()
+        };
+        if deltas {
+            // A row of a zone that was stepped back out reads "복원 중" again.
+            for index in self.ladder.keys() {
+                if !segments.iter().any(|(i, _)| i == index) {
+                    segments.push((*index, 0));
+                }
+            }
+        }
+        let pulses = b.live.pulse_until.clone();
         drop(b);
         for (index, level) in segments {
             if !self.ladder.contains_key(&index) {
@@ -290,7 +376,7 @@ impl StatusApp {
                 let Some(row) = added.first().copied() else { continue };
                 let pips = dom.find_in(row, ".segment-row__bar").map(|bar| dom.children(bar)).unwrap_or_default();
                 let Some(note) = dom.find_in(row, ".segment-row__note") else { continue };
-                self.ladder.insert(index, LadderRow { pips, note });
+                self.ladder.insert(index, LadderRow { root: row, pips, note });
             }
             let row = &self.ladder[&index];
             for (i, pip) in row.pips.iter().enumerate() {
@@ -298,6 +384,8 @@ impl StatusApp {
             }
             dom.set_text(row.note, &panels::ladder_note(level));
             dom.set_attr(row.note, "data-refining", panels::ladder_refining(level));
+            let pulsing = deltas && pulses.get(&index).is_some_and(|until| pulse_now < *until);
+            dom.set_attr(row.root, "data-pulse", if pulsing { "1" } else { "0" });
         }
     }
 
@@ -310,19 +398,30 @@ impl StatusApp {
             preparing: b.first_progress.map(|p| f64::from(p) * 100.0),
             failed: b.geometry_failed,
         };
-        let text = panels::banner_text(&input);
+        let mut text = panels::banner_text(&input);
+        // The waiting screen's caption stands in for the "first segment" wait.
+        if input.link_up && !input.has_geometry {
+            text.clear();
+        }
         dom.set_text("board-waiting", &text);
         dom.toggle_class("board-waiting", "is-visible", !text.is_empty());
     }
 
     fn render_points(&mut self, dom: &mut Dom<'_>) {
-        let (on, delivered, refined, total, has_segments, range) = {
+        let (on, delivered, refined, total, has_segments, range, deltas) = {
             let b = self.board.borrow();
             let delivered = b.segments.len();
             let refined = b.segments.values().filter(|s| s.refined).count();
-            (b.point_layer_on, delivered, refined, b.total_points(), b.store.segments().next().is_some(), b.height_range())
+            let deltas = b.has_deltas().then(|| (b.live.mode, b.live.mode == live::ColorMode::Height));
+            (b.point_layer_on, delivered, refined, b.total_points(), b.store.segments().next().is_some(), b.height_range(), deltas)
         };
-        dom.set_text(q(".point-toggle__meta"), &panels::point_meta(on, delivered, refined, total));
+        // With a points-delta stream the toggle is the height colouring of the live cloud.
+        let on = deltas.map_or(on, |(_, height)| height);
+        let meta = match deltas {
+            Some((mode, _)) => format!("{}점 · {}", live::group(total), mode.label()),
+            None => panels::point_meta(on, delivered, refined, total),
+        };
+        dom.set_text(q(".point-toggle__meta"), &meta);
         dom.toggle_class("point-toggle", "is-on", on);
         dom.set_attr("point-toggle", "aria-pressed", if on { "true" } else { "false" });
 
@@ -445,6 +544,7 @@ impl ScreenApp for StatusApp {
             dom.set_style(q("#overlay-status .detect-card"), "bottom", "228px");
         }
         self.card = Card::bind(dom);
+        self.live = Some(LivePanel::mount(dom));
         self.loading = LoadingScreen::mount(dom, LOADING_TITLE);
         if let Some(l) = &mut self.loading {
             l.progress(dom, 0.0, None);
@@ -463,6 +563,7 @@ impl ScreenApp for StatusApp {
             self.on_event(ev, dom, now);
         }
         self.board.borrow_mut().refresh();
+        self.apply_pause_at();
         self.step_detections(dom, now, dt);
 
         if let Some(badge) = &mut self.badge {
@@ -471,6 +572,9 @@ impl ScreenApp for StatusApp {
         self.render_server_panel(dom);
         self.render_banner(dom);
         self.render_points(dom);
+        if let Some(live) = &mut self.live {
+            live.render(dom, &self.board.borrow());
+        }
         self.size_minimap(dom);
         self.update_map();
 
@@ -489,10 +593,20 @@ impl ScreenApp for StatusApp {
             self.confirm(dom);
             return true;
         }
+        if let Some(live) = &mut self.live
+            && live.input(input, &mut self.board.borrow_mut())
+        {
+            return true;
+        }
         if input.is_click() && input.closest_id("point-toggle").is_some() {
             {
                 let mut b = self.board.borrow_mut();
-                b.point_layer_on = !b.point_layer_on;
+                if b.has_deltas() {
+                    // The live cloud has no second panel: the toggle is its height colouring.
+                    b.live.mode = if b.live.mode == live::ColorMode::Height { live::ColorMode::Rgb } else { live::ColorMode::Height };
+                } else {
+                    b.point_layer_on = !b.point_layer_on;
+                }
             }
             self.render_points(dom);
             return true;
@@ -534,6 +648,21 @@ mod tests {
     }
 
     #[test]
+    fn live_start_values_parse_and_are_validated() {
+        let o = parse_args(["--live-mode=zone", "--live-size", "99", "--live-speed=60", "--live-pause-at", "7"].map(String::from)).unwrap();
+        assert_eq!(o.live_mode, Some(live::ColorMode::Zone));
+        assert_eq!(o.live_size, Some(live::SIZE_MAX));
+        assert_eq!((o.live_speed, o.live_pause_at), (Some(60), Some(7)));
+        assert!(parse_args(["--live-mode=blue".to_string()]).is_err());
+        assert!(parse_args(["--live-speed=7".to_string()]).is_err());
+        assert!(parse_args(["--live-pause-at=x".to_string()]).is_err());
+        assert!(parse_args(["--live-nope=1".to_string()]).is_err());
+        let b = StatusApp::new(&Options { live_mode: Some(live::ColorMode::Height), live_size: Some(3.0), ..Options::default() });
+        assert_eq!(b.board.borrow().live.mode, live::ColorMode::Height);
+        assert_eq!(b.board.borrow().live.size, 3.0);
+    }
+
+    #[test]
     fn settings_fall_back_to_the_defaults() {
         assert_eq!(options_from_settings(None, None), Options::default());
         assert_eq!(options_from_settings(Some("  "), Some("")), Options::default());
@@ -551,7 +680,12 @@ mod tests {
         assert_eq!(p.template, STATUS_HTML);
         assert_eq!(p.stylesheets.last().map(String::as_str), Some(STATUS_PANELS_CSS));
         let html = p.html();
-        for id in ["status-view", "overlay-status", "net-status", "server-status", "minimap", "board-waiting", "point-toggle", "toast-root"] {
+        for id in [
+            "status-view", "overlay-status", "net-status", "server-status", "minimap", "board-waiting", "point-toggle", "toast-root",
+            "live-wait", "live-wait-sub", "live-monitor", "live-monitor-canvas", "live-monitor-label", "live-monitor-sub", "live-monitor-age",
+            "live-panel", "live-indicator", "live-go-live", "live-play", "live-size-val", "live-t", "live-pts", "live-evt", "live-bar-label",
+            "live-bar-pct", "live-bar-fill", "live-cnt-moved", "live-cnt-new", "live-cnt-gone", "live-evhead", "live-events",
+        ] {
             assert!(html.contains(&format!("id=\"{id}\"")), "{id}");
         }
     }

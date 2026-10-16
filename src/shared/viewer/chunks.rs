@@ -14,11 +14,15 @@
 //!   became visible.
 //! - **Terrain tiles** and **building sets** are kept per cell; a later delivery replaces the
 //!   cell unless it carries an older non-zero `version`.
+//! - **Points deltas** (`CHUNK_KIND_POINTS_DELTA`) feed the store's [`DeltaCloud`] (slot buffer plus
+//!   replay timeline); a duplicate `seq` is [`Change::Stale`], a snapshot resets the timeline. The
+//!   zone that triggered a delta counts as arrived at the refined level.
 //! - A segment has *arrived* once any reconstruction chunk (points or mesh) of it was received.
 //!
 //! The store keeps payloads so the 3D view can be rebuilt (GPU recreated, display change) without
 //! asking the core again. Call [`ChunkStore::clear`] when the link reconnects: the core replays.
 
+use crate::delta_cloud::{DeltaCloud, Ingest};
 use crate::protocol;
 use pointblitz::io::chunk::{FLAG_FIRST_PASS_COMPLETE, FLAG_LAST_IN_GENERATION, decode_header};
 use skylens_shared::proto::model::v1 as model;
@@ -136,6 +140,8 @@ pub enum Change {
     Detections { ids: Vec<String> },
     Terrain { cell: [i32; 2] },
     Buildings { cell: [i32; 2] },
+    /// A points delta was recorded on the [`DeltaCloud`] timeline (a snapshot also reset it).
+    PointsDelta { seq: u32, kind: payload::DeltaKind, zone: u32, snapshot: bool },
     /// Older than what is stored; dropped.
     Stale,
     /// Undecodable or of an unknown kind; counted in [`ChunkStore::invalid`].
@@ -172,6 +178,7 @@ pub struct ChunkStore {
     buildings: BTreeMap<[i32; 2], BuildingEntry>,
     arrived: BTreeSet<u32>,
     levels: BTreeMap<u32, model::Level>,
+    cloud: DeltaCloud,
     /// Never reset, so a segment recreated after `clear` gets an epoch the GPU has not seen.
     next_stamp: u64,
     pub chunks_received: u64,
@@ -205,7 +212,7 @@ impl ChunkStore {
             model::ChunkKind::Detections => self.apply_detections(chunk),
             model::ChunkKind::Terrain => self.apply_terrain(chunk),
             model::ChunkKind::Buildings => self.apply_buildings(chunk),
-            model::ChunkKind::PointsDelta => Applied::of(Change::Invalid("points delta not handled yet".into())),
+            model::ChunkKind::PointsDelta => self.apply_points_delta(chunk),
             model::ChunkKind::Unspecified => Applied::of(Change::Invalid(format!("unknown chunk kind {}", chunk.kind))),
         };
         if matches!(out.change, Change::Invalid(_)) {
@@ -269,6 +276,23 @@ impl ChunkStore {
             out.newly_arrived = self.mark_arrived(segment, chunk.level());
         }
         out
+    }
+
+    fn apply_points_delta(&mut self, chunk: &model::Chunk) -> Applied {
+        let d = match protocol::decode_points_delta(&chunk.payload) {
+            Ok(d) => d,
+            Err(e) => return Applied::of(Change::Invalid(e.to_string())),
+        };
+        let (seq, kind, zone, snapshot) = (d.seq, d.kind(), d.zone, d.snapshot);
+        match self.cloud.ingest(d) {
+            Ingest::Duplicate => Applied::of(Change::Stale),
+            Ingest::Invalid(e) => Applied::of(Change::Invalid(e)),
+            Ingest::Recorded { .. } | Ingest::Reset => {
+                let mut out = Applied::of(Change::PointsDelta { seq, kind, zone, snapshot });
+                out.newly_arrived = self.mark_arrived(zone, model::Level::Refined);
+                out
+            }
+        }
     }
 
     fn apply_mesh(&mut self, chunk: &model::Chunk) -> Applied {
@@ -399,6 +423,17 @@ impl ChunkStore {
 
     pub fn segment(&self, segment: u32) -> Option<&SegmentPoints> {
         self.points.get(&segment)
+    }
+
+    // ---- points deltas --------------------------------------------------------------------
+
+    /// The live point cloud fed by points-delta chunks.
+    pub fn delta_cloud(&mut self) -> &mut DeltaCloud {
+        &mut self.cloud
+    }
+
+    pub fn delta_cloud_ref(&self) -> &DeltaCloud {
+        &self.cloud
     }
 
     // ---- meshes ---------------------------------------------------------------------------
@@ -689,6 +724,48 @@ mod tests {
         };
         assert_eq!(s.apply(&set).change, Change::Buildings { cell: [0, 1] });
         assert_eq!(s.building_sets().count(), 1);
+    }
+
+    fn delta_chunk(seq: u32, zone: u32, snapshot: bool, adds: u32) -> model::Chunk {
+        use skylens_shared::delta::{AddRec, pack_adds, to_chunk};
+        let recs: Vec<AddRec> = (0..adds).map(|id| AddRec { id, xyz: [1.0, 2.0, 3.0], rgb: [1, 2, 3], zone: 0 }).collect();
+        let d = payload::PointsDelta { seq, zone, snapshot, capacity: 16, adds: pack_adds(&recs), ..Default::default() };
+        to_chunk(u64::from(seq), &d, 0)
+    }
+
+    #[test]
+    fn delta_chunks_feed_the_cloud_and_mark_the_zone_arrived() {
+        let mut s = ChunkStore::new();
+        s.apply(&detections(&[("a", 2, payload::DetectionCategory::Person)]));
+        let a = s.apply(&delta_chunk(1, 2, false, 3));
+        assert_eq!(a.change, Change::PointsDelta { seq: 1, kind: payload::DeltaKind::Unspecified, zone: 2, snapshot: false });
+        assert_eq!(a.newly_arrived, Some(2));
+        assert_eq!(a.revealed, vec!["a".to_string()]);
+        assert_eq!(s.levels()[&2], model::Level::Refined);
+        assert_eq!(s.delta_cloud().len(), 1);
+        s.delta_cloud().advance(0.0);
+        assert_eq!(s.delta_cloud().alive_count(), 3);
+        let b = s.apply(&delta_chunk(2, 2, false, 1));
+        assert_eq!(b.newly_arrived, None);
+    }
+
+    #[test]
+    fn duplicate_delta_is_stale_and_snapshot_resets() {
+        let mut s = ChunkStore::new();
+        s.apply(&delta_chunk(1, 0, false, 1));
+        s.apply(&delta_chunk(2, 0, false, 1));
+        assert_eq!(s.apply(&delta_chunk(2, 0, false, 1)).change, Change::Stale);
+        assert_eq!(s.delta_cloud().len(), 2);
+        let snap = s.apply(&delta_chunk(10, 1, true, 2));
+        assert!(matches!(snap.change, Change::PointsDelta { seq: 10, snapshot: true, .. }));
+        assert_eq!(s.delta_cloud().len(), 1);
+        assert_eq!(s.delta_cloud().alive_count(), 2);
+        let mut bad = delta_chunk(11, 0, false, 1);
+        bad.payload.truncate(5);
+        assert!(matches!(s.apply(&bad).change, Change::Invalid(_)));
+        assert_eq!(s.invalid, 1);
+        s.clear();
+        assert!(s.delta_cloud().is_empty());
     }
 
     #[test]

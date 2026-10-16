@@ -5384,6 +5384,7 @@ dependencies = [
  "blitz-paint",
  "blitz-shell",
  "blitz-traits",
+ "bytemuck",
  "futures-util",
  "glam 0.34.1",
  "image",

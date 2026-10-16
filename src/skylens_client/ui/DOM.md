@@ -282,3 +282,33 @@ position:fixed;left:50%;bottom:18px;transform:translateX(-50%);z-index:50;backgr
 ```
 
 문구: 처음 `"pick=on · 복원 지오메트리를 클릭하면 좌표가 표시됩니다"`, 빗나가면 `"히트 없음 \u{2014} 지오메트리 위를 클릭하세요"`, 맞으면 `"asset [${x, y, z}]  world [${x, y, z}]"`(각 값 `toFixed(2)`, `", "`로 이음, asset이 없으면 `?`, `]` 뒤 공백 두 칸).
+
+## 13. 실시간 복원 (points-delta) `live-*`
+
+레거시에 없는 요소다. cumulus3d 로컬 뷰어(대기 화면, 모니터, 이벤트 타임라인)를 현황판에 합친 것이고, 문구와 마크업은 `live.rs`의 순수 함수가 만든다. 색은 공용 토큰이고 시안 HUD 대신 보드의 정보색(`--info`)을 쓴다. 델타 청크가 없으면 `.live-wait`(대기 캡션)만 첫 복원이 올 때까지 보이고 나머지는 숨겨져 있다.
+
+| id / 클래스 | 내용 |
+|---|---|
+| `#live-wait` | 대기 캡션. `is-visible`, `style="opacity: 0..1"`. 점 물결 자체는 3D 뷰 위에 벡터로 그린다(`waves::paint_wait`) |
+| `#live-wait-sub` | `위치 a/b  ·  경과 m:ss` 또는 `경과 m:ss` |
+| `#live-monitor` | 첫 델타가 적용되면 `is-visible`. `is-done`(Final), `is-flash`(적용 직후 1.2초) |
+| `#live-monitor-canvas` | 점 물결(`MonitorWave` 위젯). 가운데 `.live-monitor__shade` 위에 라벨 3줄 |
+| `#live-monitor-label` / `-sub` / `-age` | `생성 중 · 구역 N` / `위치 a/b` 또는 `이벤트 a/n` / `마지막 갱신 n초 전`. Final: `생성 완료 · 총 N점 · m:ss` / `위치 a/b` 또는 `구역 N개` / 빈 문자열 |
+| `#live-panel` | 델타 이벤트가 하나라도 있으면 `is-visible` |
+| `#live-indicator` | 따라가는 중이면 `is-on`(LIVE 점) |
+| `#live-go-live` | 따라가기를 멈췄을 때만 `is-on`(LIVE 버튼, `data-act="live"`) |
+| `[data-act]` | `prev`, `play`, `next`, `live`, `size-down`, `size-up`, `fit`, `events` |
+| `#live-play` | `일시정지`(따라가는 중이거나 재생 중) / `재생` |
+| `[data-speed]` | 배속 버튼 1·5·20·60, 선택된 것에 `is-on` |
+| `[data-mode]` | 색 모드 `rgb`·`zone`·`height`, 선택된 것에 `is-on` |
+| `#live-size-val` | 점 크기 값(`2.0`, 0.5 단위) |
+| `#live-t`, `#live-pts`, `#live-evt` | 현재 이벤트의 `m:ss`, 살아 있는 점 수, `적용/전체` |
+| `#live-bar-label`, `#live-bar-pct`, `#live-bar-fill` | `POSITIONS a/b`(알면) 또는 `EVENTS a/n`, 백분율, `width` 인라인 스타일 |
+| `#live-cnt-moved` / `-new` / `-gone` | 현재 이벤트의 MOVED / NEW / GONE |
+| `#live-evhead` | `- EVENTS` / `+ EVENTS` (`data-act="events"`) |
+| `#live-events` | 이벤트 행 목록(`is-collapsed`로 접힘), 행 `.live-ev[data-ev="인덱스"]`에 `is-done`(적용됨)·`is-cur`(현재). 열: 점, 순번, `Z{구역}`, 종류(`REFINED`·`REPLACE`·`FINAL`·`SNAP`), `T+m:ss`, `+Δs`, 점 수 |
+
+사다리(§4.3)는 델타 모드에서 구역별 행을 델타 타임라인으로 채운다: `.segment-row`의 `data-pulse="1"`은 REPLACE 직후 1.2초 동안 붙는다. 점 토글(§7)은 델타 모드에서 고도색 모드 on/off이고 메타 문구는 `N점 · RGB|구역|고도`다.
+
+배치(1500x950): 중계 배지 우상단(14px), 모니터 그 아래(52px, 220x140), 컨트롤 패널 그 아래(204px부터, 폭 340), 미니맵 우하단. 폭 720px 이하에서는 모니터가 150x96으로 줄고 패널이 미니맵 위 전체 폭으로 내려오며 이벤트 목록은 96px로 낮아진다.
+
