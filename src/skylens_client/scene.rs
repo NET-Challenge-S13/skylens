@@ -11,15 +11,14 @@
 //! camera waits. Otherwise the camera eases (`1 - exp(-2.5 dt)`) toward the focused detection
 //! (FOCUSING / LOCKED) or the follow pose of the active drone.
 
-use crate::board::{Board, FIT_SAMPLES_PER_SEGMENT, LiveView};
-use crate::inset;
+use crate::board::{Board, LiveView};
 use crate::live_layer::{LiveLayer, Paint};
 use crate::follow::{self, FollowInput, Follower};
 use crate::glam::DVec3;
 use crate::markers;
 use crate::pointblitz::core::{Blend, Fog, FrameStyle, Material, PointSize, Shading};
 use crate::reveal::RevealFade;
-use skylens_viewer::camera::{UserOrbit, damp_factor};
+use skylens_viewer::camera::{Pose, UserOrbit, damp_factor};
 use skylens_viewer::config::{self, color};
 use skylens_viewer::view3d::{SEGMENT_CLOUDS, segment_cloud};
 use skylens_viewer::{FrameInfo, FrameSpec, Gpu3d, ViewInput, ViewScreen};
@@ -57,12 +56,26 @@ pub fn lambert(alpha: f32) -> Material {
     }
 }
 
+/// Oblique top-down pose over a bounds box (z up, as the inset): the target is the centre, the
+/// eye sits `1.2 x` the horizontal diagonal above it and back to the south for a ~60 degree pitch.
+/// Returns the pose and the eye distance.
+fn top_down_pose(lo: DVec3, hi: DVec3) -> (Pose, f64) {
+    let c = (lo + hi) / 2.0;
+    let diag = (hi.x - lo.x).hypot(hi.y - lo.y).max(10.0);
+    let h = 1.2 * diag;
+    let back = h / 60f64.to_radians().tan();
+    let eye = c + DVec3::new(0.0, -back, h);
+    (Pose::new(eye, c), eye.distance(c))
+}
+
 pub struct StatusScene {
     board: Rc<RefCell<Board>>,
     fade: RevealFade,
     orbit: UserOrbit,
     follower: Follower,
     framed: bool,
+    /// Live slot mode: the opening top-down pose was applied (once).
+    slot_framed: bool,
     fog: (f64, f64),
     css_height: f64,
     point_size: Option<f32>,
@@ -92,6 +105,7 @@ impl StatusScene {
             orbit,
             follower: Follower::default(),
             framed: false,
+            slot_framed: false,
             fog: framing.base_fog(),
             css_height: 1.0,
             point_size: None,
@@ -143,15 +157,27 @@ impl StatusScene {
     /// "화면 맞춤": frame everything delivered, obliquely, and keep the automatic camera off for a while.
     fn fit_view(&mut self, board: &Board, info: &FrameInfo) {
         let Some((lo, hi)) = board.points_box() else { return };
-        let aspect = info.css_width() / info.css_height().max(1.0);
-        if let Some(f) = inset::fit(&board.fit_samples(FIT_SAMPLES_PER_SEGMENT), lo, hi, FOV_DEG, aspect) {
-            self.orbit.set_pose(f.pose);
-            self.orbit.max_distance = self.orbit.max_distance.max(f.max_distance);
-            self.fit_hold_until = info.now_ms + 30_000.0;
-        }
+        let (pose, reach) = top_down_pose(lo, hi);
+        self.orbit.set_pose(pose);
+        self.orbit.max_distance = self.orbit.max_distance.max(reach * 4.0);
+        self.fit_hold_until = info.now_ms + 30_000.0;
+        self.slot_framed = true;
     }
 
     fn camera(&mut self, board: &Board, info: &FrameInfo) {
+        if !board.store.slots().is_empty() {
+            // Live slot mode: one opening pose above the cloud (the same bounds as the inset),
+            // no drone follow; after that only the operator moves the camera.
+            if !self.slot_framed && let Some((lo, hi)) = board.points_box() {
+                let (pose, reach) = top_down_pose(lo, hi);
+                self.orbit.set_pose(pose);
+                self.orbit.max_distance = self.orbit.max_distance.max(reach * 4.0);
+                self.slot_framed = true;
+                self.framed = true;
+            }
+            self.orbit.update(info.dt);
+            return;
+        }
         if !self.framed && let Some(f) = board.framing {
             // First geometry: frame on it (legacy: on the placeholder cloud at load).
             self.framed = true;
