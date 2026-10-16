@@ -222,10 +222,10 @@ impl ViewScreen for InsetScene {
         }
         self.orbit.update(info.dt);
 
-        let size = board.point_size_m;
+        let size = board.settings.borrow().point_size * info.scale as f32;
         let point_size = (self.point_size != Some(size)).then(|| {
             self.point_size = Some(size);
-            PointSize::Metres(size)
+            PointSize::Pixels(size)
         });
         FrameSpec {
             camera: self.orbit.pose().camera(FOV_DEG, self.near),

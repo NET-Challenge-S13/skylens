@@ -512,6 +512,7 @@ pub async fn serve_with(settings: Settings, live: LiveEngine) -> anyhow::Result<
         settings.demo,
         if settings.demo { settings.manifest.display().to_string() } else { "-".into() }
     );
+    tracing::info!("live stride {} (SKYLENS_LIVE_STRIDE)", settings.live_stride);
     if !settings.demo {
         spawn_gpu_watch();
     }

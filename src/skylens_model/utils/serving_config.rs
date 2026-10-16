@@ -231,7 +231,7 @@ mod tests {
         assert_eq!(s.gpu, None);
         assert_eq!(s.precision, None);
         assert!(s.stable_display);
-        assert_eq!(s.live_stride, 6);
+        assert_eq!(s.live_stride, 2);
         assert!(s.zone_preview);
         assert_eq!(s.backlog_batch, None);
         assert_eq!((s.zone_span, s.zone_overlap), (6, 2));

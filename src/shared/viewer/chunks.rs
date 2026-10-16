@@ -262,7 +262,10 @@ impl SlotPoints {
         for s in self.slots.iter().filter(|s| s.shown) {
             let n = seen.entry(s.zone).or_insert(0);
             let step = steps.get(&s.zone).copied().unwrap_or(1);
-            if (*n).is_multiple_of(step) {
+            // Hash-thinned (not every step-th): slot ids follow the scan order, so a regular
+            // stride can land on one row/height and flatten the height range.
+            let keep = step == 1 || ((*n).wrapping_add(1).wrapping_mul(0x9E37_79B9_7F4A_7C15) >> 32) < (u64::from(u32::MAX) / step);
+            if keep {
                 let v = out.entry(s.zone).or_default();
                 if v.len() < max {
                     v.push(s.pos.map(f64::from));

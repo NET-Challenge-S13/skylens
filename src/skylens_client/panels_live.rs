@@ -314,8 +314,8 @@ pub fn next_speed(current: u32) -> u32 {
 }
 
 /// Point size range of the `-`/`+` buttons (pixels), and the step.
-pub const SIZE_MIN: f32 = 0.5;
-pub const SIZE_MAX: f32 = 10.0;
+pub const SIZE_MIN: f32 = 1.0;
+pub const SIZE_MAX: f32 = 6.0;
 pub const SIZE_STEP: f32 = 0.5;
 
 pub fn step_size(current: f32, dir: i32) -> f32 {
@@ -761,8 +761,8 @@ mod tests {
         assert_eq!(next_speed(60), 1);
         assert_eq!(next_speed(7), 1);
         assert_eq!(step_size(2.0, 1), 2.5);
-        assert_eq!(step_size(0.5, -1), 0.5);
-        assert_eq!(step_size(10.0, 1), 10.0);
+        assert_eq!(step_size(1.0, -1), 1.0);
+        assert_eq!(step_size(6.0, 1), 6.0);
         assert_eq!(size_text(2.0), "2.0");
         assert_eq!(ColorMode::from_key("zone"), Some(ColorMode::Zone));
         assert_eq!(ColorMode::from_key("x"), None);

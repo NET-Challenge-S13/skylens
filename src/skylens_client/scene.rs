@@ -218,7 +218,7 @@ impl ViewScreen for StatusScene {
         let (mode, scale, fit, show_mesh) = {
             let mut st = board.settings.borrow_mut();
             let fit = std::mem::take(&mut st.fit_requested);
-            (st.color_mode, st.point_size / 2.0, fit, st.show_mesh)
+            (st.color_mode, st.point_size, fit, st.show_mesh)
         };
         let paint = Paint::of(mode, board.height_range());
         self.layer.pump(gpu, &mut board, paint, BG_RGB, info.now_ms / 1000.0);
@@ -251,10 +251,11 @@ impl ViewScreen for StatusScene {
         self.sync_markers(gpu, &board);
         self.camera(&board, info);
 
-        let size = board.point_size_m * scale;
+        // Fixed screen size (CSS px x DPR), no distance scaling: crisp points like the replay viewer.
+        let size = scale * info.scale as f32;
         let point_size = (self.point_size != Some(size)).then(|| {
             self.point_size = Some(size);
-            PointSize::Metres(size)
+            PointSize::Pixels(size)
         });
         FrameSpec {
             camera: self.orbit.pose().camera(FOV_DEG, NEAR),

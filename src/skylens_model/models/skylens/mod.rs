@@ -84,7 +84,7 @@ pub const SETTLE_MAX_ZONE: usize = 3;
 pub const LIVE_SEED: u64 = 1;
 /// Live display thinning: 1 of this many points (the V100 live runs' `--live-stride 6`, also
 /// cumulus3d's default; the decision 0052 measurements use it).
-pub const DEFAULT_LIVE_STRIDE: usize = 6;
+pub const DEFAULT_LIVE_STRIDE: usize = 2;
 
 #[derive(Debug, Clone)]
 pub struct EngineConfig {
