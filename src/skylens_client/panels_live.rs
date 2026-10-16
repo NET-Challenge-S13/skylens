@@ -452,7 +452,7 @@ pub fn follow_indicator(s: &Snapshot<'_>) -> (&'static str, &'static str) {
 
 /// The play button's glyph.
 pub fn play_glyph(shows_pause: bool) -> &'static str {
-    if shows_pause { "\u{275A}\u{275A}" } else { "\u{25B6}" }
+    if shows_pause { "||" } else { "\u{25B6}" }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -529,9 +529,9 @@ pub fn live_markup(settings: &LiveSettings) -> String {
             "<div class=\"live-events\" id=\"live-events\"></div>",
             "</div>",
             "<div id=\"live-controls\" class=\"sl-surface sl-surface--panel live-controls\">",
-            "<button type=\"button\" class=\"live-btn live-ic\" id=\"live-prev\" data-live=\"prev\" title=\"한 단계 뒤로\">\u{23EE}</button>",
-            "<button type=\"button\" class=\"live-btn live-ic\" id=\"live-play\" data-live=\"play\" title=\"재생 / 일시정지\">\u{275A}\u{275A}</button>",
-            "<button type=\"button\" class=\"live-btn live-ic\" id=\"live-next\" data-live=\"next\" title=\"한 단계 앞으로\">\u{23ED}</button>",
+            "<button type=\"button\" class=\"live-btn live-ic\" id=\"live-prev\" data-live=\"prev\" title=\"한 단계 뒤로\">|\u{25C0}</button>",
+            "<button type=\"button\" class=\"live-btn live-ic\" id=\"live-play\" data-live=\"play\" title=\"재생 / 일시정지\">||</button>",
+            "<button type=\"button\" class=\"live-btn live-ic\" id=\"live-next\" data-live=\"next\" title=\"한 단계 앞으로\">\u{25B6}|</button>",
             "<button type=\"button\" class=\"live-btn\" id=\"live-speed\" data-live=\"speed\" title=\"재생 속도\">{speed}x</button>",
             "<span class=\"live-sep\"></span>",
             "<span class=\"live-lbl\">점 크기</span><button type=\"button\" class=\"live-btn live-ic\" data-live=\"size-\">\u{2212}</button><span class=\"live-val\" id=\"live-size\">{size}</span><button type=\"button\" class=\"live-btn live-ic\" data-live=\"size+\">+</button>",
@@ -698,7 +698,7 @@ mod tests {
         let l = log();
         assert_eq!(follow_indicator(&snap(&l, 4, true)), ("live-follow is-live", "LIVE"));
         assert_eq!(follow_indicator(&snap(&l, 2, false)).0, "live-follow");
-        assert_eq!(play_glyph(true), "\u{275A}\u{275A}");
+        assert_eq!(play_glyph(true), "||");
         assert_eq!(play_glyph(false), "\u{25B6}");
     }
 

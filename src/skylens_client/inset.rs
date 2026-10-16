@@ -101,7 +101,7 @@ pub struct InsetScene {
     auto: bool,
     /// Jump (not ease) to the next framing: nothing was framed yet.
     snap: bool,
-    fit_key: Option<(DVec3, DVec3, u64, i64)>,
+    fit_key: Option<(DVec3, DVec3, i64)>,
     fit: Option<Fit>,
     near: f64,
     uploaded: BTreeMap<u32, Uploaded>,
@@ -174,8 +174,14 @@ impl InsetScene {
     fn desired(&mut self, board: &Board, aspect: f64) -> Option<Pose> {
         let (bmin, bmax) = board.points_box()?;
         // Refit only when what is shown or the panel's shape changes.
-        let key = (bmin, bmax, board.total_points(), (aspect * 1000.0).round() as i64);
-        if self.fit_key != Some(key) {
+        // Only a box that really grew (or a reshaped panel) refits: a point count that changes
+        // with every event must not pump the zoom.
+        let key = (bmin, bmax, (aspect * 1000.0).round() as i64);
+        let grew = self.fit_key.is_none_or(|(lo, hi, a)| {
+            let span = (hi - lo).max_element().max(1.0);
+            a != key.2 || (bmin.cmplt(lo - DVec3::splat(span * 0.1)).any()) || (bmax.cmpgt(hi + DVec3::splat(span * 0.1)).any())
+        });
+        if grew {
             let samples = board.fit_samples(FIT_SAMPLES_PER_SEGMENT);
             self.fit = fit(&samples, bmin, bmax, FOV_DEG, aspect);
             self.fit_key = Some(key);
