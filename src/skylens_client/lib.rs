@@ -15,11 +15,15 @@
 pub mod app;
 pub mod board;
 pub mod card;
+pub mod delta_log;
 pub mod follow;
 pub mod inset;
+pub mod live_layer;
+pub mod live_ui;
 pub mod markers;
 pub mod minimap;
 pub mod panels;
+pub mod panels_live;
 pub mod points;
 pub mod reveal;
 pub mod scene;

@@ -5,7 +5,8 @@
 //! everything delivered obliquely from the south-east and widens as segments arrive, until the
 //! operator drags or zooms inside the panel; a double click hands the framing back.
 
-use crate::board::{Board, FIT_SAMPLES_PER_SEGMENT};
+use crate::board::{Board, FIT_SAMPLES_PER_SEGMENT, LiveView};
+use crate::live_layer::{LiveLayer, Paint};
 use crate::glam::DVec3;
 use crate::pointblitz::core::{FrameStyle, PointSize};
 use crate::points;
@@ -19,6 +20,7 @@ use std::rc::Rc;
 
 pub const FOV_DEG: f64 = 45.0;
 const BACKGROUND: u32 = 0x06090e;
+const BACKGROUND_RGB: [u8; 3] = [0x06, 0x09, 0x0e];
 
 /// Camera basis (right, up, forward) looking from `eye` at `target`, z up.
 fn basis(eye: DVec3, target: DVec3) -> (DVec3, DVec3, DVec3) {
@@ -105,6 +107,7 @@ pub struct InsetScene {
     uploaded: BTreeMap<u32, Uploaded>,
     css_height: f64,
     point_size: Option<f32>,
+    layer: LiveLayer,
 }
 
 impl InsetScene {
@@ -122,6 +125,7 @@ impl InsetScene {
             uploaded: BTreeMap::new(),
             css_height: 1.0,
             point_size: None,
+            layer: LiveLayer::new(LiveView::Inset),
         }
     }
 
@@ -131,8 +135,10 @@ impl InsetScene {
         self.snap = true;
     }
 
-    fn sync_clouds(&mut self, gpu: &mut Gpu3d, board: &Board) {
+    fn sync_clouds(&mut self, gpu: &mut Gpu3d, board: &mut Board, now_s: f64) {
         let Some(range) = board.height_range() else { return };
+        // The slot stream: the same live layer as the main view, always coloured by height.
+        self.layer.pump(gpu, board, Paint::Height(range.0, range.1), BACKGROUND_RGB, now_s);
         for (seg, pts) in board.store.segments() {
             let id = segment_cloud(seg);
             let payloads = pts.payloads();
@@ -163,10 +169,6 @@ impl InsetScene {
                 self.uploaded.remove(&s);
             }
         }
-        // The slot stream: recoloured message by message; a new range rebuilds it.
-        let key = range.0.to_bits().rotate_left(17) ^ range.1.to_bits();
-        let (device, queue) = (&gpu.device, &gpu.queue);
-        gpu.clouds.sync_slots_with(device, queue, &board.store, key, |m| points::recolor_slots_by_height(m, range.0, range.1));
     }
 
     fn desired(&mut self, board: &Board, aspect: f64) -> Option<Pose> {
@@ -189,13 +191,17 @@ impl InsetScene {
 impl ViewScreen for InsetScene {
     fn gpu_lost(&mut self) {
         self.uploaded.clear();
+        let board = self.board.clone();
+        if let Ok(mut b) = board.try_borrow_mut() {
+            self.layer.lost(&mut b);
+        }
     }
 
     fn frame(&mut self, gpu: &mut Gpu3d, info: &FrameInfo) -> FrameSpec {
         self.css_height = info.css_height();
         let board_rc = self.board.clone();
-        let board = board_rc.borrow();
-        self.sync_clouds(gpu, &board);
+        let mut board = board_rc.borrow_mut();
+        self.sync_clouds(gpu, &mut board, info.now_ms / 1000.0);
 
         let aspect = info.css_width() / info.css_height().max(1.0);
         if self.auto

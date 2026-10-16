@@ -11,7 +11,9 @@
 //! camera waits. Otherwise the camera eases (`1 - exp(-2.5 dt)`) toward the focused detection
 //! (FOCUSING / LOCKED) or the follow pose of the active drone.
 
-use crate::board::Board;
+use crate::board::{Board, FIT_SAMPLES_PER_SEGMENT, LiveView};
+use crate::inset;
+use crate::live_layer::{LiveLayer, Paint};
 use crate::follow::{self, FollowInput, Follower};
 use crate::glam::DVec3;
 use crate::markers;
@@ -30,6 +32,8 @@ pub const FOV_DEG: f64 = 50.0;
 const NEAR: f64 = 0.05;
 /// Ids of the board's own meshes (markers), below the shared sync namespaces.
 const MARKER_IDS: u64 = 1 << 20;
+/// `#0d0f14`: what the point fades run to.
+const BG_RGB: [u8; 3] = [0x0d, 0x0f, 0x14];
 
 /// The legacy scene light on a mesh: `AmbientLight(0xffe8cf, 0.35)` (a hemisphere light with the
 /// same sky and ground colour is the same thing) and `DirectionalLight(0xfff1d8, 0.5)` at
@@ -62,6 +66,10 @@ pub struct StatusScene {
     fog: (f64, f64),
     css_height: f64,
     point_size: Option<f32>,
+    /// The animated live point layer.
+    layer: LiveLayer,
+    /// The operator asked to fit the view: the automatic camera waits until then (ms).
+    fit_hold_until: f64,
     /// Mesh alpha per segment as last applied.
     mesh_alpha: BTreeMap<u32, f32>,
     /// Marker id -> mesh id base (pin, ring = base + 1).
@@ -85,6 +93,8 @@ impl StatusScene {
             fog: framing.base_fog(),
             css_height: 1.0,
             point_size: None,
+            layer: LiveLayer::new(LiveView::Main),
+            fit_hold_until: 0.0,
             mesh_alpha: BTreeMap::new(),
             marker_ids: BTreeMap::new(),
             next_marker: 0,
@@ -115,6 +125,17 @@ impl StatusScene {
             };
             let ring = markers::ring_mesh(feet, markers::pulse(board.time, feet.x));
             gpu.meshes.upsert(&gpu.device, &gpu.queue, base + 1, &ring, None, markers::ring_material(person));
+        }
+    }
+
+    /// "화면 맞춤": frame everything delivered, obliquely, and keep the automatic camera off for a while.
+    fn fit_view(&mut self, board: &Board, info: &FrameInfo) {
+        let Some((lo, hi)) = board.points_box() else { return };
+        let aspect = info.css_width() / info.css_height().max(1.0);
+        if let Some(f) = inset::fit(&board.fit_samples(FIT_SAMPLES_PER_SEGMENT), lo, hi, FOV_DEG, aspect) {
+            self.orbit.set_pose(f.pose);
+            self.orbit.max_distance = self.orbit.max_distance.max(f.max_distance);
+            self.fit_hold_until = info.now_ms + 30_000.0;
         }
     }
 
@@ -156,6 +177,7 @@ impl StatusScene {
         };
         if let Some(d) = desired
             && !self.orbit.auto_paused(info.now_ms)
+            && info.now_ms >= self.fit_hold_until
         {
             self.orbit.approach(&d, damp_factor(2.5, info.dt));
         }
@@ -164,15 +186,33 @@ impl StatusScene {
 }
 
 impl ViewScreen for StatusScene {
+    fn gpu_lost(&mut self) {
+        self.mesh_alpha.clear();
+        let board = self.board.clone();
+        if let Ok(mut b) = board.try_borrow_mut() {
+            self.layer.lost(&mut b);
+        }
+    }
+
     fn frame(&mut self, gpu: &mut Gpu3d, info: &FrameInfo) -> FrameSpec {
         self.css_height = info.css_height();
         let board_rc = self.board.clone();
         let mut board = board_rc.borrow_mut();
         board.time += info.dt;
 
-        // Points: one scene per segment, faded in on arrival; the slot stream as one slot scene.
+        // Points: one scene per segment, faded in on arrival; the slot stream as the animated
+        // live layer (fade and glide per point), coloured as the controls bar says.
         gpu.sync_segments(&board.store, 0.0);
-        gpu.sync_slots(&board.store);
+        let (mode, scale, fit) = {
+            let mut st = board.settings.borrow_mut();
+            let fit = std::mem::take(&mut st.fit_requested);
+            (st.color_mode, st.point_size / 2.0, fit)
+        };
+        let paint = Paint::of(mode, board.height_range());
+        self.layer.pump(gpu, &mut board, paint, BG_RGB, info.now_ms / 1000.0);
+        if fit {
+            self.fit_view(&board, info);
+        }
         for (seg, level) in board.store.levels() {
             self.fade.note_arrival(*seg, *level);
         }
@@ -194,7 +234,7 @@ impl ViewScreen for StatusScene {
         self.sync_markers(gpu, &board);
         self.camera(&board, info);
 
-        let size = board.point_size_m;
+        let size = board.point_size_m * scale;
         let point_size = (self.point_size != Some(size)).then(|| {
             self.point_size = Some(size);
             PointSize::Metres(size)
