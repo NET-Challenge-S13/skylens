@@ -714,6 +714,7 @@ impl Sinks {
             snapshots: self.snapshots,
             live_stream: None,
             live_stride: self.live_stride,
+            live_files: true,
         }
     }
 }

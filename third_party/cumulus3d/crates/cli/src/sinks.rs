@@ -385,6 +385,9 @@ pub struct SnapshotSink {
     last_display: Option<(PointCloud, Vec<usize>)>,
     /// Progress heartbeat (`live/stream/status.json`), on with the block stream.
     beat: Option<Heartbeat>,
+    /// Write the display PLYs (`live/display_*.ply`, `live/latest.ply`) and the post-processing outputs. Off: only the
+    /// live diff stream and its heartbeat (SkyLens patch).
+    files: bool,
 }
 
 /// Zone event time (the first one received).
@@ -415,7 +418,14 @@ impl SnapshotSink {
             diff: None,
             last_display: None,
             beat: None,
+            files: true,
         }
+    }
+
+    /// Writes the display PLYs and the post-processing outputs (default) or, off, only the live diff stream.
+    pub fn with_files(mut self, on: bool) -> Self {
+        self.files = on;
+        self
     }
 
     /// Updates the heartbeat state through `f` and rewrites `status.json`; a failure is only logged.
@@ -455,6 +465,9 @@ impl SnapshotSink {
     /// Writes the display cloud for the refined zones received so far (`live/display_NN_TTTT.Ts_refined_K.ply`, and
     /// `live/latest.ply` replaced atomically), every zone placed in the newest refined model's frame.
     fn write_live(&mut self, k: usize, at: SystemTime, kind: &str) {
+        if !self.files && self.diff.is_none() {
+            return;
+        }
         let t = Instant::now();
         let clouds: BTreeMap<usize, &PointCloud> = self.refined.iter().map(|(j, c)| (*j, &**c)).collect();
         let models: BTreeMap<usize, &Reconstruction> = self.refined_models.iter().map(|(j, m)| (*j, &**m)).collect();
@@ -465,6 +478,10 @@ impl SnapshotSink {
         let dir = self.out.join("live");
         let rel = epoch_secs(at) - epoch_secs(self.t0.unwrap_or(at));
         self.live_count += 1;
+        if !self.files {
+            self.write_stream(k, rel, kind, cloud, zones);
+            return;
+        }
         let name = format!("display_{:02}_{rel:06.1}s_refined_{k}.ply", self.live_count);
         let tmp = dir.join(".latest.ply.tmp");
         let r = std::fs::create_dir_all(&dir)
@@ -509,6 +526,9 @@ impl SnapshotSink {
     /// Post-process with the results collected so far. When finished, copy `timeline.txt` to `snapshots/`.
     /// `final_model` = `AllRefinedDone::chain` (in stable display mode the GPS-aligned final model).
     pub fn finish_with(&mut self, final_model: Option<&Reconstruction>) {
+        if !self.files {
+            return;
+        }
         if self.preview_models.is_empty() && !self.refined.is_empty() {
             let t0 = epoch_secs(self.t0.unwrap_or(UNIX_EPOCH));
             let rel = |t: Option<SystemTime>| t.map(|t| epoch_secs(t) - t0);
@@ -547,6 +567,9 @@ impl SnapshotSink {
     /// Post-process with the results collected so far (preview/refined alignment, per-event snapshots, re-anchoring). When finished, copy
     /// `timeline.txt` to `snapshots/`.
     pub fn finish(&mut self) {
+        if !self.files {
+            return;
+        }
         let t0 = epoch_secs(self.t0.unwrap_or(UNIX_EPOCH));
         let rel = |t: Option<SystemTime>| t.map(|t| epoch_secs(t) - t0);
         let times: BTreeMap<usize, ZoneTimes> = self
@@ -725,6 +748,8 @@ pub struct SinkSet {
     pub live_stream: Option<LiveStream>,
     /// Live display thinning stride (1 = keep all).
     pub live_stride: usize,
+    /// Display PLYs and post-processing outputs of [`SnapshotSink`] (off: only the live diff stream; SkyLens patch).
+    pub live_files: bool,
 }
 
 impl SinkSet {
@@ -738,6 +763,7 @@ impl SinkSet {
             snapshots: true,
             live_stream: None,
             live_stride: post::LiveOptions::default().stride,
+            live_files: true,
         }
     }
 }
@@ -777,7 +803,7 @@ impl DefaultSinks {
             sinks.push(Box::new(ModelSink::new(out.join("work").join("models"), Some(log.clone()))));
         }
         if set.snapshots {
-            let mut snap = SnapshotSink::new(out.to_path_buf(), log.clone()).with_live_stride(set.live_stride);
+            let mut snap = SnapshotSink::new(out.to_path_buf(), log.clone()).with_live_stride(set.live_stride).with_files(set.live_files);
             if let Some(cfg) = set.live_stream {
                 snap = snap.with_live_stream(cfg);
             }

@@ -564,6 +564,8 @@ pub struct NodeBuilder {
     output: Option<(PathBuf, SinkOptions)>,
     /// Geodetic origin written to the live diff stream manifest (`origin_gps`).
     stream_origin: Option<[f64; 3]>,
+    /// Stable display output: only run.log, the timeline and the live diff stream.
+    stream_only: bool,
     attach: Vec<Attach>,
     frames: bool,
 }
@@ -589,6 +591,7 @@ impl ReconNode {
             spool: PathBuf::from(".live"),
             output: None,
             stream_origin: None,
+            stream_only: false,
             attach: Vec::new(),
             frames: false,
         }
@@ -718,6 +721,12 @@ impl NodeBuilder {
         self.stream_origin = Some([lat, lon, alt]);
         self
     }
+    /// Stable display with [`NodeBuilder::output`]: write only run.log, the timeline and the live diff stream, not the
+    /// zone PLYs, the display PLYs, the per-zone models or the post-processing snapshots.
+    pub fn stream_only(mut self, on: bool) -> Self {
+        self.stream_only = on;
+        self
+    }
     /// Writes the standard output files (timeline, run.log, zone PLYs, snapshots) to `dir`. With
     /// [`NodeBuilder::stable_display`] also the live diff stream (`live/stream/`).
     pub fn output(mut self, dir: impl Into<PathBuf>, opts: SinkOptions) -> Self {
@@ -784,7 +793,7 @@ impl NodeBuilder {
     /// Checks the configuration, creates the session and pipeline, and registers the node on `host`.
     /// Creates the image folder's spool folder; nothing else is written until frames are declared.
     pub fn build(self, host: &CompositionHost) -> Result<ReconNode, ComposeError> {
-        let NodeBuilder { id, plan, policy, backpressure, source, spool, output, stream_origin, attach, frames } = self;
+        let NodeBuilder { id, plan, policy, backpressure, source, spool, output, stream_origin, stream_only, attach, frames } = self;
         let mut pr = Vec::new();
         let cams = &plan.input.cameras;
         if cams.is_empty() {
@@ -871,7 +880,9 @@ impl NodeBuilder {
             pl = if plan.sparse.stable_display {
                 // Same files as `sinks::attach`, plus the live diff stream (stable display only, as in `Recon::run`).
                 let set = SinkSet {
-                    models: opts.save_models,
+                    models: opts.save_models && !stream_only,
+                    zone_ply: !stream_only,
+                    live_files: !stream_only,
                     live_stride: plan.sinks.live_stride,
                     live_stream: Some(LiveStream { enu: stream_origin.is_some(), origin_gps: stream_origin }),
                     ..SinkSet::all()
