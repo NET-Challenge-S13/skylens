@@ -84,6 +84,36 @@ pub fn core_box(samples: &[DVec3]) -> Option<(DVec3, DVec3)> {
     Some((DVec3::new(x.0, y.0, z.0), DVec3::new(x.1, y.1, z.1)))
 }
 
+/// Robust bounds of a point sample for camera framing: per-axis 2nd..98th percentile of at most
+/// `MAX_BOUNDS_SAMPLES` evenly strided points. Degenerate extents are widened around their centre
+/// (horizontal at least 5 m, vertical at least 0.5 m) so a sparse or flat cloud never collapses the box.
+pub const MAX_BOUNDS_SAMPLES: usize = 50_000;
+pub const MIN_HORIZONTAL_EXTENT: f64 = 5.0;
+
+pub fn robust_bounds(samples: &[DVec3]) -> Option<(DVec3, DVec3)> {
+    let stride = samples.len().div_ceil(MAX_BOUNDS_SAMPLES).max(1);
+    let axis = |k: usize, min_extent: f64| {
+        let mut v: Vec<f64> = samples.iter().step_by(stride).map(|p| p[k]).filter(|v| v.is_finite()).collect();
+        v.sort_by(f64::total_cmp);
+        let (mut lo, mut hi) = (quantile(&v, 0.02)?, quantile(&v, 0.98)?);
+        if hi - lo < min_extent {
+            let c = (lo + hi) / 2.0;
+            lo = c - min_extent / 2.0;
+            hi = c + min_extent / 2.0;
+        }
+        Some((lo, hi))
+    };
+    let (x, y, z) = (axis(0, MIN_HORIZONTAL_EXTENT)?, axis(1, MIN_HORIZONTAL_EXTENT)?, axis(2, 0.5)?);
+    Some((DVec3::new(x.0, y.0, z.0), DVec3::new(x.1, y.1, z.1)))
+}
+
+/// Whether bounds moved meaningfully (centre or any extent by more than `frac` of the larger extent).
+pub fn bounds_changed(old: (DVec3, DVec3), new: (DVec3, DVec3), frac: f64) -> bool {
+    let span = (old.1 - old.0).max(new.1 - new.0).max_element().max(1.0);
+    let d = (old.0 - new.0).abs().max((old.1 - new.1).abs()).max_element();
+    d > frac * span
+}
+
 /// Point diameter in metres for a delivery: 1.5 x the typical spacing, the legacy `voxel * 1.5`
 /// rule with the spacing measured from the chunks (median over chunks of
 /// `sqrt(footprint / points)`), within 5 cm .. 1 m. 0.15 m (the legacy default) when unknown.
@@ -299,5 +329,20 @@ mod tests {
         let s = point_size_m([c.as_slice()]);
         assert!((s - 0.15).abs() < 0.01, "{s}");
         assert_eq!(point_size_m(std::iter::empty()), 0.15);
+    }
+
+    #[test]
+    fn robust_bounds_ignore_outliers_and_widen_tiny_samples() {
+        let mut pts: Vec<DVec3> = (0..1000).map(|i| DVec3::new(f64::from(i % 100), f64::from(i / 10), 1.0)).collect();
+        pts.push(DVec3::new(1.0e6, -1.0e6, 500.0));
+        pts.push(DVec3::new(f64::NAN, 0.0, 0.0));
+        let (lo, hi) = robust_bounds(&pts).unwrap();
+        assert!(hi.x < 100.0 && lo.x >= 0.0 && hi.y <= 100.0 && hi.z < 10.0, "{lo:?} {hi:?}");
+        // One point: widened to the 5 m minimum around it.
+        let (lo, hi) = robust_bounds(&[DVec3::new(10.0, 20.0, 3.0)]).unwrap();
+        assert!((hi.x - lo.x - 5.0).abs() < 1e-9 && (hi.y - lo.y - 5.0).abs() < 1e-9 && hi.z - lo.z >= 0.5);
+        assert!(robust_bounds(&[]).is_none());
+        assert!(!bounds_changed((lo, hi), (lo, hi + DVec3::splat(0.1)), 0.15));
+        assert!(bounds_changed((lo, hi), (lo, hi + DVec3::splat(50.0)), 0.15));
     }
 }

@@ -459,6 +459,14 @@ pub fn build_engine(settings: &Settings) -> anyhow::Result<Engine> {
             gpu,
             stable_display: settings.stable_display,
             live_stride: settings.live_stride,
+            zone_preview: settings.zone_preview,
+            backlog_batch: settings.backlog_batch,
+            camera_json: settings.camera_json.clone(),
+            frame_width: settings.frame_width,
+            settle_tol: settings.settle_tol,
+            settle_max_zone: settings.settle_max_zone,
+            focal_sigma: settings.focal_sigma,
+            dist_sigma: settings.dist_sigma,
         },
         detector,
     )
@@ -493,12 +501,24 @@ async fn wait_stop(mut rx: watch::Receiver<bool>) {
 
 /// Run both servers until Ctrl-C.
 pub async fn serve(settings: Settings) -> anyhow::Result<()> {
+    let live = build_live(&settings).await;
+    serve_with(settings, live).await
+}
+
+/// [`serve`] with an engine built by the caller (replay tools, tests).
+pub async fn serve_with(settings: Settings, live: LiveEngine) -> anyhow::Result<()> {
     tracing::info!(
         "skylens_model api up (demo={}, manifest={})",
         settings.demo,
         if settings.demo { settings.manifest.display().to_string() } else { "-".into() }
     );
-    let live = build_live(&settings).await;
+    tracing::info!(
+        "live stride {} (SKYLENS_LIVE_STRIDE), zone preview {} (SKYLENS_ZONE_PREVIEW), backlog batch {:?} (SKYLENS_BACKLOG_BATCH), camera prior {:?} (SKYLENS_CAMERA_JSON)",
+        settings.live_stride,
+        settings.zone_preview,
+        settings.backlog_batch,
+        settings.camera_json
+    );
     if !settings.demo {
         spawn_gpu_watch();
     }

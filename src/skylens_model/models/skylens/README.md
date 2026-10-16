@@ -22,11 +22,11 @@ cumulus3d의 구간(zone)과 GPS ENU 정렬이 대신한다.
 ```
 FrameSet(gRPC) → Assembler(카메라 모으기) → LiveFrameSet → ReconNode.compose
   ├─ on_frame 훅 → 큐(최대 24장) → UNet → 관측(축소 확률 격자 + 사람 점)
-  ├─ 파일 싱크(stable display) → <work_dir>/runs/live-<스트림 id>-<pid>/live/stream/
-  │    └─ follower(slotstream.rs, 200 ms): 새 사건 → PBSD 머리 + 팩 → CHUNK_KIND_POINT_SLOTS
+  ├─ 이벤트 DisplayDelta (stable display, 조밀화 있음)
+  │    ├─ 점: slotstream.rs SlotEncoder → PBSD 머리 + v4 팩 → CHUNK_KIND_POINT_SLOTS
+  │    └─ 메시: 델타를 거울에 적용 → 바뀐 구간의 거울 점을 deltamesh Preview로 ingest → 바뀐 블록만 MeshBlock
   └─ 이벤트 ZoneRefined (stable display에는 ZonePreview가 없다)
-       ├─ 점: 조밀화가 없을 때만 pointblitz 청크 v2 (stable display를 끄면 미리보기·정제본 모두)
-       ├─ 메시: deltamesh ingest(구간, Preview|Refined) → extract → 바뀐 블록만 MeshBlock
+       ├─ 점·메시: 조밀화가 없거나 실패한 구간만 pointblitz 청크 v2 + 구간 점군 메시 (stable display를 끄면 미리보기·정제본 모두)
        └─ 탐지 융합: 등록 포즈로 투영 → 프레임 간 confidence 가중 → DetectionBatch
   → ChunkLog(sequence 부여, 재생 기록) → SubscribeChunks
 ```
@@ -37,8 +37,9 @@ FrameSet(gRPC) → Assembler(카메라 모으기) → LiveFrameSet → ReconNode
 | 조정 정책 | append-only. 늦게 오거나 고쳐진 묶음은 무시한다. deltamesh 정제본은 구간당 한 번만 넣을 수 있고, 이미 내보낸 구간을 되감지 않기 위해서다 |
 | 카메라가 따로 오는 묶음 | 같은 키의 push를 모아 모든 카메라가 차면 선언한다. 대기 중인 묶음은 최대 64개 |
 | stable display | 기본(`SKYLENS_STABLE_DISPLAY=1`). 미리보기가 없고 구간 K의 정제는 K−1을 기다리며, GPS 위치 제약으로 한 번 보인 구간은 움직이지 않는다. 내부값이 안정되기 전(1 %, 늦어도 구간 3)에는 앞 구간을 다시 놓고 `ZoneRefined`를 다시 낸다 |
-| 점 슬롯 | 노드에 실행 폴더를 주어 cumulus3d가 live diff stream v4를 쓰게 하고, follower가 사건마다 청크 하나로 낸다(`segment` 사건 구간, `version` 순번, `generation` 스트림 id). 스트림 id는 `runs/` 아래 가장 큰 id + 1과 시작 시각 초 중 큰 값이고, 청크 시퀀스는 `스트림 id << 32`에서 시작한다(다시 뜬 모델 서버의 청크가 코어의 이어받기 시점보다 모두 크다). 실행 폴더에는 run.log, 타임라인, 차분 스트림만 쓰고(`stream_only`), 시작할 때 실행 폴더를 3개(`KEEP_RUNS`)만 남긴다. 화면용 점은 1/6(`SKYLENS_LIVE_STRIDE`). 조밀화가 실패한 구간(`dense: false`)은 스트림에 없으므로 그 구간만 점 청크로 보낸다 |
-| 메시와 재배치 | 구간 3까지는 다시 놓일 수 있어 deltamesh에 미리보기 수준으로 넣고(다시 오면 교체), 구간 4가 오면 그 구간들의 마지막 점을 정제 수준으로 넣는다. 점이 그대로면 메시가 바뀌지 않아 블록을 다시 보내지 않는다(그 블록 청크의 수준은 미리보기로 남는다). 구간이 4개 이하인 실행은 구간 0~3의 메시가 미리보기 수준으로 남는다 |
+| 점 슬롯 | 노드에 `display_deltas(stride 2)`를 주면 조밀 구간 결과마다 `Event::DisplayDelta`가 오고, `SlotEncoder`가 델타마다 청크 하나로 낸다(`segment` 델타를 일으킨 구간, `version` 순번 1부터 빠짐없이, `generation` 스트림 id). 스트림 id는 시작 시각 초이고 이 프로세스가 앞서 쓴 id보다 늘 크며, 청크 시퀀스는 `스트림 id << 32`에서 시작한다(다시 뜬 모델 서버의 청크가 코어의 이어받기 시점보다 모두 크다). 순번은 인코더가 직접 센다(cumulus3d의 델타 seq는 변화 없는 구름도 세어 건너뛸 수 있다). ENU 프레임이 아니면 델타를 건너뛰고, 원점이 앵커와 다르면(1 cm 초과) 앵커 기준으로 평행이동한다. 화면용 점은 1/2(`SKYLENS_LIVE_STRIDE`). 조밀화가 실패한 구간(`dense: false`)은 델타가 없으므로 그 구간만 점 청크로 보낸다 |
+| 메시 | 델타를 모델 쪽 슬롯 거울(`DisplayMirror`)에 적용한 뒤, 점이 바뀐 구간(추가·이동·삭제 점의 구간)마다 거울의 그 구간 점을 deltamesh에 미리보기로 다시 넣고 바뀐 블록만 낸다(미리보기는 되풀이해 넣을 수 있다). 표시가 겹침을 이미 지웠으므로 메시는 한 겹이다. 청크의 `level`은 미리보기다 |
+| 복원 설정 | V100 라이브 실행(`cumulus3d stream`)과 같다: 증분 삼각측량, 조밀화 fast·max-levels 1·가시성 8뷰, 융합 평활 2회/1.5 GSD/15도, 표시 1/2(`SKYLENS_LIVE_STRIDE`, 기본 2), 구역 미리보기 끔, 밀린 위치 일괄 처리 끔(`SKYLENS_BACKLOG_BATCH` 기본 1; cumulus3d 0.11.0에서 1 초과면 표시 크기가 약 30배 줄어드는 알려진 버그), 구역 6/2 위치(`SKYLENS_ZONE_SPAN`/`SKYLENS_ZONE_OVERLAP`), 정착 0.02/구간 1(`SKYLENS_SETTLE_TOL`/`SKYLENS_SETTLE_MAX_ZONE`), 시드 1. 데모에서는 구역이 50~70초마다 나오고 내부값이 구역마다 1% 넘게 움직여 구역 0이 여러 번 다시 조밀화됐기 때문에(REPLACE 폭풍) V100 실행보다 구역을 작게, 정착을 빠르게 잡았다. 내부값 사전값(`--intrinsics-prior`)도 켠다: `SKYLENS_CAMERA_JSON`(안 주면 내장 DJI FC9589 1920x1080: fx 1505, fy 1510, cx 960, cy 540. theater30 자체 보정을 1920으로 환산한 값이고 촬영본 zip의 1329는 12% 낮다. 파일을 주면 그 값, 없는 파일이면 로그만 남기고 건너뜀)의 값을, 왜곡 0을 노드가 선언한 모든 카메라에 σ 0.02/0.01(`SKYLENS_INTRINSICS_SIGMA`, 상대 초점 σ. 데모 초점은 추정값이라 크게 믿지 않는다; 왜곡 σ는 `SKYLENS_INTRINSICS_DIST_SIGMA`)로 준다. 보낸 프레임 폭이 다르면(`SKYLENS_FRAME_WIDTH`) fx, fy, cx, cy를 폭/1920으로 키운다 |
 | 미리보기 좌표계 | (stable display를 끈 경우) 구간 0과, 정제본이 채택된 뒤의 미리보기만 GPS 정렬이다. 정렬되지 않은 미리보기는 내보내지 않고 정제본을 기다린다 |
 | 조밀화 | CUDA가 필요하다. `gpu = false`면 구간 모델의 희소 점을 대신 쓴다 |
 | 메시 GPU | `gpu-mesh` 기능을 켜고 빌드하면 `GpuMesher`, 아니면 CPU `SdfMesher` |
@@ -132,7 +133,7 @@ src/skylens_model/models/skylens/
 ├─ recon.rs      # cumulus3d 결과 → 점·카메라 뷰
 ├─ fusion.rs     # 탐지 투영과 프레임 간 융합 (순수 계산, 단위 테스트)
 ├─ chunks.rs     # 청크 인코딩, sequence, 재생 기록
-├─ slotstream.rs # live diff stream follower → 점 슬롯 청크 (시험은 src/test/tests/slots.rs에서도 돈다)
+├─ slotstream.rs # DisplayDelta → 점 슬롯 청크 (SlotEncoder) (시험은 src/test/tests/slots.rs에서도 돈다)
 ├─ jobs.rs       # 잡 실행, steps → 수준
 └─ sources.rs    # uri → 프레임 (폴더·이미지·ffmpeg)
 ```
@@ -331,3 +332,14 @@ gsplat의 데이터 로더는 `normalize=True`일 때 **카메라 집합으로�
 3DGS 재설계가 아니라 데이터 로더 한 곳을 고정하는 문제다. 구현 대기.
 
 ---
+
+## 기록된 스트림 재생 (GPU 없이)
+
+`examples/delta_replay.rs`는 cumulus3d가 파일로 남긴 live diff stream v4(`manifest.json` + `packs/e_NNNN.bin`)를 `Event::DisplayDelta`로 바꿔 엔진의 소비자에 넣는다(`Engine::inject_event`, 파서는 `replay.rs`). 점 슬롯 청크 생성과 메시 생성은 실제 라이브와 같은 경로를 타고, 코어는 평소처럼 `SubscribeChunks`로 받는다.
+
+```
+SKYLENS_REST_ADDR=0.0.0.0:8100 SKYLENS_GRPC_ADDR=0.0.0.0:8101 SKYLENS_WORK_DIR=/tmp/skylens-replay \
+cargo run --release -p skylens-model --example delta_replay -- --stream <manifest가 있는 폴더> [--speed 10] [--start-after 0] [--hold] [--check]
+```
+
+`--speed N`은 매니페스트 `t`/N 간격으로, `--start-after S`는 첫 사건 전에 S초 기다리고(대기 화면 확인용), `--hold`는 끝난 뒤에도 서버를 유지하며, `--check`는 파싱과 인코딩 시간만 잰다. 엔진 앵커는 스트림의 `origin_gps`다.

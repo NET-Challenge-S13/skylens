@@ -20,6 +20,7 @@
 
 use crate::camera::Projector;
 use crate::chunks::{ChunkStore, MeshEntry};
+use crate::live_slots::{Batch, LiveSlots};
 use anyrender::{PaintRef, PaintScene as _, ResourceId};
 use blitz_dom::Widget;
 use blitz_dom::node::ComputedStyles;
@@ -149,6 +150,8 @@ pub struct SegmentSync {
 pub struct PointClouds {
     clouds: BTreeMap<u64, PointCloud>,
     slots: Option<SlotCloud>,
+    /// The animated live layer (two slot scenes), when the screen drives one.
+    live: Option<LiveSlots>,
 }
 
 impl PointClouds {
@@ -178,6 +181,17 @@ impl PointClouds {
     pub fn clear(&mut self) {
         self.clouds.clear();
         self.slots = None;
+        self.live = None;
+    }
+
+    /// The animated live layer, created on first use. The screen feeds it batches and ticks it
+    /// once a frame; it is drawn with the other scenes. Background `bg` is what fades run to.
+    pub fn live(&mut self, bg: [u8; 3]) -> &mut LiveSlots {
+        self.live.get_or_insert_with(|| LiveSlots::new(bg))
+    }
+
+    pub fn live_ref(&self) -> Option<&LiveSlots> {
+        self.live.as_ref()
     }
 
     pub fn contains(&self, id: u64) -> bool {
@@ -207,7 +221,8 @@ impl PointClouds {
 
     /// Points on screen across visible clouds and the slot scene.
     pub fn points(&self) -> u64 {
-        let slots = self.slots.as_ref().filter(|s| s.visible).map_or(0, |s| s.scene.points());
+        let slots = self.slots.as_ref().filter(|s| s.visible).map_or(0, |s| s.scene.points())
+            + self.live.as_ref().map_or(0, LiveSlots::points);
         self.clouds.values().filter(|c| c.visible).map(|c| c.scene.points()).sum::<u64>() + slots
     }
 
@@ -344,11 +359,16 @@ impl PointClouds {
     }
 
     fn slot_draw_list(&self) -> (Vec<&SlotScene>, Vec<f32>) {
-        self.slots
+        let mut list: Vec<(&SlotScene, f32)> = self
+            .slots
             .iter()
             .filter(|s| s.visible && s.alpha > 0.0 && s.scene.points() > 0)
             .map(|s| (&s.scene, s.alpha))
-            .unzip()
+            .collect();
+        if let Some(live) = &self.live {
+            list.extend(live.scenes().into_iter().filter(|s| s.points() > 0).map(|s| (s, 1.0)));
+        }
+        list.into_iter().unzip()
     }
 }
 
@@ -395,6 +415,19 @@ impl Gpu3d {
     /// [`PointClouds::sync_segments`] with this device.
     pub fn sync_segments(&mut self, store: &ChunkStore, initial_alpha: f32) -> SegmentSync {
         self.clouds.sync_segments(&self.device, store, initial_alpha)
+    }
+
+    /// Feeds the animated live layer: `batch`, then this frame's animation step.
+    pub fn live_step(&mut self, bg: [u8; 3], reset: bool, batches: &[Batch], now_s: f64) {
+        let live = self.clouds.live(bg);
+        live.set_background(bg);
+        if reset {
+            live.reset();
+        }
+        for b in batches {
+            live.apply(b, now_s);
+        }
+        live.tick(&self.device, &self.queue, now_s);
     }
 
     /// [`PointClouds::sync_slots`] with this device.

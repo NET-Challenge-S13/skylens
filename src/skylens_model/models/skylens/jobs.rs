@@ -18,8 +18,9 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, anyhow, bail};
 use cumulus3d_cli::compose::{CompositionHost, FrameKey, FrameState, LiveFrameSet, ReconNode, ReconcilePolicy};
-use cumulus3d_cli::declare::{AlignFrame, Dense};
+use cumulus3d_cli::declare::{AlignFrame, Dense, Plan};
 use cumulus3d_cli::events::{Event, ZoneRange};
+use cumulus3d_cli::intrinsics::IntrinsicsPrior;
 use cumulus3d_core::io::ply::PointCloud;
 use cumulus3d_core::Reconstruction;
 use skylens_shared::proto::model::v1::{Gps as ProtoGps, Level, Source};
@@ -29,7 +30,7 @@ use super::frames::ANCHOR_RECORD;
 use super::fusion::{FrameObservation, View};
 use super::recon::{zone_points, zone_views};
 use super::sources;
-use super::EngineConfig;
+use super::{EngineConfig, SETTLE_MAX_ZONE, SETTLE_TOL};
 use crate::detect::Detector;
 
 /// `steps` at or above this produce the refined level; below, the preview.
@@ -49,9 +50,77 @@ pub struct JobOutput {
     pub cloud: Arc<PointCloud>,
 }
 
-/// Dense settings shared by the live node and jobs. Densification needs CUDA.
+/// Plan the live node and the jobs start from: cumulus3d's defaults, no densification until
+/// [`dense_for`] and no GPS file (the sets carry their GPS fixes). The settle parameters
+/// (`--settle-tol 0.01 --settle-max-zone 3`) are set with `NodeBuilder::settle`.
+///
+/// The intrinsics prior (`--intrinsics-prior`) is added to the live node by [`intrinsics_prior`].
+pub fn live_plan() -> Plan {
+    let mut plan = Plan::default();
+    plan.dense.enabled = false;
+    plan.gps = None;
+    // Live throughput of a node: feature lookahead 4, backlog batching off by default (SKYLENS_BACKLOG_BATCH=1).
+    plan.live = cumulus3d_cli::declare::Live::live_node();
+    plan
+}
+
+/// Focal-length sigma (relative) and distortion sigma (absolute) of the intrinsics prior of the
+/// V100 runs (`--intrinsics-prior` defaults). The live node's own defaults are looser (the demo
+/// focal is an estimate); see `SKYLENS_INTRINSICS_SIGMA`.
+pub const PRIOR_FOCAL_SIGMA: f64 = 0.005;
+pub const PRIOR_DIST_SIGMA: f64 = 0.01;
+
+/// Sentinel `camera_json` path meaning the built-in demo camera (`SKYLENS_CAMERA_JSON` unset).
+pub const BUILTIN_CAMERA: &str = "builtin:dji-fc9589";
+/// Built-in demo camera, DJI FC9589 1920x1080: theater30 self-calibration scaled to 1920 (the
+/// footage zip's camera.json estimate, 1329, is 12% low).
+pub const BUILTIN_CAMERA_JSON: &str =
+    r#"{"video_width":1920,"video_height":1080,"fx_estimate_px":1505,"fy_estimate_px":1510,"cx":960,"cy":540}"#;
+
+/// Intrinsics prior for every camera in `cameras` from the camera estimate in `path`
+/// (`data/demo/camera.json`: `fx_estimate_px`, `fy_estimate_px`, `cx`, `cy`, `video_width`; zero
+/// distortion). fx, fy, cx and cy are scaled by `frame_width / video_width` when the pushed frames
+/// have another width. `Ok(None)` when the file does not exist.
+pub fn intrinsics_prior(
+    path: &Path,
+    cameras: &[String],
+    frame_width: Option<u32>,
+    focal_sigma: f64,
+    dist_sigma: f64,
+) -> anyhow::Result<Option<IntrinsicsPrior>> {
+    let raw = match if path == Path::new(BUILTIN_CAMERA) { Ok(BUILTIN_CAMERA_JSON.as_bytes().to_vec()) } else { std::fs::read(path) } {
+        Ok(r) => r,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(anyhow::Error::new(e).context("read camera json")),
+    };
+    let v: serde_json::Value = serde_json::from_slice(&raw).context("parse camera json")?;
+    let num = |k: &str| v.get(k).and_then(serde_json::Value::as_f64).with_context(|| format!("camera json has no number {k:?}"));
+    let (fx, fy, cx, cy) = (num("fx_estimate_px")?, num("fy_estimate_px")?, num("cx")?, num("cy")?);
+    let scale = match (frame_width, v.get("video_width").and_then(serde_json::Value::as_f64)) {
+        (Some(w), Some(vw)) if vw > 0.0 => f64::from(w) / vw,
+        _ => 1.0,
+    };
+    let mut prior = IntrinsicsPrior::new().sigmas(focal_sigma, dist_sigma);
+    for c in cameras {
+        prior = prior.opencv(c.clone(), [fx * scale, fy * scale, cx * scale, cy * scale, 0.0, 0.0, 0.0, 0.0]);
+    }
+    Ok(Some(prior))
+}
+
+/// Dense settings shared by the live node and jobs, equal to the V100 live runs: `fast` profile,
+/// `--max-levels 1`, `--visibility-views 8`, `--fusion-smooth-iters 2 --fusion-smooth-radius 1.5
+/// --fusion-smooth-normal 15`; everything else is the profile default (views 10, 960 px, fusion min
+/// views 3). Densification needs CUDA.
 pub fn dense_for(gpu: bool) -> Option<Dense> {
-    gpu.then(|| Dense::profile("fast").fusion_min_views(2))
+    gpu.then(|| {
+        let mut d = Dense::profile("fast")
+            .max_levels(1)
+            .fusion_smooth_iters(2)
+            .fusion_smooth_radius(1.5)
+            .fusion_smooth_normal(15.0);
+        d.fusion.visibility_views = Some(8);
+        d
+    })
 }
 
 /// Runs one job node over `sources` in `dir` (created, left for the caller to remove).
@@ -80,6 +149,8 @@ pub fn run(
 
     let host = CompositionHost::new();
     let mut b = ReconNode::declare()
+        .plan(live_plan())
+        .settle(SETTLE_TOL, SETTLE_MAX_ZONE)
         .id("job")
         .images(&images)
         .cameras(input.cameras.clone())
@@ -220,6 +291,34 @@ pub fn write_cloud(path: &Path, out: &JobOutput) -> anyhow::Result<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const CAMERA_JSON: &str = r#"{"video_width":1920,"video_height":1080,"fx_estimate_px":1329,"fy_estimate_px":1329,"cx":960,"cy":540}"#;
+
+    fn camera_file(tag: &str) -> PathBuf {
+        let p = std::env::temp_dir().join(format!("skylens-camera-{tag}-{}.json", std::process::id()));
+        std::fs::write(&p, CAMERA_JSON).unwrap();
+        p
+    }
+
+    #[test]
+    fn the_intrinsics_prior_covers_every_camera_and_scales_with_the_frame_width() {
+        let path = camera_file("prior");
+        let cams: Vec<String> = ["left", "center", "right"].map(String::from).to_vec();
+        let p = intrinsics_prior(&path, &cams, None, PRIOR_FOCAL_SIGMA, PRIOR_DIST_SIGMA).unwrap().unwrap();
+        assert_eq!(p.named.keys().collect::<Vec<_>>(), ["center", "left", "right"]);
+        assert_eq!(p.named["left"], vec![1329.0, 1329.0, 960.0, 540.0, 0.0, 0.0, 0.0, 0.0]);
+        assert_eq!((p.focal_sigma, p.dist_sigma), (0.005, 0.01));
+        p.validate().unwrap();
+        let half = intrinsics_prior(&path, &cams, Some(960), PRIOR_FOCAL_SIGMA, PRIOR_DIST_SIGMA).unwrap().unwrap();
+        assert_eq!(half.named["center"][..4], [664.5, 664.5, 480.0, 270.0]);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn a_missing_camera_file_means_no_prior() {
+        let none = intrinsics_prior(Path::new("/nonexistent/camera.json"), &["left".into()], None, PRIOR_FOCAL_SIGMA, PRIOR_DIST_SIGMA);
+        assert!(none.unwrap().is_none());
+    }
 
     #[test]
     fn steps_map_to_levels_at_the_threshold() {

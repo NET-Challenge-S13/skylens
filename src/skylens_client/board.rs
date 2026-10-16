@@ -11,14 +11,19 @@
 //! decision 0052); a segment of the slot stream is the zone its slots belong to, read off the
 //! store's slot state the same way (samples, height range, box, point count).
 
+use crate::delta_log::{DeltaLog, LayerOp, SlotMeta};
 use crate::follow::{self, CorridorPath, DronePose, Framing, Interior};
+use crate::panels_live::LiveSettings;
 use crate::glam::DVec3;
+use crate::markers;
 use crate::points;
 use skylens_shared::proto::model::v1 as model;
 use skylens_shared::proto::payload::v1 as payload;
 use skylens_shared::proto::viewer::v1 as viewer;
 use skylens_viewer::camera::CameraSync;
 use skylens_viewer::{ChunkStore, SiteFrame};
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 /// Samples kept per segment for heights, framing and the corridor analysis.
@@ -30,6 +35,16 @@ pub const FIT_SAMPLES_PER_SEGMENT: usize = 400;
 /// Second half of a [`SegmentInfo`] key read off the slot stream (the first half is the zone's
 /// stamp); point chunk keys count chunks and never get this high.
 const SLOT_KEY: usize = usize::MAX;
+
+/// Slot messages kept for the live log while they wait for a gap to fill.
+const MAX_PENDING_SLOT_MESSAGES: usize = 128;
+
+/// Which view drains the live log's ops (each keeps its own cursor).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LiveView {
+    Main,
+    Inset,
+}
 
 /// A drone the pipeline reported (telemetry only; the board simulates nothing).
 #[derive(Debug, Clone, PartialEq)]
@@ -92,6 +107,15 @@ pub struct Board {
     pub point_layer_on: bool,
     /// Seconds since the board started (marker pulse).
     pub time: f64,
+    /// The live point stream as events: timeline rows, seek, undo (the point layers drain it).
+    pub live: DeltaLog,
+    /// The controls bar's choices (point size, colour mode, speed, fit), written by the panels.
+    pub settings: Rc<RefCell<LiveSettings>>,
+    /// Slot messages seen but not yet applied by the store: seq -> (zone, message).
+    pending_slots: BTreeMap<u32, (u32, SlotMeta, Vec<u8>)>,
+    /// Stream id the live log follows.
+    live_stream: u32,
+    cursors: [Option<u64>; 2],
 }
 
 impl Board {
@@ -120,12 +144,21 @@ impl Board {
             first_progress: None,
             point_layer_on,
             time: 0.0,
+            live: DeltaLog::new(),
+            settings: Rc::new(RefCell::new(LiveSettings::default())),
+            pending_slots: BTreeMap::new(),
+            live_stream: 0,
+            cursors: [None, None],
         }
     }
 
     /// The link reconnected: the core replays what it holds.
     pub fn reconnected(&mut self) {
         self.store.clear();
+        self.live.reset();
+        self.pending_slots.clear();
+        self.live_stream = 0;
+        self.cursors = [None, None];
         self.local_chunks = 0;
         self.local_detections = 0;
         self.geometry_failed = false;
@@ -167,8 +200,15 @@ impl Board {
     /// Applies a reconstruction chunk. Terrain and buildings are the tower's base map and never
     /// shown here.
     pub fn chunk(&mut self, chunk: &model::Chunk) -> skylens_viewer::Applied {
+        self.note_slot_message(chunk);
         let applied = self.store.apply(chunk);
         use skylens_viewer::Change as C;
+        if let C::SlotsApplied { seqs, .. } = &applied.change {
+            self.feed_live(seqs);
+        } else if chunk.kind() == model::ChunkKind::PointSlots && !matches!(applied.change, C::SlotsHeld { .. }) {
+            // Stale, invalid or from an older stream: never applied, so never logged.
+            self.pending_slots.remove(&chunk.version);
+        }
         match (&applied.change, chunk.kind()) {
             (C::Invalid(_), model::ChunkKind::Points | model::ChunkKind::MeshBlock | model::ChunkKind::PointSlots) => {
                 self.geometry_failed = true
@@ -183,6 +223,54 @@ impl Board {
             _ => {}
         }
         applied
+    }
+
+    /// Keeps a slot message until the store has applied it (it may be held behind a gap), and
+    /// starts a new live run when the stream id grows.
+    fn note_slot_message(&mut self, chunk: &model::Chunk) {
+        if chunk.kind() != model::ChunkKind::PointSlots {
+            return;
+        }
+        let Ok(h) = skylens_viewer::pointblitz::io::slots::validate(&chunk.payload) else { return };
+        if chunk.generation < self.live_stream {
+            return;
+        }
+        if chunk.generation > self.live_stream {
+            self.live_stream = chunk.generation;
+            self.pending_slots.clear();
+            self.live.reset();
+            self.cursors = [None, None];
+        }
+        if self.pending_slots.len() >= MAX_PENDING_SLOT_MESSAGES {
+            self.pending_slots.clear();
+        }
+        self.pending_slots.insert(h.seq, (chunk.segment, SlotMeta { kind: chunk.slot_kind, t_ms: chunk.slot_t_ms }, chunk.payload.clone()));
+    }
+
+    /// Logs the messages the store applied, in order, with the board clock.
+    fn feed_live(&mut self, seqs: &[u32]) {
+        let t_ms = skylens_viewer::now_ms();
+        for seq in seqs {
+            if let Some((zone, meta, msg)) = self.pending_slots.remove(seq) {
+                self.live.push_meta(self.live_stream, zone, &msg, t_ms, meta);
+            }
+        }
+    }
+
+    /// What a point layer must do since it last asked (see [`DeltaLog::ops_since`]).
+    pub fn live_ops(&mut self, who: LiveView) -> Vec<LayerOp> {
+        let i = who as usize;
+        let ops = self.live.ops_since(&mut self.cursors[i]);
+        // A layer without a cursor starts from the present state, so it needs no old ops.
+        if let Some(low) = self.cursors.iter().flatten().min().copied() {
+            self.live.trim_ops(low);
+        }
+        ops
+    }
+
+    /// The layer lost its GPU state: it starts over from the present on its next ask.
+    pub fn live_ops_reset(&mut self, who: LiveView) {
+        self.cursors[who as usize] = None;
     }
 
     /// Whether any reconstruction has arrived.
@@ -322,15 +410,15 @@ impl Board {
         out.into_iter().collect()
     }
 
-    /// Height range of the points on screen: union of the segments' 1..99 % ranges, at least
+    /// Height range of the points on screen: robust 2..98 % of all samples, at least
     /// 0.5 m tall (legacy `recomputeRange`).
     pub fn height_range(&self) -> Option<(f64, f64)> {
-        let (lo, hi) = self
-            .segments
-            .values()
-            .filter_map(|i| i.range)
-            .fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), (l, h)| (a.min(l), b.max(h)));
-        (lo.is_finite() && hi.is_finite()).then(|| (lo, hi.max(lo + 0.5)))
+        let all: Vec<DVec3> = self.segments.values().flat_map(|i| i.samples.iter().copied()).collect();
+        let n = all.len().div_ceil(points::MAX_BOUNDS_SAMPLES).max(1);
+        let mut z: Vec<f64> = all.iter().step_by(n).map(|p| p.z).filter(|v| v.is_finite()).collect();
+        z.sort_by(f64::total_cmp);
+        let (lo, hi) = (points::quantile(&z, 0.02)?, points::quantile(&z, 0.98)?);
+        Some((lo, hi.max(lo + 0.5)))
     }
 
     /// Box of every segment's core (the point panel's framing), or None.
@@ -383,6 +471,20 @@ impl Board {
                 Some((d.id.clone(), self.detection_pos(d)?, person))
             })
             .collect()
+    }
+
+    /// Markers to draw: [`Self::markers`] with same-kind detections within 3 m merged.
+    pub fn marker_view(&self) -> Vec<(String, DVec3, bool)> {
+        let sightings: Vec<markers::Sighting> = self
+            .store
+            .detections()
+            .filter(|d| self.revealed.contains(&d.id) && self.segment_final(d.segment))
+            .filter_map(|d| {
+                let person = d.category() == payload::DetectionCategory::Person;
+                Some((d.id.clone(), self.detection_pos(d)?, person, d.confidence))
+            })
+            .collect();
+        markers::dedupe(&sightings)
     }
 
     /// The next detection for the camera: shown and not yet confirmed (legacy candidate rule).
@@ -563,6 +665,60 @@ mod tests {
         let before = b.segments.clone();
         b.refresh();
         assert_eq!(b.segments, before);
+    }
+
+    #[test]
+    fn slot_chunks_feed_the_live_log_in_order_and_start_a_new_run_on_a_new_stream() {
+        let mut b = board();
+        let in_stream = |mut c: model::Chunk, stream: u32| {
+            c.generation = stream;
+            c
+        };
+        // Seq 2 first: the store holds it behind the gap, the log gets both once seq 1 lands.
+        b.chunk(&in_stream(slots_chunk(2, 10, &[1], 5), 5));
+        assert_eq!(b.live.len(), 0);
+        b.chunk(&in_stream(slots_chunk(1, 0, &[0], 10), 5));
+        assert_eq!((b.live.len(), b.live.applied(), b.live.run_id()), (2, 2, Some(5)));
+        let e = b.live.entries();
+        assert_eq!((e[0].seq, e[0].zone, e[0].n_add), (1, 0, 10));
+        assert_eq!((e[1].seq, e[1].zone, e[1].total_points), (2, 1, 15));
+        // A repeat is not logged twice.
+        b.chunk(&in_stream(slots_chunk(2, 10, &[1], 5), 5));
+        assert_eq!(b.live.len(), 2);
+        // The layers drain the log through their own cursors.
+        let ops = b.live_ops(LiveView::Main);
+        assert_eq!(ops.len(), 2);
+        assert!(b.live_ops(LiveView::Main).is_empty());
+        // A newer stream (a new model run) empties the log and tells the layer to reset.
+        b.chunk(&in_stream(slots_chunk(1, 0, &[0], 3), 6));
+        assert_eq!((b.live.len(), b.live.run_id(), b.live.table().len()), (1, Some(6), 3));
+        assert!(matches!(b.live_ops(LiveView::Main)[0], crate::delta_log::LayerOp::Reset));
+        // An older stream is dropped.
+        b.chunk(&in_stream(slots_chunk(2, 3, &[0], 3), 5));
+        assert_eq!(b.live.len(), 1);
+        // A reconnect: the core replays from the start.
+        b.reconnected();
+        assert_eq!(b.live.len(), 0);
+        b.chunk(&in_stream(slots_chunk(1, 0, &[0], 4), 6));
+        assert_eq!(b.live.len(), 1);
+    }
+
+    #[test]
+    fn the_chunk_fields_set_the_row_kind_and_clock() {
+        let mut b = board();
+        let mut c = slots_chunk(1, 0, &[0], 5);
+        c.slot_kind = 1;
+        c.slot_t_ms = 1500;
+        b.chunk(&c);
+        let header = crate::pointblitz::io::slots::SlotHeader { seq: 2, n_add: 0, n_move: 0, n_remove: 0, capacity: 5 };
+        let mut f = model::Chunk { sequence: 2, version: 2, generation: 1, payload: crate::pointblitz::io::slots::encode(&header, &[]).unwrap(), ..c.clone() };
+        f.slot_kind = 3;
+        f.slot_t_ms = 9000;
+        b.chunk(&f);
+        let e = b.live.entries();
+        assert_eq!((e[0].kind, e[0].t_ms), (crate::delta_log::Kind::Refined, 1500.0));
+        assert_eq!((e[1].kind, e[1].t_ms), (crate::delta_log::Kind::Final, 9000.0));
+        assert!(b.live.is_final());
     }
 
     #[test]

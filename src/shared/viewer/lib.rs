@@ -12,6 +12,7 @@
 //! - [`site`]: the operating area from the core; `Site.anchor` is the ENU origin.
 //! - [`chunks`]: chunk replacement rules and per-kind access.
 //! - [`camera`]: camera controllers ported from the legacy three.js viewers, and screen projection.
+//! - [`live_slots`]: the animated live point layer (fade and glide) on two pointblitz slot scenes.
 //! - [`view3d`]: the Blitz custom widget that owns the GPU and draws a frame with pointblitz.
 //! - [`config`]: legacy tuning constants and colours.
 
@@ -21,6 +22,7 @@ pub mod chunks;
 pub mod config;
 pub mod dom;
 pub mod link;
+pub mod live_slots;
 pub mod protocol;
 pub mod shell;
 pub mod site;
@@ -35,6 +37,7 @@ pub use {anyrender, glam, peniko, pointblitz, skylens_shared, wgpu};
 pub use camera::{Pose, Projector};
 pub use chunks::{Applied, Change, ChunkStore, SlotPoints, ZoneSlots};
 pub use dom::{Dom, Sel, q};
+pub use live_slots::LiveSlots;
 pub use link::{CoreLink, LinkEvent, LinkStatus};
 pub use shell::{Page, PollCx, ScreenApp, ScreenDocument, UiInput, WindowOptions};
 pub use site::SiteFrame;

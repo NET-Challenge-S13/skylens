@@ -5,7 +5,8 @@
 //! everything delivered obliquely from the south-east and widens as segments arrive, until the
 //! operator drags or zooms inside the panel; a double click hands the framing back.
 
-use crate::board::{Board, FIT_SAMPLES_PER_SEGMENT};
+use crate::board::{Board, FIT_SAMPLES_PER_SEGMENT, LiveView};
+use crate::live_layer::{LiveLayer, Paint};
 use crate::glam::DVec3;
 use crate::pointblitz::core::{FrameStyle, PointSize};
 use crate::points;
@@ -19,6 +20,7 @@ use std::rc::Rc;
 
 pub const FOV_DEG: f64 = 45.0;
 const BACKGROUND: u32 = 0x06090e;
+const BACKGROUND_RGB: [u8; 3] = [0x06, 0x09, 0x0e];
 
 /// Camera basis (right, up, forward) looking from `eye` at `target`, z up.
 fn basis(eye: DVec3, target: DVec3) -> (DVec3, DVec3, DVec3) {
@@ -99,12 +101,13 @@ pub struct InsetScene {
     auto: bool,
     /// Jump (not ease) to the next framing: nothing was framed yet.
     snap: bool,
-    fit_key: Option<(DVec3, DVec3, u64, i64)>,
+    fit_key: Option<(DVec3, DVec3, i64)>,
     fit: Option<Fit>,
     near: f64,
     uploaded: BTreeMap<u32, Uploaded>,
     css_height: f64,
     point_size: Option<f32>,
+    layer: LiveLayer,
 }
 
 impl InsetScene {
@@ -122,6 +125,7 @@ impl InsetScene {
             uploaded: BTreeMap::new(),
             css_height: 1.0,
             point_size: None,
+            layer: LiveLayer::new(LiveView::Inset),
         }
     }
 
@@ -131,8 +135,10 @@ impl InsetScene {
         self.snap = true;
     }
 
-    fn sync_clouds(&mut self, gpu: &mut Gpu3d, board: &Board) {
+    fn sync_clouds(&mut self, gpu: &mut Gpu3d, board: &mut Board, now_s: f64) {
         let Some(range) = board.height_range() else { return };
+        // The slot stream: the same live layer as the main view, always coloured by height.
+        self.layer.pump(gpu, board, Paint::Height(range.0, range.1), BACKGROUND_RGB, now_s);
         for (seg, pts) in board.store.segments() {
             let id = segment_cloud(seg);
             let payloads = pts.payloads();
@@ -163,17 +169,19 @@ impl InsetScene {
                 self.uploaded.remove(&s);
             }
         }
-        // The slot stream: recoloured message by message; a new range rebuilds it.
-        let key = range.0.to_bits().rotate_left(17) ^ range.1.to_bits();
-        let (device, queue) = (&gpu.device, &gpu.queue);
-        gpu.clouds.sync_slots_with(device, queue, &board.store, key, |m| points::recolor_slots_by_height(m, range.0, range.1));
     }
 
     fn desired(&mut self, board: &Board, aspect: f64) -> Option<Pose> {
         let (bmin, bmax) = board.points_box()?;
         // Refit only when what is shown or the panel's shape changes.
-        let key = (bmin, bmax, board.total_points(), (aspect * 1000.0).round() as i64);
-        if self.fit_key != Some(key) {
+        // Only a box that really grew (or a reshaped panel) refits: a point count that changes
+        // with every event must not pump the zoom.
+        let key = (bmin, bmax, (aspect * 1000.0).round() as i64);
+        let grew = self.fit_key.is_none_or(|(lo, hi, a)| {
+            let span = (hi - lo).max_element().max(1.0);
+            a != key.2 || (bmin.cmplt(lo - DVec3::splat(span * 0.1)).any()) || (bmax.cmpgt(hi + DVec3::splat(span * 0.1)).any())
+        });
+        if grew {
             let samples = board.fit_samples(FIT_SAMPLES_PER_SEGMENT);
             self.fit = fit(&samples, bmin, bmax, FOV_DEG, aspect);
             self.fit_key = Some(key);
@@ -189,13 +197,17 @@ impl InsetScene {
 impl ViewScreen for InsetScene {
     fn gpu_lost(&mut self) {
         self.uploaded.clear();
+        let board = self.board.clone();
+        if let Ok(mut b) = board.try_borrow_mut() {
+            self.layer.lost(&mut b);
+        }
     }
 
     fn frame(&mut self, gpu: &mut Gpu3d, info: &FrameInfo) -> FrameSpec {
         self.css_height = info.css_height();
         let board_rc = self.board.clone();
-        let board = board_rc.borrow();
-        self.sync_clouds(gpu, &board);
+        let mut board = board_rc.borrow_mut();
+        self.sync_clouds(gpu, &mut board, info.now_ms / 1000.0);
 
         let aspect = info.css_width() / info.css_height().max(1.0);
         if self.auto
@@ -210,10 +222,10 @@ impl ViewScreen for InsetScene {
         }
         self.orbit.update(info.dt);
 
-        let size = board.point_size_m;
+        let size = board.settings.borrow().point_size * info.scale as f32;
         let point_size = (self.point_size != Some(size)).then(|| {
             self.point_size = Some(size);
-            PointSize::Metres(size)
+            PointSize::Pixels(size)
         });
         FrameSpec {
             camera: self.orbit.pose().camera(FOV_DEG, self.near),
