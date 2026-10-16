@@ -299,12 +299,15 @@ async fn start_all(
             Some(base) => paths::tcp_publish_url(base, drone),
             None => paths::srt_publish_url(&srt_addr, drone),
         };
-        let argv = paths::publisher_args(file, &url);
-        children.push(procs::spawn(spec(plan, &name, &tag, &plan.ffmpeg, argv, vec![]), events.clone()).map_err(fail)?);
+        let argv = paths::publisher_args(file, &url, !o.no_loop);
+        let mut publisher = spec(plan, &name, &tag, &plan.ffmpeg, argv, vec![]);
+        // A clip that plays once ends on its own; that is not a failure.
+        publisher.critical = !o.no_loop;
+        children.push(procs::spawn(publisher, events.clone()).map_err(fail)?);
         starts[i] = Instant::now();
     }
     settle(Duration::from_millis(1500), rx).await?;
-    log("launch", "영상 송출 3개 시작 (drone1=left, drone2=center, drone3=right, 반복 재생)");
+    log("launch", &format!("영상 송출 3개 시작 (drone1=left, drone2=center, drone3=right, {})", if o.no_loop { "한 번만 재생" } else { "반복 재생" }));
 
     // ---- model server ----
     if remote {
@@ -354,7 +357,7 @@ async fn start_all(
 
     // ---- drones and the control watcher ----
     let flight = match &s.track {
-        Some(track) => sim::Flight::Recorded { track: track.clone(), starts, ground_alt: s.ground_alt },
+        Some(track) => sim::Flight::Recorded { track: track.clone(), starts, ground_alt: s.ground_alt, looped: !o.no_loop },
         None => sim::Flight::Synthetic,
     };
     tasks.push(task("drone", events, sim::run_drones(core.clone(), o.follow_route, flight)));
