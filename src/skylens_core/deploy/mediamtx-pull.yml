@@ -15,7 +15,13 @@ api: no
 metrics: no
 pprof: no
 playback: no
-rtsp: no
+# RTSP on loopback only, so the bridge can pull the video through the SSH tunnel
+# (its key carries permitopen 127.0.0.1:8554) and re-send it as WebRTC on the
+# operator LAN. That detour exists because the WebRTC media below is UDP and does
+# not cross the VPN and KOREN boundary: the signalling answers and the screens
+# still show NO SIGNAL. Nothing outside this host can reach 8554.
+rtsp: yes
+rtspAddress: 127.0.0.1:8554
 rtmp: no
 hls: no
 moq: no

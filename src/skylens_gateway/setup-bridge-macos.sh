@@ -42,6 +42,10 @@ REDIRECT_TO_HTTPS=yes
 TOWER_PORT=8090
 TOWER_TLS_PORT=8091
 TOWER_ALLOW="127.0.0.1 10.9.8.0/24 10.9.9.0/24"
+VIDEO_MODE=ingest
+WHEP_SOURCE=local
+WHEP_PORT=10889
+WEBRTC_HOSTS=
 WEB_DIR=/opt/skylens/web
 DAEJEON_HOST=116.89.187.181
 DAEJEON_PORT=26022
@@ -67,6 +71,7 @@ fi
 BASE=/opt/skylens
 TUNNEL_PORT=20889
 PROXY_TUNNEL_PORT=20882
+RTSP_TUNNEL_PORT=20554
 TUNNEL_KEY="$BASE/tunnel/tunnel_key"
 LOGS="$BASE/logs"
 TLS_DIR="$BASE/tls"
@@ -91,7 +96,7 @@ mkdir -p "$BASE/mediamtx" "$BASE/tunnel" "$LOGS"
 chown "$RUN_USER" "$BASE/mediamtx" "$BASE/tunnel" "$LOGS"
 
 # ---------- 1. the tunnel to Daejeon ----------
-step "대전 터널 (로컬 :$TUNNEL_PORT → $DAEJEON_HOST:10889, 로컬 :$PROXY_TUNNEL_PORT → :8082)"
+step "대전 터널 (로컬 :$TUNNEL_PORT → :10889, :$PROXY_TUNNEL_PORT → :8082, :$RTSP_TUNNEL_PORT → :8554)"
 if [ ! -f "$TUNNEL_KEY" ]; then
   as_user ssh-keygen -q -t ed25519 -N '' -C 'bridge-tunnel@skylens' -f "$TUNNEL_KEY"
   ok "터널 키 생성: $TUNNEL_KEY"
@@ -120,6 +125,7 @@ cat > /Library/LaunchDaemons/com.skylens.daejeon-tunnel.plist <<PLIST
     <string>-o</string><string>BatchMode=yes</string>
     <string>-L</string><string>127.0.0.1:$TUNNEL_PORT:127.0.0.1:10889</string>
     <string>-L</string><string>127.0.0.1:$PROXY_TUNNEL_PORT:127.0.0.1:8082</string>
+    <string>-L</string><string>127.0.0.1:$RTSP_TUNNEL_PORT:127.0.0.1:8554</string>
     <string>-p</string><string>$DAEJEON_PORT</string>
     <string>$DAEJEON_USER@$DAEJEON_HOST</string>
   </array>
@@ -183,6 +189,14 @@ NGINX_ETC="$PREFIX/etc/nginx"
 mkdir -p "$NGINX_ETC/servers"
 # A redirect to the default TLS port must not carry :443 in the URL.
 if [ "$HTTPS_PORT" = 443 ]; then HTTPS_SUFFIX=""; else HTTPS_SUFFIX=":$HTTPS_PORT"; fi
+# Where /live/ sends the WHEP exchange: this host's MediaMTX, or the Daejeon one
+# through the tunnel. Local is the default, because Daejeon's UDP media does not
+# cross the VPN boundary.
+case "$WHEP_SOURCE" in
+  local)  WHEP_UPSTREAM="127.0.0.1:$WHEP_PORT" ;;
+  tunnel) WHEP_UPSTREAM="127.0.0.1:$TUNNEL_PORT" ;;
+  *) echo "WHEP_SOURCE 은 local 또는 tunnel" >&2; exit 1 ;;
+esac
 if [ "$REDIRECT_TO_HTTPS" = no ]; then
   HTTPS_REDIRECT="# redirect off (REDIRECT_TO_HTTPS=no)"
   TOWER_REDIRECT="# redirect off (REDIRECT_TO_HTTPS=no)"
@@ -200,6 +214,7 @@ sed -e "s/__HTTP_PORT__/$HTTP_PORT/g" -e "s|__WEB_DIR__|$WEB_DIR|g" \
   -e "s|__HTTPS_REDIRECT__|$HTTPS_REDIRECT|g" \
   -e "s/__TOWER_PORT__/$TOWER_PORT/g" -e "s/__TOWER_TLS_PORT__/$TOWER_TLS_PORT/g" \
   -e "s|__TOWER_ACL__|$TOWER_ACL|g" -e "s|__TOWER_REDIRECT__|$TOWER_REDIRECT|g" \
+  -e "s|__WHEP_UPSTREAM__|$WHEP_UPSTREAM|g" \
   nginx-skylens.conf > "$NGINX_ETC/servers/skylens.conf"
 grep -qE '^\s*include\s+servers/\*;' "$NGINX_ETC/nginx.conf" \
   || warn "nginx.conf 에 'include servers/*;' 가 없습니다 — http { } 블록 안에 추가해야 합니다"
@@ -248,8 +263,26 @@ if [ ! -x "$BASE/mediamtx/mediamtx" ] || [ "$(cat "$BASE/mediamtx/VERSION" 2>/de
 else
   ok "바이너리 있음"
 fi
+case "$VIDEO_MODE" in
+  ingest) MTX_CONF=mediamtx-bridge.yml ;;
+  relay)  MTX_CONF=mediamtx-bridge-relay.yml ;;
+  *) echo "VIDEO_MODE 은 ingest 또는 relay" >&2; exit 1 ;;
+esac
+if [ -n "$WEBRTC_HOSTS" ]; then
+  HOSTS="$WEBRTC_HOSTS"
+else
+  HOSTS=""
+  TICK="'"          # the YAML list wants each host quoted
+  for ip in $(ifconfig 2>/dev/null | awk '/inet /{print $2}'); do
+    [ "$ip" = 127.0.0.1 ] && continue
+    HOSTS="${HOSTS:+$HOSTS,}$TICK$ip$TICK"
+  done
+fi
 sed -e "s/__PUBLISH_PASS__/$PUBLISH_PASS/g" -e "s/__SRT_PORT__/$SRT_PORT/g" \
-  mediamtx-bridge.yml > "$BASE/mediamtx/mediamtx.yml"
+  -e "s/__WHEP_PORT__/$WHEP_PORT/g" -e "s/__RTSP_TUNNEL_PORT__/$RTSP_TUNNEL_PORT/g" \
+  -e "s|__WEBRTC_HOSTS__|$HOSTS|g" \
+  "$MTX_CONF" > "$BASE/mediamtx/mediamtx.yml"
+ok "$MTX_CONF, WebRTC 후보 $HOSTS"
 chmod 0640 "$BASE/mediamtx/mediamtx.yml"
 chown -R "$RUN_USER" "$BASE/mediamtx"
 

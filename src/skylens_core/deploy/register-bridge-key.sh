@@ -1,13 +1,18 @@
 #!/usr/bin/env bash
 # Register the bridge (175) tunnel public key on the Daejeon ubuntu account.
 #
-# The bridge uses this key to open two forwards and nothing else:
+# The bridge uses this key to open three forwards and nothing else:
 #   local 20889 -> Daejeon 10889 (WHEP)
 #   local 20882 -> Daejeon 8082  (the proxy, board /viewer and uplink /uplink)
+#   local 20554 -> Daejeon 8554  (RTSP, so the bridge can pull the video and
+#                                 re-send it as WebRTC on the operator LAN;
+#                                 the UDP media from Daejeon does not cross the
+#                                 VPN boundary)
 # The key carries command="/bin/false" plus restrict and two permitopen entries,
 # so it cannot run a command, get a shell, forward another port, or reach the
 # agent or X11.
-# An already registered key whose options are stale (no 8082) gets its line redone.
+# An already registered key whose options are stale (no 8082, no 8554) gets its
+# line redone.
 # Order: run this first, then setup-bridge.sh on the bridge. The other way round,
 # the refused permitopen drops the whole SSH connection and WHEP (10889) with it.
 #
@@ -31,7 +36,7 @@ KEYBODY="$(printf '%s' "$KEY" | awk '{print $2}')"
 
 # restrict alone does not block command execution (checked), so command= makes the
 # session useless. autossh runs with -N, so the forced command never runs anyway.
-OPTS='command="/bin/false",restrict,port-forwarding,permitopen="127.0.0.1:10889",permitopen="127.0.0.1:8082"'
+OPTS='command="/bin/false",restrict,port-forwarding,permitopen="127.0.0.1:10889",permitopen="127.0.0.1:8082",permitopen="127.0.0.1:8554"'
 
 CUR="$(grep -F "$KEYBODY" "$AK" || true)"
 if [ -n "$CUR" ]; then
@@ -52,4 +57,4 @@ printf '%s %s\n' "$OPTS" "$KEY" >> "$AK"
 echo "등록 완료:"
 tail -1 "$AK" | cut -c1-140
 echo
-echo "브리지에서 확인: ./check-bridge.sh  →  127.0.0.1:20889 · 127.0.0.1:20882 열림이 떠야 함"
+echo "브리지에서 확인: ./check-bridge.sh  →  127.0.0.1:20889 · 20882 · 20554 열림이 떠야 함"

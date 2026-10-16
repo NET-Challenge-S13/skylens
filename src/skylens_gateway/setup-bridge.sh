@@ -34,6 +34,10 @@ REDIRECT_TO_HTTPS=yes
 TOWER_PORT=8090
 TOWER_TLS_PORT=8091
 TOWER_ALLOW="127.0.0.1 10.9.8.0/24 10.9.9.0/24"
+VIDEO_MODE=ingest
+WHEP_SOURCE=local
+WHEP_PORT=10889
+WEBRTC_HOSTS=
 DAEJEON_HOST=116.89.187.181
 DAEJEON_PORT=26022
 DAEJEON_USER=ubuntu
@@ -57,6 +61,7 @@ fi
 TUNNEL_USER=skytunnel
 TUNNEL_PORT=20889
 PROXY_TUNNEL_PORT=20882
+RTSP_TUNNEL_PORT=20554
 TUNNEL_DIR=/etc/skylens
 TUNNEL_KEY="$TUNNEL_DIR/tunnel_key"
 TLS_DIR=/etc/skylens/tls
@@ -76,7 +81,7 @@ apt-get install -y -qq nginx curl ca-certificates autossh openssh-client >/dev/n
 ok "nginx, curl, autossh"
 
 # ---------- 1. the tunnel to Daejeon ----------
-step "대전 터널 ($TUNNEL_USER: 로컬 :$TUNNEL_PORT → $DAEJEON_HOST:10889, 로컬 :$PROXY_TUNNEL_PORT → :8082)"
+step "대전 터널 ($TUNNEL_USER: 로컬 :$TUNNEL_PORT → :10889, :$PROXY_TUNNEL_PORT → :8082, :$RTSP_TUNNEL_PORT → :8554)"
 id "$TUNNEL_USER" >/dev/null 2>&1 || useradd -r -M -s /usr/sbin/nologin "$TUNNEL_USER"
 install -d -m 0750 -o "$TUNNEL_USER" -g "$TUNNEL_USER" "$TUNNEL_DIR"
 if [ ! -f "$TUNNEL_KEY" ]; then
@@ -107,6 +112,7 @@ ExecStart=/usr/bin/autossh -M 0 -N \\
   -o BatchMode=yes \\
   -L 127.0.0.1:$TUNNEL_PORT:127.0.0.1:10889 \\
   -L 127.0.0.1:$PROXY_TUNNEL_PORT:127.0.0.1:8082 \\
+  -L 127.0.0.1:$RTSP_TUNNEL_PORT:127.0.0.1:8554 \\
   -p $DAEJEON_PORT $DAEJEON_USER@$DAEJEON_HOST
 Restart=always
 RestartSec=10
@@ -160,6 +166,14 @@ fi
 step "nginx (:$HTTP_PORT, TLS :$HTTPS_PORT)"
 # A redirect to the default TLS port must not carry :443 in the URL.
 if [ "$HTTPS_PORT" = 443 ]; then HTTPS_SUFFIX=""; else HTTPS_SUFFIX=":$HTTPS_PORT"; fi
+# Where /live/ sends the WHEP exchange: this host's MediaMTX, or the Daejeon one
+# through the tunnel. Local is the default, because Daejeon's UDP media does not
+# cross the VPN boundary.
+case "$WHEP_SOURCE" in
+  local)  WHEP_UPSTREAM="127.0.0.1:$WHEP_PORT" ;;
+  tunnel) WHEP_UPSTREAM="127.0.0.1:$TUNNEL_PORT" ;;
+  *) echo "WHEP_SOURCE 은 local 또는 tunnel" >&2; exit 1 ;;
+esac
 if [ "$REDIRECT_TO_HTTPS" = no ]; then
   HTTPS_REDIRECT="# redirect off (REDIRECT_TO_HTTPS=no)"
   TOWER_REDIRECT="# redirect off (REDIRECT_TO_HTTPS=no)"
@@ -177,6 +191,7 @@ sed -e "s/__HTTP_PORT__/$HTTP_PORT/g" -e "s|__WEB_DIR__|$WEB_DIR|g" \
     -e "s|__HTTPS_REDIRECT__|$HTTPS_REDIRECT|g" \
     -e "s/__TOWER_PORT__/$TOWER_PORT/g" -e "s/__TOWER_TLS_PORT__/$TOWER_TLS_PORT/g" \
     -e "s|__TOWER_ACL__|$TOWER_ACL|g" -e "s|__TOWER_REDIRECT__|$TOWER_REDIRECT|g" \
+    -e "s|__WHEP_UPSTREAM__|$WHEP_UPSTREAM|g" \
     nginx-skylens.conf > /etc/nginx/sites-available/skylens
 ln -sf /etc/nginx/sites-available/skylens /etc/nginx/sites-enabled/skylens
 if [ -L /etc/nginx/sites-enabled/default ] && \
@@ -191,7 +206,7 @@ systemctl reload nginx
 ok "nginx 활성"
 
 # ---------- 3. MediaMTX (SRT ingest) ----------
-step "MediaMTX $MEDIAMTX_VERSION (SRT :$SRT_PORT)"
+step "MediaMTX $MEDIAMTX_VERSION (SRT :$SRT_PORT, WHEP :$WHEP_PORT, $VIDEO_MODE)"
 mkdir -p /opt/mediamtx
 # The bridge host is a Raspberry Pi 5 (arm64). A hardcoded amd64 download
 # succeeds and only fails to execute, which takes a long time to track down.
@@ -214,8 +229,31 @@ if [ ! -x /opt/mediamtx/mediamtx ] || [ "$(cat /opt/mediamtx/VERSION 2>/dev/null
 else
   ok "바이너리 있음 (linux_$MARCH)"
 fi
+# ingest: the drones publish here and Daejeon pulls it.
+# relay:  Daejeon holds the video and this host pulls it over the tunnel as
+#         RTSP, because Daejeon's UDP media does not cross the VPN boundary.
+case "$VIDEO_MODE" in
+  ingest) MTX_CONF=mediamtx-bridge.yml ;;
+  relay)  MTX_CONF=mediamtx-bridge-relay.yml ;;
+  *) echo "VIDEO_MODE 은 ingest 또는 relay" >&2; exit 1 ;;
+esac
+# ICE candidates have to be addresses the viewers can reach, so default to this
+# host's own IPv4 addresses.
+if [ -n "$WEBRTC_HOSTS" ]; then
+  HOSTS="$WEBRTC_HOSTS"
+else
+  HOSTS=""
+  TICK="'"          # the YAML list wants each host quoted
+  for ip in $(hostname -I 2>/dev/null); do
+    case "$ip" in *:*|127.*) continue ;; esac
+    HOSTS="${HOSTS:+$HOSTS,}$TICK$ip$TICK"
+  done
+fi
 sed -e "s/__PUBLISH_PASS__/$PUBLISH_PASS/g" -e "s/__SRT_PORT__/$SRT_PORT/g" \
-  mediamtx-bridge.yml > /opt/mediamtx/mediamtx.yml
+  -e "s/__WHEP_PORT__/$WHEP_PORT/g" -e "s/__RTSP_TUNNEL_PORT__/$RTSP_TUNNEL_PORT/g" \
+  -e "s|__WEBRTC_HOSTS__|$HOSTS|g" \
+  "$MTX_CONF" > /opt/mediamtx/mediamtx.yml
+ok "$MTX_CONF, WebRTC 후보 $HOSTS"
 chmod 0640 /opt/mediamtx/mediamtx.yml
 id mediamtx >/dev/null 2>&1 || useradd -r -s /usr/sbin/nologin mediamtx
 chown -R mediamtx:mediamtx /opt/mediamtx
@@ -267,7 +305,7 @@ cat <<SUMMARY
                      WebGPU 가 보안 컨텍스트에서만 열려서 HTTPS 로 띄웁니다.
                      자체 서명 인증서라 브라우저 경고를 한 번 넘겨야 합니다.
                      http:// 로 들어오면 이 주소로 넘깁니다.
- 라이브 주소       : http://$PUB_IP:$HTTP_PORT/live/drone1/whep   (drone1~3)
+ 라이브 영상       : /live/drone1/whep  (drone1~3) · WHEP 출처 $WHEP_SOURCE · 영상 모드 $VIDEO_MODE
  관제탑            : https://$(hostname -I | awk '{print $1}'):$TOWER_TLS_PORT/   (랜·VPN 전용)
                      평문은 :$TOWER_PORT 이고 같은 주소로 넘깁니다.
                      허용 범위: $TOWER_ALLOW
