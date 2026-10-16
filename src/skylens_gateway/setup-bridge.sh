@@ -36,7 +36,11 @@ if [ -f bridge.env ]; then
   . ./bridge.env
 fi
 if [ -z "$PUBLISH_PASS" ]; then
-  PUBLISH_PASS="$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 20)"
+  # head 를 뒤에 두면(`tr ... | head -c 20`) head 가 20바이트에서 먼저 끝나 tr 이 SIGPIPE 로
+  # 죽고, set -o pipefail + set -e 때문에 스크립트가 아무 말도 없이 141 로 멈춘다.
+  # 그래서 읽는 양을 head 로 먼저 자르고 그 뒤에 걸러낸다.
+  PUBLISH_PASS="$(LC_ALL=C head -c 512 /dev/urandom | LC_ALL=C tr -dc 'A-Za-z0-9' | cut -c1-20)"
+  [ ${#PUBLISH_PASS} -eq 20 ] || { echo "비밀번호 생성 실패 (${#PUBLISH_PASS}자)" >&2; exit 1; }
   GENERATED_PASS=1
 else
   GENERATED_PASS=0
