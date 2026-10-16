@@ -3,7 +3,7 @@
 offer 를 만들어 <url>/whep 에 POST 하고, answer 로 연결한 뒤
 몇 초간 비디오 프레임이 실제로 도착하는지 센다.
 
-사용: python whep_probe.py http://127.0.0.1:10889/drone [seconds]
+사용: python whep_probe.py http://127.0.0.1:10889/drone1 [seconds]
 """
 
 import asyncio
@@ -65,6 +65,6 @@ async def main(base: str, seconds: float) -> int:
 
 
 if __name__ == "__main__":
-    url = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:10889/drone"
+    url = sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:10889/drone1"
     secs = float(sys.argv[2]) if len(sys.argv) > 2 else 5
     sys.exit(asyncio.run(main(url, secs)))

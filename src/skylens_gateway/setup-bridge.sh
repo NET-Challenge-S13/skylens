@@ -186,9 +186,9 @@ cat <<SUMMARY
  브리지 설치 완료
 ============================================================
  공인 IP           : $PUB_IP
- 현황판 주소      : http://$PUB_IP:$HTTP_PORT/   (파일은 $WEB_DIR)
- 라이브 주소       : http://$PUB_IP:$HTTP_PORT/live/drone
- SRT 수신          : srt://$PUB_IP:$SRT_PORT?streamid=publish:drone:drone:<PASS>
+ 현황판 주소       : http://$PUB_IP:$HTTP_PORT/   (파일은 $WEB_DIR)
+ 라이브 주소       : http://$PUB_IP:$HTTP_PORT/live/drone1/whep   (drone1~3)
+ SRT 수신          : srt://$PUB_IP:$SRT_PORT?streamid=publish:drone1:drone:<PASS>
  SRT publish 비번  : $PUBLISH_PASS$([ "$GENERATED_PASS" = 1 ] && printf '   (자동 생성 — bridge.env 에 적어두세요)')
 
  공유기 뒤라면 포트포워딩 (두 개):

@@ -73,9 +73,9 @@ KOREN은 등록 IP 외 인바운드를 막고, 브리지 → 대전은 SSH 하�
 
 | 파일 | 하는 일 |
 |---|---|
-| `nginx-skylens.conf` | `/` 현황판 웹, `/live/` WHEP 시그널링(터널 경유), `/healthz` |
-| `mediamtx-bridge.yml` | 드론 SRT 수신 :10890 |
-| `setup-bridge.sh` · `check-bridge.sh` · `bridge.env.example` | 설치·점검·설정 |
+| `nginx-skylens.conf` | `/` 현황판 웹(정적 파일, wasm MIME 지정), `/viewer`·`/uplink` WebSocket(터널 20882 → 대전 프록시), `/live/{path}/whep` WHEP(터널 20889), `/healthz`(터널 생존) · `/health`(자신) |
+| `mediamtx-bridge.yml` | 드론 SRT 수신 :10890. 경로는 코어가 정한 `drone1`~`drone3` |
+| `setup-bridge.sh` · `check-bridge.sh` · `bridge.env.example` | 설치·점검·설정. 지금 호스트는 맥미니라 `setup-bridge-macos.sh`·`check-bridge-macos.sh`를 쓴다(같은 설정 파일, launchd·Homebrew) |
 
 ### 3.3 `skylens_proxy` (nginx · 대전)
 
@@ -218,7 +218,7 @@ pointblitz는 서버에서 헤드리스로 그려 영상으로 보내는 모드�
 |---|---|---:|---|
 | `skylens_core` | 대전 | 8080 | `ws /uplink`(드론) · `ws /control`(관제탑, 제어 가능) · `ws /viewer`(현황판, 읽기 전용) · `GET /site` · `GET /vworld/*`(키를 서버에서 붙이는 VWorld 프록시) · `GET /health` · 관제탑 웹 |
 | `skylens_proxy` | 대전 | 8082 | 코어로 넘김 · `GET /health` · `GET /core/health` |
-| `skylens_gateway` | 브리지 | 80 | `/` 현황판 웹 · `/live/` WHEP · `/healthz` |
+| `skylens_gateway` | 브리지 | 80 | `/` 현황판 웹 · `ws /viewer`·`ws /uplink`(터널 → 프록시) · `/live/` WHEP · `/healthz` · `/health` |
 | `skylens_gateway` MediaMTX | 브리지 | 10890/udp | 드론 SRT 수신 |
 | `skylens_core` MediaMTX | 대전 | 10889 · 10189/udp | WHEP 시그널링 · WebRTC 미디어 |
 | `skylens_drone` | 현장 PC | 8091 | `/health` · `/missions` · `/formation` · `/cloud/*` |
