@@ -25,8 +25,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! SIFT 처리 시간 측정: `cargo run --release -p cumulus3d-features --example bench_sift -- <영상|synthetic> [W H]`
-//! W H 를 주면 그 크기로 재표본화한 뒤 측정한다.
+//! SIFT timing: `cargo run --release -p cumulus3d-features --example bench_sift -- <image|synthetic> [W H]`
+//! If W H is given, the image is resampled to that size before measuring.
 
 use cumulus3d_features::*;
 use std::time::Instant;

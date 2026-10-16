@@ -29,10 +29,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 조밀화 장면: 왜곡 보정된 모델 + 영상 → 뷰(K·자세·회색/컬러 영상)와 희소점(관측 뷰 목록).
+//! Densification scene: undistorted model + images → views (K, pose, gray/color image) and sparse points (list of observing views).
 //!
-//! 픽셀 규약: 장면 안에서는 정수 픽셀 인덱스가 곧 픽셀 중심 좌표다. 입력 모델(좌상단 화소 중심 = (0.5, 0.5))의
-//! 주점에서 0.5 를 빼서 옮긴다.
+//! Pixel convention: inside a scene, an integer pixel index is the pixel center coordinate. The input model (top-left pixel center = (0.5,
+//! 0.5))
+//! is shifted by subtracting 0.5 from the principal point.
 
 use crate::image::ImageBuffer;
 use cumulus3d_core::{CameraModelKind, Error, ImageId, Reconstruction, Result};
@@ -40,10 +41,10 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::Path;
 use std::sync::Arc;
 
-/// 장면 구성 옵션.
+/// Scene construction options.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SceneOptions {
-    /// 긴 변 상한(≤ 0 이면 그대로). 줄일 때만 적용한다.
+    /// Upper bound on the long side (unchanged if ≤ 0). Applied only when shrinking.
     pub max_image_size: i64,
 }
 
@@ -53,31 +54,31 @@ impl Default for SceneOptions {
     }
 }
 
-/// 조밀화 뷰 하나.
+/// One densification view.
 #[derive(Clone, Debug)]
 pub struct DenseView {
-    /// 모델의 영상 id.
+    /// Image id in the model.
     pub image_id: ImageId,
-    /// 영상 이름(상대 경로).
+    /// Image name (relative path).
     pub name: String,
-    /// 너비(픽셀).
+    /// Width (pixels).
     pub width: usize,
-    /// 높이(픽셀).
+    /// Height (pixels).
     pub height: usize,
-    /// fx, fy, cx, cy (정수 중심 규약).
+    /// fx, fy, cx, cy (integer-center convention).
     pub k: [f64; 4],
-    /// 세계 → 카메라 회전(행 우선)과 이동.
+    /// World → camera rotation (row-major) and translation.
     pub r: [[f64; 3]; 3],
-    /// 세계 → 카메라 이동.
+    /// World → camera translation.
     pub t: [f64; 3],
-    /// 회색 8비트(0.2126R + 0.7152G + 0.0722B 반올림).
+    /// 8-bit gray (0.2126R + 0.7152G + 0.0722B, rounded).
     pub gray: Arc<Vec<u8>>,
-    /// 컬러(융합 색).
+    /// Color (fusion color).
     pub color: Arc<ImageBuffer>,
 }
 
 impl DenseView {
-    /// 카메라 중심(세계).
+    /// Camera center (world).
     pub fn center(&self) -> [f64; 3] {
         let (r, t) = (&self.r, &self.t);
         [
@@ -86,7 +87,7 @@ impl DenseView {
             -(r[0][2] * t[0] + r[1][2] * t[1] + r[2][2] * t[2]),
         ]
     }
-    /// 세계 점 → 카메라 좌표.
+    /// World point → camera coordinates.
     pub fn to_cam(&self, x: &[f64; 3]) -> [f64; 3] {
         let r = &self.r;
         [
@@ -95,7 +96,7 @@ impl DenseView {
             r[2][0] * x[0] + r[2][1] * x[1] + r[2][2] * x[2] + self.t[2],
         ]
     }
-    /// 카메라 좌표 → 세계.
+    /// Camera coordinates → world.
     pub fn to_world(&self, c: &[f64; 3]) -> [f64; 3] {
         let r = &self.r;
         let d = [c[0] - self.t[0], c[1] - self.t[1], c[2] - self.t[2]];
@@ -105,7 +106,7 @@ impl DenseView {
             r[0][2] * d[0] + r[1][2] * d[1] + r[2][2] * d[2],
         ]
     }
-    /// 카메라 방향 벡터 → 세계 방향.
+    /// Camera direction vector → world direction.
     pub fn dir_to_world(&self, n: &[f64; 3]) -> [f64; 3] {
         let r = &self.r;
         [
@@ -114,20 +115,20 @@ impl DenseView {
             r[0][2] * n[0] + r[1][2] * n[1] + r[2][2] * n[2],
         ]
     }
-    /// 세계 방향 벡터 → 카메라 방향.
+    /// World direction vector → camera direction.
     pub fn dir_to_cam(&self, d: &[f64; 3]) -> [f64; 3] {
         let r = &self.r;
         [0, 1, 2].map(|i| r[i][0] * d[0] + r[i][1] * d[1] + r[i][2] * d[2])
     }
-    /// 카메라 좌표 → 픽셀 (x, y, 깊이).
+    /// Camera coordinates → pixel (x, y, depth).
     pub fn project_cam(&self, c: &[f64; 3]) -> (f64, f64, f64) {
         (self.k[0] * c[0] / c[2] + self.k[2], self.k[1] * c[1] / c[2] + self.k[3], c[2])
     }
-    /// 정규 광선 K⁻¹[x, y, 1].
+    /// Normalized ray K⁻¹[x, y, 1].
     pub fn ray(&self, x: f64, y: f64) -> [f64; 3] {
         [(x - self.k[2]) / self.k[0], (y - self.k[3]) / self.k[1], 1.0]
     }
-    /// 자세·내부 매개변수·크기 해시(깊이맵 캐시 열쇠).
+    /// Hash of pose, intrinsics and size (depth map cache key).
     pub fn geometry_hash(&self) -> u64 {
         let mut b = Vec::with_capacity(160);
         b.extend_from_slice(self.name.as_bytes());
@@ -140,25 +141,25 @@ impl DenseView {
     }
 }
 
-/// 희소점 하나(세계 좌표와 관측 뷰 색인; 같은 뷰가 두 번 나올 수 있다).
+/// One sparse point (world coordinates and observing view indices; the same view may appear twice).
 #[derive(Clone, Debug)]
 pub struct ScenePoint {
-    /// 세계 좌표.
+    /// World coordinates.
     pub xyz: [f64; 3],
-    /// 관측 뷰 색인.
+    /// Observing view indices.
     pub views: Vec<u32>,
 }
 
-/// 조밀화 장면.
+/// Densification scene.
 #[derive(Clone, Debug, Default)]
 pub struct DenseScene {
-    /// 뷰(등록 영상 순서).
+    /// Views (in registered image order).
     pub views: Vec<DenseView>,
-    /// 희소점.
+    /// Sparse points.
     pub points: Vec<ScenePoint>,
 }
 
-/// RGB → 회색 8비트.
+/// RGB → 8-bit gray.
 pub fn gray_of(img: &ImageBuffer) -> Vec<u8> {
     let n = img.width * img.height;
     if img.channels < 3 {
@@ -173,7 +174,7 @@ pub fn gray_of(img: &ImageBuffer) -> Vec<u8> {
 }
 
 impl DenseScene {
-    /// 등록 영상 순서로 뷰를 만든다. `images` 에 없는 영상은 빠진다. 카메라는 왜곡 없는 핀홀이어야 한다.
+    /// Builds the views in registered image order. Images not in `images` are dropped. Cameras must be distortion-free pinhole.
     pub fn from_reconstruction(rec: &Reconstruction, images: &BTreeMap<ImageId, Arc<ImageBuffer>>, opts: &SceneOptions) -> Result<Self> {
         let mut views = Vec::new();
         let mut index: HashMap<ImageId, u32> = HashMap::new();
@@ -231,7 +232,7 @@ impl DenseScene {
         Ok(Self { views, points })
     }
 
-    /// 왜곡 보정 작업 폴더(`sparse/`, `images/`)에서 읽는다.
+    /// Reads from the undistortion working folder (`sparse/`, `images/`).
     pub fn from_workspace_dir(dir: impl AsRef<Path>, opts: &SceneOptions) -> Result<Self> {
         let dir = dir.as_ref();
         let rec = cumulus3d_core::interop::read_model(dir.join("sparse"))?;

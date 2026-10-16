@@ -29,9 +29,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// 다중 가설 뷰 선택 PatchMatch 커널(적·흑 반쪽 단계, 단일 가설 평가, 최종 판독).
-// 규칙은 cumulus3d-dense 의 kernel 모듈 문서와 같다. 컴파일 상수:
-//   WR (창 반경), WSTEP (표본 간격), HW_INTERP (1 = 텍스처 하드웨어 쌍선형, 0 = 소프트웨어 쌍선형)
+// Multi-hypothesis view-selection PatchMatch kernels (red-black half step, single-hypothesis evaluation, final readout).
+// The rules are the same as in the kernel module docs of cumulus3d-dense. Compile-time constants:
+//   WR (window radius), WSTEP (sample spacing), HW_INTERP (1 = texture hardware bilinear, 0 = software bilinear)
 
 typedef unsigned long long u64;
 typedef unsigned char u8;
@@ -43,7 +43,7 @@ typedef unsigned char u8;
 #define TILE_W (2 * BX + 2 * WR + 1)
 #define TILE_H (BY + 2 * WR)
 #define INF_ERR 1e30f
-// 창 표본이 적으면 픽셀별 양방향 가중치를 공유 메모리에 한 번 계산해 둔다.
+// When there are few window samples, compute the per-pixel bilateral weights once into shared memory.
 #define SHW (WN * WN <= 36)
 #ifndef MIN_BLOCKS
 #define MIN_BLOCKS 3
@@ -63,7 +63,7 @@ struct PairRec {
     float c[3];
 };
 
-// 스케일별 상대 기하의 호모그래피 상수부: A = K_j R K⁻¹, b = K_j t.
+// Homography constant part of the per-scale relative geometry: A = K_j R K⁻¹, b = K_j t.
 struct LevelPair {
     float A[9];
     float b[3];
@@ -108,7 +108,7 @@ struct KParams {
     const LevelPair* lpairs;
 };
 
-// ---------------------------------------------------------------- 난수
+// ---------------------------------------------------------------- Random numbers
 __device__ __forceinline__ u64 mix64(u64 z) {
     z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
     z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
@@ -124,7 +124,7 @@ __device__ __forceinline__ u64 rng_state(u64 seed, u64 key, int level, int run, 
     return mix64(seed ^ mix64(key ^ mix64(tag)) ^ pixel);
 }
 
-// ---------------------------------------------------------------- 벡터
+// ---------------------------------------------------------------- Vectors
 __device__ __forceinline__ float dot3(float3 a, float3 b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
 __device__ __forceinline__ float3 cross3(float3 a, float3 b) { return make_float3(a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x); }
 __device__ __forceinline__ float3 nrm3(float3 a) {
@@ -132,7 +132,7 @@ __device__ __forceinline__ float3 nrm3(float3 a) {
     return make_float3(a.x * l, a.y * l, a.z * l);
 }
 
-// ---------------------------------------------------------------- 기준 영상 접근
+// ---------------------------------------------------------------- Reference image access
 struct RefGlobal {
     const u8* p;
     int pitch, w, h;
@@ -165,7 +165,7 @@ struct RefTile {
     static constexpr bool cached = SHW;
 };
 
-// 원천 영상 표본(정수 중심 규약, 밖은 0).
+// Source image sample (integer-center convention, 0 outside).
 __device__ __forceinline__ float src_sample(const KParams& P, const LevelDesc& L, float u, float v) {
 #if HW_INTERP
     return tex2D<float>((cudaTextureObject_t)L.tex, u + 0.5f, v + 0.5f);
@@ -191,7 +191,7 @@ __device__ __forceinline__ float src_sample(const KParams& P, const LevelDesc& L
 #endif
 }
 
-// 기준 패치 통계.
+// Reference patch statistics.
 struct RefStats {
     float ic, W, mu, var;
 };
@@ -222,7 +222,7 @@ __device__ RefStats ref_stats(const KParams& P, const REF& ref, int x, int y) {
     return s;
 }
 
-// 평면 유도 호모그래피 H = K_j (R + t nᵀ/δ) K⁻¹ = A + b (nᵀK⁻¹)/δ.
+// Plane-induced homography H = K_j (R + t nᵀ/δ) K⁻¹ = A + b (nᵀK⁻¹)/δ.
 __device__ __forceinline__ bool homography(const LevelDesc& R, const LevelPair& L, float x, float y, float d, float3 n, float* H) {
     float ifx = 1.0f / R.fx, ify = 1.0f / R.fy;
     float3 ray = make_float3((x - R.cx) * ifx, (y - R.cy) * ify, 1.0f);
@@ -241,7 +241,7 @@ __device__ __forceinline__ bool homography(const LevelDesc& R, const LevelPair& 
     return true;
 }
 
-// 비용 1 − ρ (양방향 가중 NCC). 실패는 2.
+// Cost 1 − ρ (bilateral-weighted NCC). 2 on failure.
 template <class REF>
 __device__ float ncc_cost(const KParams& P, const REF& ref, const RefStats& rs, const LevelDesc& S, const float* H, int x, int y) {
     float fx = (float)x, fy = (float)y;
@@ -289,7 +289,7 @@ __device__ float ncc_cost(const KParams& P, const REF& ref, const RefStats& rs, 
     return fminf(fmaxf(c, 0.0f), 2.0f);
 }
 
-// 순·역 재투영 오차(실패는 INF_ERR).
+// Forward/backward reprojection error (INF_ERR on failure).
 __device__ float geo_error(const KParams& P, const LevelDesc& R, const LevelDesc& S, const PairRec& pr, int x, int y, float d) {
     long long off = P.snap_off[pr.src];
     if (off < 0) return INF_ERR;
@@ -313,7 +313,7 @@ __device__ float geo_error(const KParams& P, const LevelDesc& R, const LevelDesc
     return sqrtf(cx * cx + cy * cy);
 }
 
-// 가설 하나 × 원천 하나의 (광도 비용, 절단 기하 오차).
+// (Photometric cost, truncated geometric error) of one hypothesis × one source.
 template <class REF>
 __device__ __forceinline__ float pair_cost(const KParams& P, const REF& ref, const RefStats& rs, const LevelDesc& R, const LevelDesc& S, const PairRec& pr, const LevelPair& lp, int x, int y, float4 h, float* geo) {
     float H[9];
@@ -323,7 +323,7 @@ __device__ __forceinline__ float pair_cost(const KParams& P, const REF& ref, con
     return c;
 }
 
-// 상위 K 평균(기하 실행이면 m + λ·Δe).
+// Top-K mean (m + λ·Δe for a geometric run).
 template <class REF>
 __device__ float topk_cost(const KParams& P, const REF& ref, const RefStats& rs, const LevelDesc& R, const PairRec* prs, const LevelPair* lps, int nsrc, int x, int y, float4 h) {
     float b0 = 1e30f, b1 = 1e30f, b2 = 1e30f;
@@ -344,7 +344,7 @@ __device__ float topk_cost(const KParams& P, const REF& ref, const RefStats& rs,
     return k > 0 ? s / (float)k : 2.0f;
 }
 
-// 무작위 법선(구면 균등, 카메라 쪽).
+// Random normal (uniform on the sphere, toward the camera).
 __device__ float3 random_normal(u64& st, float3 ray) {
     float3 n = make_float3(0.f, 0.f, -1.f);
     for (int k = 0; k < 64; ++k) {
@@ -385,7 +385,7 @@ __device__ float3 perturb_normal(u64& st, float3 n, float3 ray, float phi) {
 
 __device__ __forceinline__ float3 pixel_ray(const LevelDesc& R, int x, int y) { return make_float3((x - R.cx) / R.fx, (y - R.cy) / R.fy, 1.0f); }
 
-// 사전확률(삼각측량·입사각·해상도).
+// Priors (triangulation, incidence angle, resolution).
 __device__ float view_prior(const KParams& P, const LevelDesc& R, const PairRec& pr, const float* H, bool hok, int x, int y, float4 h) {
     if (!hok) return 0.f;
     float3 ray = pixel_ray(R, x, y);
@@ -421,11 +421,11 @@ __device__ float view_prior(const KParams& P, const LevelDesc& R, const PairRec&
     return tri * inc * res;
 }
 
-// 영역 오프셋(위 방향 기준; 나머지는 90° 회전).
+// Region offsets (for the up direction; the others are 90° rotations).
 __constant__ int V_OFF[7][2] = {{0, -1}, {-1, -2}, {1, -2}, {-2, -3}, {2, -3}, {-3, -4}, {3, -4}};
 
 __device__ __forceinline__ void rot_dir(int dir, int dx, int dy, int& ox, int& oy) {
-    // 위 → 오른쪽 → 아래 → 왼쪽: (dx,dy) → (−dy, dx)
+    // up → right → down → left: (dx,dy) → (−dy, dx)
     ox = dx;
     oy = dy;
     for (int k = 0; k < dir; ++k) {
@@ -435,7 +435,7 @@ __device__ __forceinline__ void rot_dir(int dir, int dx, int dy, int& ox, int& o
     }
 }
 
-// ================================================================ 반쪽 단계
+// ================================================================ Half step
 extern "C" __global__ void __launch_bounds__(BX * BY, MIN_BLOCKS) pm_half(KParams P) {
     __shared__ float tile[TILE_W * TILE_H];
     __shared__ float wsh[SHW ? WN * WN * BX * BY : 1];
@@ -443,7 +443,7 @@ extern "C" __global__ void __launch_bounds__(BX * BY, MIN_BLOCKS) pm_half(KParam
     const LevelDesc R = P.lv[bi.view * P.nlevels + P.level];
     const int w = bi.w, h = bi.h;
     const int x0 = blockIdx.x * (2 * BX) - WR, y0 = blockIdx.y * BY - WR;
-    if (x0 + WR >= w || y0 + WR >= h) return;  // 블록 전체가 밖
+    if (x0 + WR >= w || y0 + WR >= h) return;  // the whole block is outside
     RefGlobal g;
     g.p = P.img + R.off;
     g.pitch = R.pitch;
@@ -474,7 +474,7 @@ extern "C" __global__ void __launch_bounds__(BX * BY, MIN_BLOCKS) pm_half(KParam
     float* co = P.cost + base;
     const float3 ray = pixel_ray(R, x, y);
 
-    // 1. 후보: 현재 + 영역 8개.
+    // 1. Candidates: current + 8 regions.
     float4 hyp[9];
     hyp[0] = pl[pix];
     for (int r = 0; r < 8; ++r) {
@@ -510,7 +510,7 @@ extern "C" __global__ void __launch_bounds__(BX * BY, MIN_BLOCKS) pm_half(KParam
         }
     }
 
-    // 2. 뷰 순회: 투표·가중·집계.
+    // 2. View traversal: voting, weighting, aggregation.
     RefStats rs = ref_stats(P, ref, x, y);
     const int vprev = P.bview[base + pix];
     float num[9];
@@ -519,7 +519,7 @@ extern "C" __global__ void __launch_bounds__(BX * BY, MIN_BLOCKS) pm_half(KParam
     float den = 0.f, wbest = 0.f;
     int vbest = 255;
     float wv[MAXSRC];
-    // 대체 집계(가중 합이 0 일 때): 사전확률 가중 평균. 재계산 없이 같은 순회에서 모은다.
+    // Fallback aggregation (when the weight sum is 0): prior-weighted average. Collected in the same traversal without recomputation.
     float numf[9];
 #pragma unroll
     for (int i = 0; i < 9; ++i) numf[i] = 0.f;
@@ -533,7 +533,7 @@ extern "C" __global__ void __launch_bounds__(BX * BY, MIN_BLOCKS) pm_half(KParam
             float H[9];
             bool ok = homography(R, lps[j], (float)x, (float)y, hyp[0].w, make_float3(hyp[0].x, hyp[0].y, hyp[0].z), H);
             prior = view_prior(P, R, pr, H, ok, x, y, hyp[0]);
-            // 사전확률이 0 인 뷰는 가중치도 0 이라 비용을 계산하지 않는다(상위 K 대체 경로는 따로 전부 계산).
+            // A view with prior 0 also has weight 0, so its cost is not computed (the top-K fallback path computes everything separately).
             wv[j] = 0.f;
             if (!(prior > 0.f)) continue;
             m[0] = ok ? ncc_cost(P, ref, rs, S, H, x, y) : 2.f;
@@ -584,7 +584,7 @@ extern "C" __global__ void __launch_bounds__(BX * BY, MIN_BLOCKS) pm_half(KParam
         for (int i = 0; i < 9; ++i) agg[i] = numf[i] / denf;
         for (int i = 1; i < 9; ++i)
             if (agg[i] < agg[bi9]) bi9 = i;
-        // 정제도 같은 가중(사전확률)으로 비교한다.
+        // Refinement is also compared with the same weights (priors).
         for (int j = 0; j < nsrc; ++j) wv[j] = -wv[j];
         den = denf;
     } else {
@@ -593,7 +593,7 @@ extern "C" __global__ void __launch_bounds__(BX * BY, MIN_BLOCKS) pm_half(KParam
     float4 best = hyp[bi9];
     float bcost = agg[bi9];
 
-    // 3. 정제 6가설.
+    // 3. Refinement, 6 hypotheses.
     u64 st = rng_state(P.seed, vd.key, P.level, P.run_id, P.t, P.color, (u64)pix);
     float d_r = random_depth(st, vd.dmin, vd.dmax);
     float3 n_r = random_normal(st, ray);
@@ -626,7 +626,7 @@ extern "C" __global__ void __launch_bounds__(BX * BY, MIN_BLOCKS) pm_half(KParam
             best = cand[c];
         }
     }
-    // 4. 무늬 약한 픽셀: 거친 스케일 가설을 후보로만 추가.
+    // 4. Weak-texture pixel: add the coarse-scale hypothesis only as a candidate.
     if (P.use_prior && rs.var < P.weak_var) {
         float4 q = P.prior[base + pix];
         if (q.w > 0.f && dot3(make_float3(q.x, q.y, q.z), ray) < 0.f) {
@@ -656,8 +656,8 @@ extern "C" __global__ void __launch_bounds__(BX * BY, MIN_BLOCKS) pm_half(KParam
     P.bview[base + pix] = (u8)vbest;
 }
 
-// ================================================================ 초기화·평가(전체 픽셀)
-// mode 0: 비용만 평가해 cost 에 기록. mode 1: 실행 시작(무작위 초기화 선택 + 비용 + 최중요 뷰 비움).
+// ================================================================ Initialization and evaluation (all pixels)
+// mode 0: evaluate cost only and record it in cost. mode 1: run start (random initialization selection + cost + clear most important view).
 extern "C" __global__ void __launch_bounds__(BX * BY, MIN_BLOCKS) pm_eval(KParams P, int mode) {
     const BatchItem bi = P.batch[blockIdx.z];
     const int x = blockIdx.x * BX + threadIdx.x, y = blockIdx.y * BY + threadIdx.y;
@@ -691,7 +691,7 @@ extern "C" __global__ void __launch_bounds__(BX * BY, MIN_BLOCKS) pm_eval(KParam
     if (mode == 1) P.bview[base + pix] = 255;
 }
 
-// ================================================================ 최종 판독
+// ================================================================ Final readout
 extern "C" __global__ void __launch_bounds__(BX * BY, MIN_BLOCKS) pm_filter(KParams P) {
     const BatchItem bi = P.batch[blockIdx.z];
     const int x = blockIdx.x * BX + threadIdx.x, y = blockIdx.y * BY + threadIdx.y;
@@ -736,8 +736,8 @@ extern "C" __global__ void __launch_bounds__(BX * BY, MIN_BLOCKS) pm_filter(KPar
     P.count[base + pix] = (u8)min(count, 255);
 }
 
-// ================================================================ 스케일 사이 상향 표본(결합 양방향)
-// 입력: prior 버퍼의 저해상 평면(항목별 시작 = batch.pad), 출력: plane 버퍼.
+// ================================================================ Upsampling between scales (joint bilateral)
+// Input: low-res planes in the prior buffer (per-item start = batch.pad), output: plane buffer.
 extern "C" __global__ void __launch_bounds__(BX * BY) pm_upsample(KParams P, float inv2s, float inv2c) {
     const BatchItem bi = P.batch[blockIdx.z];
     const int x = blockIdx.x * BX + threadIdx.x, y = blockIdx.y * BY + threadIdx.y;
@@ -800,8 +800,8 @@ extern "C" __global__ void __launch_bounds__(BX * BY) pm_upsample(KParams P, flo
     P.plane[bi.off + y * bi.w + x] = out;
 }
 
-// ================================================================ 5×5 중앙값 평면 필터
-// 입력: prior 버퍼(항목별 시작 = batch.off), 출력: plane 버퍼.
+// ================================================================ 5×5 median plane filter
+// Input: prior buffer (per-item start = batch.off), output: plane buffer.
 extern "C" __global__ void __launch_bounds__(BX * BY) pm_median(KParams P) {
     const BatchItem bi = P.batch[blockIdx.z];
     const int x = blockIdx.x * BX + threadIdx.x, y = blockIdx.y * BY + threadIdx.y;
@@ -827,7 +827,7 @@ extern "C" __global__ void __launch_bounds__(BX * BY) pm_median(KParams P) {
             if (!(den < -1e-6f)) continue;
             float d = q.w * dot3(n, pixel_ray(R, qx, qy)) / den;
             if (!(d > 0.f) || !isfinite(d)) continue;
-            // 삽입 정렬(깊이, 같으면 색인).
+            // Insertion sort (depth, then index on ties).
             int qi = qy * w + qx;
             int k = c++;
             while (k > 0 && (ds[k - 1] > d || (ds[k - 1] == d && qs[k - 1] > qi))) {

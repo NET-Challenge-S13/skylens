@@ -29,27 +29,27 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 기술자 무차별 매칭.
+//! Brute-force descriptor matching.
 //!
-//! 정수 내적 d = Σ a_k b_k (u8×u8→u32) 를 블록 GEMM 처럼 계산하고, 행·열별 top-2 를
-//! 타일 안에서 바로 축약한다(내적 행렬 전체를 저장하지 않음). 거리 = arccos(min(d/512², 1)).
+//! Computes the integer dot product d = Σ a_k b_k (u8×u8->u32) like a block GEMM, and reduces the per-row and per-column top-2
+//! directly inside each tile (the full dot-product matrix is not stored). Distance = arccos(min(d/512², 1)).
 
 use cumulus3d_core::{Descriptors, FeatureMatch, DESCRIPTOR_DIM};
 use rayon::prelude::*;
 
-/// 512² — 정규화 기술자 노름의 제곱.
+/// 512² - the squared norm of a normalized descriptor.
 pub const DOT_NORM: f32 = 262144.0;
 
-/// SIFT 기술자 매칭 옵션.
+/// SIFT descriptor matching options.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DescriptorMatchOptions {
-    /// 최근접/차근접 각 거리 비율 상한(Lowe 비율 검사).
+    /// Upper bound on the nearest/second-nearest angular distance ratio (Lowe ratio test).
     pub max_ratio: f64,
-    /// 최근접 각 거리 상한(라디안).
+    /// Upper bound on the nearest angular distance (radians).
     pub max_distance: f64,
-    /// 교차 검사(양방향 최근접 일치) 사용 여부.
+    /// Whether to use the cross-check (mutual nearest-neighbor agreement).
     pub cross_check: bool,
-    /// 경계 규칙: GPU(θ1 < max_dist && θ1 < r θ2) 또는 CPU 무차별(θ1 ≤ max_dist && θ1 < r θ2).
+    /// Boundary rule: GPU (θ1 < max_dist && θ1 < r θ2) or CPU brute-force (θ1 ≤ max_dist && θ1 < r θ2).
     pub rule: AcceptRule,
 }
 
@@ -59,25 +59,25 @@ impl Default for DescriptorMatchOptions {
     }
 }
 
-/// 채택 조건의 경계 처리(경계값에서만 차이).
+/// Boundary handling of the acceptance condition (differs only at the boundary value).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum AcceptRule {
     #[default]
-    /// GPU 규칙: θ1 < max_distance (엄격).
+    /// GPU rule: θ1 < max_distance (strict).
     Gpu,
-    /// CPU 무차별 규칙: θ1 ≤ max_distance.
+    /// CPU brute-force rule: θ1 ≤ max_distance.
     CpuBruteForce,
 }
 
-/// 한 행(또는 열)의 top-2: 최댓값 내적, 그 인덱스, 두 번째 최댓값.
-/// 초기값 0, "엄격히 큼"으로 갱신하므로 동점이면 앞선 인덱스 유지.
+/// Top-2 of one row (or column): maximum dot product, its index, and the second maximum.
+/// Initial value 0, updated only on "strictly greater", so ties keep the earlier index.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Top2 {
-    /// 최댓값 내적.
+    /// Maximum dot product.
     pub best: u32,
-    /// 최댓값의 상대 인덱스(없으면 `u32::MAX`).
+    /// Relative index of the maximum (`u32::MAX` if none).
     pub idx: u32,
-    /// 두 번째 최댓값 내적.
+    /// Second maximum dot product.
     pub second: u32,
 }
 
@@ -89,7 +89,7 @@ impl Default for Top2 {
 
 impl Top2 {
     #[inline]
-    /// 내적 `d`(인덱스 `idx`)로 top-2 를 갱신한다.
+    /// Updates the top-2 with dot product `d` (index `idx`).
     pub fn push(&mut self, d: u32, idx: u32) {
         if d > self.best {
             self.second = self.best;
@@ -99,7 +99,7 @@ impl Top2 {
             self.second = d;
         }
     }
-    /// 앞 구간(self)과 뒤 구간(o)의 결과 병합. 순차 갱신과 같은 결과(결합적).
+    /// Merges the result of the earlier segment (self) and the later segment (o). Same result as sequential updating (associative).
     #[inline]
     pub fn merge(&mut self, o: &Top2) {
         if o.best > self.best {
@@ -112,13 +112,13 @@ impl Top2 {
     }
 }
 
-/// 매칭 커널 백엔드. GPU 구현은 `top2` 만 바꿔 끼우면 된다(융합 GEMM + top-2 에필로그).
+/// Matching kernel backend. A GPU implementation only needs to swap in `top2` (fused GEMM + top-2 epilogue).
 pub trait MatcherBackend: Send + Sync {
-    /// 행(영상1 각 기술자)별, 열(영상2 각 기술자)별 정수 내적 top-2.
+    /// Integer dot-product top-2 per row (each image-1 descriptor) and per column (each image-2 descriptor).
     fn top2(&self, d1: &[u8], n1: usize, d2: &[u8], n2: usize) -> (Vec<Top2>, Vec<Top2>);
 
-    /// 비율·거리·교차 검사를 적용한 매칭. 영상1 인덱스 오름차순, 최대 `max_num_matches`.
-    /// 기술자 수가 `max_num_matches` 를 넘으면 앞쪽만 쓴다(GPU 동작).
+    /// Matching with the ratio, distance, and cross checks applied. Ascending image-1 index, at most `max_num_matches`.
+    /// If the descriptor count exceeds `max_num_matches`, only the leading ones are used (GPU behavior).
     fn match_descriptors(
         &self,
         d1: &Descriptors,
@@ -136,8 +136,8 @@ pub trait MatcherBackend: Send + Sync {
     }
 }
 
-/// 내적 → 각도(라디안). arccos(min(d/262144, 1)).
-// 설계 결정: GPU 경로와 결과를 맞추려고 f32 로 계산한다.
+/// Dot product -> angle (radians). arccos(min(d/262144, 1)).
+// Design decision: compute in f32 to match the GPU path's results.
 #[inline]
 pub fn dot_to_angle(d: u32) -> f32 {
     (d as f32 / DOT_NORM).min(1.0).acos()
@@ -158,7 +158,7 @@ fn accept(t: &Top2, opts: &DescriptorMatchOptions) -> bool {
     }
 }
 
-/// top-2 결과에 검사들을 적용.
+/// Applies the checks to the top-2 results.
 pub fn apply_tests(rows: &[Top2], cols: &[Top2], opts: &DescriptorMatchOptions, max_num_matches: usize) -> Vec<FeatureMatch> {
     let mut out = Vec::new();
     for (i, r) in rows.iter().enumerate() {
@@ -179,12 +179,12 @@ pub fn apply_tests(rows: &[Top2], cols: &[Top2], opts: &DescriptorMatchOptions, 
     out
 }
 
-/// CPU 백엔드: rayon 병렬 + 캐시 타일링(행 블록 × 열 타일).
+/// CPU backend: rayon-parallel + cache tiling (row blocks × column tiles).
 #[derive(Clone, Debug)]
 pub struct CpuMatcher {
-    /// 병렬 작업 단위 행 수.
+    /// Number of rows per parallel work unit.
     pub row_block: usize,
-    /// L1 에 머무는 열 타일 크기.
+    /// Column tile size that stays in L1.
     pub col_tile: usize,
 }
 
@@ -205,7 +205,7 @@ fn dot128(a: &[u8], b: &[u8]) -> u32 {
     s
 }
 
-/// 4행 × 1열 마이크로 커널: b 한 줄을 네 번 재사용.
+/// 4-row × 1-column micro-kernel: reuses one line of b four times.
 #[inline(always)]
 fn dot4x1(a0: &[u8], a1: &[u8], a2: &[u8], a3: &[u8], b: &[u8]) -> [u32; 4] {
     let a0: &[u8; DESCRIPTOR_DIM] = a0.try_into().expect("128");
@@ -229,7 +229,7 @@ impl MatcherBackend for CpuMatcher {
         const D: usize = DESCRIPTOR_DIM;
         let rb = self.row_block.max(4);
         let ct = self.col_tile.max(1);
-        // 행 블록마다: 그 블록의 행 top-2 와 (그 블록 행들에 한정한) 열 top-2.
+        // Per row block: that block's row top-2 and column top-2 (restricted to the rows of that block).
         let parts: Vec<(Vec<Top2>, Vec<Top2>)> = (0..n1.div_ceil(rb))
             .into_par_iter()
             .map(|blk| {
@@ -242,7 +242,7 @@ impl MatcherBackend for CpuMatcher {
                 while c0 < n2 {
                     let c1 = (c0 + ct).min(n2);
                     let w = c1 - c0;
-                    // 내적 타일 계산(행 4개씩).
+                    // Compute the dot-product tile (4 rows at a time).
                     let mut i = r0;
                     while i + 4 <= r1 {
                         let a = |k: usize| &d1[(i + k) * D..(i + k + 1) * D];
@@ -262,7 +262,7 @@ impl MatcherBackend for CpuMatcher {
                         }
                         i += 1;
                     }
-                    // 행·열 축약(인덱스 오름차순 순회 → 순차 규칙과 동일).
+                    // Row/column reduction (traversal in ascending index order -> same as the sequential rule).
                     for li in 0..(r1 - r0) {
                         let row = &tile[li * ct..li * ct + w];
                         let gi = (r0 + li) as u32;
@@ -289,7 +289,7 @@ impl MatcherBackend for CpuMatcher {
     }
 }
 
-/// 기준 구현(테스트용): 이중 루프 순차 top-2.
+/// Reference implementation (for tests): double-loop sequential top-2.
 pub fn top2_naive(d1: &[u8], n1: usize, d2: &[u8], n2: usize) -> (Vec<Top2>, Vec<Top2>) {
     const D: usize = DESCRIPTOR_DIM;
     let mut rows = vec![Top2::default(); n1];

@@ -4,7 +4,6 @@ English | [한국어](https://github.com/AH100-1/cumulus3d/blob/main/crates/cli/
 
 The `cumulus3d` executable, which progressively builds 3D point clouds from drone-formation video (three cameras, GPS), and the library (`cumulus3d_cli`) that holds its assembly.
 
-API doc comments are currently in Korean; English translation is planned.
 
 **Pipeline stage**: the whole assembly. It chains the other crates (feature extraction → matching → SfM → BA → GPS alignment → densification)
 inside a single process and handles **progressive streaming**: while video arrives position by position, it emits per-zone previews (no BA) and

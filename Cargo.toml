@@ -49,7 +49,7 @@ tonic-prost-build = "0.14"
 protox = "0.10" # pure-Rust protobuf compiler, so builds do not need protoc
 
 # reconstruction: live CompositionHost input is only on the git head, not in the 0.3.1 release
-cumulus3d-cli = { git = "https://github.com/AH100-1/cumulus3d", rev = "b9f4a9bda714fa31fc0fd395f821114b64fd2c1f" }
+cumulus3d-cli = { git = "https://github.com/AH100-1/cumulus3d", rev = "01f90e779ee5e32e7665e2191c4bf8e5e3a997a9" }
 deltamesh = "0.1"
 
 # UNet inference links libtorch 2.13, downloaded at build time (CUDA flavour from

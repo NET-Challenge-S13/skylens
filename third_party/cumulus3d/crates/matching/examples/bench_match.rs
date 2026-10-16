@@ -25,7 +25,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 매칭 커널 시간 측정: 8192 × 8192 기술자.
+//! Matching kernel timing: 8192 × 8192 descriptors.
 use cumulus3d_core::Descriptors;
 use cumulus3d_matching::*;
 use rand::{RngExt, SeedableRng};

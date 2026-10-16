@@ -29,7 +29,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 영상 목록 → 카메라 묶기 → SIFT → `FeatureStore` 증분 기록.
+//! Image list -> camera grouping -> SIFT -> incremental `FeatureStore` writes.
 
 use crate::camera_init::init_camera;
 use crate::exif_info::ExifInfo;
@@ -42,36 +42,36 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::sync::Arc;
 
-/// 카메라 묶기 방식.
+/// Camera grouping mode.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum CameraMode {
-    /// 영상마다 새 카메라.
+    /// A new camera per image.
     PerImage,
-    /// 이번 호출의 모든 영상이 카메라 하나.
+    /// All images in this call share one camera.
     Single,
-    /// 폴더(이름의 부모 경로)마다 카메라 하나. 위치 0 설정.
+    /// One camera per folder (parent path of the name). Sets position 0.
     #[default]
     PerFolder,
-    /// 기존 카메라 id 에 붙임(파라미터 갱신 없음). 위치 p ≥ 1 설정.
+    /// Attach to an existing camera id (no parameter update). Sets position p >= 1.
     Existing(CameraId),
 }
 
-/// 영상 읽기·카메라 옵션.
+/// Image reading and camera options.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ReaderOptions {
-    /// 새 카메라의 모델 종류.
+    /// Model type of new cameras.
     pub camera_model: CameraModelKind,
-    /// 카메라 묶기 방식.
+    /// Camera grouping mode.
     pub camera_mode: CameraMode,
-    /// 주어지면 새 카메라 파라미터로 그대로 사용(사전 초점 플래그 참).
+    /// If given, used as-is for the new camera parameters (pre-focal flag set).
     pub camera_params: Option<Vec<f64>>,
-    /// EXIF 가 없을 때 초점거리 = 계수 × max(W, H).
+    /// Focal length when EXIF is missing = factor x max(W, H).
     pub default_focal_length_factor: f64,
-    /// 최대 영상 크기(축소 기준). SIFT 실효값 3200.
+    /// Maximum image size (downscale criterion). Effective SIFT value 3200.
     pub max_image_size: usize,
-    /// `Existing` 모드에서 영상 크기가 카메라와 다르면 실패 처리(끄면 오류 없이 환산).
+    /// In `Existing` mode, fail if the image size differs from the camera (if disabled, convert without error).
     pub strict_existing_camera_size: bool,
-    /// EXIF GPS 를 사전 위치로 기록.
+    /// Record EXIF GPS as the prior position.
     pub read_pose_priors: bool,
 }
 
@@ -89,68 +89,68 @@ impl Default for ReaderOptions {
     }
 }
 
-/// 추출 옵션 묶음.
+/// Extraction option bundle.
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct ExtractionOptions {
-    /// 영상 읽기·카메라 옵션.
+    /// Image reading and camera options.
     pub reader: ReaderOptions,
-    /// SIFT 옵션.
+    /// SIFT options.
     pub sift: SiftOptions,
-    /// 여러 영상을 동시에 처리(메모리 ≈ 영상 수 × 피라미드).
+    /// Process several images concurrently (memory ~ image count x pyramid).
     pub sequential_images: bool,
 }
 
-/// 메모리 입력 영상(디코딩 완료).
+/// In-memory input image (already decoded).
 #[derive(Clone, Debug)]
 pub struct ImageSource {
-    /// 저장소 영상 이름('/' 구분 상대 경로).
+    /// Image name in the store (relative path separated by '/').
     pub name: String,
-    /// 입력 해상도 회색 영상.
+    /// Grayscale image at input resolution.
     pub gray: GrayImage,
-    /// 영상의 EXIF 요약.
+    /// EXIF summary of the image.
     pub exif: ExifInfo,
 }
 
-/// 영상별 처리 결과.
+/// Per-image processing result.
 #[derive(Clone, Debug, PartialEq)]
 pub enum ImageStatus {
-    /// 특징을 추출해 저장소에 기록함.
+    /// Features extracted and written to the store.
     Extracted {
-        /// 발급된 영상 id.
+        /// Issued image id.
         image_id: ImageId,
-        /// 배정된 카메라 id.
+        /// Assigned camera id.
         camera_id: CameraId,
-        /// 기록한 특징 수.
+        /// Number of features recorded.
         num_features: usize,
     },
-    /// 같은 이름이 이미 있고 특징도 있음 → 건너뜀.
+    /// Same name already exists and has features -> skipped.
     AlreadyExists {
-        /// 기존 영상 id.
+        /// Existing image id.
         image_id: ImageId,
     },
-    /// 읽기·추출 실패(다른 영상 처리는 계속).
+    /// Reading/extraction failed (processing of other images continues).
     Failed {
-        /// 실패 사유.
+        /// Failure reason.
         error: String,
     },
 }
 
-/// 영상 하나의 처리 보고.
+/// Processing report for one image.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ImageReport {
-    /// 저장소 영상 이름.
+    /// Image name in the store.
     pub name: String,
-    /// 처리 결과.
+    /// Processing result.
     pub status: ImageStatus,
 }
 
-/// 이미지 목록 파일: 줄마다 앞뒤 공백 제거, 빈 줄 건너뜀.
+/// Image list file: trim whitespace on each line, skip blank lines.
 pub fn read_image_list(path: &Path) -> Result<Vec<String>> {
     let s = std::fs::read_to_string(path)?;
     Ok(s.lines().map(str::trim).filter(|l| !l.is_empty()).map(str::to_string).collect())
 }
 
-/// 이름의 부모 폴더("camF/x.jpg" → "camF").
+/// Parent folder of the name ("camF/x.jpg" -> "camF").
 pub fn image_folder(name: &str) -> &str {
     match name.rfind('/') {
         Some(i) => &name[..i],
@@ -158,7 +158,7 @@ pub fn image_folder(name: &str) -> &str {
     }
 }
 
-/// 입력 회색 영상 → (축소, EXIF 방향 회전) → SIFT → 키포인트를 카메라 크기 (cam_w, cam_h) 좌표로.
+/// Input grayscale image -> (downscale, EXIF orientation rotation) -> SIFT -> keypoints in camera-size (cam_w, cam_h) coordinates.
 pub fn extract_for_camera(
     backend: &dyn SiftEngine,
     gray: &GrayImage,
@@ -205,7 +205,7 @@ pub fn extract_for_camera(
     Ok((kps, out))
 }
 
-/// 특징 추출기: 백엔드 + 저장소 기록.
+/// Feature extractor: backend + store writes.
 #[derive(Clone)]
 pub struct FeatureExtractor {
     backend: Arc<dyn SiftEngine>,
@@ -217,7 +217,7 @@ impl Default for FeatureExtractor {
     }
 }
 
-/// 카메라 배정을 마친 작업 하나.
+/// One job after camera assignment.
 struct Job {
     idx: usize,
     image_id: ImageId,
@@ -225,23 +225,23 @@ struct Job {
 }
 
 impl FeatureExtractor {
-    /// CPU 백엔드.
+    /// CPU backend.
     pub fn new() -> Self {
         Self { backend: Arc::new(CpuSift::new()) }
     }
 
-    /// 지정한 SIFT 백엔드(예: GPU)로 만든다.
+    /// Creates one with the given SIFT backend (e.g. GPU).
     pub fn with_backend(backend: Arc<dyn SiftEngine>) -> Self {
         Self { backend }
     }
 
-    /// 사용 중인 SIFT 백엔드.
+    /// SIFT backend in use.
     pub fn backend(&self) -> &dyn SiftEngine {
         self.backend.as_ref()
     }
 
-    /// 파일 목록(`root` 기준 상대 이름)을 읽어 저장소에 추가. 이름은 사전순으로 처리.
-    /// `Existing(N)` 에서 카메라 N 이 없으면 즉시 오류. 영상별 실패는 보고서에 담는다.
+    /// Reads a file list (names relative to `root`) and adds them to the store. Names are processed in lexicographic order.
+    /// With `Existing(N)`, fails immediately if camera N does not exist. Per-image failures are recorded in the report.
     pub fn extract_files(&self, store: &FeatureStore, root: &Path, names: &[String], opts: &ExtractionOptions) -> Result<Vec<ImageReport>> {
         let mut names: Vec<String> = names.iter().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
         names.sort();
@@ -278,14 +278,14 @@ impl FeatureExtractor {
             }
         }
         let sub = self.extract_inputs(store, inputs, opts)?;
-        // extract_inputs 는 이름 정렬 순서로 돌려준다. 입력도 정렬돼 있으므로 순서가 같다.
+        // extract_inputs returns results in name-sorted order. The inputs are sorted too, so the order matches.
         for (slot, r) in input_slot.into_iter().zip(sub) {
             reports[slot] = Some(r);
         }
         Ok(reports.into_iter().flatten().collect())
     }
 
-    /// 디코딩된 영상들을 저장소에 추가(위치 하나 단위 호출용). 이름 사전순으로 id 를 발급한다.
+    /// Adds decoded images to the store (for per-position calls). Issues ids in lexicographic name order.
     pub fn extract_inputs(&self, store: &FeatureStore, mut inputs: Vec<ImageSource>, opts: &ExtractionOptions) -> Result<Vec<ImageReport>> {
         inputs.sort_by(|a, b| a.name.cmp(&b.name));
         let ro = &opts.reader;
@@ -293,7 +293,7 @@ impl FeatureExtractor {
         let mut reports: Vec<ImageReport> =
             inputs.iter().map(|i| ImageReport { name: i.name.clone(), status: ImageStatus::Failed { error: String::new() } }).collect();
 
-        // 1) 카메라·영상 행 배정(순차, 결정적 id).
+        // 1) Assign camera and image rows (sequential, deterministic ids).
         let mut jobs = Vec::new();
         let mut folder_cam: HashMap<String, CameraId> = HashMap::new();
         let mut single_cam: Option<CameraId> = None;
@@ -304,7 +304,7 @@ impl FeatureExtractor {
             }
             let (w, h) = (inp.gray.width as u64, inp.gray.height as u64);
             let assigned: std::result::Result<(ImageId, CameraId), String> = (|| {
-                // 행만 있고 특징이 없으면 특징만 다시 채운다.
+                // If only the row exists without features, just refill the features.
                 if let Some(img) = store.image_by_name(&inp.name) {
                     return Ok((img.image_id, img.camera_id));
                 }
@@ -333,7 +333,8 @@ impl FeatureExtractor {
                             c
                         }
                     },
-                    // 설계 결정: 폴더→카메라 사전으로 묶는다. 정렬된 목록에서는 "직전 카메라 + 처음 본 폴더" 규칙과 같다.
+                    // Design decision: group via a folder->camera map. On a sorted list this equals the
+                    // "previous camera + first-seen folder" rule.
                     CameraMode::PerFolder => {
                         let folder = image_folder(&inp.name).to_string();
                         match folder_cam.get(&folder) {
@@ -370,7 +371,7 @@ impl FeatureExtractor {
             }
         }
 
-        // 2) SIFT (영상 병렬) → 저장.
+        // 2) SIFT (images in parallel) -> store.
         let run = |job: &Job| -> (usize, ImageStatus) {
             let inp = &inputs[job.idx];
             let Some(cam) = store.camera(job.camera_id) else {
@@ -403,7 +404,7 @@ impl FeatureExtractor {
     }
 }
 
-/// 이름이 있고 키포인트·기술자가 모두 있으면 그 id.
+/// The id if it has a name and both keypoints and descriptors.
 fn already_done(store: &FeatureStore, name: &str) -> Option<ImageId> {
     let id = store.image_id_by_name(name)?;
     (store.exists_keypoints(id) && store.exists_descriptors(id)).then_some(id)

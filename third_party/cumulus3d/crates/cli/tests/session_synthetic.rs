@@ -25,8 +25,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 상태 값 리듀서(`Session`, `step`/`poll`/`command`/`finish`)를 합성 장면(드론 3대 × 8위치)으로 시험한다.
-//! 조밀화는 끈다(장치 없이 돌도록). 이벤트 순서·개수, 되감기(ResetFrom), 구역 무효화, 즉시 수신기, Pipeline 연결.
+//! Test the state-value reducer (`Session`, `step`/`poll`/`command`/`finish`) with a synthetic scene (3 drones x 8 positions).
+//! Densification is off (so it runs without a device). Event order and count, rewinding (ResetFrom), zone invalidation, immediate
+//! receiver, Pipeline hookup.
 
 mod common;
 use common::{make_dataset, NPOS};
@@ -38,7 +39,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 const CAMS: [&str; 3] = ["camF", "camR", "camL"];
 
-/// 시험들이 함께 쓰는 합성 입력 폴더(한 번만 만든다).
+/// Synthetic input folder shared by the tests (created only once).
 fn dataset() -> &'static Path {
     static DIR: OnceLock<PathBuf> = OnceLock::new();
     DIR.get_or_init(|| {
@@ -77,7 +78,7 @@ fn idx(tl: &[String], s: &str) -> usize {
     tl.iter().position(|e| e.starts_with(s)).unwrap_or_else(|| panic!("사건 없음: {s}\n{tl:#?}"))
 }
 
-/// 불변 값 방식으로 끝까지: step 마다 새 Session, 마지막에 finish.
+/// All the way through in immutable-value style: a new Session at every step, finish at the end.
 fn run_all(total: Option<usize>) -> (Session, Vec<Event>) {
     let mut s = Session::new(config(total));
     let mut all = Vec::new();
@@ -95,7 +96,7 @@ fn run_all(total: Option<usize>) -> (Session, Vec<Event>) {
 #[test]
 fn events_order_and_counts() {
     let (s, evs) = run_all(Some(NPOS));
-    // 버전은 단조 증가, 빠짐 없음(배경 이벤트도 제자리).
+    // Versions increase monotonically with no gaps (background events too, in place).
     for (i, e) in evs.iter().enumerate() {
         assert_eq!(e.meta().version, i as u64 + 1, "{:?}", e.kind());
     }
@@ -105,7 +106,7 @@ fn events_order_and_counts() {
     assert_eq!(count(&evs, EventKind::FeaturesExtracted), 3 * NPOS);
     assert_eq!(count(&evs, EventKind::PairsMatched), NPOS);
     assert_eq!(count(&evs, EventKind::ModelInitialized), 1);
-    // span 4 + overlap 1: 첫 모델은 위치 4, 그 뒤 위치마다 PositionDone.
+    // span 4 + overlap 1: the first model is at position 4, then PositionDone at every position.
     assert_eq!(count(&evs, EventKind::PositionDone), NPOS - 4);
     for k in [
         EventKind::ZoneArrived,
@@ -123,7 +124,7 @@ fn events_order_and_counts() {
     assert_eq!(count(&evs, EventKind::Error), 0);
     assert!(count(&evs, EventKind::FrameRegistered) >= 20);
 
-    // timeline 문구·순서.
+    // Timeline text and order.
     let tl = texts(&evs);
     assert_eq!(tl[0], format!("start NPOS={NPOS}"));
     assert_eq!(idx(&tl, "init_model Registered images: "), 1);
@@ -137,7 +138,7 @@ fn events_order_and_counts() {
     assert!(idx(&tl, "refined 1 ready") < idx(&tl, "all refined done"));
     assert!(tl.iter().any(|e| e.starts_with("refined 0 pose_ready") && e.contains("Mean reprojection error: ") && e.ends_with("px ")));
 
-    // run.log 줄: 단계 시간·통계.
+    // run.log lines: stage times and statistics.
     let logs: Vec<&str> = evs.iter().filter_map(|e| if let Event::Log { line, .. } = e { Some(line.as_str()) } else { None }).collect();
     for pre in [
         "[time] feature pos 0",
@@ -150,7 +151,7 @@ fn events_order_and_counts() {
     ] {
         assert!(logs.iter().any(|l| l.starts_with(pre)), "로그 없음 {pre}");
     }
-    // 정밀 정렬은 GPS 오차가 작다.
+    // Refined alignment has a small GPS error.
     let err: Vec<f64> = logs
         .iter()
         .filter(|l| l.starts_with("[align] refined"))
@@ -159,7 +160,7 @@ fn events_order_and_counts() {
     assert_eq!(err.len(), 2);
     assert!(err.iter().all(|e| *e < 0.2), "{err:?}");
 
-    // 점군 이벤트: 조밀화를 껐으므로 자리표시, 모델은 들어 있다.
+    // Point-cloud events: densification is off, so placeholders; the models are included.
     for e in &evs {
         match e {
             Event::ZonePreview { dense, model, frame, range, .. } => {
@@ -180,7 +181,7 @@ fn events_order_and_counts() {
             _ => {}
         }
     }
-    // 상태 조회.
+    // State queries.
     assert_eq!(s.positions(), NPOS);
     assert!(s.is_finished());
     assert_eq!(s.previews().len(), 2);
@@ -188,7 +189,7 @@ fn events_order_and_counts() {
     assert_eq!(rf.len(), 2);
     assert!(rf.values().all(|z| z.done));
     assert!(s.model().unwrap().registered_image_count() >= 20);
-    // 끝난 세션에 더 넣으면 경고만.
+    // Feeding more into a finished session only gives a warning.
     let (_, evs) = session::step(&s, frames(0));
     assert_eq!(evs.iter().map(|e| e.kind()).collect::<Vec<_>>(), vec![EventKind::Warning]);
 }
@@ -198,7 +199,7 @@ fn unknown_total_closes_last_zone_at_finish() {
     let (_, evs) = run_all(None);
     let tl = texts(&evs);
     assert_eq!(tl[0], "start");
-    // 구역 1 의 명목 끝(9)은 오지 않으므로 finish 에서 [3,8) 로 닫힌다.
+    // The nominal end (9) of zone 1 never arrives, so it is closed as [3,8) in finish.
     let a = idx(&tl, "region 1 arrived pos[3,8)");
     assert!(a > idx(&tl, "pos 7 registered "));
     assert!(a < idx(&tl, "all positions done"));
@@ -216,7 +217,7 @@ fn reset_from_rewinds_state() {
     let before = s.store().num_images();
     assert_eq!(before, 18);
 
-    // 위치 5 부터 다시: 저장소·체인은 위치 4 직후, 구역 0(위치 4 에서 닫힘)은 유지.
+    // Restart from position 5: the store and chain are right after position 4, and zone 0 (closed at position 4) is kept.
     let (mut s, evs) = session::command(&s, Command::ResetFrom(5));
     assert!(evs.iter().any(|e| matches!(e, Event::Reset { position: 5, .. })));
     assert_eq!(count(&evs, EventKind::ZoneInvalidated), 0);
@@ -225,7 +226,7 @@ fn reset_from_rewinds_state() {
     assert!(s.position_of("camF/camF_0015.jpg").is_none());
     assert_eq!(s.arrived_zones().len(), 1);
 
-    // 다시 넣으면 끝까지 정상.
+    // Feeding again works normally to the end.
     let mut all = Vec::new();
     for p in 5..NPOS {
         all.extend(s.apply(Input::Frames(frames(p))));
@@ -242,8 +243,8 @@ fn reset_from_rewinds_state() {
     assert!(s.model().unwrap().registered_image_count() >= 20);
     assert_eq!(s.refined().len(), 2);
 
-    // 첫 모델 이전으로 되감으면 구역 0 도 무효화되고 모델이 없다.
-    // (끝난 세션은 입력을 받지 않으므로 끝내기 전 값에서.)
+    // Rewinding to before the first model also invalidates zone 0, and there is no model.
+    // (A finished session accepts no input, so use the value from before finishing.)
     let (s2, evs) = session::command(&unfinished, Command::ResetFrom(3));
     assert!(evs.iter().any(|e| matches!(e, Event::ZoneInvalidated { zone: 0, .. })));
     assert!(evs.iter().any(|e| matches!(e, Event::ZoneInvalidated { zone: 1, .. })));
@@ -264,7 +265,7 @@ fn reset_without_history_is_rejected() {
     let evs = s.apply(Input::Command(Command::ResetFrom(2)));
     assert_eq!(evs.iter().map(|e| e.kind()).collect::<Vec<_>>(), vec![EventKind::Warning]);
     assert_eq!(s.positions(), 3);
-    // 위치 0 으로는 되감기 지점 없이도 된다.
+    // Rewinding to position 0 works even without a rewind point.
     let evs = s.apply(Input::Command(Command::ResetFrom(0)));
     assert!(evs.iter().any(|e| e.kind() == EventKind::Reset));
     assert_eq!(s.positions(), 0);
@@ -286,14 +287,15 @@ fn invalidate_zone_rebuilds_it() {
     let i = kinds.iter().position(|k| *k == EventKind::ZoneInvalidated).unwrap();
     assert!(kinds[i..].contains(&EventKind::ZoneArrived));
     assert!(kinds[i..].contains(&EventKind::ZonePreview));
-    // 아직 오지 않은 구역은 경고만.
+    // A zone that has not arrived yet only gives a warning.
     let evs = s.apply(Input::Command(Command::InvalidateZone(1)));
     assert_eq!(evs.iter().map(|e| e.kind()).filter(|k| *k != EventKind::Log).collect::<Vec<_>>(), vec![EventKind::Warning]);
     after.extend(s.apply(Input::Finish));
-    // 무효화 뒤에는 (무효화 전 정밀 작업이 아직 돌고 있었어도 그 이벤트는 버려지고) 다시 만든 구역 0 의 정밀본 하나만 나온다.
+    // After invalidation (even if a refinement job from before the invalidation was still running, its events are dropped), only the
+    // refined version of the rebuilt zone 0 comes out.
     let z0 = after.iter().filter(|e| matches!(e, Event::ZoneRefined { range, .. } if range.zone == 0)).count();
     assert_eq!(z0, 1);
-    // finish 가 남은 구역 1 을 [3,5) 로 닫는다.
+    // finish closes the remaining zone 1 as [3,5).
     assert!(after.iter().any(|e| matches!(e, Event::ZoneArrived { range, .. } if range.zone == 1 && range.hi == 5)));
     assert_eq!(s.refined().len(), 2);
     assert!(after.iter().any(|e| e.kind() == EventKind::Finished));
@@ -315,7 +317,8 @@ fn sink_receives_everything_in_version_order() {
     let v: Vec<u64> = got.iter().map(|e| e.meta().version).collect();
     assert_eq!(v, (1..=v.len() as u64).collect::<Vec<_>>());
     assert_eq!(got.last().unwrap().kind(), EventKind::Finished);
-    // 반환 벡터는 전경 이벤트(이미 전달된 사본); 배경 정밀 이벤트는 수신기로만 간다.
+    // The return vector holds the foreground events (copies of what was already delivered); background refinement events go only to the
+    // receiver.
     assert!(returned.len() < got.len());
     assert!(returned.iter().all(|r| got.iter().any(|g| g.meta().version == r.meta().version && g.kind() == r.kind())));
     assert!(!returned.iter().any(|e| e.kind() == EventKind::ZoneRefined));
@@ -343,4 +346,138 @@ fn drives_pipeline() {
     assert_eq!(tl.last().unwrap(), "all refined done");
     let n = rx.iter().count();
     assert_eq!(n as u64, s.version());
+}
+
+/// Runs a stable-display session over the synthetic flight with span 3 / overlap 1 (zones 0, 1, 2).
+fn run_stable(tol: f64, max_zone: usize) -> (Session, Vec<Event>) {
+    let mut c = config(Some(NPOS));
+    c.span = 3;
+    c.stable_display = true;
+    c.settle_tol = tol;
+    c.settle_max_zone = max_zone;
+    let mut s = Session::new(c);
+    let mut all = Vec::new();
+    for p in 0..NPOS {
+        let (s2, evs) = session::step(&s, frames(p));
+        assert!(s2.failed().is_none(), "{:?}", s2.failed());
+        s = s2;
+        all.extend(evs);
+    }
+    let (s, evs) = session::finish(&s);
+    all.extend(evs);
+    (s, all)
+}
+
+fn logs(evs: &[Event]) -> Vec<&str> {
+    evs.iter().filter_map(|e| if let Event::Log { line, .. } = e { Some(line.as_str()) } else { None }).collect()
+}
+
+#[test]
+fn stable_display_freezes_shown_cameras_after_settling() {
+    // A huge tolerance settles at zone 1 (zone 0 has nothing to compare with); zone 2 is then anchored.
+    let (s, all) = run_stable(1e9, 3);
+    assert_eq!(count(&all, EventKind::ZonePreview), 0);
+    let refined = s.refined();
+    assert!(refined.len() >= 3, "zones {:?}", refined.keys().collect::<Vec<_>>());
+    let l = logs(&all);
+    assert!(l.iter().any(|x| x.starts_with("[settle] refined 1:") && x.ends_with("→ 고정")), "{l:#?}");
+    assert!(!l.iter().any(|x| x.starts_with("[settle] refined 2:")));
+    // The model at the settle point (zone 1) is what every later zone keeps: poses and intrinsics never change.
+    let at_settle = &refined[&1].model;
+    for (k, z) in refined.iter().filter(|(k, _)| **k >= 2) {
+        let mut shared = 0;
+        for id in at_settle.registered_images() {
+            let name = &at_settle.image(id).unwrap().name;
+            let Some(cur) = z.model.image_by_name(name) else { continue };
+            let (a, b) = (at_settle.world_to_cam(id).unwrap(), z.model.world_to_cam(cur.image_id).unwrap());
+            assert!((a.center() - b.center()).norm() < 1e-9, "zone {k}: {name} moved");
+            shared += 1;
+        }
+        assert!(shared > 0, "zone {k} shares no camera with the settled model");
+        assert_eq!(cumulus3d_cli::session::intrinsics_change(at_settle.cameras(), z.model.cameras()), 0.0);
+    }
+    // The final model handed to sinks is aligned to GPS (ENU), not the display frame.
+    let chain = all.iter().find_map(|e| if let Event::AllRefinedDone { chain: Some(c), .. } = e { Some(c) } else { None }).expect("chain");
+    assert!(logs(&all).iter().any(|x| x.starts_with("[align] final (stable display):")));
+    let gps = &config(Some(NPOS)).gps;
+    let o = &gps[0];
+    let frame = cumulus3d_align::EnuFrame::new(o.lat, o.lon, o.alt);
+    let (mut sum, mut n) = (0.0, 0);
+    for id in chain.registered_images() {
+        let Some(g) = gps.iter().find(|g| g.name == chain.image(id).unwrap().name) else { continue };
+        sum += (chain.projection_center(id).unwrap() - frame.lla_to_enu(g.lat, g.lon, g.alt)).norm();
+        n += 1;
+    }
+    assert!(n > 0 && sum / (n as f64) < 1.0, "final chain not in ENU: mean error {} over {n}", sum / (n as f64));
+}
+
+#[test]
+fn stable_display_forced_settle_replaces_earlier_zones_then_stops() {
+    // Tolerance so small it never settles by itself; forced at zone 2. The synthetic run has no dense stage, so the
+    // re-placement shows up as repeated ZoneRefinedPose / ZoneRefined events (dense = false) for the earlier zones.
+    let (s, all) = run_stable(1e-12, 2);
+    let refined = s.refined();
+    assert!(refined.len() >= 3, "zones {:?}", refined.keys().collect::<Vec<_>>());
+    let l = logs(&all);
+    assert!(l.iter().any(|x| x.starts_with("[settle] refined 1:") && x.ends_with("→ 정착 중")), "{l:#?}");
+    assert!(l.iter().any(|x| x.starts_with("[settle] refined 2:") && x.ends_with("→ 강제 고정")), "{l:#?}");
+    let n = |k: EventKind, z: usize| {
+        all.iter()
+            .filter(|e| e.kind() == k)
+            .filter(|e| matches!(e, Event::ZoneRefined { range, .. } | Event::ZoneRefinedPose { range, .. } if range.zone == z))
+            .count()
+    };
+    // Zone 0: first result + re-placed by zones 1 and 2. Zone 1: first + re-placed by zone 2. Zone 2: only its own.
+    assert_eq!(n(EventKind::ZoneRefined, 0), 3);
+    assert_eq!(n(EventKind::ZoneRefined, 1), 2);
+    assert_eq!(n(EventKind::ZoneRefined, 2), 1);
+    assert_eq!(n(EventKind::ZoneRefinedPose, 0), 3);
+    // Nothing is re-emitted after the settle point: zones settled at 2 never touch zones 0..1 again.
+    for z in refined.keys().filter(|z| **z >= 3) {
+        assert_eq!(n(EventKind::ZoneRefined, *z), 1);
+    }
+    // Zone 0 and 1 now live in the final adjustment's model (their camera poses equal zone 2's).
+    let last = &refined[&2].model;
+    for j in [0, 1] {
+        let m = &refined[&j].model;
+        for id in m.registered_images().into_iter().take(5) {
+            let name = &m.image(id).unwrap().name;
+            let cur = last.image_by_name(name).unwrap();
+            assert!((m.world_to_cam(id).unwrap().center() - last.world_to_cam(cur.image_id).unwrap().center()).norm() < 1e-9);
+        }
+    }
+}
+
+#[test]
+fn intrinsics_prior_initializes_cameras_and_holds_the_focal_length() {
+    // A prior 30 % away from the rendered focal length, very tight: the cameras start there (log) and the stable-display
+    // adjustment of every zone stays within 1 % of it (the data alone would pull the focal length back towards the truth).
+    let f0 = common::F * 1.3;
+    let text = format!(
+        r#"{{"cameras": {{"1": [{f0}, {f0}, 160.0, 120.0, 0, 0, 0, 0], "2": [{f0}, {f0}, 160.0, 120.0, 0, 0, 0, 0], "3": [{f0}, {f0}, 160.0, 120.0, 0, 0, 0, 0]}}}}"#
+    );
+    let mut c = config(Some(NPOS));
+    c.span = 3;
+    c.stable_display = true;
+    c.intrinsics_prior = Some(Arc::new(cumulus3d_cli::intrinsics::IntrinsicsPrior::from_json(&text, 1e-4, 1e-3).unwrap()));
+    let mut s = Session::new(c);
+    let mut all = Vec::new();
+    for p in 0..NPOS {
+        let (s2, evs) = session::step(&s, frames(p));
+        assert!(s2.failed().is_none(), "{:?}", s2.failed());
+        s = s2;
+        all.extend(evs);
+    }
+    let (s, evs) = session::finish(&s);
+    all.extend(evs);
+    let l = logs(&all);
+    assert!(l.iter().any(|x| x.starts_with("[prior] 카메라 1:")), "{l:#?}");
+    assert!(l.iter().any(|x| x.starts_with("[prior] refined 0:")), "{l:#?}");
+    let refined = s.refined();
+    assert!(!refined.is_empty());
+    for z in refined.values() {
+        for cam in z.model.cameras().values() {
+            assert!((cam.params[0] / f0 - 1.0).abs() < 0.01, "fx {} vs prior {f0}", cam.params[0]);
+        }
+    }
 }

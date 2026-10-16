@@ -29,41 +29,41 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 카메라 모델.
+//! Camera models.
 //!
-//! 좌표 규약: 카메라 좌표 (X, Y, Z) → 정규화 평면 (u, v) = (X/Z, Y/Z) → 왜곡 → 픽셀.
-//! 픽셀 원점은 영상 좌상단 모서리, 좌상단 화소 중심 = (0.5, 0.5).
+//! Coordinate convention: camera coordinates (X, Y, Z) -> normalized plane (u, v) = (X/Z, Y/Z) -> distortion -> pixel.
+//! The pixel origin is the top-left corner of the image; the top-left pixel center = (0.5, 0.5).
 
 use crate::error::{Error, Result};
 use crate::geometry::{Mat3, Vec2, Vec3};
 use crate::ids::{CameraId, INVALID_CAMERA_ID};
 use nalgebra::{Matrix2, Matrix2x3};
 
-/// 지원 카메라 모델. 숫자 id 는 모델 파일 형식의 모델 번호.
+/// Supported camera models. The numeric id is the model number in the model file format.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum CameraModelKind {
-    /// 단일 초점 핀홀(f, cx, cy).
+    /// Single-focal pinhole (f, cx, cy).
     SingleFocalPinhole = 0,
-    /// 핀홀(fx, fy, cx, cy).
+    /// Pinhole (fx, fy, cx, cy).
     Pinhole = 1,
-    /// 단일 초점 + 방사 왜곡 1항(f, cx, cy, k).
+    /// Single focal + 1 radial distortion term (f, cx, cy, k).
     SingleFocalRadial = 2,
-    /// 단일 초점 + 방사 왜곡 2항(f, cx, cy, k1, k2).
+    /// Single focal + 2 radial distortion terms (f, cx, cy, k1, k2).
     Radial = 3,
-    /// 방사 2항 + 접선 2항(fx, fy, cx, cy, k1, k2, p1, p2).
+    /// 2 radial terms + 2 tangential terms (fx, fy, cx, cy, k1, k2, p1, p2).
     OpenCv = 4,
 }
 
-/// 왜곡 제거 뉴턴 반복 최대 횟수.
+/// Maximum number of Newton iterations for undistortion.
 pub const UNDISTORT_MAX_ITERS: usize = 100;
-/// 수렴 판정: ‖step‖² < 1e−10.
+/// Convergence test: ‖step‖² < 1e−10.
 pub const UNDISTORT_STEP_SQ_TOL: f64 = 1e-10;
 
-/// 지원 모델의 파일 형식 이름(id 순서).
+/// File-format names of the supported models (in id order).
 const MODEL_NAMES: [&str; 5] = ["SIMPLE_PINHOLE", "PINHOLE", "SIMPLE_RADIAL", "RADIAL", "OPENCV"];
 
 impl CameraModelKind {
-    /// 모델 번호 → 종류.
+    /// Model number -> kind.
     pub fn from_id(id: i32) -> Result<Self> {
         match id {
             0 => Ok(Self::SingleFocalPinhole),
@@ -74,22 +74,22 @@ impl CameraModelKind {
             _ => Err(Error::Unsupported(format!("카메라 모델 id {id}"))),
         }
     }
-    /// 모델 번호.
+    /// Model number.
     pub fn id(self) -> i32 {
         self as i32
     }
-    /// 파일 형식 모델 이름(예: `PINHOLE`).
+    /// File-format model name (e.g. `PINHOLE`).
     pub fn name(self) -> &'static str {
         MODEL_NAMES[self as usize]
     }
-    /// 파일 형식 모델 이름 → 종류.
+    /// File-format model name -> kind.
     pub fn from_name(name: &str) -> Result<Self> {
         match MODEL_NAMES.iter().position(|n| *n == name) {
             Some(i) => Self::from_id(i as i32),
             None => Err(Error::Format(format!("알 수 없는 카메라 모델 이름 {name}"))),
         }
     }
-    /// 파라미터 개수.
+    /// Number of parameters.
     pub fn num_params(self) -> usize {
         match self {
             Self::SingleFocalPinhole => 3,
@@ -99,7 +99,7 @@ impl CameraModelKind {
             Self::OpenCv => 8,
         }
     }
-    /// 파라미터 이름(쉼표 구분).
+    /// Parameter names (comma-separated).
     pub fn params_info(self) -> &'static str {
         match self {
             Self::SingleFocalPinhole => "f, cx, cy",
@@ -109,21 +109,21 @@ impl CameraModelKind {
             Self::OpenCv => "fx, fy, cx, cy, k1, k2, p1, p2",
         }
     }
-    /// `params` 안 초점 파라미터 위치.
+    /// Position of the focal parameters within `params`.
     pub fn focal_slots(self) -> &'static [usize] {
         match self {
             Self::SingleFocalPinhole | Self::SingleFocalRadial | Self::Radial => &[0],
             Self::Pinhole | Self::OpenCv => &[0, 1],
         }
     }
-    /// `params` 안 주점 파라미터 위치.
+    /// Position of the principal point parameters within `params`.
     pub fn pp_slots(self) -> &'static [usize] {
         match self {
             Self::SingleFocalPinhole | Self::SingleFocalRadial | Self::Radial => &[1, 2],
             Self::Pinhole | Self::OpenCv => &[2, 3],
         }
     }
-    /// `params` 안 왜곡(추가) 파라미터 위치.
+    /// Position of the distortion (extra) parameters within `params`.
     pub fn extra_param_slots(self) -> &'static [usize] {
         match self {
             Self::SingleFocalPinhole | Self::Pinhole => &[],
@@ -134,25 +134,25 @@ impl CameraModelKind {
     }
 }
 
-/// 카메라(내부 파라미터). `focal_from_prior` 는 메모리 전용(모델 파일에 저장 안 됨).
+/// Camera (intrinsic parameters). `focal_from_prior` is memory-only (not stored in the model file).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Camera {
-    /// 카메라 id.
+    /// Camera id.
     pub camera_id: CameraId,
-    /// 카메라 모델.
+    /// Camera model.
     pub model: CameraModelKind,
-    /// 영상 너비(픽셀).
+    /// Image width (pixels).
     pub width: u64,
-    /// 영상 높이(픽셀).
+    /// Image height (pixels).
     pub height: u64,
-    /// 모델 파라미터(순서는 `CameraModelKind::params_info`).
+    /// Model parameters (order per `CameraModelKind::params_info`).
     pub params: Vec<f64>,
-    /// 초점이 EXIF 등 사전 정보에서 왔는지(보정 경로 선택용).
+    /// Whether the focal length came from prior information such as EXIF (for choosing the calibration path).
     pub focal_from_prior: bool,
 }
 
 impl Camera {
-    /// 파라미터 개수를 검증해 생성.
+    /// Creates after validating the parameter count.
     pub fn new(camera_id: CameraId, model: CameraModelKind, width: u64, height: u64, params: Vec<f64>) -> Result<Self> {
         if params.len() != model.num_params() {
             return Err(Error::Format(format!(
@@ -165,7 +165,7 @@ impl Camera {
         Ok(Self { camera_id, model, width, height, params, focal_from_prior: false })
     }
 
-    /// 초점 f 로 초기화: 초점 = f, 주점 = (W/2, H/2), 왜곡 0.
+    /// Initializes with focal length f: focal = f, principal point = (W/2, H/2), distortion 0.
     pub fn from_focal(model: CameraModelKind, focal: f64, width: u64, height: u64) -> Self {
         let mut params = vec![0.0; model.num_params()];
         for &i in model.focal_slots() {
@@ -177,58 +177,58 @@ impl Camera {
         Self { camera_id: INVALID_CAMERA_ID, model, width, height, params, focal_from_prior: false }
     }
 
-    /// 파라미터 개수가 모델과 맞는지.
+    /// Whether the parameter count matches the model.
     pub fn verify_params(&self) -> bool {
         self.params.len() == self.model.num_params()
     }
 
-    /// 평균 초점거리.
+    /// Mean focal length.
     pub fn mean_focal(&self) -> f64 {
         let idx = self.model.focal_slots();
         idx.iter().map(|&i| self.params[i]).sum::<f64>() / idx.len() as f64
     }
-    /// x 초점거리.
+    /// x focal length.
     pub fn focal_length_x(&self) -> f64 {
         self.params[self.model.focal_slots()[0]]
     }
-    /// y 초점거리(단일 초점 모델이면 x 와 같음).
+    /// y focal length (same as x for single-focal models).
     pub fn focal_length_y(&self) -> f64 {
         let idx = self.model.focal_slots();
         self.params[idx[idx.len() - 1]]
     }
-    /// 모든 초점 파라미터를 f 로 설정.
+    /// Sets all focal parameters to f.
     pub fn set_focal_length(&mut self, f: f64) {
         for &i in self.model.focal_slots() {
             self.params[i] = f;
         }
     }
-    /// 주점 x.
+    /// Principal point x.
     pub fn principal_point_x(&self) -> f64 {
         self.params[self.model.pp_slots()[0]]
     }
-    /// 주점 y.
+    /// Principal point y.
     pub fn principal_point_y(&self) -> f64 {
         self.params[self.model.pp_slots()[1]]
     }
-    /// 주점 설정.
+    /// Sets the principal point.
     pub fn set_principal_point(&mut self, cx: f64, cy: f64) {
         let pp = self.model.pp_slots();
         self.params[pp[0]] = cx;
         self.params[pp[1]] = cy;
     }
-    /// 왜곡(추가) 파라미터 복사본.
+    /// Copy of the distortion (extra) parameters.
     pub fn extra_params(&self) -> Vec<f64> {
         self.model.extra_param_slots().iter().map(|&i| self.params[i]).collect()
     }
-    /// 왜곡 없음 판정: 추가 파라미터가 모두 0.
+    /// No-distortion test: all extra parameters are 0.
     pub fn is_undistorted(&self) -> bool {
         self.model.extra_param_slots().iter().all(|&i| self.params[i] == 0.0)
     }
-    /// 보정 행렬 K (왜곡 무시).
+    /// Calibration matrix K (distortion ignored).
     pub fn calibration_matrix(&self) -> Mat3 {
         Mat3::new(self.focal_length_x(), 0.0, self.principal_point_x(), 0.0, self.focal_length_y(), self.principal_point_y(), 0.0, 0.0, 1.0)
     }
-    /// 비정상 파라미터 판정.
+    /// Abnormal-parameter test.
     pub fn has_implausible_params(&self, min_focal_ratio: f64, max_focal_ratio: f64, max_extra_param: f64) -> bool {
         let (w, h) = (self.width as f64, self.height as f64);
         let (cx, cy) = (self.principal_point_x(), self.principal_point_y());
@@ -245,7 +245,7 @@ impl Camera {
         self.model.extra_param_slots().iter().any(|&i| self.params[i].abs() > max_extra_param)
     }
 
-    /// 균일 크기 조정: 초점·주점에 s 곱, 크기는 반올림. 왜곡 계수 불변.
+    /// Uniform resize: multiplies focal and principal point by s, size is rounded. Distortion coefficients unchanged.
     pub fn rescale(&mut self, scale: f64) {
         let nw = (self.width as f64 * scale).round().max(1.0) as u64;
         let nh = (self.height as f64 * scale).round().max(1.0) as u64;
@@ -254,7 +254,7 @@ impl Camera {
         self.height = nh;
     }
 
-    /// 새 크기로 조정: 축별 sx = W'/W, sy = H'/H 를 초점·주점에 곱함.
+    /// Resize to a new size: multiplies focal and principal point by per-axis sx = W'/W, sy = H'/H.
     pub fn rescale_to(&mut self, new_width: u64, new_height: u64) {
         let sx = new_width as f64 / self.width as f64;
         let sy = new_height as f64 / self.height as f64;
@@ -266,7 +266,7 @@ impl Camera {
     fn scale_params(&mut self, sx: f64, sy: f64) {
         let f = self.model.focal_slots();
         if f.len() == 1 {
-            // 설계 결정: 단일 초점 모델의 비등방 축척은 두 축 평균을 사용.
+            // Design decision: for single-focal models, the anisotropic scale uses the mean of the two axes.
             self.params[f[0]] *= 0.5 * (sx + sy);
         } else {
             self.params[f[0]] *= sx;
@@ -277,12 +277,12 @@ impl Camera {
         self.params[pp[1]] *= sy;
     }
 
-    /// 픽셀 오차 임계를 정규화 평면 임계로: τ / 평균 초점.
+    /// Converts a pixel error threshold to a normalized-plane threshold: τ / mean focal length.
     pub fn img_to_cam_threshold(&self, threshold_px: f64) -> f64 {
         threshold_px / self.mean_focal()
     }
 
-    /// 정규화 평면 왜곡량 Δ(u,v) 와 ∂Δ/∂(u,v).
+    /// Normalized-plane distortion Δ(u,v) and ∂Δ/∂(u,v).
     fn distortion(&self, u: f64, v: f64) -> (f64, f64, Matrix2<f64>) {
         let p = &self.params;
         match self.model {
@@ -316,14 +316,14 @@ impl Camera {
         (self.focal_length_x(), self.focal_length_y(), self.principal_point_x(), self.principal_point_y())
     }
 
-    /// 정규화 평면 (u, v) → 픽셀 (왜곡 포함).
+    /// Normalized plane (u, v) -> pixel (with distortion).
     pub fn normalized_to_img(&self, uv: &Vec2) -> Vec2 {
         let (fx, fy, cx, cy) = self.fxfycxcy();
         let (du, dv, _) = self.distortion(uv.x, uv.y);
         Vec2::new(fx * (uv.x + du) + cx, fy * (uv.y + dv) + cy)
     }
 
-    /// 카메라 좌표 3D 점 → 픽셀. Z < f64 ε 이면 None.
+    /// 3D point in camera coordinates -> pixel. None if Z < f64 ε.
     pub fn cam_to_img(&self, xc: &Vec3) -> Option<Vec2> {
         if xc.z < f64::EPSILON {
             return None;
@@ -331,7 +331,7 @@ impl Camera {
         Some(self.normalized_to_img(&Vec2::new(xc.x / xc.z, xc.y / xc.z)))
     }
 
-    /// 픽셀 → 정규화 평면(왜곡 제거). 뉴턴 100회 내 미수렴이면 None.
+    /// Pixel -> normalized plane (undistortion). None if Newton does not converge within 100 iterations.
     pub fn img_to_normalized(&self, xy: &Vec2) -> Option<Vec2> {
         let (fx, fy, cx, cy) = self.fxfycxcy();
         let p0 = Vec2::new((xy.x - cx) / fx, (xy.y - cy) / fy);
@@ -360,16 +360,16 @@ impl Camera {
         None
     }
 
-    /// 픽셀 → 단위 광선 (u, v, 1)/‖·‖.
+    /// Pixel -> unit ray (u, v, 1)/‖·‖.
     pub fn img_to_ray(&self, xy: &Vec2) -> Option<Vec3> {
         self.img_to_normalized(xy).map(|uv| Vec3::new(uv.x, uv.y, 1.0).normalize())
     }
 
-    /// 투영과 해석적 야코비안.
+    /// Projection and analytic Jacobian.
     ///
-    /// 반환: (픽셀, ∂픽셀/∂카메라좌표 2×3). `d_params` 가 주어지면 행 우선 2×num_params
-    /// (첫 행 = x, 둘째 행 = y, 열 = 파라미터 순서)로 ∂픽셀/∂파라미터를 채운다.
-    /// Z < ε 이면 None (BA 는 이때 잔차·야코비안 0 으로 둔다).
+    /// Returns: (pixel, ∂pixel/∂camera-coordinates 2×3). If `d_params` is given, fills ∂pixel/∂parameters as row-major 2×num_params
+    /// (first row = x, second row = y, columns = parameter order).
+    /// None if Z < ε (BA then sets the residual and Jacobian to 0).
     pub fn cam_to_img_with_jacobian(&self, xc: &Vec3, d_params: Option<&mut [f64]>) -> Option<(Vec2, Matrix2x3<f64>)> {
         if xc.z < f64::EPSILON {
             return None;
@@ -479,7 +479,8 @@ mod tests {
                     cam.params[1] = cam.params[0] * 1.01;
                 }
                 let uv = Vec2::new(rng.random_range(-0.8..0.8), rng.random_range(-0.8..0.8));
-                // 왜곡 사상이 국소적으로 가역이 아닌 표본(야코비안 행렬식 ≤ 0.2)은 해가 유일하지 않아 제외.
+                // Samples where the distortion map is not locally invertible (Jacobian determinant ≤ 0.2) are excluded
+                // since the solution is not unique.
                 if (Matrix2::identity() + cam.distortion(uv.x, uv.y).2).determinant() <= 0.2 {
                     continue;
                 }
@@ -495,7 +496,7 @@ mod tests {
     #[test]
     fn undistort_failure_no_nan() {
         let cam = opencv([1000.0, 1000.0, 500.0, 400.0, -5.0, 0.0, 0.0, 0.0]);
-        // 큰 반경: k1 = −5 이면 F(p) 의 최대값(r≈0.26 에서 ~0.17)을 넘는 p0 는 해가 없다.
+        // Large radius: with k1 = −5, a p0 beyond the maximum of F(p) (~0.17 at r≈0.26) has no solution.
         let r = cam.img_to_normalized(&Vec2::new(500.0 + 900.0, 400.0 + 900.0));
         assert!(r.is_none());
     }

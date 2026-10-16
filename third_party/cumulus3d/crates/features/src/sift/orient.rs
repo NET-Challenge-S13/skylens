@@ -29,29 +29,29 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 방향 할당·128차원 기술자.
+//! Orientation assignment and 128-dimensional descriptors.
 
 use rayon::prelude::*;
 use std::f32::consts::PI;
 
 const TWO_PI: f32 = 2.0 * PI;
 
-/// 가우시안 레벨의 기울기(크기 m = ½‖∇‖, 각 θ = atan2(dy, dx)). 미리 계산하거나 즉석 계산.
+/// Gradient of a Gaussian level (magnitude m = ½‖∇‖, angle θ = atan2(dy, dx)). Precomputed or computed on the fly.
 pub struct Gradient<'a> {
     g: &'a [f32],
     w: usize,
-    /// 영상 높이.
+    /// Image height.
     pub h: usize,
     pre: Option<(Vec<f32>, Vec<f32>)>,
 }
 
 impl<'a> Gradient<'a> {
-    /// 즉석 계산(키포인트가 적은 레벨).
+    /// On-the-fly computation (levels with few keypoints).
     pub fn lazy(g: &'a [f32], w: usize, h: usize) -> Self {
         Self { g, w, h, pre: None }
     }
 
-    /// 전 영상 미리 계산(키포인트가 많은 레벨). 결과는 즉석 계산과 비트 단위 동일.
+    /// Precomputed for the whole image (levels with many keypoints). The result is bit-identical to on-the-fly computation.
     pub fn precomputed(g: &'a [f32], w: usize, h: usize) -> Self {
         let mut mag = vec![0f32; w * h];
         let mut ang = vec![0f32; w * h];
@@ -68,12 +68,12 @@ impl<'a> Gradient<'a> {
         Self { g, w, h, pre: Some((mag, ang)) }
     }
 
-    /// 영상 너비.
+    /// Image width.
     pub fn width(&self) -> usize {
         self.w
     }
 
-    /// 화소 (x, y) 의 (m, θ). 1 ≤ x ≤ w−2, 1 ≤ y ≤ h−2 전제.
+    /// (m, θ) at pixel (x, y). Assumes 1 <= x <= w-2, 1 <= y <= h-2.
     #[inline]
     pub fn at(&self, x: usize, y: usize) -> (f32, f32) {
         match &self.pre {
@@ -91,30 +91,30 @@ fn grad_at(g: &[f32], w: usize, x: usize, y: usize) -> (f32, f32) {
     (0.5 * (dx * dx + dy * dy).sqrt(), dy.atan2(dx))
 }
 
-/// 방향 할당 매개변수.
+/// Orientation assignment parameters.
 #[derive(Clone, Copy, Debug)]
 pub struct OrientParams {
-    /// 키포인트당 최대 방향 수.
+    /// Maximum number of orientations per keypoint.
     pub max_num_orientations: usize,
-    /// 인접 빈 선형 보간(개선 옵션).
+    /// Linear interpolation between adjacent bins (improvement option).
     pub bin_interpolation: bool,
 }
 
-/// 16비트 양자화된 내부 각 θ_int ([0, 2π)).
+/// 16-bit quantized internal angle θ_int ([0, 2π)).
 #[inline]
 pub fn quantize_angle(theta: f32) -> u16 {
     let f = (theta / TWO_PI).rem_euclid(1.0);
     ((f * 65535.0).floor() as u32).min(65534) as u16
 }
 
-// 설계 결정: 16비트 값의 복원 배율은 저장과 같은 65535 사용.
+// Design decision: restore 16-bit values with the same 65535 scale used for storage.
 #[inline]
-/// 양자화 각 → 라디안([`quantize_angle`] 의 역).
+/// Quantized angle -> radians (inverse of [`quantize_angle`]).
 pub fn dequantize_angle(q: u16) -> f32 {
     q as f32 / 65535.0 * TWO_PI
 }
 
-/// 키포인트 (x, y, σ) 의 주 방향들(양자화된 θ_int). 피크가 없으면 빈 목록.
+/// Principal orientations of keypoint (x, y, σ) (quantized θ_int). Empty list if there is no peak.
 pub fn orientations(grad: &Gradient, x: f32, y: f32, sigma: f32, p: &OrientParams) -> Vec<u16> {
     const NB: usize = 36;
     let w = grad.width();
@@ -155,7 +155,7 @@ pub fn orientations(grad: &Gradient, x: f32, y: f32, sigma: f32, p: &OrientParam
             }
         }
     }
-    // 원형 3탭 평균 6회.
+    // Circular 3-tap average, 6 times.
     for _ in 0..6 {
         let prev = hist;
         for i in 0..NB {
@@ -170,7 +170,7 @@ pub fn orientations(grad: &Gradient, x: f32, y: f32, sigma: f32, p: &OrientParam
             peaks.push((hc, i));
         }
     }
-    // 가중치 내림차순(동률은 빈 번호 오름차순으로 결정적).
+    // Descending weight (ties broken deterministically by ascending bin index).
     peaks.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
     let mut out: Vec<u16> = Vec::with_capacity(p.max_num_orientations);
     for &(hc, i) in peaks.iter().take(p.max_num_orientations.max(1)) {
@@ -185,17 +185,17 @@ pub fn orientations(grad: &Gradient, x: f32, y: f32, sigma: f32, p: &OrientParam
     out
 }
 
-/// 기술자 정규화 방식.
+/// Descriptor normalization mode.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum DescriptorNormalization {
-    /// L1 정규화 후 제곱근(RootSIFT). 기본.
+    /// L1 normalization followed by square root (RootSIFT). Default.
     #[default]
     L1Root,
-    /// L2 정규화.
+    /// L2 normalization.
     L2,
 }
 
-/// 128차원 기술자(uint8). θ 는 내부 각(θ_int).
+/// 128-dimensional descriptor (uint8). θ is the internal angle (θ_int).
 pub fn descriptor(grad: &Gradient, x: f32, y: f32, sigma: f32, theta: f32, norm: DescriptorNormalization) -> [u8; 128] {
     let w = grad.width();
     let h = grad.h;
@@ -213,7 +213,7 @@ pub fn descriptor(grad: &Gradient, x: f32, y: f32, sigma: f32, theta: f32, norm:
         let dy = yi as f32 + 0.5 - y;
         for xi in x0..=x1 {
             let dx = xi as f32 + 0.5 - x;
-            // 회전된 셀 좌표(키포인트 중심 기준).
+            // Rotated cell coordinates (relative to the keypoint center).
             let rx = (c * dx + sn * dy) * inv_s;
             let ry = (c * dy - sn * dx) * inv_s;
             let fx = rx + 1.5;
@@ -251,7 +251,7 @@ pub fn descriptor(grad: &Gradient, x: f32, y: f32, sigma: f32, theta: f32, norm:
     normalize_quantize(&mut d, norm)
 }
 
-/// L2 → 0.2 절단 → L2, 이어서 L1-ROOT(또는 L2), ×512 반올림 후 `[0,255]` 포화.
+/// L2 -> clip at 0.2 -> L2, then L1-ROOT (or L2), round after ×512 and saturate to `[0,255]`.
 pub fn normalize_quantize(d: &mut [f32; 128], norm: DescriptorNormalization) -> [u8; 128] {
     let l2 = |d: &mut [f32; 128]| {
         let n = d.iter().map(|v| v * v).sum::<f32>().sqrt();

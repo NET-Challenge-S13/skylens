@@ -29,11 +29,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 전역 위치 추정: BATA 계열 점-카메라 방향 제약, 회전 고정.
+//! Global position estimation: BATA-family point-to-camera direction constraints, rotations fixed.
 //!
-//! 잔차 e_k = v_k − d_k (X_p − c_i), Huber(0.1) 손실. 자체 LM: 관측 스케일 d → 점 X 순으로
-//! 슈어 소거하고 프레임 중심의 밀집 축약 계통을 촐레스키로 푼다.
-//! 병렬 합산은 고정 크기 덩어리 단위로 하고 덩어리 순서대로 더해 스레드 수와 무관하게 결정적이다.
+//! Residual e_k = v_k − d_k (X_p − c_i), Huber(0.1) loss. Custom LM: Schur-eliminates the observation scale d,
+//! then the point X, in that order, and solves the dense reduced system centered on the frame centers with Cholesky.
+//! Parallel summation uses fixed-size chunks added in chunk order, so the result is deterministic regardless of the thread count.
 
 use cumulus3d_core::{Error, ImageId, Mat3, Point3DId, Reconstruction, Result, Rigid3, Vec3};
 use nalgebra::{DMatrix, DVector};
@@ -41,30 +41,30 @@ use rand::{RngExt, SeedableRng};
 use rayon::prelude::*;
 use std::collections::BTreeMap;
 
-/// 위치 추정 옵션.
+/// Position estimation options.
 #[derive(Clone, Debug)]
 pub struct PositionSolverOptions {
-    /// 프레임 중심 위치를 변수로 둘지.
+    /// Whether to treat frame center positions as variables.
     pub optimize_positions: bool,
-    /// 3D 점을 변수로 둘지.
+    /// Whether to treat 3D points as variables.
     pub optimize_points: bool,
-    /// 관측별 스케일을 변수로 둘지.
+    /// Whether to treat per-observation scales as variables.
     pub optimize_scales: bool,
-    /// Huber 척도 a.
+    /// Huber scale a.
     pub loss_scale: f64,
-    /// LM 최대 반복 횟수.
+    /// Maximum number of LM iterations.
     pub max_num_iterations: usize,
-    /// 비용 상대 변화 수렴 임계.
+    /// Convergence threshold on the relative change in cost.
     pub function_tolerance: f64,
-    /// 기울기 수렴 임계.
+    /// Convergence threshold on the gradient.
     pub gradient_tolerance: f64,
-    /// 파라미터 변화 수렴 임계.
+    /// Convergence threshold on the parameter change.
     pub parameter_tolerance: f64,
-    /// 초기화 난수 시드(기본 0).
+    /// Random seed for initialization (default 0).
     pub random_seed: u64,
-    /// 초점 사전값 없는 카메라 관측의 손실 배율.
+    /// Loss multiplier for observations from cameras without a focal prior.
     pub uncalibrated_weight: f64,
-    /// 관측 스케일 하한.
+    /// Lower bound of the observation scale.
     pub min_scale: f64,
 }
 
@@ -86,28 +86,28 @@ impl Default for PositionSolverOptions {
     }
 }
 
-/// 위치 추정 결과 통계.
+/// Position estimation result statistics.
 #[derive(Clone, Debug, Default)]
 pub struct PositioningSummary {
-    /// 최적화한 프레임 수.
+    /// Number of frames optimized.
     pub num_frames: usize,
-    /// 최적화한 점 수.
+    /// Number of points optimized.
     pub num_points: usize,
-    /// 방향 관측 수.
+    /// Number of direction observations.
     pub num_observations: usize,
-    /// LM 반복 횟수.
+    /// Number of LM iterations.
     pub num_iterations: usize,
-    /// 초기 비용.
+    /// Initial cost.
     pub initial_cost: f64,
-    /// 최종 비용.
+    /// Final cost.
     pub final_cost: f64,
-    /// 수렴 여부.
+    /// Whether it converged.
     pub converged: bool,
 }
 
 struct Obs {
     frame: usize,
-    /// 세계 좌표 관측 방향(단위).
+    /// Observation direction in world coordinates (unit).
     v: Vec3,
     factor: f64,
     fixed: bool,
@@ -118,19 +118,19 @@ struct Problem {
     points: Vec<Vec3>,
     scales: Vec<f64>,
     obs: Vec<Obs>,
-    /// 점별 관측 구간.
+    /// Observation range per point.
     ptr: Vec<usize>,
 }
 
-/// 점 하나의 축약 결과(역전파용).
+/// Reduction result for one point (for back-substitution).
 struct PointSys {
     inv: Mat3,
-    /// (프레임, S_Xc 블록).
+    /// (frame, S_Xc block).
     blocks: Vec<(usize, Mat3)>,
     gx: Vec3,
-    /// 관측별 (h, g_d, H_dX 행, H_dc 행) — 고정 스케일이면 h = 0.
+    /// Per-observation (h, g_d, H_dX row, H_dc row) — h = 0 if the scale is fixed.
     od: Vec<(f64, f64, Vec3, Vec3)>,
-    /// 프레임별 축약 블록 기여 (프레임, S_cc 대각 기여, g_c 기여).
+    /// Per-frame reduced block contribution (frame, S_cc diagonal contribution, g_c contribution).
     cc: Vec<(usize, Mat3, Vec3)>,
 }
 
@@ -215,7 +215,7 @@ impl Problem {
                 None => cc.push((f, scc, gck)),
             }
         }
-        // H_XX = Σ w d² I (+ 감쇠).
+        // H_XX = Σ w d² I (+ damping).
         let hxx = hxx_diag + mu * hxx_diag.clamp(1e-6, 1e32);
         sxx += Mat3::identity() * hxx;
         let inv = if opts.optimize_points { sxx.try_inverse().unwrap_or_else(Mat3::zeros) } else { Mat3::zeros() };
@@ -223,7 +223,8 @@ impl Problem {
     }
 }
 
-/// 등록 영상의 회전을 고정하고 중심·점 위치를 푼다. 결과를 재구성에 기록(t = −R c).
+/// Fixes the rotations of registered images and solves for centers and point positions.
+/// Writes the result to the reconstruction (t = −R c).
 pub fn global_positioning(rec: &mut Reconstruction, opts: &PositionSolverOptions) -> Result<PositioningSummary> {
     let mut frames: Vec<ImageId> = rec.registered_images();
     frames.sort();
@@ -233,7 +234,7 @@ pub fn global_positioning(rec: &mut Reconstruction, opts: &PositionSolverOptions
     let fidx: BTreeMap<ImageId, usize> = frames.iter().enumerate().map(|(i, id)| (*id, i)).collect();
     let rots: Vec<Mat3> =
         frames.iter().map(|id| rec.world_to_cam(*id).map(|p| p.rotation_matrix()).unwrap_or_else(Mat3::identity)).collect();
-    // 관측 구성.
+    // Build the observations.
     let point_ids: Vec<Point3DId> = rec.point3d_ids();
     let mut obs = Vec::new();
     let mut ptr = vec![0usize];
@@ -266,7 +267,7 @@ pub fn global_positioning(rec: &mut Reconstruction, opts: &PositionSolverOptions
     let scales = vec![1.0; obs.len()];
     let mut prob = Problem { centers, points, scales, obs, ptr };
     let summary = solve(&mut prob, opts);
-    // 기록.
+    // Write back.
     for (i, id) in frames.iter().enumerate() {
         let r = rots[i];
         rec.set_world_to_cam(*id, Rigid3::from_rotation_matrix(&r, -(r * prob.centers[i])))?;
@@ -285,12 +286,12 @@ fn solve(prob: &mut Problem, opts: &PositionSolverOptions) -> PositioningSummary
     let mut summary = PositioningSummary { initial_cost: cost, ..Default::default() };
     let mut mu = 1e-4;
     let mut nu = 2.0;
-    // 덩어리 수(결정적 병렬 합산).
+    // Number of chunks (deterministic parallel summation).
     let chunk = np.div_ceil(64).max(256);
     for _ in 0..opts.max_num_iterations {
         summary.num_iterations += 1;
         let systems: Vec<PointSys> = (0..np).into_par_iter().map(|p| prob.point_system(p, a, mu, opts)).collect();
-        // 축약 계통 S δc = −g.
+        // Reduced system S δc = −g.
         let n = 3 * nf;
         let partial: Vec<(DMatrix<f64>, DVector<f64>)> = systems
             .par_chunks(chunk)
@@ -334,7 +335,7 @@ fn solve(prob: &mut Problem, opts: &PositionSolverOptions) -> PositioningSummary
             s += ps;
             g += pg;
         }
-        // 카메라 대각 감쇠: 원 헤시안 대각 H_cc = Σ w d² 를 다시 계산.
+        // Camera diagonal damping: recompute the original Hessian diagonal H_cc = Σ w d².
         let mut hcc = vec![0.0; nf];
         for p in 0..np {
             for k in prob.ptr[p]..prob.ptr[p + 1] {
@@ -349,7 +350,7 @@ fn solve(prob: &mut Problem, opts: &PositionSolverOptions) -> PositioningSummary
                 s[(3 * f + r, 3 * f + r)] += mu * hcc[f].clamp(1e-6, 1e32);
             }
         }
-        // 기울기 수렴 검사(축약 기울기 근사).
+        // Gradient convergence check (approximate reduced gradient).
         let gmax = g.amax().max(systems.iter().map(|ps| ps.gx.amax()).fold(0.0, f64::max));
         if gmax < opts.gradient_tolerance {
             summary.converged = true;
@@ -367,7 +368,7 @@ fn solve(prob: &mut Problem, opts: &PositionSolverOptions) -> PositioningSummary
         } else {
             DVector::zeros(n)
         };
-        // 역대입.
+        // Back-substitution.
         let steps: Vec<Vec3> = systems
             .par_iter()
             .map(|ps| {
@@ -436,7 +437,7 @@ mod tests {
     use crate::math::umeyama;
     use cumulus3d_core::{Camera, CameraModelKind, Image, Point3D, TrackEntry, Vec2};
 
-    /// 참 회전 + 참 트랙으로 무작위 초기화 → 상사 정렬 후 중심 오차.
+    /// Random initialization from true rotations + true tracks, then the center error after similarity alignment.
     fn run(noise_px: f64, seed: u64) -> (f64, f64, Reconstruction) {
         use rand::SeedableRng;
         let mut rng = rand_pcg::Pcg64::seed_from_u64(seed);

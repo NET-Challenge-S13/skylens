@@ -25,7 +25,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 3차원 KD-트리(자체 구현). 정밀 점군 근접 마스킹용. 질의는 rayon 병렬.
+//! 3D KD-tree (own implementation). For proximity masking against the refined cloud. Queries are parallel with rayon.
 
 use rayon::prelude::*;
 
@@ -37,7 +37,7 @@ enum Node {
     Split { dim: u8, val: f64, left: u32, right: u32 },
 }
 
-/// 정적 KD-트리. 점은 트리 순서로 재배열해 저장하고 원래 인덱스를 함께 보관한다.
+/// Static KD-tree. Points are stored rearranged in tree order, together with their original indices.
 #[derive(Clone, Debug, Default)]
 pub struct KdTree {
     pts: Vec<[f64; 3]>,
@@ -52,7 +52,7 @@ fn d2(a: &[f64; 3], b: &[f64; 3]) -> f64 {
 }
 
 impl KdTree {
-    /// f64 점으로 생성.
+    /// Creates from f64 points.
     pub fn new(points: impl IntoIterator<Item = [f64; 3]>) -> Self {
         let pts: Vec<[f64; 3]> = points.into_iter().collect();
         assert!(pts.len() < u32::MAX as usize, "점이 너무 많음");
@@ -64,20 +64,20 @@ impl KdTree {
         let reordered = idx.iter().map(|&i| pts[i as usize]).collect();
         Self { pts: reordered, orig: idx, nodes }
     }
-    /// f32 점(PLY)으로 생성.
+    /// Creates from f32 points (PLY).
     pub fn from_f32(points: &[[f32; 3]]) -> Self {
         Self::new(points.iter().map(|p| [p[0] as f64, p[1] as f64, p[2] as f64]))
     }
-    /// 점 개수.
+    /// Number of points.
     pub fn len(&self) -> usize {
         self.pts.len()
     }
-    /// 점이 없으면 참.
+    /// True if there are no points.
     pub fn is_empty(&self) -> bool {
         self.pts.is_empty()
     }
 
-    /// 최근접 점 (원래 인덱스, 거리²). 빈 트리면 None.
+    /// Nearest point (original index, distance²). None for an empty tree.
     pub fn nearest(&self, q: &[f64; 3]) -> Option<(usize, f64)> {
         if self.nodes.is_empty() {
             return None;
@@ -108,7 +108,7 @@ impl KdTree {
         }
     }
 
-    /// 반경 r 안(거리 ≤ r)에 점이 하나라도 있는가(조기 종료).
+    /// Whether any point lies within radius r (distance ≤ r) (early exit).
     pub fn any_within(&self, q: &[f64; 3], r: f64) -> bool {
         !self.nodes.is_empty() && self.any_rec(0, q, r * r)
     }
@@ -124,7 +124,7 @@ impl KdTree {
         }
     }
 
-    /// 반경 r 안의 모든 점(원래 인덱스, 순서 미정).
+    /// All points within radius r (original index, order unspecified).
     pub fn within_radius(&self, q: &[f64; 3], r: f64) -> Vec<usize> {
         let mut out = Vec::new();
         if !self.nodes.is_empty() {
@@ -154,18 +154,18 @@ impl KdTree {
         }
     }
 
-    /// 병렬 최근접 질의.
+    /// Parallel nearest-neighbor query.
     pub fn nearest_many(&self, queries: &[[f64; 3]]) -> Vec<Option<(usize, f64)>> {
         queries.par_iter().map(|q| self.nearest(q)).collect()
     }
 
-    /// 병렬 반경 판정(f32 질의). `결과[i]` = 질의 i 의 r 안에 점이 있음.
+    /// Parallel radius test (f32 queries). `result[i]` = whether query i has a point within r.
     pub fn any_within_many_f32(&self, queries: &[[f32; 3]], r: f64) -> Vec<bool> {
         queries.par_iter().map(|q| self.any_within(&[q[0] as f64, q[1] as f64, q[2] as f64], r)).collect()
     }
 }
 
-/// idx 구간에 대해 노드를 만들고 그 노드 번호를 반환. `offset` = idx 구간의 전체 내 시작 위치.
+/// Builds nodes for the idx range and returns the node index. `offset` = start position of the idx range within the whole.
 fn build(pts: &[[f64; 3]], idx: &mut [u32], offset: usize, nodes: &mut Vec<Node>) -> u32 {
     let me = nodes.len() as u32;
     let n = idx.len();
@@ -173,7 +173,7 @@ fn build(pts: &[[f64; 3]], idx: &mut [u32], offset: usize, nodes: &mut Vec<Node>
         nodes.push(Node::Leaf { start: offset as u32, end: (offset + n) as u32 });
         return me;
     }
-    // 범위가 가장 큰 축으로 분할.
+    // Split along the axis with the largest extent.
     let (mut lo, mut hi) = ([f64::INFINITY; 3], [f64::NEG_INFINITY; 3]);
     for &i in idx.iter() {
         let p = &pts[i as usize];
@@ -184,15 +184,15 @@ fn build(pts: &[[f64; 3]], idx: &mut [u32], offset: usize, nodes: &mut Vec<Node>
     }
     let dim = (0..3).max_by(|&a, &b| (hi[a] - lo[a]).total_cmp(&(hi[b] - lo[b]))).unwrap_or(0);
     if hi[dim] - lo[dim] <= 0.0 {
-        // 모든 점이 같은 위치: 더 나눌 수 없음.
+        // All points at the same position: cannot split further.
         nodes.push(Node::Leaf { start: offset as u32, end: (offset + n) as u32 });
         return me;
     }
     let mid = n / 2;
     idx.select_nth_unstable_by(mid, |a, b| pts[*a as usize][dim].total_cmp(&pts[*b as usize][dim]));
     let val = pts[idx[mid] as usize][dim];
-    // 왼쪽 ≤ val ≤ 오른쪽. 가지치기는 |q_d − val| 하한만 쓰므로 같은 값이 양쪽에 있어도 정확하다.
-    nodes.push(Node::Leaf { start: 0, end: 0 }); // 자리 확보
+    // Left ≤ val ≤ right. Pruning uses only the |q_d − val| lower bound, so it is exact even if equal values lie on both sides.
+    nodes.push(Node::Leaf { start: 0, end: 0 }); // reserve a slot
     let (l, r) = idx.split_at_mut(mid);
     let left = build(pts, l, offset, nodes);
     let right = build(pts, r, offset + mid, nodes);
@@ -219,7 +219,7 @@ mod tests {
             let (gi, gd) = g.unwrap();
             assert_eq!(gd, bd);
             assert!(gi == bi || d2(&pts[gi], q) == bd);
-            // 반경 질의도 무차별 대입과 일치.
+            // Radius queries also match brute force.
             let r = 3.0;
             let mut within = tree.within_radius(q, r);
             within.sort_unstable();

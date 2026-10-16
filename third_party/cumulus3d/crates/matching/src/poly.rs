@@ -25,12 +25,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 다항식 근.
+//! Polynomial roots.
 
 use nalgebra::DMatrix;
 
-/// 계수(오름차순: `c[0] + c[1] z + …`)로 주어진 다항식의 복소 근 (실수부, 허수부).
-/// 최고차 계수로 정규화한 동반행렬의 고유값. 최고차 계수가 0 이면 차수를 낮춘다.
+/// Complex roots (real part, imaginary part) of a polynomial given by coefficients (ascending: `c[0] + c[1] z + …`).
+/// Eigenvalues of the companion matrix normalized by the leading coefficient. If the leading coefficient is 0, the degree is lowered.
 pub fn roots_companion(coeffs: &[f64]) -> Vec<(f64, f64)> {
     let mut deg = coeffs.len().saturating_sub(1);
     while deg > 0 && coeffs[deg] == 0.0 {
@@ -59,7 +59,7 @@ pub fn roots_companion(coeffs: &[f64]) -> Vec<(f64, f64)> {
     }
 }
 
-/// 모닉 3차식 x³ + a x² + b x + c 의 실근(1개 또는 3개). 해석적 해.
+/// Real roots (1 or 3) of the monic cubic x³ + a x² + b x + c. Analytic solution.
 pub fn solve_cubic_monic(a: f64, b: f64, c: f64) -> Vec<f64> {
     let a3 = a / 3.0;
     let p = b - a * a3;
@@ -74,7 +74,7 @@ pub fn solve_cubic_monic(a: f64, b: f64, c: f64) -> Vec<f64> {
     } else if p == 0.0 {
         vec![-a3]
     } else {
-        // 세 실근(중근 포함): 삼각 해법.
+        // Three real roots (including a repeated root): trigonometric solution.
         let m = 2.0 * (-p / 3.0).sqrt();
         let arg = (3.0 * q / (p * m)).clamp(-1.0, 1.0);
         let theta = arg.acos() / 3.0;
@@ -83,7 +83,7 @@ pub fn solve_cubic_monic(a: f64, b: f64, c: f64) -> Vec<f64> {
     }
 }
 
-/// 다항식 곱(오름차순 계수).
+/// Polynomial product (ascending coefficients).
 pub fn poly_mul(a: &[f64], b: &[f64]) -> Vec<f64> {
     let mut r = vec![0.0; a.len() + b.len() - 1];
     for (i, x) in a.iter().enumerate() {
@@ -94,7 +94,7 @@ pub fn poly_mul(a: &[f64], b: &[f64]) -> Vec<f64> {
     r
 }
 
-/// 다항식 합/차.
+/// Polynomial sum/difference.
 pub fn poly_add(a: &[f64], b: &[f64], sign: f64) -> Vec<f64> {
     let mut r = vec![0.0; a.len().max(b.len())];
     for (i, x) in a.iter().enumerate() {
@@ -106,7 +106,7 @@ pub fn poly_add(a: &[f64], b: &[f64], sign: f64) -> Vec<f64> {
     r
 }
 
-/// 다항식 값.
+/// Polynomial value.
 pub fn poly_eval(c: &[f64], z: f64) -> f64 {
     c.iter().rev().fold(0.0, |acc, &v| acc * z + v)
 }
@@ -121,7 +121,7 @@ mod tests {
         let mut r = solve_cubic_monic(0.0, -7.0, 6.0);
         r.sort_by(f64::total_cmp);
         assert!((r[0] + 3.0).abs() < 1e-12 && (r[1] - 1.0).abs() < 1e-12 && (r[2] - 2.0).abs() < 1e-12);
-        // x³ + x + 1: 실근 1개
+        // x³ + x + 1: one real root
         let r = solve_cubic_monic(0.0, 1.0, 1.0);
         assert_eq!(r.len(), 1);
         assert!(poly_eval(&[1.0, 1.0, 0.0, 1.0], r[0]).abs() < 1e-12);

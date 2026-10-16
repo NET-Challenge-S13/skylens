@@ -25,14 +25,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 점군 후처리: Sim3 변환, 정밀 점군 근접 마스킹, 1/N 추출, 스냅샷 합성.
+//! Point cloud post-processing: Sim3 transform, proximity masking against the refined cloud, 1/N thinning, snapshot composition.
 
 use crate::kdtree::KdTree;
 use cumulus3d_core::io::PointCloud;
 use cumulus3d_core::{Sim3, Vec3};
 use rayon::prelude::*;
 
-/// 점과 법선에 Sim3 적용(점: sRx+t, 법선: Rn). 계산은 f64.
+/// Applies a Sim3 to points and normals (points: sRx+t, normals: Rn). Computed in f64.
 pub fn transform_cloud(cloud: &mut PointCloud, t: &Sim3) {
     let r = t.rotation.to_rotation_matrix();
     let sr = r * t.scale;
@@ -46,7 +46,7 @@ pub fn transform_cloud(cloud: &mut PointCloud, t: &Sim3) {
     });
 }
 
-/// `mask[i]` 가 true 인 점만 남긴 새 점군.
+/// New point cloud keeping only the points where `mask[i]` is true.
 pub fn select(cloud: &PointCloud, keep: &[bool]) -> PointCloud {
     let pick = |v: &Vec<[f32; 3]>| -> Vec<[f32; 3]> {
         if v.is_empty() {
@@ -63,17 +63,18 @@ pub fn select(cloud: &PointCloud, keep: &[bool]) -> PointCloud {
         } else {
             cloud.colors.iter().zip(keep).filter(|(_, k)| **k).map(|(c, _)| *c).collect()
         },
+        keys: if cloud.keys.is_empty() { Vec::new() } else { cloud.keys.iter().zip(keep).filter(|(_, k)| **k).map(|(c, _)| *c).collect() },
     }
 }
 
-/// `reference` 와 거리 ≤ radius 인 점을 뺀 점군(정밀 점과 겹치는 초벌 점 제거).
+/// Point cloud without the points within distance ≤ radius of `reference` (removes preview points that overlap refined points).
 pub fn remove_near(cloud: &PointCloud, reference: &KdTree, radius: f64) -> PointCloud {
     let near = reference.any_within_many_f32(&cloud.positions, radius);
     let keep: Vec<bool> = near.iter().map(|b| !b).collect();
     select(cloud, &keep)
 }
 
-/// 1/stride 간격 추출(인덱스 0, stride, 2·stride, …). stride ≤ 1 이면 그대로.
+/// Takes every stride-th point (indices 0, stride, 2·stride, …). Unchanged if stride ≤ 1.
 pub fn decimate(cloud: &PointCloud, stride: usize) -> PointCloud {
     if stride <= 1 {
         return cloud.clone();
@@ -82,7 +83,8 @@ pub fn decimate(cloud: &PointCloud, stride: usize) -> PointCloud {
     select(cloud, &keep)
 }
 
-/// 이어 붙이기. 일부만 법선/색이 있으면 없는 쪽을 (0,0,0) 법선 / 흰색으로 채운다.
+/// Concatenation. If only some clouds have normals/colors, the missing ones are filled with (0,0,0) normals / white.
+/// Keys are kept only if every non-empty cloud has them.
 pub fn merge_clouds(clouds: &[&PointCloud]) -> PointCloud {
     let total: usize = clouds.iter().map(|c| c.len()).sum();
     let any_n = clouds.iter().any(|c| c.has_normals());
@@ -91,9 +93,18 @@ pub fn merge_clouds(clouds: &[&PointCloud]) -> PointCloud {
         positions: Vec::with_capacity(total),
         normals: Vec::with_capacity(if any_n { total } else { 0 }),
         colors: Vec::with_capacity(if any_c { total } else { 0 }),
+        keys: Vec::new(),
     };
+    // Keys are concatenated only if every cloud has them (if only some do, alignment would break, so they are dropped).
+    let all_k = !clouds.is_empty() && clouds.iter().all(|c| c.is_empty() || c.has_keys());
+    if all_k && clouds.iter().any(|c| c.has_keys()) {
+        out.keys.reserve(total);
+    }
     for c in clouds {
         out.positions.extend_from_slice(&c.positions);
+        if all_k && c.has_keys() {
+            out.keys.extend_from_slice(&c.keys);
+        }
         if any_n {
             if c.has_normals() {
                 out.normals.extend_from_slice(&c.normals);
@@ -112,12 +123,12 @@ pub fn merge_clouds(clouds: &[&PointCloud]) -> PointCloud {
     out
 }
 
-/// 스냅샷 합성 옵션.
+/// Snapshot composition options.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SnapshotOptions {
-    /// 정밀 점과 이 거리 이내의 초벌 점 제거 (m).
+    /// Remove preview points within this distance (m) of a refined point.
     pub mask_radius: f64,
-    /// 최종 1/N 추출.
+    /// Final 1/N thinning.
     pub stride: usize,
 }
 
@@ -127,8 +138,8 @@ impl Default for SnapshotOptions {
     }
 }
 
-/// 스냅샷 = 정밀 구역 전부 + (정밀 점과 겹치지 않는) 초벌 구역들, 그 뒤 1/N 추출.
-/// 모든 입력은 이미 같은 좌표계에 있어야 한다.
+/// Snapshot = all refined zones + the preview zones (not overlapping refined points), then 1/N thinning.
+/// All inputs must already be in the same coordinate frame.
 pub fn compose_snapshot(fine: &[&PointCloud], coarse: &[&PointCloud], opts: &SnapshotOptions) -> PointCloud {
     let fine_all = merge_clouds(fine);
     let masked: Vec<PointCloud> = if fine_all.is_empty() {
@@ -139,7 +150,7 @@ pub fn compose_snapshot(fine: &[&PointCloud], coarse: &[&PointCloud], opts: &Sna
     };
     let mut parts: Vec<&PointCloud> = vec![&fine_all];
     parts.extend(masked.iter());
-    // 설계 결정: 1/N 추출 시점. 마스킹 후 합친 전체에 한 번 적용한다.
+    // Design decision: timing of 1/N thinning. Applied once to the whole merged set after masking.
     decimate(&merge_clouds(&parts), opts.stride)
 }
 
@@ -162,14 +173,14 @@ mod tests {
 
     #[test]
     fn mask_within_1_5m() {
-        // 정밀: x ∈ [0, 10] 격자(z=0). 초벌: z 높이별 점 — 1.5 m 이내만 제거.
+        // Refined: grid on x ∈ [0, 10] (z=0). Preview: points at various z heights, only those within 1.5 m are removed.
         let fine = grid(11, 1.0, 0.0);
         let mut coarse = PointCloud::default();
         for z in [0.5f32, 1.4, 1.5, 1.6, 3.0] {
             coarse.positions.push([5.0, 5.0, z]);
         }
-        coarse.positions.push([20.0, 5.0, 0.0]); // 수평으로 멀리
-        coarse.positions.push([11.4, 5.0, 0.0]); // 가장자리에서 1.4 m
+        coarse.positions.push([20.0, 5.0, 0.0]); // far away horizontally
+        coarse.positions.push([11.4, 5.0, 0.0]); // 1.4 m from the edge
         let tree = KdTree::from_f32(&fine.positions);
         let out = remove_near(&coarse, &tree, 1.5);
         assert_eq!(out.positions, vec![[5.0, 5.0, 1.6], [5.0, 5.0, 3.0], [20.0, 5.0, 0.0]]);
@@ -185,7 +196,7 @@ mod tests {
             let e = t.transform_point(&Vec3::new(a[0] as f64, a[1] as f64, a[2] as f64));
             assert!((e - Vec3::new(b[0] as f64, b[1] as f64, b[2] as f64)).norm() < 1e-5);
         }
-        // z 법선 → x 축 90° 회전 → −y.
+        // z normal, rotate 90° about the x axis, giving −y.
         let n = c.normals[0];
         assert!((n[1] + 1.0).abs() < 1e-6 && n[2].abs() < 1e-6);
     }
@@ -195,7 +206,7 @@ mod tests {
         let c = grid(4, 1.0, 0.0);
         assert_eq!(decimate(&c, 6).len(), 3); // 16 → 0, 6, 12
         let fine = grid(5, 1.0, 0.0);
-        let mut coarse = grid(10, 1.0, 0.0); // 0..9; x,y ≤ 6 인 점은 정밀(0..4)과 1.5 m 이내
+        let mut coarse = grid(10, 1.0, 0.0); // 0..9; points with x,y ≤ 6 are within 1.5 m of the refined ones (0..4)
         coarse.normals.clear();
         let snap = compose_snapshot(&[&fine], &[&coarse], &SnapshotOptions { mask_radius: 1.5, stride: 1 });
         let kept_coarse = coarse

@@ -29,7 +29,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! SIFT. 무거운 계산은 [`SiftEngine`] 뒤에 둔다.
+//! SIFT. Heavy computation sits behind [`SiftEngine`].
 
 pub mod detect;
 pub mod orient;
@@ -43,51 +43,52 @@ use orient::{Gradient, OrientParams};
 use pyramid::{BufferPool, ScaleSpace};
 use rayon::prelude::*;
 
-/// 최대 특징 수 제한 방식.
+/// Maximum feature count limiting mode.
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
 pub enum FeatureSelection {
-    /// 레벨 단위 규칙: 거친 레벨부터 통째로, 상한을 넘긴 레벨까지 포함. 기본.
+    /// Level-wise rule: whole levels from the coarsest, including the level that crosses the cap. Default.
     #[default]
     CompatLevels,
-    /// 개선: 거친 레벨 우선 + 레벨 내 |DoG 응답| 내림차순으로 정확히 K개.
+    /// Improvement: coarse levels first + within a level descending |DoG response|, exactly K features.
     TopK,
-    /// 개선: 영상을 `cells × cells` 격자로 나눠 칸마다 |응답| 순으로 번갈아 뽑아 정확히 K개(공간 균등).
+    /// Improvement: split the image into a `cells x cells` grid and pick alternately per cell in |response| order,
+    /// exactly K features (spatially uniform).
     SpatialGrid {
-        /// 한 축의 격자 칸 수.
+        /// Number of grid cells per axis.
         cells: u32,
     },
 }
 
-/// SIFT 옵션. 기본값 = 파이프라인 설정 + 레벨 단위 선택 동작.
+/// SIFT options. Defaults = pipeline settings + level-wise selection behavior.
 #[derive(Clone, Debug, PartialEq)]
 pub struct SiftOptions {
-    /// 최대 특징 수(0 = 무제한).
+    /// Maximum feature count (0 = unlimited).
     pub max_num_features: usize,
-    /// −1(2배 업샘플) 또는 0.
+    /// -1 (2x upsample) or 0.
     pub first_octave: i32,
-    /// None = 영상 크기로 자동(floor(log2 min) − 3). Some(n) = 고정.
+    /// None = automatic from image size (floor(log2 min) - 3). Some(n) = fixed.
     pub num_octaves: Option<usize>,
-    /// 옥타브당 검출 레벨 수 S.
+    /// Number of detection levels per octave S.
     pub octave_resolution: usize,
-    /// DoG 극값 임계값(대비).
+    /// DoG extremum threshold (contrast).
     pub peak_threshold: f32,
-    /// 엣지 억제 임계값(주곡률 비).
+    /// Edge suppression threshold (principal curvature ratio).
     pub edge_threshold: f32,
-    /// 키포인트당 최대 방향 수.
+    /// Maximum number of orientations per keypoint.
     pub max_num_orientations: usize,
-    /// 참이면 방향 할당 없이 θ = 0.
+    /// If true, θ = 0 without orientation assignment.
     pub upright: bool,
-    /// 기술자 정규화 방식.
+    /// Descriptor normalization mode.
     pub normalization: DescriptorNormalization,
-    /// 입력 너비를 4의 배수로 내림(기본 동작). 끄면 오른쪽 열을 버리지 않음(개선).
+    /// Round the input width down to a multiple of 4 (default behavior). If disabled, the right columns are not dropped (improvement).
     pub truncate_width_to_4: bool,
-    /// 부분화소 보정 반복 수. 1 = 1회(이동 없음, 기본). 5 = 화소 이동하며 반복(개선).
+    /// Number of sub-pixel refinement iterations. 1 = once (no shift, default). 5 = iterate while shifting pixels (improvement).
     pub refinement_iterations: usize,
-    /// 특이 헤시안이면 버림(개선). 기본 false = δ=0 으로 통과.
+    /// Discard if the Hessian is singular (improvement). Default false = pass with δ=0.
     pub reject_singular_refinement: bool,
-    /// 방향 히스토그램 인접 빈 선형 보간(개선).
+    /// Linear interpolation between adjacent orientation histogram bins (improvement).
     pub orientation_bin_interpolation: bool,
-    /// 최대 특징 수 제한 방식.
+    /// Maximum feature count limiting mode.
     pub selection: FeatureSelection,
 }
 
@@ -112,78 +113,78 @@ impl Default for SiftOptions {
     }
 }
 
-/// 특징 하나(입력 영상 화소 단위, 좌상단 화소 중심 = (0.5, 0.5)).
+/// One feature (in input-image pixel units, top-left pixel center = (0.5, 0.5)).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SiftFeature {
-    /// x 좌표(화소).
+    /// x coordinate (pixels).
     pub x: f32,
-    /// y 좌표(화소).
+    /// y coordinate (pixels).
     pub y: f32,
-    /// 스케일 σ(입력 영상 화소 단위).
+    /// Scale σ (in input-image pixel units).
     pub scale: f32,
-    /// 출력 방향 = (2π − θ_int) mod 2π.
+    /// Output orientation = (2π - θ_int) mod 2π.
     pub orientation: f32,
-    /// 검출 옥타브 번호.
+    /// Detection octave index.
     pub octave: i32,
-    /// 옥타브 내 검출 레벨 j (0..S).
+    /// Detection level j within the octave (0..S).
     pub level: u32,
-    /// 보정된 DoG 값.
+    /// Refined DoG value.
     pub response: f32,
 }
 
 impl SiftFeature {
-    /// 아핀 키포인트.
+    /// Affine keypoint.
     pub fn keypoint(&self) -> Keypoint {
         Keypoint::from_scale_orientation(self.x, self.y, self.scale, self.orientation)
     }
 }
 
-/// 추출 결과. `features[i]` ↔ `descriptors.row(i)`.
+/// Extraction result. `features[i]` <-> `descriptors.row(i)`.
 #[derive(Clone, Debug, Default)]
 pub struct SiftOutput {
-    /// 특징 목록.
+    /// Feature list.
     pub features: Vec<SiftFeature>,
-    /// 128차원 uint8 기술자(행 i ↔ 특징 i).
+    /// 128-dimensional uint8 descriptors (row i <-> feature i).
     pub descriptors: Descriptors,
 }
 
 impl SiftOutput {
-    /// 특징들을 아핀 키포인트로 변환.
+    /// Converts the features to affine keypoints.
     pub fn keypoints(&self) -> Vec<Keypoint> {
         self.features.iter().map(|f| f.keypoint()).collect()
     }
-    /// 특징 수.
+    /// Number of features.
     pub fn len(&self) -> usize {
         self.features.len()
     }
-    /// 특징이 없으면 참.
+    /// True if there are no features.
     pub fn is_empty(&self) -> bool {
         self.features.is_empty()
     }
 }
 
-/// SIFT 계산 백엔드. CUDA 등 다른 구현을 끼울 수 있게 trait 로 둔다.
+/// SIFT compute backend. A trait so that other implementations such as CUDA can be plugged in.
 pub trait SiftEngine: Send + Sync {
-    /// 백엔드 이름(로그용).
+    /// Backend name (for logging).
     fn name(&self) -> &str;
-    /// 회색 영상에서 특징 추출. 좌표는 입력 영상 화소 단위.
+    /// Extracts features from a grayscale image. Coordinates are in input-image pixel units.
     fn extract(&self, image: &GrayImage, options: &SiftOptions) -> Result<SiftOutput>;
 }
 
-/// CPU(rayon) 백엔드. 피라미드 버퍼를 영상 간에 재사용한다.
+/// CPU (rayon) backend. Reuses pyramid buffers across images.
 #[derive(Default)]
 pub struct CpuSift {
     pool: BufferPool,
 }
 
 impl CpuSift {
-    /// 빈 버퍼 풀로 CPU 백엔드를 만든다.
+    /// Creates a CPU backend with an empty buffer pool.
     pub fn new() -> Self {
         Self::default()
     }
 }
 
-/// 레벨 하나의 결과(방향 포함).
+/// Result of one level (including orientations).
 struct LevelFeats {
     oi: usize,
     j: usize,
@@ -207,7 +208,7 @@ impl SiftEngine for CpuSift {
         if w < 8 || h < 8 {
             return Ok(SiftOutput::default());
         }
-        // 입력 정규화 /255 (+ 너비 절단).
+        // Input normalization /255 (+ width truncation).
         let mut base = self.pool.take(w * h);
         base.par_chunks_mut(w).enumerate().for_each(|(y, row)| {
             let src = &image.data[y * image.width..y * image.width + w];
@@ -240,7 +241,8 @@ impl SiftEngine for CpuSift {
         };
         let op = OrientParams { max_num_orientations: opts.max_num_orientations, bin_interpolation: opts.orientation_bin_interpolation };
 
-        // 거친 옥타브·높은 레벨부터. 레벨 단위 규칙상 잘릴 레벨은 검출 자체를 생략(결과 동일).
+        // From coarse octaves and high levels first. Under the level-wise rule, levels that would be cut
+        // skip detection entirely (same result).
         let mut levels: Vec<LevelFeats> = Vec::new();
         let (mut cum_det, mut cum_or) = (0usize, 0usize);
         'outer: for oi in (0..pyr.len()).rev() {
@@ -271,7 +273,7 @@ impl SiftEngine for CpuSift {
                 let items: Vec<(Candidate, u16)> = if opts.upright {
                     cands.into_iter().map(|c| (c, 0u16)).collect()
                 } else {
-                    // 방향 창은 작아서 즉석 기울기가 유리.
+                    // The orientation window is small, so on-the-fly gradients are advantageous.
                     let grad = Gradient::lazy(oct.level(j as i32), ow, oh);
                     cands
                         .par_iter()
@@ -288,7 +290,7 @@ impl SiftEngine for CpuSift {
 
         select(&mut levels, opts.selection, k_max, &pyr);
 
-        // 출력 순서: 옥타브 오름차순, 레벨 오름차순, 레벨 내 검출 순서.
+        // Output order: octave ascending, level ascending, detection order within a level.
         levels.sort_by_key(|l| (l.oi, l.j));
         let total: usize = levels.iter().map(|l| l.items.len()).sum();
         let mut features = Vec::with_capacity(total);
@@ -332,7 +334,7 @@ impl SiftEngine for CpuSift {
     }
 }
 
-/// 최대 특징 수 제한. `levels` 는 거친 → 미세 순서.
+/// Limits the maximum feature count. `levels` is in coarse -> fine order.
 fn select(levels: &mut [LevelFeats], mode: FeatureSelection, k: usize, pyr: &[pyramid::Octave]) {
     let total: usize = levels.iter().map(|l| l.items.len()).sum();
     if total <= k {
@@ -340,7 +342,7 @@ fn select(levels: &mut [LevelFeats], mode: FeatureSelection, k: usize, pyr: &[py
     }
     match mode {
         FeatureSelection::CompatLevels => {
-            // 가장 미세한 레벨부터 "전체 − 그 레벨 > K" 인 동안 통째 제거.
+            // From the finest level, remove whole levels while "total - that level > K".
             let mut total = total;
             for lv in levels.iter_mut().rev() {
                 if total - lv.items.len() > k {
@@ -371,7 +373,7 @@ fn select(levels: &mut [LevelFeats], mode: FeatureSelection, k: usize, pyr: &[py
         }
         FeatureSelection::SpatialGrid { cells } => {
             let cells = cells.max(1) as usize;
-            // 입력 영상 크기 ≈ 첫 옥타브 크기 × 2^o_min.
+            // Input image size ~ first octave size x 2^o_min.
             let o0 = &pyr[0];
             let sc = 2f32.powi(o0.o);
             let (iw, ih) = (o0.w as f32 * sc, o0.h as f32 * sc);

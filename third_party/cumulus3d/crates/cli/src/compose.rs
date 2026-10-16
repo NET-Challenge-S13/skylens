@@ -645,7 +645,12 @@ impl NodeBuilder {
         self.plan.matching.backend = "cuda".into();
         self.plan.sparse.backend = "cuda".into();
         self.plan.dense.backend = "cuda".into();
+<<<<<<< skylens (vendored)
         self.plan.sparse.ba_backend = "cuda".into();
+||||||| base b9f4a9bda
+=======
+        self.plan.dense.undistort_backend = "cuda".into();
+>>>>>>> upstream v0.5.0
         self
     }
     /// Triangulate only newly registered images.

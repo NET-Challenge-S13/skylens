@@ -13,7 +13,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.3.1"
+version = "0.5.0"
 edition = "2021"
 license = "Apache-2.0"
 authors = ["ParkSangWoo <dev.parksangwoo@gmail.com>"]
@@ -21,14 +21,14 @@ repository = "https://github.com/AH100-1/cumulus3d"
 rust-version = "1.89"
 
 [workspace.dependencies]
-cumulus3d-core = { path = "crates/core", version = "0.3.1" }
-cumulus3d-features = { path = "crates/features", version = "0.3.1" }
-cumulus3d-matching = { path = "crates/matching", version = "0.3.1" }
-cumulus3d-ba = { path = "crates/ba", version = "0.3.1" }
-cumulus3d-sfm = { path = "crates/sfm", version = "0.3.1" }
-cumulus3d-align = { path = "crates/align", version = "0.3.1" }
-cumulus3d-dense = { path = "crates/dense", version = "0.3.1" }
-cumulus3d-cuda = { path = "crates/cuda", version = "0.3.1" }
+cumulus3d-core = { path = "crates/core", version = "0.5.0" }
+cumulus3d-features = { path = "crates/features", version = "0.5.0" }
+cumulus3d-matching = { path = "crates/matching", version = "0.5.0" }
+cumulus3d-ba = { path = "crates/ba", version = "0.5.0" }
+cumulus3d-sfm = { path = "crates/sfm", version = "0.5.0" }
+cumulus3d-align = { path = "crates/align", version = "0.5.0" }
+cumulus3d-dense = { path = "crates/dense", version = "0.5.0" }
+cumulus3d-cuda = { path = "crates/cuda", version = "0.5.0" }
 cudarc = { version = "0.19", default-features = false, features = ["std", "driver", "nvrtc", "dynamic-loading", "cuda-12040"] }
 nalgebra = "0.35"
 rayon = "1"

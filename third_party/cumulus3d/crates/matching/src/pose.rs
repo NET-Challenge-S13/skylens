@@ -29,7 +29,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 상대 자세 분해와 cheirality. sfm 도 사용한다.
+//! Relative pose decomposition and cheirality. Also used by sfm.
 
 use crate::essential::essential_eight_point;
 use crate::estimators::{fundamental_eight_point, homography_dlt};
@@ -37,7 +37,7 @@ use crate::linalg::svd3;
 use cumulus3d_core::geometry::triangulation_angle;
 use cumulus3d_core::{Camera, Keypoint, Mat3, Rigid3, TwoViewGeometry, TwoViewGeometryConfig, Vec2, Vec3};
 
-/// E 분해 4후보 (R_a,t), (R_b,t), (R_a,−t), (R_b,−t). t 는 단위 벡터. cam1_to_cam2 규약.
+/// The 4 E decomposition candidates (R_a,t), (R_b,t), (R_a,-t), (R_b,-t). t is a unit vector. cam1_to_cam2 convention.
 pub fn decompose_essential(e: &Mat3) -> Option<[(Mat3, Vec3); 4]> {
     let (mut u, _, v) = svd3(e)?;
     let mut vt = v.transpose();
@@ -54,8 +54,8 @@ pub fn decompose_essential(e: &Mat3) -> Option<[(Mat3, Vec3); 4]> {
     Some([(ra, t), (rb, t), (ra, -t), (rb, -t)])
 }
 
-/// 중점 삼각측량. cam1_to_cam2 = (R, t), r1·r2 는 각 카메라 광선(단위 아니어도 됨).
-/// 결과 점은 카메라1 좌표. 어느 쪽이든 깊이(λ) ≤ ε 이면 None.
+/// Midpoint triangulation. cam1_to_cam2 = (R, t), r1·r2 are the rays of each camera (need not be unit).
+/// The resulting point is in camera-1 coordinates. None if the depth (λ) is <= ε on either side.
 pub fn triangulate_midpoint(r: &Mat3, t: &Vec3, r1: &Vec3, r2: &Vec3) -> Option<Vec3> {
     let r2p = r.tr_mul(r2);
     let c2 = -r.tr_mul(t);
@@ -73,8 +73,9 @@ pub fn triangulate_midpoint(r: &Mat3, t: &Vec3, r1: &Vec3, r2: &Vec3) -> Option<
     Some(0.5 * (l1 * r1 + c2 + l2 * r2p))
 }
 
-/// E → (cam1_to_cam2, 카메라1 좌표 3D 점들). 성공 점 수가 이전 최선 이상이면 갱신(동점은 나중 후보).
-/// 점이 0개면 None.
+/// E -> (cam1_to_cam2, 3D points in camera-1 coordinates). Update if the number of successful points is at least
+/// the previous best (ties go to the later candidate).
+/// None if there are zero points.
 pub fn pose_from_essential(e: &Mat3, rays1: &[Vec3], rays2: &[Vec3]) -> Option<(Rigid3, Vec<Vec3>)> {
     let cands = decompose_essential(e)?;
     let mut best: Option<(Mat3, Vec3, Vec<Vec3>)> = None;
@@ -91,8 +92,8 @@ pub fn pose_from_essential(e: &Mat3, rays1: &[Vec3], rays2: &[Vec3]) -> Option<(
     Some((Rigid3::from_rotation_matrix(&r, t), pts))
 }
 
-/// H 분해 후보 (R, t, n) 목록. H 는 픽셀 호모그래피(x2 ~ H x1), K1·K2 는 보정 행렬.
-/// 순수 회전이면 후보 1개 (H_n, 0, 0). 규약: H_n ∝ R − t nᵀ (평면 nᵀX = d=1, 카메라1 좌표).
+/// List of H decomposition candidates (R, t, n). H is a pixel homography (x2 ~ H x1), K1·K2 are calibration matrices.
+/// For pure rotation, 1 candidate (H_n, 0, 0). Convention: H_n ∝ R - t nᵀ (plane nᵀX = d = 1, camera-1 coordinates).
 pub fn decompose_homography(h: &Mat3, k1: &Mat3, k2: &Mat3) -> Vec<(Mat3, Vec3, Vec3)> {
     let Some(k2i) = k2.try_inverse() else { return Vec::new() };
     let mut hn = k2i * h * k1;
@@ -115,7 +116,7 @@ pub fn decompose_homography(h: &Mat3, k1: &Mat3, k2: &Mat3) -> Vec<(Mat3, Vec3, 
     let s01 = sm[(0, 1)];
     let s02 = sm[(0, 2)];
     let s12 = sm[(1, 2)];
-    // 여인자(소행렬식의 반대 부호).
+    // Cofactor (minor determinant with the opposite sign).
     let m00 = s12 * s12 - s11 * s22;
     let m11 = s02 * s02 - s00 * s22;
     let m22 = s01 * s01 - s00 * s11;
@@ -167,7 +168,7 @@ pub fn decompose_homography(h: &Mat3, k1: &Mat3, k2: &Mat3) -> Vec<(Mat3, Vec3, 
     vec![(r1, t1, -n1), (r1, -t1, n1), (r2, t2, -n2), (r2, -t2, n2)]
 }
 
-/// H → (cam1_to_cam2, 법선, 3D 점). 성공 점 수가 엄격히 많거나 같으면 오차 합이 작은 후보.
+/// H -> (cam1_to_cam2, normal, 3D points). The candidate with strictly more successful points, or equal and a smaller error sum.
 pub fn pose_from_homography(h: &Mat3, k1: &Mat3, k2: &Mat3, rays1: &[Vec3], rays2: &[Vec3]) -> Option<(Rigid3, Vec3, Vec<Vec3>)> {
     let cands = decompose_homography(h, k1, k2);
     let mut best: Option<(Mat3, Vec3, Vec3, Vec<Vec3>, f64)> = None;
@@ -202,8 +203,8 @@ fn cos_between(a: &Vec3, b: &Vec3) -> f64 {
     }
 }
 
-/// 삼각측량 각 중앙값(점 = 카메라1 좌표).
-// 설계 결정: 짝수 개일 때의 중앙값 정의. 두 가운데 값의 평균을 쓴다.
+/// Median triangulation angle (points in camera-1 coordinates).
+// Design decision: median definition for an even count. Use the average of the two middle values.
 pub fn median_triangulation_angle(pose: &Rigid3, pts: &[Vec3]) -> f64 {
     if pts.is_empty() {
         return 0.0;
@@ -220,7 +221,7 @@ pub fn median_triangulation_angle(pose: &Rigid3, pts: &[Vec3]) -> f64 {
     }
 }
 
-/// 인라이어 매칭의 단위 광선(역투영 실패 시 영벡터).
+/// Unit rays of the inlier matches (zero vector if back-projection fails).
 pub fn inlier_rays(cam1: &Camera, cam2: &Camera, kps1: &[Keypoint], kps2: &[Keypoint], tvg: &TwoViewGeometry) -> (Vec<Vec3>, Vec<Vec3>) {
     let mut r1 = Vec::with_capacity(tvg.inlier_matches.len());
     let mut r2 = Vec::with_capacity(tvg.inlier_matches.len());
@@ -233,8 +234,8 @@ pub fn inlier_rays(cam1: &Camera, cam2: &Camera, kps1: &[Keypoint], kps2: &[Keyp
     (r1, r2)
 }
 
-/// 두 뷰 기하에서 상대 자세를 분해해 `cam1_to_cam2`, `tri_angle`, (PoP 이면) 구성을 채운다.
-/// 대상: CALIBRATED/UNCALIBRATED/PLANAR/PANORAMIC/PLANAR_OR_PANORAMIC. 실패하면 false.
+/// Decomposes the relative pose from the two-view geometry and fills `cam1_to_cam2`, `tri_angle`, and (for PoP) the configuration.
+/// Applies to CALIBRATED/UNCALIBRATED/PLANAR/PANORAMIC/PLANAR_OR_PANORAMIC. Returns false on failure.
 pub fn recover_two_view_pose(cam1: &Camera, cam2: &Camera, kps1: &[Keypoint], kps2: &[Keypoint], tvg: &mut TwoViewGeometry) -> bool {
     use TwoViewGeometryConfig as C;
     if tvg.inlier_matches.is_empty() {
@@ -285,9 +286,9 @@ pub fn recover_two_view_pose(cam1: &Camera, cam2: &Camera, kps1: &[Keypoint], kp
     }
 }
 
-/// 전역 매퍼 준비용 일괄 분해: 행렬이 없으면 인라이어로 다시 맞춘 뒤 분해하고 t 를 단위화.
-/// CALIBRATED → 8점 E(유효 광선 ≥ 8), UNCALIBRATED → 8점 F, PLANAR 계열 → N점 DLT.
-/// UNDEFINED/DEGENERATE/WATERMARK/MULTIPLE 은 false.
+/// Batch decomposition for global mapper preparation: if matrices are missing, re-fit from inliers, then decompose and normalize t.
+/// CALIBRATED -> 8-point E (valid rays >= 8), UNCALIBRATED -> 8-point F, PLANAR family -> N-point DLT.
+/// UNDEFINED/DEGENERATE/WATERMARK/MULTIPLE return false.
 pub fn refit_and_estimate_relative_pose(
     cam1: &Camera,
     cam2: &Camera,

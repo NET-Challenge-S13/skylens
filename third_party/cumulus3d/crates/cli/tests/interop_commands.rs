@@ -25,7 +25,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 단계별 호환 하위 명령을 스크립트 순서대로 이어 돌린다(FeatureStore 파일 + 모델 폴더로 상태 전달).
+//! Run the stage-by-stage compatible subcommands chained in script order (state passed through the FeatureStore file + model folders).
 
 mod common;
 use common::make_dataset;
@@ -52,7 +52,7 @@ fn interop_chain() {
     let imgs = src.join("images");
     let db = base.join("db.c3dfs");
     let list = base.join("list.txt");
-    // 위치 0–4: 첫 위치는 폴더당 카메라, 이후 기존 카메라 id(스크립트와 같은 호출 방식).
+    // Positions 0-4: the first position uses one camera per folder, afterwards existing camera ids (same calling style as the script).
     std::fs::write(&list, "camF/camF_0000.jpg\ncamR/camR_0000.jpg\ncamL/camL_0000.jpg\n").unwrap();
     run(&[
         "feature_extractor",
@@ -177,7 +177,7 @@ fn interop_chain() {
         run(&["densify", "-i", s(&ud), "-o", s(&ply), "--number-views", "8"]);
         assert!(cumulus3d_core::io::read_ply(&ply).unwrap().len() > 1000);
     } else {
-        // 장치가 없으면 조밀화는 명확한 오류로 끝나야 한다.
+        // Without a device, densification must end with a clear error.
         let out = Command::new(env!("CARGO_BIN_EXE_cumulus3d")).args(["densify", "-i", s(&ud), "-o", s(&ply)]).output().unwrap();
         assert!(!out.status.success());
         assert!(String::from_utf8_lossy(&out.stderr).contains("CUDA"));
@@ -185,7 +185,7 @@ fn interop_chain() {
     let txt = base.join("txt");
     run(&["model_converter", "--input_path", s(&al), "--output_path", s(&txt), "--output_type", "TXT"]);
     assert!(std::fs::read_to_string(txt.join("images.txt")).unwrap().contains("camR/camR_0012.jpg"));
-    // 정렬된 모델에 새 위치 등록: image_registrator 가 저장소의 나머지 영상을 붙인다.
+    // Register a new position onto the aligned model: image_registrator attaches the rest of the store's images.
     for p in 5..6 {
         for c in ["camF", "camR", "camL"] {
             std::fs::write(&list, format!("{c}/{c}_{:04}.jpg\n", p * 3)).unwrap();

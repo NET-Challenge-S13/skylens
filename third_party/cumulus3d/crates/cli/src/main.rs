@@ -25,7 +25,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! `cumulus3d` 실행 파일.
+//! The `cumulus3d` executable.
 
 use clap::{Args, Parser, Subcommand};
 use cumulus3d_cli::declare::{Plan, Recon};
@@ -42,11 +42,12 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Cmd {
-    /// incremental_stream.sh 를 한 프로세스로: 위치 도착 루프 + 구역별 초벌/정밀 조밀화 + 후처리.
-    Stream(StreamArgs),
-    /// 계획 TOML 파일로 실행: 계획 검사(문제를 모두 보고) → 위치 반복·배경 작업 대기·후처리까지 한 번에.
+    /// incremental_stream.sh as a single process: position-arrival loop + per-zone preview/refined densification + post-processing.
+    Stream(Box<StreamArgs>),
+    /// Run from a plan TOML file: validate the plan (reporting every problem) -> position loop, wait for background jobs,
+    /// post-processing, all in one go.
     Run(RunArgs),
-    /// 계획 도구: 기본 계획 출력, 계획 검사.
+    /// Plan tools: print the default plan, validate a plan.
     Plan(PlanArgs),
     #[command(flatten)]
     Interop(InteropCmd),
@@ -54,95 +55,153 @@ enum Cmd {
 
 #[derive(Args, Debug)]
 struct StreamArgs {
-    /// 입력 폴더(images/camF|camR|camL/*.jpg, gps_ref.txt).
+    /// Input folder (images/camF|camR|camL/*.jpg, gps_ref.txt).
     #[arg(long)]
     src: PathBuf,
-    /// 출력 폴더(지우고 새로 만든다).
+    /// Output folder (deleted and recreated).
     #[arg(long)]
     out: PathBuf,
     #[arg(long, default_value_t = 12)]
     span: usize,
     #[arg(long, default_value_t = 2)]
     overlap: usize,
-    /// 파일 번호 % stride == 0 인 프레임만. 위치 = 선택된 프레임 목록의 순번.
+    /// Only frames with file number % stride == 0. Position = index in the selected frame list.
     #[arg(long, default_value_t = 3)]
     stride: usize,
-    /// 새로 등록된 영상만 삼각측량(결과가 달라질 수 있는 개선).
+    /// Triangulate only newly registered images (an improvement that can change the result).
     #[arg(long)]
     incremental_triangulation: bool,
-    /// 겹침 영상의 깊이맵 재사용.
+    /// Reuse depth maps of overlapping images.
     #[arg(long)]
     depth_cache: bool,
-    /// 첫 GPS 줄로 세션 ENU 원점 고정.
+    /// Fix the session ENU origin to the first GPS line.
     #[arg(long)]
     fixed_enu_origin: bool,
-    /// PatchMatch 백엔드(cuda). 장치가 없으면 조밀화 단계에서 오류.
+    /// PatchMatch backend (cuda). Without a device, densification fails with an error.
     #[arg(long, default_value = "cuda")]
     pm_backend: String,
-    /// 조밀화 프로파일(fast|quality).
+    /// Densification profile (fast|quality).
     #[arg(long, default_value = "fast")]
     mvs_profile: String,
-    /// SIFT 백엔드(cpu|cuda). 결과는 cpu 와 같다.
+    /// SIFT backend (cpu|cuda). The result is the same as cpu.
     #[arg(long, default_value = "cpu")]
     sift_backend: String,
-    /// 기술자 매칭 백엔드(cpu|cuda). 결과는 cpu 와 같다.
+    /// Descriptor matching backend (cpu|cuda). The result is the same as cpu.
     #[arg(long, default_value = "cpu")]
     match_backend: String,
-    /// --pm-backend/--sift-backend/--match-backend 를 모두 cuda 로.
+    /// Image undistortion backend (cpu|cuda). The result matches cpu up to rounding.
+    #[arg(long, default_value = "cpu")]
+    undistort_backend: String,
+    /// Set --pm-backend/--sift-backend/--match-backend/--undistort-backend all to cuda.
     #[arg(long)]
     gpu: bool,
-    /// rayon 스레드 수(0 = 코어 수).
+    /// Number of rayon threads (0 = number of cores).
     #[arg(long, default_value_t = 0)]
     threads: usize,
-    /// 앞 N 위치만(빠른 시험용).
+    /// Only the first N positions (for quick tests).
     #[arg(long)]
     max_positions: Option<usize>,
-    /// 구역별 희소 모델(work/models/*) 저장.
+    /// Save the per-zone sparse model (work/models/*).
     #[arg(long)]
     save_models: bool,
-    /// 초벌·정밀 조밀화 백엔드 호출을 직렬화.
+    /// Serialize the preview/refined densification backend calls.
     #[arg(long)]
     serialize_dense: bool,
-    /// 왜곡 보정 최대 영상 크기(스크립트 960). 낮추면 조밀화가 빨라진다.
+    /// Maximum undistorted image size (script: 960). Lowering it speeds up densification.
     #[arg(long, default_value_t = 960)]
     dense_max_image_size: i64,
-    /// 조밀화 원천 뷰 수(≤ 32).
+    /// Number of densification source views (<= 32).
     #[arg(long, default_value_t = 10)]
     number_views: usize,
-    /// SIFT 최대 특징 수(스크립트 8192).
+    /// Maximum number of SIFT features (script: 8192).
     #[arg(long, default_value_t = 8192)]
     max_num_features: usize,
-    /// SIFT 입력 최대 영상 크기(기본 3200).
+    /// Maximum SIFT input image size (default 3200).
     #[arg(long, default_value_t = 3200)]
     sift_max_image_size: usize,
-    /// 표준 출력에 진행 기록을 보이지 않음(run.log 에만).
+    /// Do not show progress on standard output (only in run.log).
     #[arg(long)]
     quiet: bool,
-    /// 조밀화 생략(개발·시험용; 후처리 출력 없음).
+    /// Skip densification (for development/tests; no post-processing output).
     #[arg(long)]
     no_dense: bool,
-    /// RANSAC 시드 고정(두 뷰 기하·GPS 정렬). 없으면 실행마다 다름.
+    /// Stable display: no preview, each refined zone is adjusted with already shown cameras held fixed and stays where
+    /// it was shown (local frame); GPS/ENU is applied once to the final outputs.
+    #[arg(long)]
+    stable_display: bool,
+    /// Stable display: the display settles (shown cameras and intrinsics frozen) once the relative focal change between
+    /// consecutive refined zones is below this (default 0.01 = 1 %).
+    #[arg(long, default_value_t = 0.01)]
+    settle_tol: f64,
+    /// Stable display: settle by force at this zone at the latest (default 3).
+    #[arg(long, default_value_t = 3)]
+    settle_max_zone: usize,
+    /// Soft intrinsics prior: JSON `{"cameras": {"<camera_id>": [params in the camera model's order]}}` (OPENCV:
+    /// fx fy cx cy k1 k2 p1 p2). Cameras start from these values and the bundle adjustment is pulled towards them.
+    #[arg(long)]
+    intrinsics_prior: Option<PathBuf>,
+    /// Intrinsics prior: relative sigma of the focal lengths (residual (f - f0)/(sigma*f0)).
+    #[arg(long, default_value_t = 0.005)]
+    intrinsics_prior_sigma: f64,
+    /// Intrinsics prior: absolute sigma of the distortion parameters.
+    #[arg(long, default_value_t = 0.01)]
+    intrinsics_prior_dist_sigma: f64,
+    /// Fix the RANSAC seed (two-view geometry, GPS alignment). Without it, it differs from run to run.
     #[arg(long)]
     seed: Option<u64>,
+    /// Live display thinning: keep 1 of N points (key hash); 1 = keep all. Not applied to merged.ply.
+    #[arg(long, default_value_t = 6, value_parser = parse_live_stride)]
+    live_stride: usize,
+    /// Upper bound on the number of densification scales (1 = a single scale at full resolution; unset = profile default).
+    #[arg(long)]
+    max_levels: Option<usize>,
+    /// Fused-cloud smoothing along normals: iterations (0 = off).
+    #[arg(long)]
+    fusion_smooth_iters: Option<usize>,
+    /// Fused-cloud smoothing: neighbour radius (GSD multiple).
+    #[arg(long)]
+    fusion_smooth_radius: Option<f64>,
+    /// Fused-cloud smoothing: range sigma along the normal (GSD multiple).
+    #[arg(long)]
+    fusion_smooth_range: Option<f64>,
+    /// Fused-cloud smoothing: neighbour normal gate (degrees).
+    #[arg(long)]
+    fusion_smooth_normal: Option<f64>,
+    /// Free-space visibility filter: neighbouring views checked per fused point (0 = off).
+    #[arg(long)]
+    visibility_views: Option<usize>,
+    /// Free-space visibility filter: relative depth tolerance.
+    #[arg(long)]
+    visibility_tau: Option<f64>,
+    /// Free-space visibility filter: minimum violating views to remove a point.
+    #[arg(long)]
+    visibility_min_violations: Option<usize>,
 }
 
 #[derive(Args, Debug)]
 struct RunArgs {
-    /// 계획 파일(TOML). 상대 경로는 실행 위치 기준.
+    /// Plan file (TOML). Relative paths are relative to the working location.
     plan: PathBuf,
-    /// 검사만 하고 실행하지 않음.
+    /// Only validate; do not run.
     #[arg(long)]
     check: bool,
 }
 
 #[derive(Args, Debug)]
 struct PlanArgs {
-    /// 기본 계획(aerial-formation 프리셋)을 TOML 로 표준 출력에.
+    /// Print the default plan (aerial-formation preset) as TOML to standard output.
     #[arg(long)]
     print_default: bool,
-    /// 계획 파일을 검사(실행하지 않음).
+    /// Validate the plan file (do not run).
     #[arg(long)]
     check: Option<PathBuf>,
+}
+
+fn parse_live_stride(s: &str) -> Result<usize, String> {
+    match s.parse::<usize>() {
+        Ok(n) if n >= 1 => Ok(n),
+        _ => Err("must be an integer >= 1".into()),
+    }
 }
 
 fn check_plan(path: &PathBuf) -> Result<Recon, String> {
@@ -153,6 +212,7 @@ fn main() {
     let cli = Cli::parse();
     let r = match cli.cmd {
         Cmd::Stream(a) => {
+            let a = *a;
             let mut c = StreamConfig::new(a.src, a.out);
             c.span = a.span;
             c.overlap = a.overlap;
@@ -164,7 +224,9 @@ fn main() {
             c.pm_backend = a.pm_backend;
             c.sift_backend = a.sift_backend;
             c.match_backend = a.match_backend;
+            c.undistort_backend = a.undistort_backend;
             if a.gpu {
+                c.undistort_backend = "cuda".into();
                 c.pm_backend = "cuda".into();
                 c.sift_backend = "cuda".into();
                 c.match_backend = "cuda".into();
@@ -179,13 +241,28 @@ fn main() {
             c.sift_max_image_size = a.sift_max_image_size;
             c.echo = !a.quiet;
             c.no_dense = a.no_dense;
+            c.stable_display = a.stable_display;
+            c.settle_tol = a.settle_tol;
+            c.settle_max_zone = a.settle_max_zone;
+            c.intrinsics_prior = a.intrinsics_prior;
+            c.intrinsics_prior_sigma = a.intrinsics_prior_sigma;
+            c.intrinsics_prior_dist_sigma = a.intrinsics_prior_dist_sigma;
             c.seed = a.seed;
+            c.max_levels = a.max_levels;
+            c.live_stride = a.live_stride;
+            c.fusion.smooth_iters = a.fusion_smooth_iters;
+            c.fusion.smooth_radius = a.fusion_smooth_radius;
+            c.fusion.smooth_range = a.fusion_smooth_range;
+            c.fusion.smooth_normal = a.fusion_smooth_normal;
+            c.fusion.visibility_views = a.visibility_views;
+            c.fusion.visibility_tau = a.visibility_tau;
+            c.fusion.visibility_min_violations = a.visibility_min_violations;
             run_stream(c)
         }
         Cmd::Run(a) => check_plan(&a.plan).and_then(|r| if a.check { Ok(()) } else { r.run().map(|_| ()) }),
         Cmd::Plan(a) => {
             if a.print_default {
-                print!("{}", Plan::default().to_toml());
+                print!("{}", Plan::default().to_toml_annotated());
                 Ok(())
             } else if let Some(p) = a.check {
                 check_plan(&p).map(|r| println!("계획 검사 통과: 위치 {}", r.positions()))

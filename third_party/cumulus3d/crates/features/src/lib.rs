@@ -25,14 +25,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 이미지 읽기와 SIFT 특징 추출.
+//! Image reading and SIFT feature extraction.
 //!
-//! - [`gray`]: 디코딩·회색 변환·축소·90° 회전.
-//! - [`exif_info`], [`camera_init`]: EXIF 초점거리 규칙과 카메라 초기값.
-//! - [`sift`]: 결정적 SIFT(레벨 단위 특징 수 제한), [`sift::SiftEngine`] 로 백엔드 교체 가능.
-//! - [`extract`]: 카메라 묶기 + `FeatureStore` 증분 기록.
+//! - [`gray`]: decoding, grayscale conversion, downscaling, 90° rotation.
+//! - [`exif_info`], [`camera_init`]: EXIF focal-length rules and initial camera values.
+//! - [`sift`]: deterministic SIFT (feature-count limit per level); the backend can be swapped via [`sift::SiftEngine`].
+//! - [`extract`]: camera grouping + incremental `FeatureStore` writes.
 //!
-//! # 사용 예
+//! # Usage example
 //!
 //! ```
 //! use cumulus3d_core::FeatureStore;
@@ -41,7 +41,7 @@
 //!     SiftOptions,
 //! };
 //!
-//! // 합성 영상: 밝기 블롭 세 개.
+//! // Synthetic image: three bright blobs.
 //! let blob = |x: usize, y: usize, cx: f32, cy: f32, s: f32| {
 //!     let (dx, dy) = (x as f32 - cx, y as f32 - cy);
 //!     (-(dx * dx + dy * dy) / (2.0 * s * s)).exp()
@@ -50,12 +50,12 @@
 //!     0.2 + 0.6 * (blob(x, y, 80.0, 60.0, 6.0) + blob(x, y, 200.0, 150.0, 9.0) + blob(x, y, 260.0, 70.0, 5.0))
 //! });
 //!
-//! // 1) SIFT 백엔드 직접 호출: 특징 i ↔ 기술자 행 i.
+//! // 1) Call the SIFT backend directly: feature i <-> descriptor row i.
 //! let out = CpuSift::new().extract(&img, &SiftOptions::default())?;
 //! assert!(!out.is_empty());
 //! assert_eq!(out.features.len(), out.descriptors.len());
 //!
-//! // 2) 저장소에 기록(카메라 배정 + 키포인트·기술자).
+//! // 2) Write to the store (camera assignment + keypoints and descriptors).
 //! let store = FeatureStore::new();
 //! let src = ImageSource { name: "camF/0001.jpg".into(), gray: img, exif: ExifInfo::default() };
 //! let reports = FeatureExtractor::new().extract_inputs(&store, vec![src], &ExtractionOptions::default())?;

@@ -25,9 +25,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 기존 `cumulus3d stream` 출력 폴더(timeline.txt + work/models + 구역 점군)에서 이벤트 열을 다시 만든다.
-//! timeline 한 줄 = 이벤트 하나(시각 = 그 줄의 epoch 초.나노). 문구가 없는 이벤트(`FrameIngested`, `ZoneAdjusted`)는
-//! 입력 배치·저장된 모델로 채운다.
+//! Rebuild the event sequence from an existing `cumulus3d stream` output folder (timeline.txt + work/models + zone point clouds).
+//! One timeline line = one event (time = the epoch seconds.nanoseconds of that line). Events without text (`FrameIngested`, `ZoneAdjusted`)
+//! are filled in from the input layout and the saved models.
 #![allow(dead_code)]
 
 use cumulus3d_cli::events::{Event, Meta, ZoneRange};
@@ -39,7 +39,7 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-/// `secs.nanos 문구` → (시각, 문구).
+/// `secs.nanos text` -> (time, text).
 pub fn parse_line(l: &str) -> (SystemTime, String) {
     let (t, s) = l.split_once(' ').expect("시각 문구");
     let (a, b) = t.split_once('.').expect("초.나노");
@@ -51,15 +51,15 @@ fn num(s: &str) -> usize {
     s.parse().unwrap_or_else(|_| panic!("수 아님: {s}"))
 }
 
-/// 구역 점군 공급자: (종류 "preview"|"refined", 구역) → 점군(없으면 조밀화 없음).
+/// Zone point-cloud provider: (kind "preview"|"refined", zone) -> point cloud (None means no densification).
 pub type Clouds<'a> = &'a dyn Fn(&str, &ZoneRange) -> Option<Arc<PointCloud>>;
 
-/// 저장된 모델(없으면 빈 모델).
+/// Saved model (an empty model if absent).
 pub fn model(out: &Path, name: &str) -> Arc<Reconstruction> {
     Arc::new(read_model(out.join("work/models").join(name)).unwrap_or_default())
 }
 
-/// timeline 문구 하나를 이벤트로. `ranges` 는 앞서 본 구역 범위(구역 번호로 찾음).
+/// One timeline text line as an event. `ranges` are the zone ranges seen earlier (looked up by zone index).
 fn to_event(meta: Meta, s: &str, out: &Path, ranges: &mut Vec<ZoneRange>, clouds: Clouds) -> Vec<Event> {
     let w: Vec<&str> = s.split(' ').collect();
     let range = |ranges: &Vec<ZoneRange>, k: usize| *ranges.iter().find(|r| r.zone == k).expect("앞선 region arrived");
@@ -128,7 +128,7 @@ fn to_event(meta: Meta, s: &str, out: &Path, ranges: &mut Vec<ZoneRange>, clouds
     vec![e]
 }
 
-/// 출력 폴더의 timeline.txt 로 이벤트 열을 만든다. `Started` 바로 뒤에 위치별 `FrameIngested` 를 넣는다.
+/// Build the event sequence from the output folder's timeline.txt. Insert a per-position `FrameIngested` right after `Started`.
 pub fn events_from_run(out: &Path, layout: &Layout, cams: &[&str], clouds: Clouds) -> Vec<Event> {
     let tl = std::fs::read_to_string(out.join("timeline.txt")).unwrap();
     let mut ranges = Vec::new();

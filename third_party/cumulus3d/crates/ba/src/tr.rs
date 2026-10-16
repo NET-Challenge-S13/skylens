@@ -25,9 +25,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 신뢰 영역 Levenberg–Marquardt 바깥 루프(일반적인 기본 허용치 사용).
+//! Trust-region Levenberg-Marquardt outer loop (using common default tolerances).
 //!
-//! 문제별 선형대수(Schur 보수, 소형 밀집)는 [`TrProblem`] 구현이 맡는다.
+//! Problem-specific linear algebra (Schur complement, small dense) is handled by the [`TrProblem`] implementation.
 
 use crate::Termination;
 
@@ -71,28 +71,46 @@ impl TrOptions {
     }
 }
 
+<<<<<<< skylens (vendored)
 /// 한 LM 단계의 모형 정보.
 pub struct StepInfo {
     /// 선형 모형이 예측한 비용 감소(양수 기대).
+||||||| base b9f4a9bda
+pub(crate) struct StepInfo {
+    /// 선형 모형이 예측한 비용 감소(양수 기대).
+=======
+pub(crate) struct StepInfo {
+    /// Cost decrease predicted by the linear model (expected positive).
+>>>>>>> upstream v0.5.0
     pub model_cost_change: f64,
-    /// ‖x_후보 − x‖ (주변 공간).
+    /// ‖x_candidate - x‖ (ambient space).
     pub step_norm: f64,
     /// ‖x‖.
     pub x_norm: f64,
 }
 
+<<<<<<< skylens (vendored)
 /// 신뢰 영역 루프가 다루는 문제. CPU·GPU 번들 조정이 같은 바깥 루프를 쓰도록 공개한다.
 pub trait TrProblem {
     /// 현재 x 에서 잔차·야코비안·기울기를 평가. `first` 면 야코비 열 배율도 정한다.
     /// 반환: 비용(½Σρ). 평가 실패(비유한) 면 None.
+||||||| base b9f4a9bda
+pub(crate) trait TrProblem {
+    /// 현재 x 에서 잔차·야코비안·기울기를 평가. `first` 면 야코비 열 배율도 정한다.
+    /// 반환: 비용(½Σρ). 평가 실패(비유한) 면 None.
+=======
+pub(crate) trait TrProblem {
+    /// Evaluates residuals, Jacobian, and gradient at the current x. If `first`, also sets the Jacobian column scaling.
+    /// Returns: cost (½Σρ). None if evaluation fails (non-finite).
+>>>>>>> upstream v0.5.0
     fn linearize(&mut self, first: bool) -> Option<f64>;
     /// ‖x − ⊞(x, −g)‖∞.
     fn grad_inf_norm(&self) -> f64;
-    /// 감쇠 μ = radius 로 LM 단계를 풀고 후보 x 를 만든다. 선형 풀이 실패면 None.
+    /// Solves the LM step with damping μ = radius and builds the candidate x. None if the linear solve fails.
     fn compute_step(&mut self, radius: f64) -> Option<StepInfo>;
-    /// 후보 x 의 비용.
+    /// Cost of the candidate x.
     fn candidate_cost(&mut self) -> Option<f64>;
-    /// 후보를 현재 x 로 채택.
+    /// Accepts the candidate as the current x.
     fn accept_candidate(&mut self);
 }
 
@@ -167,7 +185,7 @@ pub fn minimize<P: TrProblem>(p: &mut P, o: &TrOptions) -> TrResult {
             None => (f64::NAN, f64::NAN),
         };
         if cost_change.is_finite() && cost_change.abs() <= o.function_tolerance * cost {
-            // 설계 결정: 함수 기준 도달 시 개선된 단계면 채택하고 끝낸다.
+            // Design decision: when the function criterion is reached, accept the step if it improved and finish.
             if cost_change > 0.0 {
                 p.accept_candidate();
                 res.num_successful_steps += 1;

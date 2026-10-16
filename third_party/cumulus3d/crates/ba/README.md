@@ -5,7 +5,6 @@ English | [한국어](https://github.com/AH100-1/cumulus3d/blob/main/crates/ba/R
 Bundle adjustment (BA) and single-pose refinement. A trust-region Levenberg–Marquardt solver with point Schur elimination
 and dense/sparse Cholesky and PCG solvers for the reduced system. Results are deterministic regardless of the thread count.
 
-API doc comments are currently in Korean; English translation is planned.
 
 **Pipeline stage**: SfM (`cumulus3d-sfm`) uses it for absolute pose refinement right after image registration (`refine_abs_pose`)
 and for local and global bundle adjustment of refined zones (`bundle_adjust`). The standalone command `cumulus3d bundle_adjuster` also calls these functions.

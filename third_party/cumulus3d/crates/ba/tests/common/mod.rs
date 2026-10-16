@@ -25,7 +25,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 합성 장면: 드론 편대(위치마다 OPENCV 카메라 3대, 롤 −25°/0°/+25°)가 지면 점을 내려다본다.
+//! Synthetic scene: a drone formation (3 OPENCV cameras per position, roll -25°/0°/+25°) looks down at ground points.
 #![allow(dead_code)]
 
 use cumulus3d_core::{
@@ -42,7 +42,7 @@ pub struct SceneOpts {
     pub altitude: f64,
     pub noise_px: f64,
     pub min_track: usize,
-    /// 영상마다 3D 점 없는 여분 2D 점 수.
+    /// Number of extra 2D points without a 3D point, per image.
     pub spare_points: usize,
     pub seed: u64,
 }
@@ -54,7 +54,7 @@ impl Default for SceneOpts {
 }
 
 pub struct Scene {
-    /// 잡음 관측, 정답 자세·점·카메라를 가진 재구성.
+    /// Reconstruction with noisy observations, and ground-truth poses, points, and cameras.
     pub truth: Reconstruction,
     pub width: u64,
     pub height: u64,
@@ -80,7 +80,7 @@ fn rot_x(a: f64) -> Mat3 {
 pub fn make_scene(o: &SceneOpts) -> Scene {
     let mut rng = Pcg64::seed_from_u64(o.seed);
     let cams = make_cameras();
-    // 나디르: 카메라 x = 세계 x, y = −세계 y, z = −세계 z.
+    // Nadir: camera x = world x, y = -world y, z = -world z.
     let r0 = Mat3::new(1.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, -1.0);
     let rolls = [-25f64.to_radians(), 0.0, 25f64.to_radians()];
     let mut poses: Vec<(u32, Rigid3)> = Vec::new();
@@ -130,7 +130,7 @@ pub fn make_scene(o: &SceneOpts) -> Scene {
             tracks.push(tr);
         }
     }
-    // 재구성 조립
+    // Reconstruction assembly
     let mut per_image: Vec<Vec<Vec2>> = vec![Vec::new(); poses.len()];
     let mut elems: Vec<Vec<TrackEntry>> = Vec::new();
     for tr in &tracks {
@@ -163,7 +163,7 @@ pub fn make_scene(o: &SceneOpts) -> Scene {
 }
 
 pub fn gauss(rng: &mut Pcg64) -> f64 {
-    // 박스–뮬러.
+    // Box-Muller.
     let u1: f64 = rng.random_range(1e-12..1.0);
     let u2: f64 = rng.random_range(0.0..1.0);
     (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos()
@@ -186,7 +186,7 @@ fn rand_unit(rng: &mut Pcg64) -> Vec3 {
     Vec3::new(gauss(rng), gauss(rng), gauss(rng)).normalize()
 }
 
-/// 초기값 섭동: 자세 회전·중심, 점, 초점.
+/// Initial value perturbation: pose rotation/center, points, focal length.
 pub fn perturb(rec: &Reconstruction, p: &Perturb, seed: u64) -> Reconstruction {
     let mut rng = Pcg64::seed_from_u64(seed);
     let mut out = rec.clone();
@@ -212,7 +212,7 @@ pub fn perturb(rec: &Reconstruction, p: &Perturb, seed: u64) -> Reconstruction {
     out
 }
 
-/// 좌표축별 RMS 재투영 오차(픽셀).
+/// RMS reprojection error per coordinate axis (pixels).
 pub fn rms_per_coord(rec: &Reconstruction) -> f64 {
     let mut s = 0.0;
     let mut n = 0usize;
@@ -229,7 +229,7 @@ pub fn rms_per_coord(rec: &Reconstruction) -> f64 {
     (s / (2.0 * n as f64)).sqrt()
 }
 
-/// 소스 → 타깃 상사 변환(움에야마, 스케일 포함).
+/// Source -> target similarity transform (Umeyama, including scale).
 pub fn umeyama(src: &[Vec3], dst: &[Vec3]) -> Sim3 {
     let n = src.len() as f64;
     let mx = src.iter().fold(Vec3::zeros(), |a, b| a + b) / n;
@@ -256,9 +256,9 @@ pub fn umeyama(src: &[Vec3], dst: &[Vec3]) -> Sim3 {
     Sim3::new(scale, Quat::from_rotation_matrix(&r), t)
 }
 
-/// 추정 → 정답 상사 정렬 후 (최대 회전 오차 도, RMS 중심 오차 m).
+/// After similarity alignment of estimate -> ground truth (max rotation error in degrees, RMS center error in m).
 pub fn pose_errors(est: &Reconstruction, truth: &Reconstruction) -> (f64, f64) {
-    // 중심만으로는 비행 방향 축 회전이 약하게 정해지므로 3D 점도 함께 정렬에 쓴다.
+    // The centers alone weakly determine rotation about the flight-direction axis, so 3D points are also used in the alignment.
     let ids = truth.registered_images();
     let mut src: Vec<Vec3> = ids.iter().map(|&i| est.projection_center(i).unwrap()).collect();
     let mut dst: Vec<Vec3> = ids.iter().map(|&i| truth.projection_center(i).unwrap()).collect();

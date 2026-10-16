@@ -25,20 +25,20 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 조밀화 공용 경로: 구역 밖 영상 제외 → 왜곡 보정 → 장면 변환 → densify.
-//! 스트림과 `densify` 하위 명령이 함께 쓴다.
+//! Shared densification path: exclude images outside the zone -> undistortion -> scene conversion -> densify.
+//! Used by both the stream and the `densify` subcommand.
 
 use cumulus3d_core::{ImageId, Reconstruction};
 use cumulus3d_dense::{
-    undistort, DenseOutput, DenseScene, DensifyOptions, DepthMapCache, ImageBuffer, MvsProfile, PatchMatchBackend, SceneOptions,
-    UndistortCache, UndistortOptions,
+    undistort_with, DenseOutput, DenseScene, DensifyOptions, DepthMapCache, ImageBuffer, MvsProfile, PatchMatchBackend, SceneOptions,
+    UndistortBackend, UndistortCache, UndistortOptions,
 };
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-/// PatchMatch 백엔드 선택. 지금은 `cuda` 만 있다. 장치가 없으면 오류 문자열.
+/// PatchMatch backend selection. Currently only `cuda` exists. Without a device, an error string.
 pub fn make_pm_backend(name: &str) -> Result<Arc<dyn PatchMatchBackend>, String> {
     match name {
         "cuda" => cumulus3d_cuda::CudaPatchMatch::try_default()
@@ -48,11 +48,23 @@ pub fn make_pm_backend(name: &str) -> Result<Arc<dyn PatchMatchBackend>, String>
     }
 }
 
-/// `--mvs-profile` 해석.
+/// Image undistortion backend selection (cpu|cuda). `None` = the CPU path.
+pub fn make_undistort_backend(name: &str) -> Result<Option<Arc<dyn UndistortBackend>>, String> {
+    match name {
+        "cpu" => Ok(None),
+        "cuda" => cumulus3d_cuda::CudaUndistort::try_default()
+            .map(|b| Some(Arc::new(b) as Arc<dyn UndistortBackend>))
+            .map_err(|e| format!("--undistort-backend cuda: {e}")),
+        other => Err(format!("알 수 없는 --undistort-backend {other} (cpu|cuda)")),
+    }
+}
+
+/// Interpretation of `--mvs-profile`.
 pub fn parse_profile(s: &str) -> Result<MvsProfile, String> {
     MvsProfile::parse(s).ok_or_else(|| format!("알 수 없는 --mvs-profile {s} (fast|quality)"))
 }
 
+<<<<<<< skylens (vendored)
 /// 번들 조정 백엔드 선택(cpu|cuda). cuda 는 실행 중 실패하면 경고를 찍고 CPU 로 다시 푼다.
 pub fn make_ba_backend(name: &str) -> Result<Arc<dyn cumulus3d_ba::BaBackend>, String> {
     match name {
@@ -65,6 +77,11 @@ pub fn make_ba_backend(name: &str) -> Result<Arc<dyn cumulus3d_ba::BaBackend>, S
 }
 
 /// SIFT 백엔드 선택(cpu|cuda).
+||||||| base b9f4a9bda
+/// SIFT 백엔드 선택(cpu|cuda).
+=======
+/// SIFT backend selection (cpu|cuda).
+>>>>>>> upstream v0.5.0
 pub fn make_sift_backend(name: &str) -> Result<Arc<dyn cumulus3d_features::SiftEngine>, String> {
     match name {
         "cpu" => Ok(Arc::new(cumulus3d_features::CpuSift::default())),
@@ -75,7 +92,7 @@ pub fn make_sift_backend(name: &str) -> Result<Arc<dyn cumulus3d_features::SiftE
     }
 }
 
-/// 기술자 매칭 백엔드 선택(cpu|cuda).
+/// Descriptor matching backend selection (cpu|cuda).
 pub fn make_match_backend(name: &str) -> Result<Box<dyn cumulus3d_matching::MatcherBackend>, String> {
     match name {
         "cpu" => Ok(Box::new(cumulus3d_matching::CpuMatcher::default())),
@@ -86,6 +103,7 @@ pub fn make_match_backend(name: &str) -> Result<Box<dyn cumulus3d_matching::Matc
     }
 }
 
+<<<<<<< skylens (vendored)
 /// 희소 단계(두 뷰 기하 검증·등록·삼각측량) 백엔드 선택(cpu|cuda). cuda 는 장치 하나를 세 단계가 함께 쓴다.
 pub fn make_sparse_backend(name: &str) -> Result<crate::session::SparseBackends, String> {
     match name {
@@ -101,28 +119,35 @@ pub fn make_sparse_backend(name: &str) -> Result<crate::session::SparseBackends,
 }
 
 /// 조밀화 설정.
+||||||| base b9f4a9bda
+/// 조밀화 설정.
+=======
+/// Densification settings.
+>>>>>>> upstream v0.5.0
 #[derive(Clone)]
 pub struct DenseConfig {
-    /// 왜곡 보정 옵션.
+    /// Undistortion options.
     pub undistort: UndistortOptions,
-    /// 조밀 장면 변환 옵션.
+    /// Dense scene conversion options.
     pub scene: SceneOptions,
-    /// 조밀화(PatchMatch·필터·융합) 옵션.
+    /// Densification (PatchMatch, filter, fusion) options.
     pub densify: DensifyOptions,
-    /// 점수 융합 설정(있으면 `densify.fusion.mode` 대신 점수 융합).
+    /// Score fusion settings (if present, score fusion is used instead of `densify.fusion.mode`).
     pub score: Option<cumulus3d_dense::fusion_score::ScoreFusionOptions>,
-    /// 백엔드(만들지 못했으면 그 오류; 조밀화 단계에서 보고).
+    /// Backend (if it could not be created, that error; reported in the densification stage).
     pub backend: Result<Arc<dyn PatchMatchBackend>, String>,
-    /// `--serialize-dense`: 백엔드 호출을 한 번에 하나로.
+    /// `--serialize-dense`: one backend call at a time.
     pub lock: Option<Arc<Mutex<()>>>,
-    /// 깊이맵 캐시(`--depth-cache`).
+    /// Depth map cache (`--depth-cache`).
     pub depth_cache: Option<Arc<DepthMapCache>>,
-    /// 왜곡 보정 결과 캐시.
+    /// Undistortion result cache.
     pub undistort_cache: Arc<UndistortCache>,
+    /// Image undistortion backend (None = CPU).
+    pub undistort_backend: Option<Arc<dyn UndistortBackend>>,
 }
 
 impl DenseConfig {
-    /// 왜곡 보정 max_image_size 960, 프로파일 기본값.
+    /// Undistortion max_image_size 960, profile defaults.
     pub fn new(backend: Result<Arc<dyn PatchMatchBackend>, String>, profile: MvsProfile) -> Self {
         Self {
             undistort: UndistortOptions::pipeline(),
@@ -133,27 +158,29 @@ impl DenseConfig {
             lock: None,
             depth_cache: None,
             undistort_cache: Arc::new(UndistortCache::new()),
+            undistort_backend: None,
         }
     }
 }
 
-/// 조밀화 결과 요약.
+/// Densification result summary.
 pub struct DenseRun {
-    /// 조밀화에 쓴 영상 수.
+    /// Number of images used for densification.
     pub frames: usize,
-    /// 조밀화 입력 장면.
+    /// Densification input scene.
     pub scene: DenseScene,
-    /// 조밀화 결과(점군 등).
+    /// Densification result (point cloud etc.).
     pub output: DenseOutput,
-    /// 왜곡 보정 시간.
+    /// Undistortion time.
     pub undistort_time: Duration,
-    /// 조밀화 시간.
+    /// Densification time.
     pub densify_time: Duration,
-    /// 백엔드 직렬화 잠금 대기 시간.
+    /// Time spent waiting for the backend serialization lock.
     pub lock_wait: Duration,
 }
 
-/// `keep` 이 거짓인 등록 영상을 빼고(image_deleter) 조밀화한다. 보정 전 입력 영상은 `image_root/이름`.
+/// Densify after removing registered images for which `keep` is false (image_deleter). The input image before undistortion is
+/// `image_root/name`.
 pub fn dense_model(model: &Reconstruction, keep: impl Fn(&str) -> bool, image_root: &Path, cfg: &DenseConfig) -> Result<DenseRun, String> {
     let backend = cfg.backend.clone()?;
     let t0 = Instant::now();
@@ -163,8 +190,14 @@ pub fn dense_model(model: &Reconstruction, keep: impl Fn(&str) -> bool, image_ro
     let del_ref: Vec<&str> = del.iter().map(|s| s.as_str()).collect();
     m.deregister_images_by_name(&del_ref);
     let root: PathBuf = image_root.to_path_buf();
-    let und = undistort(&m, &cfg.undistort, &cfg.undistort_cache, |im| ImageBuffer::load(root.join(&im.name)).ok().map(Arc::new))
-        .map_err(|e| format!("왜곡 보정 실패: {e}"))?;
+    let und = undistort_with(
+        &m,
+        &cfg.undistort,
+        &cfg.undistort_cache,
+        |im| ImageBuffer::load(root.join(&im.name)).ok().map(Arc::new),
+        cfg.undistort_backend.as_deref(),
+    )
+    .map_err(|e| format!("왜곡 보정 실패: {e}"))?;
     let images: BTreeMap<ImageId, Arc<ImageBuffer>> = und.images;
     let frames = images.len();
     let scene = DenseScene::from_reconstruction(&und.reconstruction, &images, &cfg.scene).map_err(|e| format!("장면 변환 실패: {e}"))?;

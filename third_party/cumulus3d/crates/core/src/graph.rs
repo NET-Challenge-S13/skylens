@@ -29,27 +29,27 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 대응 그래프.
+//! Correspondence graph.
 //!
-//! 영상과 짝을 증분으로 추가할 수 있어, 새 영상이 들어올 때 전체를 다시 구성할 필요가 없다.
-//! 2D 점별 대응은 작은 Vec 로 보관한다(평탄화 생략, 의미 동일).
+//! Images and pairs can be added incrementally, so the whole graph need not be rebuilt when a new image arrives.
+//! Per-2D-point correspondences are kept in a small Vec (flattening omitted, semantics identical).
 
 use crate::features::{FeatureMatch, TwoViewGeometry, TwoViewGeometryConfig};
 use crate::ids::*;
 use crate::store::FeatureStore;
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 
-/// 대응 하나: (영상 id, 2D 점 인덱스).
+/// One correspondence: (image id, 2D point index).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Correspondence {
-    /// 영상 id.
+    /// Image id.
     pub image_id: ImageId,
-    /// 2D 점 인덱스.
+    /// 2D point index.
     pub point2d_idx: Point2DIdx,
 }
 
 impl Correspondence {
-    /// (영상, 2D 점)으로 생성.
+    /// Creates from (image, 2D point).
     pub fn new(image_id: ImageId, point2d_idx: Point2DIdx) -> Self {
         Self { image_id, point2d_idx }
     }
@@ -57,9 +57,9 @@ impl Correspondence {
 
 #[derive(Clone, Debug, Default)]
 struct GraphImage {
-    /// 대응이 하나라도 있는 2D 점 수.
+    /// Number of 2D points with at least one correspondence.
     num_observations: usize,
-    /// 짝 매칭 수 합.
+    /// Sum of pair match counts.
     num_correspondences: usize,
     corrs: Vec<Vec<Correspondence>>,
 }
@@ -67,20 +67,20 @@ struct GraphImage {
 #[derive(Clone, Debug)]
 struct GraphPair {
     num_correspondences: usize,
-    /// 작은 id → 큰 id 방향, 인라이어 목록 제외.
+    /// Smaller id -> larger id direction, inlier list excluded.
     geometry: TwoViewGeometry,
 }
 
-/// 저장소로부터 구성할 때의 옵션.
+/// Options for building from a store.
 #[derive(Clone, Debug)]
 pub struct MatchGraphOptions {
-    /// 짝으로 쓰기 위한 최소 인라이어 매칭 수.
+    /// Minimum number of inlier matches for a pair to be used.
     pub min_num_matches: usize,
-    /// 워터마크 짝을 무시할지.
+    /// Whether to ignore watermark pairs.
     pub ignore_watermarks: bool,
-    /// 비면 전체 영상.
+    /// If empty, all images.
     pub image_names: HashSet<String>,
-    /// 거짓이면 "사용 가능한 짝"으로 연결된 영상만 적재.
+    /// If false, only load images connected through "usable pairs".
     pub keep_all_images: bool,
 }
 
@@ -90,85 +90,85 @@ impl Default for MatchGraphOptions {
     }
 }
 
-/// 짝 추가 결과 통계(경고 수).
+/// Statistics of a pair insertion (number of warnings).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct AddPairStats {
-    /// 추가한 대응 수.
+    /// Number of correspondences added.
     pub num_added: usize,
-    /// 인덱스가 범위를 벗어나 버린 매칭 수.
+    /// Number of matches dropped because the index was out of range.
     pub num_out_of_range: usize,
-    /// 중복이라 버린 매칭 수.
+    /// Number of matches dropped as duplicates.
     pub num_duplicates: usize,
-    /// 자기 자신과의 짝이었는지.
+    /// Whether the pair was a pair with itself.
     pub self_pair: bool,
 }
 
-/// 대응 그래프.
+/// Correspondence graph.
 #[derive(Clone, Debug, Default)]
 pub struct MatchGraph {
     images: HashMap<ImageId, GraphImage>,
     pairs: HashMap<PairId, GraphPair>,
-    /// 증분 갱신용 저장소 로그 위치.
+    /// Store log position for incremental updates.
     store_cursor: usize,
 }
 
 impl MatchGraph {
-    /// 빈 그래프.
+    /// Empty graph.
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// 노드 추가(2D 점 수만큼 빈 대응 목록). 이미 있으면 무시.
+    /// Adds a node (an empty correspondence list per 2D point). Ignored if it already exists.
     pub fn add_image(&mut self, image_id: ImageId, num_points2d: usize) {
         self.images.entry(image_id).or_insert_with(|| GraphImage { corrs: vec![Vec::new(); num_points2d], ..Default::default() });
     }
-    /// 영상 노드가 있는지.
+    /// Whether the image node exists.
     pub fn exists_image(&self, image_id: ImageId) -> bool {
         self.images.contains_key(&image_id)
     }
-    /// 영상 노드 수.
+    /// Number of image nodes.
     pub fn num_images(&self) -> usize {
         self.images.len()
     }
-    /// 짝 수.
+    /// Number of pairs.
     pub fn pair_count(&self) -> usize {
         self.pairs.len()
     }
-    /// 영상 id 목록(오름차순).
+    /// List of image ids (ascending).
     pub fn image_ids(&self) -> Vec<ImageId> {
         let mut v: Vec<_> = self.images.keys().copied().collect();
         v.sort();
         v
     }
-    /// 영상의 2D 점 수.
+    /// Number of 2D points of the image.
     pub fn num_points2d(&self, image_id: ImageId) -> usize {
         self.images.get(&image_id).map_or(0, |i| i.corrs.len())
     }
-    /// 대응이 하나라도 있는 2D 점 수.
+    /// Number of 2D points with at least one correspondence.
     pub fn observation_count_of(&self, image_id: ImageId) -> usize {
         self.images.get(&image_id).map_or(0, |i| i.num_observations)
     }
-    /// 영상이 속한 짝들의 매칭 수 합.
+    /// Sum of match counts of the pairs the image belongs to.
     pub fn match_count_of(&self, image_id: ImageId) -> usize {
         self.images.get(&image_id).map_or(0, |i| i.num_correspondences)
     }
-    /// 두 영상 사이 매칭 수.
+    /// Number of matches between two images.
     pub fn match_count_between(&self, id1: ImageId, id2: ImageId) -> usize {
         pair_id_of(id1, id2).ok().and_then(|p| self.pairs.get(&p)).map_or(0, |p| p.num_correspondences)
     }
-    /// 두 영상 사이 짝이 있는지.
+    /// Whether a pair exists between two images.
     pub fn exists_image_pair(&self, id1: ImageId, id2: ImageId) -> bool {
         pair_id_of(id1, id2).is_ok_and(|p| self.pairs.contains_key(&p))
     }
-    /// (짝 id, 매칭 수), 짝 id 오름차순.
+    /// (pair id, match count), ascending by pair id.
     pub fn image_pairs(&self) -> Vec<(PairId, usize)> {
         let mut v: Vec<_> = self.pairs.iter().map(|(k, p)| (*k, p.num_correspondences)).collect();
         v.sort();
         v
     }
 
-    /// 짝 추가. 매칭은 (id1 의 인덱스, id2 의 인덱스).
-    /// 두 영상 노드가 있어야 한다(없으면 아무것도 안 함). 기하는 작은 id → 큰 id 방향으로 저장.
+    /// Adds a pair. Matches are (index in id1, index in id2).
+    /// Both image nodes must exist (otherwise nothing happens). Geometry is stored in the smaller id -> larger id direction.
     pub fn insert_two_view(&mut self, id1: ImageId, id2: ImageId, tvg: &TwoViewGeometry) -> AddPairStats {
         let mut st = AddPairStats::default();
         if id1 == id2 {
@@ -225,15 +225,15 @@ impl MatchGraph {
         tvg.inlier_matches.len() >= opts.min_num_matches && !(opts.ignore_watermarks && tvg.config == TwoViewGeometryConfig::Watermark)
     }
 
-    /// 저장소에서 구성.
+    /// Builds from a store.
     pub fn from_store(store: &FeatureStore, opts: &MatchGraphOptions) -> Self {
         let mut g = Self::new();
         g.update_from_store(store, opts);
         g
     }
 
-    /// 저장소에 새로 기록된 짝만 반영(증분). 새 영상 노드도 필요 시 추가.
-    /// 반환: 새로 추가된 짝 수.
+    /// Applies only the pairs newly recorded in the store (incremental). Also adds new image nodes if needed.
+    /// Returns: the number of newly added pairs.
     pub fn update_from_store(&mut self, store: &FeatureStore, opts: &MatchGraphOptions) -> usize {
         let (new_pairs, cursor) = store.two_view_geometries_since(self.store_cursor);
         self.store_cursor = cursor;
@@ -246,7 +246,7 @@ impl MatchGraph {
                 }
             }
         }
-        // 짝 id 순서로 결정적 처리, 중복 기록 제거.
+        // Process deterministically in pair id order and remove duplicate records.
         let mut by_pid: BTreeMap<PairId, _> = BTreeMap::new();
         for (pid, t) in new_pairs {
             by_pid.insert(pid, t);
@@ -271,20 +271,20 @@ impl MatchGraph {
         added
     }
 
-    /// (영상, 2D 점)의 직접 대응.
+    /// Direct correspondences of (image, 2D point).
     pub fn find_correspondences(&self, image_id: ImageId, point2d_idx: Point2DIdx) -> &[Correspondence] {
         self.images.get(&image_id).and_then(|i| i.corrs.get(point2d_idx as usize)).map_or(&[], |v| v.as_slice())
     }
-    /// (영상, 2D 점)에 대응이 있는지.
+    /// Whether (image, 2D point) has a correspondence.
     pub fn has_correspondences(&self, image_id: ImageId, point2d_idx: Point2DIdx) -> bool {
         !self.find_correspondences(image_id, point2d_idx).is_empty()
     }
-    /// 두 뷰 관측: 대응이 정확히 1개이고 상대도 정확히 1개.
+    /// Two-view observation: exactly 1 correspondence and the other side also has exactly 1.
     pub fn in_two_view_track(&self, image_id: ImageId, point2d_idx: Point2DIdx) -> bool {
         let c = self.find_correspondences(image_id, point2d_idx);
         c.len() == 1 && self.find_correspondences(c[0].image_id, c[0].point2d_idx).len() == 1
     }
-    /// 두 영상 사이 매칭: 영상1 2D 점 오름차순.
+    /// Matches between two images: ascending by image 1 2D point.
     pub fn matches_between(&self, id1: ImageId, id2: ImageId) -> Vec<FeatureMatch> {
         let mut out = Vec::new();
         if let Some(im) = self.images.get(&id1) {
@@ -298,7 +298,7 @@ impl MatchGraph {
         }
         out
     }
-    /// 추이적 대응(너비 우선, 깊이 t). 시작 관측과 이미 본 관측 제외.
+    /// Transitive correspondences (breadth-first, depth t). The starting observation and already-seen observations are excluded.
     pub fn transitive_matches(&self, image_id: ImageId, point2d_idx: Point2DIdx, depth: usize) -> Vec<Correspondence> {
         let start = Correspondence::new(image_id, point2d_idx);
         let mut seen: HashSet<Correspondence> = HashSet::from([start]);
@@ -317,13 +317,13 @@ impl MatchGraph {
         }
         out
     }
-    /// (id1 → id2) 방향 두 뷰 기하(인라이어 제외).
+    /// Two-view geometry in the (id1 -> id2) direction (inliers excluded).
     pub fn two_view_geometry(&self, id1: ImageId, id2: ImageId) -> Option<TwoViewGeometry> {
         let pid = pair_id_of(id1, id2).ok()?;
         let g = &self.pairs.get(&pid)?.geometry;
         Some(if swap_image_pair(id1, id2) { g.inverted() } else { g.clone() })
     }
-    /// (id1 → id2) 방향 기하로 갱신.
+    /// Updates with the geometry in the (id1 -> id2) direction.
     pub fn replace_two_view(&mut self, id1: ImageId, id2: ImageId, tvg: &TwoViewGeometry) -> bool {
         let Ok(pid) = pair_id_of(id1, id2) else { return false };
         let Some(p) = self.pairs.get_mut(&pid) else { return false };
@@ -335,8 +335,8 @@ impl MatchGraph {
         true
     }
 
-    /// 합집합-찾기 트랙(연결 성분). `pair_filter(작은 id, 큰 id)` 가 참인 짝만 사용.
-    /// 각 성분은 (영상, 점) 오름차순, 성분 목록은 첫 원소 오름차순. 길이 1 성분은 없다.
+    /// Union-find tracks (connected components). Only pairs for which `pair_filter(smaller id, larger id)` is true are used.
+    /// Each component is ascending by (image, point); the component list is ascending by first element. There are no length-1 components.
     pub fn union_find_tracks<F>(&self, pair_filter: F) -> Vec<Vec<Correspondence>>
     where
         F: Fn(ImageId, ImageId) -> bool,
@@ -370,7 +370,7 @@ impl MatchGraph {
                 let y = get(Correspondence::new(b, m.idx2), &mut nodes, &mut parent);
                 let (rx, ry) = (find(&mut parent, x), find(&mut parent, y));
                 if rx != ry {
-                    // 사전식으로 큰 쪽 루트를 작은 쪽 아래로.
+                    // Lexicographically, put the larger root under the smaller one.
                     if nodes[rx] < nodes[ry] {
                         parent[ry] = rx;
                     } else {

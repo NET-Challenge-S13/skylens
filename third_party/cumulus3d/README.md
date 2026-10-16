@@ -11,7 +11,6 @@ While video arrives position by position, it chains feature extraction → match
 produces a fast preview (no BA) and a refined result (with BA) for every zone, and stacks per-step snapshots on the refined map (ENU).
 Stages hand data to each other through in-memory data structures, with no intermediate database or on-disk model folders.
 
-API doc comments are currently in Korean; English translation is planned.
 
 ## Crates
 
@@ -237,6 +236,22 @@ let (_session, summary) = p.finish(); // waits for remaining refinement and drai
 ```
 
 To run it right away on a synthetic scene: `cargo run --release -p cumulus3d-cli --example hooks -- <output folder>`.
+
+## Releasing
+
+Releases are automatic. A push to `main` whose workspace version is not yet on crates.io runs every CI check, a `cargo semver-checks`
+comparison with the last published version, publishes all crates in dependency order (`scripts/publish.sh`, safe to re-run), builds
+the `cumulus3d` binaries and creates the tag `vX.Y.Z` and the GitHub Release (`.github/workflows/release.yml`). Pushes that do not
+change the version publish nothing. Requires the repository secret `CARGO_REGISTRY_TOKEN`.
+
+To cut a release, put the changes under `## Unreleased` in `CHANGELOG.md` and `CHANGELOG.ko.md`, then:
+
+```bash
+scripts/release.sh patch|minor|major --dry-run   # checks only: fmt, clippy -D warnings, tests, semver
+scripts/release.sh minor                          # bump versions + Cargo.lock, date the changelogs, commit "Release X.Y.Z", push
+```
+
+In 0.x, breaking public API changes need `minor`; the script refuses `patch` when `cargo semver-checks` reports them.
 
 ## Third-party notices
 

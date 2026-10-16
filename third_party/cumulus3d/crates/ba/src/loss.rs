@@ -29,14 +29,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 견고 손실 ρ(s) (s = 잔차 제곱노름)와 잔차·야코비안 보정.
+//! Robust loss ρ(s) (s = squared residual norm) and residual/Jacobian correction.
 
 use crate::Loss;
 
 impl Loss {
     /// (ρ(s), ρ'(s), ρ''(s)).
     pub fn evaluate(&self, s: f64) -> [f64; 3] {
-        // ρ' 하한: 0 으로 떨어져 야코비안이 사라지는 것을 막는다(최적화 라이브러리 관례).
+        // ρ' lower bound: prevents it from dropping to 0 and the Jacobian vanishing (optimization-library convention).
         const MIN: f64 = f64::MIN_POSITIVE;
         match *self {
             Loss::Trivial => [s, 1.0, 0.0],
@@ -68,10 +68,10 @@ impl Loss {
         }
     }
 
-    /// 비용 기여 ρ(s) 와 잔차·야코비안에 곱할 배율.
+    /// Cost contribution ρ(s) and the scale to multiply into the residual and Jacobian.
     ///
-    /// 여기 손실들은 모두 ρ'' ≤ 0 이라 트릭스 보정의 α 항이 0 이 되고(라이브러리 관례),
-    /// 보정은 √ρ' 배율 하나로 줄어든다.
+    /// All losses here have ρ'' <= 0, so the α term of the Triggs correction becomes 0 (library convention),
+    /// and the correction reduces to a single √ρ' scale.
     #[inline]
     pub(crate) fn weight(&self, s: f64) -> (f64, f64) {
         match self {

@@ -25,7 +25,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! GPU 조밀화 정확도: 합성 장면(무늬 바닥 + 상자, 3×3 카메라)의 참 깊이·법선과 직접 비교. 장치가 없으면 건너뛴다.
+//! GPU densification accuracy: direct comparison with the ground-truth depth and normals of a synthetic scene (textured floor + boxes, 3×3
+//! cameras). Skipped if there is no device.
 
 use cumulus3d_cuda::{is_available, CudaDevice, CudaPatchMatch, CudaPatchMatchOptions};
 use cumulus3d_dense::synthetic::{make_scene, SynthConfig, SynthScene};
@@ -108,13 +109,13 @@ fn gpu_depth_accuracy_fast_and_quality() {
     let fast = check(MvsProfile::Fast, true);
     check(MvsProfile::Quality, true);
     check(MvsProfile::Fast, false);
-    // 결정성: 같은 입력이면 비트 단위로 같다.
+    // Determinism: the same input is bit-identical.
     let again = compute_depth_maps(&s.scene, &DensifyOptions::with_profile(MvsProfile::Fast), &backend(true), None).unwrap();
     for (a, b) in fast.maps.iter().zip(&again.maps) {
         let (a, b) = (a.as_ref().unwrap(), b.as_ref().unwrap());
         assert!(a.raw_depth == b.raw_depth && a.normal == b.normal, "결정성");
     }
-    // 융합 점은 장면 표면 위.
+    // Fusion points lie on the scene surface.
     let opts = DensifyOptions::default();
     for mode in [cumulus3d_dense::FusionMode::Consistency, cumulus3d_dense::FusionMode::Traversal] {
         let mut o = opts.clone();
@@ -150,7 +151,7 @@ fn gpu_depth_cache_reuses_views() {
     }
 }
 
-/// 측정용 보고(단언 없음): 창 조합·선택 요소별 합성 장면 정확도와 깊이 시간.
+/// Measurement report (no assertions): synthetic scene accuracy and depth time per window combination and optional feature.
 #[test]
 fn synthetic_variants_report() {
     if !is_available() {

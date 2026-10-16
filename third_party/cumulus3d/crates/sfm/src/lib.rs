@@ -25,17 +25,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 희소 재구성: 전역 SfM(회전 평균 + 위치 추정), 기존 모델에 새 영상 등록, 삼각측량.
+//! Sparse reconstruction: global SfM (rotation averaging + position estimation), registering new images to an existing model,
+//! and triangulation.
 //!
-//! 입력은 `cumulus3d-core` 의 [`cumulus3d_core::FeatureStore`] (특징·두 뷰 기하)와
-//! [`cumulus3d_core::MatchGraph`] (대응 그래프), 출력은 [`cumulus3d_core::Reconstruction`].
-//! 진입점은 [`global_mapper()`] (첫 모델), [`register_images`] (새 영상 등록),
-//! [`triangulate_points`] (점 생성·연장)이다. 모듈별 표는 크레이트 README 에 있다.
+//! The inputs are the [`cumulus3d_core::FeatureStore`] (features and two-view geometry) of `cumulus3d-core` and the
+//! [`cumulus3d_core::MatchGraph`] (correspondence graph); the output is a [`cumulus3d_core::Reconstruction`].
+//! The entry points are [`global_mapper()`] (first model), [`register_images`] (register new images) and
+//! [`triangulate_points`] (create/extend points). A per-module table is in the crate README.
 //!
-//! # 사용 예
+//! # Usage example
 //!
-//! 합성 장면(드론 3대, 위치마다 3장)의 앞 5개 위치로 첫 모델을 만들고,
-//! 6번째 위치의 영상을 등록한 뒤 새 영상만 삼각측량한다.
+//! Build the first model from the first 5 positions of a synthetic scene (3 drones, 3 images per position),
+//! register the images of the 6th position, then triangulate only the new images.
 //!
 //! ```
 //! use cumulus3d_core::{MatchGraph, MatchGraphOptions};
@@ -51,12 +52,12 @@
 //!     MatchGraph::from_store(&scene.store, &opts)
 //! };
 //!
-//! // 1) 전역 SfM 으로 첫 모델.
+//! // 1) First model with global SfM.
 //! let out = global_mapper(&scene.store, &graph_up_to(5), &GlobalSfmOptions::script())?;
 //! assert!(out.failure.is_none());
 //! let mut rec = out.reconstruction;
 //!
-//! // 2) 새 위치 도착: 등록 → 새 영상만 삼각측량.
+//! // 2) A new position arrives: registration, then triangulate only the new images.
 //! let graph = graph_up_to(6);
 //! let report = register_images(&mut rec, &scene.store, &graph, &RegistrationOptions::default())?;
 //! let new_images = report.registered();

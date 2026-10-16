@@ -29,9 +29,10 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! GPS ENU 정렬: 등록 영상 투영 중심을 GPS 기준점의 ENU 좌표에 강건 Sim3 로 맞춘다.
+//! GPS ENU alignment: fits the projection centers of registered images to the ENU coordinates of the GPS reference points
+//! with a robust Sim3.
 //!
-//! 실패하면 `Err` 를 돌려주고 모델을 건드리지 않는다(빈 출력으로 조용히 진행하지 않음).
+//! On failure it returns `Err` and leaves the model untouched (it does not proceed silently with empty output).
 
 use crate::error::{AlignError, Result};
 use crate::geodesy::EnuFrame;
@@ -42,35 +43,35 @@ use cumulus3d_core::{ImageId, Reconstruction, Sim3, Vec3};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
-/// ENU 원점 선택.
+/// ENU origin selection.
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
 pub enum EnuOrigin {
-    /// 기본 동작: GPS 목록의 첫 줄.
+    /// Default behavior: the first line of the GPS list.
     #[default]
     FirstRecord,
-    /// 세션 전체 고정 원점(위도°, 경도°, 고도 m). 구역마다 원점이 바뀌는 문제를 피한다.
+    /// Origin fixed for the whole session (latitude°, longitude°, altitude m). Avoids the origin changing from zone to zone.
     Explicit {
-        /// 위도(°).
+        /// Latitude (°).
         lat: f64,
-        /// 경도(°).
+        /// Longitude (°).
         lon: f64,
-        /// 타원체고(m).
+        /// Ellipsoidal height (m).
         alt: f64,
     },
 }
 
-/// model_aligner 옵션. 기본값 = 스크립트 호출(`--alignment_max_error 3`, min_common_images 3).
+/// model_aligner options. Defaults = script invocation (`--alignment_max_error 3`, min_common_images 3).
 #[derive(Clone, Debug, PartialEq)]
 pub struct ModelAlignerOptions {
-    /// 인라이어 거리 임계 (m) (변환된 카메라 중심 ↔ GPS ENU 거리 ≤ 3 m).
+    /// Inlier distance threshold (m) (distance between transformed camera center and GPS ENU ≤ 3 m).
     pub max_error: f64,
-    /// 정렬에 필요한 최소 공통 영상 수.
+    /// Minimum number of common images needed for alignment.
     pub min_common_images: usize,
-    /// ENU 원점 선택.
+    /// ENU origin selection.
     pub origin: EnuOrigin,
-    /// 신뢰도·반복 수·시드. `max_error` 필드는 무시되고 위 값이 쓰인다.
+    /// Confidence, iteration count and seed. The `max_error` field is ignored and the value above is used.
     pub ransac: RansacParams,
-    /// 최소 표본 퇴화 판정 방식.
+    /// Minimal-sample degeneracy test method.
     pub rank_check: RankCheck,
 }
 
@@ -86,30 +87,30 @@ impl Default for ModelAlignerOptions {
     }
 }
 
-/// 정렬 결과.
+/// Alignment result.
 #[derive(Clone, Debug)]
 pub struct GpsAlignment {
     /// model_to_enu.
     pub sim3: Sim3,
-    /// 사용한 ENU 좌표계(원점 포함).
+    /// ENU frame used (including the origin).
     pub enu: EnuFrame,
-    /// 공통 영상(파일 순서): (영상 id, 이름, ENU 위치).
+    /// Common images (file order): (image id, name, ENU position).
     pub common: Vec<(ImageId, String, Vec3)>,
-    /// `common` 과 같은 순서의 인라이어 여부.
+    /// Inlier flags in the same order as `common`.
     pub inlier_mask: Vec<bool>,
-    /// 인라이어 수.
+    /// Number of inliers.
     pub num_inliers: usize,
-    /// RANSAC 시행 수.
+    /// Number of RANSAC trials.
     pub num_trials: usize,
-    /// 정렬 후 ‖C' − g‖ (파일의 각 이름 중 모델에 있고 자세가 있는 영상, 필터링 없음).
+    /// ‖C' − g‖ after alignment (for each name in the file that is in the model and has a pose; no filtering).
     pub errors: Vec<(String, f64)>,
-    /// 정렬 오차 평균 (m).
+    /// Mean alignment error (m).
     pub mean_error: f64,
-    /// 정렬 오차 중앙값 (m).
+    /// Median alignment error (m).
     pub median_error: f64,
 }
 
-/// GPS 목록 → (이름, ENU). 원점이 `FirstRecord` 인데 목록이 비면 오류.
+/// GPS list to (name, ENU). Error if the origin is `FirstRecord` but the list is empty.
 pub fn gps_to_enu(records: &[GpsRecord], origin: EnuOrigin) -> Result<(EnuFrame, Vec<(String, Vec3)>)> {
     let frame = match origin {
         EnuOrigin::FirstRecord => {
@@ -122,18 +123,18 @@ pub fn gps_to_enu(records: &[GpsRecord], origin: EnuOrigin) -> Result<(EnuFrame,
     Ok((frame, v))
 }
 
-/// 정렬 Sim3 만 추정(모델 불변).
+/// Estimates only the alignment Sim3 (model unchanged).
 pub fn estimate_gps_alignment(rec: &Reconstruction, gps: &[GpsRecord], opts: &ModelAlignerOptions) -> Result<GpsAlignment> {
     if opts.max_error.is_nan() || opts.max_error <= 0.0 {
         return Err(AlignError::BadMaxError(opts.max_error));
     }
-    // 2. 기준 위치 < 3 → 실패.
+    // 2. Reference positions < 3, so fail.
     if gps.len() < 3 {
         return Err(AlignError::TooFewReferences { found: gps.len(), required: 3 });
     }
     let (enu, refs) = gps_to_enu(gps, opts.origin)?;
 
-    // 4. 공통 영상(파일 순서, 이름 일치, 자세 있음, 중복 제외).
+    // 4. Common images (file order, names match, has pose, duplicates excluded).
     let by_name: HashMap<&str, ImageId> = rec.images().map(|im| (im.name.as_str(), im.image_id)).collect();
     let mut seen = HashSet::new();
     let mut common = Vec::new();
@@ -162,7 +163,7 @@ pub fn estimate_gps_alignment(rec: &Reconstruction, gps: &[GpsRecord], opts: &Mo
         _ => return Err(AlignError::RansacFailed { inliers: num_inliers }),
     };
 
-    // 8. 정렬 오차(파일의 모든 이름, 필터 없음; 중복 줄도 각각 센다).
+    // 8. Alignment error (all names in the file, no filter; duplicate lines are each counted).
     let mut errors = Vec::new();
     for (name, g) in &refs {
         let Some(&id) = by_name.get(name.as_str()) else { continue };
@@ -171,7 +172,7 @@ pub fn estimate_gps_alignment(rec: &Reconstruction, gps: &[GpsRecord], opts: &Mo
     }
     let mut ev: Vec<f64> = errors.iter().map(|e| e.1).collect();
     let mean_error = if ev.is_empty() { f64::NAN } else { ev.iter().sum::<f64>() / ev.len() as f64 };
-    // 설계 결정: 중앙값의 짝수 개 처리. 가운데 둘의 평균을 쓴다.
+    // Design decision: median for an even count. Use the mean of the middle two.
     let median_error = median(&mut ev);
 
     Ok(GpsAlignment {
@@ -187,14 +188,14 @@ pub fn estimate_gps_alignment(rec: &Reconstruction, gps: &[GpsRecord], opts: &Mo
     })
 }
 
-/// 추정 후 성공하면 모델(자세·점)에 적용. 실패하면 모델을 바꾸지 않고 `Err`.
+/// Applies to the model (poses and points) if estimation succeeds. On failure leaves the model unchanged and returns `Err`.
 pub fn align_to_gps(rec: &mut Reconstruction, gps: &[GpsRecord], opts: &ModelAlignerOptions) -> Result<GpsAlignment> {
     let a = estimate_gps_alignment(rec, gps, opts)?;
     rec.transform(&a.sim3);
     Ok(a)
 }
 
-/// GPS 파일 경로판.
+/// GPS file path version.
 pub fn align_to_gps_file(rec: &mut Reconstruction, path: impl AsRef<Path>, opts: &ModelAlignerOptions) -> Result<GpsAlignment> {
     let gps = read_gps_file(path)?;
     align_to_gps(rec, &gps, opts)
@@ -208,7 +209,8 @@ mod tests {
     use cumulus3d_core::{Camera, CameraModelKind, Image, Quat, Rigid3, TrackEntry};
     use rand::RngExt;
 
-    /// ENU 궤적(드론 3대 × 위치)을 만들고, 임의 Sim3 로 "모델 좌표"로 옮긴 재구성 + GPS 목록.
+    /// Builds an ENU trajectory (3 drones × positions) and moves it to "model coordinates" with an arbitrary Sim3:
+    /// the reconstruction + GPS list.
     fn scene(num_pos: usize, seed: u64) -> (Reconstruction, Vec<GpsRecord>, Vec<Vec3>, Sim3) {
         let mut rng = cumulus3d_core::ransac::make_rng(Some(seed));
         let enu = EnuFrame::new(37.5, 127.0, 50.0);
@@ -223,10 +225,10 @@ mod tests {
             for (k, dx) in [-20.0, 0.0, 20.0].iter().enumerate() {
                 let c_enu = Vec3::new(p as f64 * 8.0 + dx, p as f64 * 2.0 + dx * 0.5, 30.0 + 3.0 * k as f64);
                 let c_model = enu_to_model.transform_point(&c_enu);
-                // 아래(−U)를 보는 카메라 + 작은 무작위 회전.
+                // Camera looking down (−U) + a small random rotation.
                 let down = Quat::from_axis_angle(&Vec3::x(), std::f64::consts::PI);
                 let small = Quat::from_axis_angle(&rand_vec(&mut rng, 1.0).normalize(), rng.random_range(-0.2..0.2));
-                // 모델 좌표계 회전도 반영해야 아래를 본다: R_cam = small·down·R_mᵀ.
+                // The model-frame rotation must also be accounted for to look down: R_cam = small·down·R_mᵀ.
                 let rot = small * down * enu_to_model.rotation.conjugate();
                 let r = rot.to_rotation_matrix();
                 let pose = Rigid3::new(rot, -(r * c_model));
@@ -240,7 +242,7 @@ mod tests {
                 id += 1;
             }
         }
-        // 관측 몇 개(재투영 불변 확인용).
+        // A few observations (for checking reprojection invariance).
         for i in 0..10u32 {
             let x = enu_to_model.transform_point(&Vec3::new(10.0 + i as f64, 5.0, 0.0));
             let pid = rec.add_point3d(x, vec![], [0, 0, 0]).unwrap();
@@ -255,7 +257,7 @@ mod tests {
         (rec, gps, centers, enu_to_model)
     }
 
-    /// 모든 관측의 투영 픽셀.
+    /// Projected pixels of all observations.
     fn projections(rec: &Reconstruction) -> Vec<cumulus3d_core::Vec2> {
         let mut out = Vec::new();
         for id in rec.point3d_ids() {
@@ -277,7 +279,7 @@ mod tests {
         let opts = ModelAlignerOptions { ransac: RansacParams { random_seed: Some(1), ..Default::default() }, ..Default::default() };
         let a = align_to_gps(&mut rec, &gps, &opts).unwrap();
         assert_eq!(a.num_inliers, 30);
-        // 원점 = 첫 줄 위치이므로, 첫 영상 중심은 ENU (0,0,0) 이고 나머지는 원래 ENU 에서 c0 만큼 이동.
+        // The origin = first line position, so the first image center is ENU (0,0,0) and the rest are shifted from the original ENU by c0.
         let c0 = centers[0];
         for (i, c) in centers.iter().enumerate() {
             let got = rec.projection_center(i as u32 + 1).unwrap();
@@ -286,7 +288,7 @@ mod tests {
         assert!(a.median_error < 1e-3 && a.mean_error < 1e-3);
         let expect = enu_to_model.inverse();
         assert!((a.sim3.scale - expect.scale).abs() / expect.scale < 1e-6);
-        // Sim3 적용 후 재투영 오차 불변.
+        // Reprojection error is invariant after applying the Sim3.
         let after = projections(&rec);
         assert_eq!(before.len(), after.len());
         for (b, a) in before.iter().zip(&after) {
@@ -301,12 +303,12 @@ mod tests {
     fn explicit_origin_and_order_rule() {
         let (rec, mut gps, centers, _) = scene(6, 12);
         let opts = ModelAlignerOptions { ransac: RansacParams { random_seed: Some(2), ..Default::default() }, ..Default::default() };
-        // 줄 순서를 바꾸면 원점이 바뀐다.
+        // Changing the line order changes the origin.
         gps.swap(0, 5);
         let mut r1 = rec.clone();
         align_to_gps(&mut r1, &gps, &opts).unwrap();
         assert!(r1.projection_center(6).unwrap().norm() < 1e-3);
-        // 명시 원점은 줄 순서와 무관.
+        // An explicit origin is independent of the line order.
         let o = &gps[3];
         let opts2 = ModelAlignerOptions { origin: EnuOrigin::Explicit { lat: o.lat, lon: o.lon, alt: o.alt }, ..opts.clone() };
         let mut r2 = rec.clone();
@@ -318,7 +320,7 @@ mod tests {
 
     #[test]
     fn robust_to_gps_outliers() {
-        // 50 카메라 중 30% 를 20 m 이상 오염, 나머지 σ=1 m 잡음, 임계 3 m.
+        // Of 50 cameras, 30% are contaminated by 20 m or more, the rest get σ=1 m noise, threshold 3 m.
         let (rec, mut gps, centers, _) = scene(17, 13);
         let mut rng = cumulus3d_core::ransac::make_rng(Some(5));
         let enu = EnuFrame::new(gps[0].lat, gps[0].lon, gps[0].alt);
@@ -359,7 +361,7 @@ mod tests {
     fn failure_cases_return_err_and_leave_model() {
         let (mut rec, gps, _, _) = scene(4, 14);
         let orig = rec.projection_center(1).unwrap();
-        // 공통 영상 2개.
+        // 2 common images.
         let mut few = gps[..2].to_vec();
         few.push(GpsRecord { name: "nope.jpg".into(), ..gps[2].clone() });
         assert!(matches!(align_to_gps(&mut rec, &few, &Default::default()), Err(AlignError::TooFewCommonImages { found: 2, .. })));

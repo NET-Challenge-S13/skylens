@@ -25,53 +25,60 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! PLY 점군 읽기·쓰기.
+//! PLY point cloud reading and writing.
 
 use crate::error::{Error, Result};
 use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::path::Path;
 
-/// 점군. `normals`/`colors` 는 비어 있거나 `positions` 와 길이가 같다.
+/// Point cloud. `normals`/`colors`/`keys` are either empty or the same length as `positions`.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PointCloud {
-    /// 점 위치.
+    /// Point positions.
     pub positions: Vec<[f32; 3]>,
-    /// 법선(비어 있을 수 있음).
+    /// Normals (may be empty).
     pub normals: Vec<[f32; 3]>,
-    /// RGB 색(비어 있을 수 있음).
+    /// RGB colors (may be empty).
     pub colors: Vec<[u8; 3]>,
+    /// Point identification keys (may be empty; not written to PLY). Dense fusion fills them with `(image_id << 32) | (v << 16) | u`,
+    /// and filtering, reordering and transforms must keep them together with the positions.
+    pub keys: Vec<u64>,
 }
 
 impl PointCloud {
-    /// 점 수.
+    /// Number of points.
     pub fn len(&self) -> usize {
         self.positions.len()
     }
-    /// 점이 없는지.
+    /// Whether there are no points.
     pub fn is_empty(&self) -> bool {
         self.positions.is_empty()
     }
-    /// 법선이 있는지.
+    /// Whether normals are present.
     pub fn has_normals(&self) -> bool {
         !self.normals.is_empty()
     }
-    /// 색이 있는지.
+    /// Whether colors are present.
     pub fn has_colors(&self) -> bool {
         !self.colors.is_empty()
     }
+    /// Whether point keys are present.
+    pub fn has_keys(&self) -> bool {
+        !self.keys.is_empty()
+    }
 }
 
-/// 쓰기 속성 배치.
+/// Write attribute layout.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum PlyLayout {
-    /// 조밀 점군(dense.ply) 배치: x y z red green blue nx ny nz, 타입 이름 float32/uint8 (27바이트/점).
+    /// Dense point cloud (dense.ply) layout: x y z red green blue nx ny nz, type names float32/uint8 (27 bytes/point).
     #[default]
     XyzRgbNormal,
-    /// 자체 출력: x y z nx ny nz red green blue, 타입 이름 float/uchar (27바이트/점).
+    /// Own output: x y z nx ny nz red green blue, type names float/uchar (27 bytes/point).
     XyzNormalRgb,
 }
 
-/// 이진 리틀 엔디언 PLY 쓰기. 법선이 없으면 nx ny nz 생략, 색이 없으면 흰색(255).
+/// Binary little-endian PLY writing. nx ny nz are omitted without normals; color is white (255) without colors.
 pub fn write_ply(path: impl AsRef<Path>, cloud: &PointCloud, layout: PlyLayout) -> Result<()> {
     let n = cloud.len();
     if (cloud.has_normals() && cloud.normals.len() != n) || (cloud.has_colors() && cloud.colors.len() != n) {
@@ -201,8 +208,8 @@ struct Element {
     has_list: bool,
 }
 
-/// PLY 읽기(ascii / binary_little_endian / binary_big_endian). vertex 의 속성을 이름으로 찾는다:
-/// x y z 필수, nx ny nz 와 red green blue 는 있으면 읽는다.
+/// PLY reading (ascii / binary_little_endian / binary_big_endian). Finds the vertex attributes by name:
+/// x y z are required; nx ny nz and red green blue are read if present.
 pub fn read_ply(path: impl AsRef<Path>) -> Result<PointCloud> {
     let path = path.as_ref();
     let mut r = BufReader::new(std::fs::File::open(path)?);
@@ -326,6 +333,7 @@ mod tests {
             positions: (0..n).map(|i| [i as f32 * 0.5, -(i as f32), 1e-3 * i as f32]).collect(),
             normals: if normals { (0..n).map(|i| [0.0, (i % 2) as f32, 1.0]).collect() } else { vec![] },
             colors: (0..n).map(|i| [(i % 256) as u8, 7, 255 - (i % 256) as u8]).collect(),
+            keys: Vec::new(),
         }
     }
 

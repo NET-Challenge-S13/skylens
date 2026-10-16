@@ -25,34 +25,36 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 필터 뒤 깊이맵 후처리(신뢰도 조건부).
+//! Post-processing of depth maps after the filter (confidence-conditional).
 //!
-//! - **작은 조각 제거**: 4-이웃 사이 상대 깊이 차가 문턱 이하면 같은 성분. 넓이가 영상 넓이 비율보다 작고
-//!   비용 중앙값이 신뢰 문턱보다 큰 성분을 지운다(작아도 확실한 조각은 남긴다).
-//! - **경계 인식 틈 메우기**: 무효 픽셀에서 8방향으로 최대 `대각선 × 비율` 까지 걷다가 밝기 차가 문턱을 넘으면(영상 경계) 멈춘다.
-//!   처음 만나는 유효 픽셀들 중 밝기가 가장 비슷한 것의 평면을 자기 광선에 옮겨 채운다. 자기 PatchMatch 비용이
-//!   문턱 이하인 픽셀만 채우고, 원래 유효했던 픽셀만 출처로 쓴다(연쇄 채움 없음).
+//! - **Small component removal**: pixels whose relative depth difference between 4-neighbors is at or below a threshold form one component.
+//!   Components whose area is below an image-area ratio and whose median cost is above a confidence threshold are erased (small but certain
+//!   pieces are kept).
+//! - **Boundary-aware gap filling**: from an invalid pixel, walk in 8 directions up to `diagonal × ratio`; stop when the brightness
+//!   difference exceeds a threshold (image boundary). The plane of the valid pixel with the most similar brightness among the first ones
+//!   met is moved onto the own ray to fill. Only pixels whose own PatchMatch cost is at or below a threshold are filled, and only
+//!   originally valid pixels are used as sources (no chained filling).
 
 use crate::math::plane_transfer;
 
-/// 후처리 매개변수.
+/// Post-processing parameters.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PostParams {
-    /// 작은 조각 제거를 할지.
+    /// Whether to remove small components.
     pub remove_speckles: bool,
-    /// 같은 성분으로 볼 상대 깊이 차.
+    /// Relative depth difference to regard as the same component.
     pub speckle_rel_depth: f32,
-    /// 최소 성분 넓이(영상 넓이 비율).
+    /// Minimum component area (fraction of image area).
     pub speckle_min_area_frac: f64,
-    /// 비용 중앙값이 이 값 이하인 성분은 작아도 남긴다.
+    /// Components whose median cost is at or below this value are kept even if small.
     pub speckle_keep_cost: f32,
-    /// 경계 인식 틈 메우기를 할지.
+    /// Whether to do boundary-aware gap filling.
     pub fill_holes: bool,
-    /// 최대 채움 거리(영상 대각선 비율).
+    /// Maximum fill distance (fraction of image diagonal).
     pub fill_max_frac: f64,
-    /// 걷기를 멈추는 인접 밝기 차(\[0,1\]).
+    /// Adjacent brightness difference at which walking stops (\[0,1\]).
     pub fill_edge_step: f32,
-    /// 채울 픽셀의 자기 비용 상한.
+    /// Upper bound of the own cost of a pixel to fill.
     pub fill_max_cost: f32,
 }
 
@@ -71,7 +73,7 @@ impl Default for PostParams {
     }
 }
 
-/// 작은 조각 제거. 지운 픽셀 수를 돌려준다.
+/// Small component removal. Returns the number of erased pixels.
 pub fn remove_speckles(depth: &mut [f32], normal: &mut [[f32; 3]], cost: &[f32], w: usize, h: usize, p: &PostParams) -> usize {
     let min_area = ((w * h) as f64 * p.speckle_min_area_frac).ceil() as usize;
     if min_area <= 1 {
@@ -132,7 +134,7 @@ pub fn remove_speckles(depth: &mut [f32], normal: &mut [[f32; 3]], cost: &[f32],
     removed
 }
 
-/// 경계 인식 틈 메우기. 채운 픽셀 수를 돌려준다.
+/// Boundary-aware gap filling. Returns the number of filled pixels.
 #[allow(clippy::too_many_arguments)]
 pub fn fill_holes(
     depth: &mut [f32],
@@ -209,7 +211,7 @@ mod tests {
         let mut d = vec![10.0f32; w * h];
         let mut n = vec![[0.0f32, 0.0, -1.0]; w * h];
         let mut c = vec![0.5f32; w * h];
-        // 떠 있는 작은 조각(깊이 5) 2×2, 구멍 3×3.
+        // Floating small component (depth 5) 2×2, hole 3×3.
         for (x, y) in [(5, 5), (6, 5), (5, 6), (6, 6)] {
             d[y * w + x] = 5.0;
         }

@@ -25,13 +25,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 람다 훅 예: 합성 장면(드론 3대 × 8위치)을 위치 단위로 밀어 넣고, 이벤트·초벌/정밀 점 수를 출력하며
-//! 기본 출력 훅으로 `cumulus3d stream` 과 같은 파일(timeline.txt, run.log, snapshots/ …)을 만든다.
+//! Closure hook example: push a synthetic scene (3 drones x 8 positions) in position by position, print the events and the
+//! preview/refined point counts, and use the default output hook to produce the same files as `cumulus3d stream` (timeline.txt, run.log,
+//! snapshots/ ...).
 //!
 //! ```bash
-//! cargo run --release -p cumulus3d-cli --example hooks -- [출력 폴더]
+//! cargo run --release -p cumulus3d-cli --example hooks -- [output folder]
 //! ```
-//! CUDA 장치가 있으면 조밀화까지 하고, 없으면 조밀화 없이(점군 0, 희소 점 수만) 돈다.
+//! With a CUDA device it densifies as well; without one it runs with no densification (point cloud 0, sparse point count only).
 
 #[path = "../tests/common/mod.rs"]
 mod common;
@@ -66,7 +67,7 @@ fn main() -> Result<(), String> {
         cfg.dense = Some(d);
     }
 
-    // 훅: 사건 문구 출력, 구역 점군 점 수, 경고·오류. 그리고 기본 출력 훅(파일).
+    // Hook: print event text, zone point-cloud point counts, warnings and errors; plus the default output hook (files).
     let pipeline = Pipeline::new(Session::new(cfg))
         .on_any(|e: &Event| {
             if let Some(t) = e.timeline_text() {

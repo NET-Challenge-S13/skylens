@@ -25,17 +25,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 선언형 빌더 층: 계획을 먼저 기록하고 나중에 한 번에 실행한다.
+//! Declarative builder layer: record a plan first and run it all at once later.
 //!
-//! [`Recon::declare`] 가 돌려주는 [`ReconBuilder`] 의 메서드는 "이렇게 하겠다"는 **계획만 기록**하고 아무것도
-//! 실행하지 않는다(파일·폴더를 만들거나 지우지 않고, 장치를 열지 않는다). [`ReconBuilder::build`] 가 계획을 검사해
-//! 실행 가능한 재구성([`Recon`])을 만들고, [`Recon::run`] 이 세션 리듀서 + 파이프라인 + 훅 + 기본 출력 훅을 조립해
-//! 위치 반복·배경 작업 대기·종료까지 한 번에 실행한다(지연 실행).
+//! The methods of the [`ReconBuilder`] returned by [`Recon::declare`] only **record a plan** ("this is what to do") and execute
+//! nothing (they neither create nor delete files or folders, and do not open devices). [`ReconBuilder::build`] validates the plan
+//! and builds an executable reconstruction ([`Recon`]); [`Recon::run`] assembles the session reducer + pipeline + hooks + default output
+//! hook and
+//! runs the position loop, the wait for background jobs and the shutdown in one go (deferred execution).
 //!
-//! 계획 자체는 값([`Plan`])이라 비교·복제·TOML 저장이 된다([`Plan::to_toml`] / [`Plan::from_toml`]).
-//! 훅(클로저)은 계획이 아니라 빌더에 보관한다.
+//! The plan itself is a value ([`Plan`]), so it can be compared, cloned and saved as TOML ([`Plan::to_toml`] / [`Plan::from_toml`]).
+//! Hooks (closures) are kept in the builder, not in the plan.
 //!
-//! # 사용 예
+//! # Usage example
 //!
 //! ```no_run
 //! use cumulus3d_cli::declare::{Dense, Recon, Sinks};
@@ -44,7 +45,7 @@
 //! fn main() -> Result<(), String> {
 //!     let recon = Recon::declare()
 //!         .input("data")                      // data/images/<cam>/, data/gps_ref.txt
-//!         .preset("aerial-formation")         // camF/camR/camL, 편대 짝 규칙, stride 3
+//!         .preset("aerial-formation")         // camF/camR/camL, formation pairing rule, stride 3
 //!         .stride(3)
 //!         .zones(12, 2)
 //!         .dense(Dense::profile("fast").fusion_min_views(3))
@@ -55,21 +56,29 @@
 //!                 println!("{t}");
 //!             }
 //!         })
-//!         .on_zone_preview(|range, cloud| println!("초벌 {}: 점 {}", range.zone, cloud.len()))
-//!         .build()                            // 검사만(오류는 모아서 한 번에)
+//!         .on_zone_preview(|range, cloud| println!("preview {}: {} points", range.zone, cloud.len()))
+//!         .build()                            // validation only (errors are collected and reported at once)
 //!         .map_err(|e| e.to_string())?;
 //!     println!("{}", recon.plan().to_toml());
-//!     let summary = recon.run()?;              // 여기서 실제 실행
-//!     println!("이벤트 {} 개", summary.events);
+//!     let summary = recon.run()?;              // actual execution happens here
+//!     println!("{} events", summary.events);
 //!     Ok(())
 //! }
 //! ```
 //!
-//! TOML 계획 파일로 실행: `cumulus3d run plan.toml`. 기본 계획은 `cumulus3d plan --print-default`.
-//! 계획 파일의 상대 경로는 실행 위치(현재 폴더) 기준이다.
+//! Run from a TOML plan file: `cumulus3d run plan.toml`. The default plan is `cumulus3d plan --print-default`.
+//! Relative paths in a plan file are relative to the working location (current folder).
 
+<<<<<<< skylens (vendored)
 use crate::densewrap::{make_ba_backend, make_match_backend, make_pm_backend, make_sift_backend, make_sparse_backend, parse_profile, DenseConfig};
+||||||| base b9f4a9bda
+use crate::densewrap::{make_match_backend, make_pm_backend, make_sift_backend, parse_profile, DenseConfig};
+=======
+use crate::blocks::LiveStream;
+use crate::densewrap::{make_match_backend, make_pm_backend, make_sift_backend, make_undistort_backend, parse_profile, DenseConfig};
+>>>>>>> upstream v0.5.0
 use crate::events::{EventKind, Frame, ZoneRange};
+use crate::intrinsics::IntrinsicsPrior;
 use crate::pipeline::{Pipeline, QueuePolicy, Summary};
 use crate::session::{zones_upto, Input, Session, SessionConfig};
 use crate::sinks::{DefaultSinks, SinkSet};
@@ -83,48 +92,48 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-/// 기본 프리셋 이름.
+/// Default preset name.
 pub const DEFAULT_PRESET: &str = "aerial-formation";
 
-/// 알려진 프리셋 이름.
+/// Known preset names.
 pub const PRESETS: [&str; 1] = [DEFAULT_PRESET];
 
 // ============================================================================================
-// 계획 값
+// Plan values
 // ============================================================================================
 
-/// 재구성 계획(값). 실행하지 않고 "무엇을 어떻게 할지"만 담는다.
+/// Reconstruction plan (a value). It runs nothing and only holds "what to do and how".
 ///
-/// 기본값([`Plan::default`])은 `aerial-formation` 프리셋 + `cumulus3d stream` 기본 설정이며,
-/// 경로는 자리 표시(`data/images`, `data/gps_ref.txt`, `out`)다.
+/// The default ([`Plan::default`]) is the `aerial-formation` preset + the `cumulus3d stream` defaults,
+/// and the paths are placeholders (`data/images`, `data/gps_ref.txt`, `out`).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Plan {
-    /// 두 뷰 기하·GPS 정렬 RANSAC 시드(없으면 실행마다 다름).
+    /// RANSAC seed for two-view geometry and GPS alignment (if unset, differs from run to run).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub seed: Option<u64>,
-    /// rayon 스레드 수(0 = 코어 수).
+    /// Number of rayon threads (0 = number of cores).
     pub threads: usize,
-    /// GPS 기록 파일(`이름 위도 경도 고도` 줄). 없으면 정렬할 수 없다.
+    /// GPS record file (`name latitude longitude altitude` lines). Without it, alignment is impossible.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub gps: Option<PathBuf>,
-    /// 짝 전략.
+    /// Pairing strategy.
     pub pairing: Pairing,
-    /// 입력 영상.
+    /// Input images.
     pub input: Source,
-    /// 구역 나누기.
+    /// Zone splitting.
     pub zones: Zones,
-    /// 좌표 정렬.
+    /// Coordinate alignment.
     pub align: Align,
-    /// 특징 추출.
+    /// Feature extraction.
     pub features: Features,
-    /// 기술자 매칭.
+    /// Descriptor matching.
     pub matching: Matching,
-    /// 희소 재구성.
+    /// Sparse reconstruction.
     pub sparse: Sparse,
-    /// 조밀화.
+    /// Densification.
     pub dense: Dense,
-    /// 출력 훅.
+    /// Output hooks.
     pub sinks: Sinks,
 }
 
@@ -147,17 +156,17 @@ impl Default for Plan {
     }
 }
 
-/// 입력 영상: `<images>/<camera>/<camera>_NNNN.jpg`.
+/// Input images: `<images>/<camera>/<camera>_NNNN.jpg`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Source {
-    /// 영상 폴더(카메라 폴더들의 부모).
+    /// Image folder (parent of the camera folders).
     pub images: PathBuf,
-    /// 카메라 폴더 목록(위치 하나의 프레임 묶음 순서). 위치 목록은 첫 카메라 폴더에서 찾는다.
+    /// List of camera folders (frame-bundle order for one position). The position list is taken from the first camera folder.
     pub cameras: Vec<String>,
-    /// 파일 번호 간격: 번호 % stride == 0 인 프레임만 쓴다. 위치 = 선택된 프레임 목록의 순번.
+    /// File number interval: only frames with number % stride == 0 are used. Position = index in the selected frame list.
     pub stride: usize,
-    /// 앞 N 위치만(없으면 전부).
+    /// Only the first N positions (all if unset).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub positions: Option<usize>,
 }
@@ -168,22 +177,22 @@ impl Default for Source {
     }
 }
 
-/// 짝 전략.
+/// Pairing strategy.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Pairing {
-    /// 편대 규칙: 같은 카메라 위치 간격 1..5, 8, 16 / 다른 카메라 위치 차 0..4.
+    /// Formation rule: same camera at position gaps 1..5, 8, 16 / different cameras at position difference 0..4.
     #[default]
     Formation,
 }
 
-/// 구역(위치 단위).
+/// Zones (in units of positions).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Zones {
-    /// 구역 크기.
+    /// Zone size.
     pub span: usize,
-    /// 구역 겹침(< span).
+    /// Zone overlap (< span).
     pub overlap: usize,
 }
 
@@ -193,36 +202,36 @@ impl Default for Zones {
     }
 }
 
-/// 정렬 좌표계.
+/// Alignment coordinate frame.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum AlignFrame {
-    /// GPS 기록으로 ENU(동·북·위) 좌표계에 맞춘다(GPS 파일 필요).
+    /// Align to the ENU (east, north, up) frame using GPS records (requires the GPS file).
     #[default]
     Enu,
-    /// 정렬하지 않음(GPS 파일을 쓰지 않는다).
+    /// No alignment (the GPS file is not used).
     None,
 }
 
-/// 좌표 정렬.
+/// Coordinate alignment.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Align {
-    /// 좌표계.
+    /// Coordinate frame.
     pub frame: AlignFrame,
-    /// 첫 GPS 줄로 세션 ENU 원점 고정(끄면 정렬마다 첫 공통 기록).
+    /// Fix the session ENU origin to the first GPS line (if off, the first common record at each alignment).
     pub fixed_origin: bool,
 }
 
-/// 특징 추출.
+/// Feature extraction.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Features {
-    /// SIFT 백엔드(cpu|cuda). 결과는 cpu 와 같다.
+    /// SIFT backend (cpu|cuda). The result is the same as cpu.
     pub backend: String,
-    /// 최대 특징 수.
+    /// Maximum number of features.
     pub max_num_features: usize,
-    /// 입력 최대 영상 크기.
+    /// Maximum input image size.
     pub max_image_size: usize,
 }
 
@@ -232,11 +241,11 @@ impl Default for Features {
     }
 }
 
-/// 기술자 매칭.
+/// Descriptor matching.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Matching {
-    /// 매칭 백엔드(cpu|cuda). 결과는 cpu 와 같다.
+    /// Matching backend (cpu|cuda). The result is the same as cpu.
     pub backend: String,
 }
 
@@ -246,12 +255,21 @@ impl Default for Matching {
     }
 }
 
+<<<<<<< skylens (vendored)
 /// 희소 재구성.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+||||||| base b9f4a9bda
+/// 희소 재구성.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+=======
+/// Sparse reconstruction.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+>>>>>>> upstream v0.5.0
 #[serde(default, deny_unknown_fields)]
 pub struct Sparse {
-    /// 새로 등록된 영상만 삼각측량(결과가 달라질 수 있는 개선).
+    /// Triangulate only newly registered images (an improvement that can change the result).
     pub incremental_triangulation: bool,
+<<<<<<< skylens (vendored)
     /// 두 뷰 기하 검증·등록·삼각측량 백엔드(cpu|cuda).
     pub backend: String,
     /// 번들 조정 백엔드(cpu|cuda). cuda 는 실행 중 실패하면 경고 뒤 CPU 로 푼다.
@@ -262,29 +280,64 @@ impl Default for Sparse {
     fn default() -> Self {
         Self { incremental_triangulation: false, backend: "cpu".into(), ba_backend: "cpu".into() }
     }
+||||||| base b9f4a9bda
+=======
+    /// Stable display (see [`SessionConfig::stable_display`]).
+    pub stable_display: bool,
+    /// Stable display: settle tolerance (see [`SessionConfig::settle_tol`]).
+    pub settle_tol: f64,
+    /// Stable display: last zone that may still settle (see [`SessionConfig::settle_max_zone`]).
+    pub settle_max_zone: usize,
+    /// Soft intrinsics prior file (see [`crate::intrinsics`]).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub intrinsics_prior: Option<PathBuf>,
+    /// Intrinsics prior: relative σ of the focal lengths.
+    pub intrinsics_prior_sigma: f64,
+    /// Intrinsics prior: absolute σ of the distortion parameters.
+    pub intrinsics_prior_dist_sigma: f64,
 }
 
-/// 조밀화 계획. [`Dense::profile`] 로 시작해 메서드로 덧붙인다. 비운 융합·필터 값은 프로파일 기본값.
+impl Default for Sparse {
+    fn default() -> Self {
+        Self {
+            incremental_triangulation: false,
+            stable_display: false,
+            settle_tol: 0.01,
+            settle_max_zone: 3,
+            intrinsics_prior: None,
+            intrinsics_prior_sigma: crate::intrinsics::DEFAULT_FOCAL_SIGMA,
+            intrinsics_prior_dist_sigma: crate::intrinsics::DEFAULT_DIST_SIGMA,
+        }
+    }
+>>>>>>> upstream v0.5.0
+}
+
+/// Densification plan. Start from [`Dense::profile`] and add to it with methods. Unset fusion/filter values use the profile defaults.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Dense {
-    /// 조밀화 여부(끄면 후처리 점군 없음).
+    /// Whether to densify (if off, there is no post-processing point cloud).
     pub enabled: bool,
-    /// PatchMatch 백엔드(cuda).
+    /// PatchMatch backend (cuda).
     pub backend: String,
-    /// 프로파일(fast|quality).
+    /// Image undistortion backend (cpu|cuda). Same result as cpu up to rounding.
+    pub undistort_backend: String,
+    /// Profile (fast|quality).
     pub profile: String,
-    /// 왜곡 보정 최대 영상 크기.
+    /// Maximum undistorted image size.
     pub max_image_size: i64,
-    /// 원천 뷰 수(1..=32).
+    /// Number of source views (1..=32).
     pub views: usize,
-    /// 초벌·정밀 조밀화 백엔드 호출 직렬화.
+    /// Upper bound on the number of scales (>= 1; 1 = a single scale at full resolution). If unset, the profile default.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_levels: Option<usize>,
+    /// Serialize preview/refined densification backend calls.
     pub serialize: bool,
-    /// 겹침 영상 깊이맵 재사용.
+    /// Reuse depth maps of overlapping images.
     pub depth_cache: bool,
-    /// 융합 덮어쓰기.
+    /// Fusion overrides.
     pub fusion: Fusion,
-    /// 깊이맵 필터 덮어쓰기.
+    /// Depth map filter overrides.
     pub filter: Filter,
 }
 
@@ -293,9 +346,11 @@ impl Default for Dense {
         Self {
             enabled: true,
             backend: "cuda".into(),
+            undistort_backend: "cpu".into(),
             profile: "fast".into(),
             max_image_size: 960,
             views: 10,
+            max_levels: None,
             serialize: false,
             depth_cache: false,
             fusion: Fusion::default(),
@@ -304,136 +359,199 @@ impl Default for Dense {
     }
 }
 
-/// 융합 덮어쓰기(`densify` 하위 명령의 `--fusion-*` 와 같은 뜻). 비우면 프로파일 기본값.
+/// Fusion overrides (same meaning as `--fusion-*` of the `densify` subcommand). If unset, the profile default.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Fusion {
-    /// 융합 방식(consistency|traversal).
+    /// Fusion mode (consistency|traversal).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub mode: Option<String>,
-    /// 일치 융합: 기준 외 일치 뷰 최소 수(≥ 1).
+    /// Consistent fusion: minimum number of agreeing views besides the reference (>= 1).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub min_views: Option<usize>,
-    /// 상대 깊이 허용치(> 0).
+    /// Relative depth tolerance (> 0).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub depth_error: Option<f64>,
-    /// 법선 허용 각(도, (0, 180]).
+    /// Normal tolerance angle (degrees, (0, 180]).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub normal_error: Option<f64>,
-    /// 재투영 허용치(픽셀, > 0).
+    /// Reprojection tolerance (pixels, > 0).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reproj_error: Option<f64>,
-    /// 남은 픽셀 처리(none|release|second-pass).
+    /// Handling of remaining pixels (none|release|second-pass).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub residual: Option<String>,
+    /// Smoothing of the fused cloud along normals: iterations (0 = off).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub smooth_iters: Option<usize>,
+    /// Smoothing neighbour radius (multiple of the depth-map ground sample distance, > 0).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub smooth_radius: Option<f64>,
+    /// Smoothing range sigma along the normal (ground-sample-distance multiple, > 0).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub smooth_range: Option<f64>,
+    /// Smoothing neighbour normal gate (degrees, (0, 180]).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub smooth_normal: Option<f64>,
+    /// Free-space visibility filter: neighbouring views checked per fused point (0 = off).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub visibility_views: Option<usize>,
+    /// Free-space visibility filter: relative depth tolerance (> 0).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub visibility_tau: Option<f64>,
+    /// Free-space visibility filter: minimum violating views to remove a point.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub visibility_min_violations: Option<usize>,
 }
 
-/// 깊이맵 필터 덮어쓰기(`densify` 하위 명령의 `--filter-*`, `--median-filter` 와 같은 뜻). 비우면 프로파일 기본값.
+/// Depth map filter overrides (same meaning as `--filter-*` and `--median-filter` of the `densify` subcommand). If unset, the profile
+/// default.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Filter {
-    /// 일치 뷰 최소 수.
+    /// Minimum number of agreeing views.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub min_views: Option<u32>,
-    /// 순·역 재투영 허용치(픽셀, > 0).
+    /// Forward/backward reprojection tolerance (pixels, > 0).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub geom_error: Option<f32>,
-    /// 최소 NCC([-1, 1]).
+    /// Minimum NCC ([-1, 1]).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub min_ncc: Option<f32>,
-    /// 판독 전 5×5 중앙값 평면 필터.
+    /// 5x5 median plane filter before readout.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub median: Option<bool>,
+    /// Edge-aware hole filling of the filtered depth maps.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fill_holes: Option<bool>,
 }
 
 impl Dense {
-    /// 프로파일(fast|quality)과 기본값으로 시작(켜짐, 백엔드 cuda).
+    /// Start from a profile (fast|quality) and the defaults (on, backend cuda).
     pub fn profile(name: &str) -> Self {
         Self { profile: name.to_string(), ..Self::default() }
     }
-    /// 꺼진 조밀화.
+    /// Densification turned off.
     pub fn off() -> Self {
         Self { enabled: false, ..Self::default() }
     }
-    /// PatchMatch 백엔드 이름.
+    /// PatchMatch backend name.
     pub fn backend(mut self, name: &str) -> Self {
         self.backend = name.to_string();
         self
     }
-    /// 왜곡 보정 최대 영상 크기.
+    /// Image undistortion backend name (cpu|cuda).
+    pub fn undistort_backend(mut self, name: &str) -> Self {
+        self.undistort_backend = name.to_string();
+        self
+    }
+    /// Maximum undistorted image size.
     pub fn max_image_size(mut self, n: i64) -> Self {
         self.max_image_size = n;
         self
     }
-    /// 원천 뷰 수.
+    /// Number of source views.
     pub fn views(mut self, n: usize) -> Self {
         self.views = n;
         self
     }
-    /// 초벌·정밀 백엔드 호출 직렬화.
+    /// Serialize preview/refined backend calls.
     pub fn serialize(mut self, on: bool) -> Self {
         self.serialize = on;
         self
     }
-    /// 겹침 영상 깊이맵 재사용.
+    /// Reuse depth maps of overlapping images.
     pub fn depth_cache(mut self, on: bool) -> Self {
         self.depth_cache = on;
         self
     }
-    /// 융합 방식(consistency|traversal).
+    /// Fusion mode (consistency|traversal).
     pub fn fusion_mode(mut self, mode: &str) -> Self {
         self.fusion.mode = Some(mode.to_string());
         self
     }
-    /// 일치 융합: 기준 외 일치 뷰 최소 수.
+    /// Consistent fusion: minimum number of agreeing views besides the reference.
     pub fn fusion_min_views(mut self, n: usize) -> Self {
         self.fusion.min_views = Some(n);
         self
     }
-    /// 융합 상대 깊이 허용치.
+    /// Fusion relative depth tolerance.
     pub fn fusion_depth_error(mut self, v: f64) -> Self {
         self.fusion.depth_error = Some(v);
         self
     }
-    /// 융합 법선 허용 각(도).
+    /// Fusion normal tolerance angle (degrees).
     pub fn fusion_normal_error(mut self, deg: f64) -> Self {
         self.fusion.normal_error = Some(deg);
         self
     }
-    /// 융합 재투영 허용치(픽셀).
+    /// Fusion reprojection tolerance (pixels).
     pub fn fusion_reproj_error(mut self, px: f64) -> Self {
         self.fusion.reproj_error = Some(px);
         self
     }
-    /// 일치 융합 남은 픽셀 처리(none|release|second-pass).
+    /// Handling of remaining pixels in consistent fusion (none|release|second-pass).
     pub fn fusion_residual(mut self, mode: &str) -> Self {
         self.fusion.residual = Some(mode.to_string());
         self
     }
-    /// 깊이맵 필터: 일치 뷰 최소 수.
+    /// Smoothing of the fused cloud along normals: iterations (0 = off).
+    pub fn fusion_smooth_iters(mut self, n: usize) -> Self {
+        self.fusion.smooth_iters = Some(n);
+        self
+    }
+    /// Smoothing neighbour radius (ground-sample-distance multiple).
+    pub fn fusion_smooth_radius(mut self, r: f64) -> Self {
+        self.fusion.smooth_radius = Some(r);
+        self
+    }
+    /// Smoothing range sigma along the normal (ground-sample-distance multiple).
+    pub fn fusion_smooth_range(mut self, r: f64) -> Self {
+        self.fusion.smooth_range = Some(r);
+        self
+    }
+    /// Smoothing neighbour normal gate (degrees).
+    pub fn fusion_smooth_normal(mut self, deg: f64) -> Self {
+        self.fusion.smooth_normal = Some(deg);
+        self
+    }
+    /// Upper bound on the number of scales (1 = a single scale at full resolution).
+    pub fn max_levels(mut self, n: usize) -> Self {
+        self.max_levels = Some(n);
+        self
+    }
+    /// Edge-aware hole filling of the filtered depth maps.
+    pub fn fill_holes(mut self, on: bool) -> Self {
+        self.filter.fill_holes = Some(on);
+        self
+    }
+    /// Depth map filter: minimum number of agreeing views.
     pub fn filter_min_views(mut self, n: u32) -> Self {
         self.filter.min_views = Some(n);
         self
     }
-    /// 깊이맵 필터: 순·역 재투영 허용치(픽셀).
+    /// Depth map filter: forward/backward reprojection tolerance (pixels).
     pub fn filter_geom_error(mut self, px: f32) -> Self {
         self.filter.geom_error = Some(px);
         self
     }
-    /// 깊이맵 필터: 최소 NCC.
+    /// Depth map filter: minimum NCC.
     pub fn filter_min_ncc(mut self, v: f32) -> Self {
         self.filter.min_ncc = Some(v);
         self
     }
-    /// 판독 전 중앙값 평면 필터.
+    /// Median plane filter before readout.
     pub fn median_filter(mut self, on: bool) -> Self {
         self.filter.median = Some(on);
         self
     }
 
-    /// 덮어쓰기를 조밀화 옵션에 반영(이름이 틀리면 오류).
+    /// Apply the overrides to the densification options (an unknown name is an error).
     pub fn apply(&self, o: &mut DensifyOptions) -> Result<(), String> {
         let f = &self.fusion;
+        if let Some(v) = self.max_levels {
+            o.max_levels = v;
+        }
         if let Some(m) = &f.mode {
             o.fusion.mode = parse_fusion_mode(m)?;
         }
@@ -448,6 +566,27 @@ impl Dense {
         }
         if let Some(v) = f.reproj_error {
             o.fusion.max_reproj_error = v;
+        }
+        if let Some(v) = f.smooth_iters {
+            o.fusion.smooth.iterations = v;
+        }
+        if let Some(v) = f.smooth_radius {
+            o.fusion.smooth.radius_gsd = v;
+        }
+        if let Some(v) = f.smooth_range {
+            o.fusion.smooth.sigma_range_gsd = v;
+        }
+        if let Some(v) = f.smooth_normal {
+            o.fusion.smooth.normal_deg = v;
+        }
+        if let Some(v) = f.visibility_views {
+            o.fusion.visibility.check_views = v;
+        }
+        if let Some(v) = f.visibility_tau {
+            o.fusion.visibility.tau = v;
+        }
+        if let Some(v) = f.visibility_min_violations {
+            o.fusion.visibility.min_violations = v;
         }
         if let Some(m) = &f.residual {
             o.fusion.residual =
@@ -466,12 +605,17 @@ impl Dense {
         if let Some(v) = g.median {
             o.filter.median_filter = v;
         }
+        if let Some(v) = g.fill_holes {
+            o.post.fill_holes = v;
+        }
         Ok(())
     }
 
-    /// 실행용 조밀화 설정. 백엔드는 여기서 만든다(장치가 없으면 그 오류를 조밀화 단계에서 보고).
+    /// Densification settings for running. The backend is created here (if there is no device, that error is reported in the
+    /// densification stage).
     pub fn config(&self) -> Result<DenseConfig, String> {
         let mut d = DenseConfig::new(make_pm_backend(&self.backend), parse_profile(&self.profile)?);
+        d.undistort_backend = make_undistort_backend(&self.undistort_backend)?;
         d.undistort.max_image_size = self.max_image_size;
         d.densify.neighbors.num_views = self.views;
         self.apply(&mut d.densify)?;
@@ -489,38 +633,40 @@ fn parse_fusion_mode(m: &str) -> Result<FusionMode, String> {
     FusionMode::parse(m).ok_or_else(|| format!("알 수 없는 융합 방식 {m} (consistency|traversal)"))
 }
 
-/// 출력 훅 계획. `out` 이 없으면 파일을 쓰지 않는다(켜 둔 파일 항목도 무시, 훅만).
+/// Output hook plan. If `out` is unset, no files are written (enabled file items are ignored, only hooks remain).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Sinks {
-    /// 출력 폴더.
+    /// Output folder.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub out: Option<PathBuf>,
-    /// 실행 시작 때 출력 폴더를 지우고 새로 만든다.
+    /// Delete and recreate the output folder when the run starts.
     pub clean: bool,
-    /// run.log 내용을 표준 출력에도.
+    /// Also write the run.log contents to standard output.
     pub echo: bool,
     /// `timeline.txt`.
     pub timeline: bool,
     /// `run.log`, `DONE`.
     pub run_log: bool,
-    /// 구역 PLY(`full/preview`, `full/refined`).
+    /// Zone PLY (`full/preview`, `full/refined`).
     pub zone_ply: bool,
-    /// 정렬·스냅샷·manifest·final_frame.
+    /// Alignment, snapshots, manifest, final_frame.
     pub snapshots: bool,
-    /// 구역별 희소 모델(`work/models/`).
+    /// Per-zone sparse models (`work/models/`).
     pub models: bool,
+    /// Live display thinning: keep 1 of `live_stride` points by key hash (1 = keep all; ≥ 1).
+    pub live_stride: usize,
 }
 
 impl Default for Sinks {
-    /// 출력 폴더 없는 [`Sinks::default_files`](TOML 에서 `[sinks]` 일부만 적었을 때의 나머지 값).
+    /// [`Sinks::default_files`] without an output folder (the remaining values when only part of `[sinks]` is written in TOML).
     fn default() -> Self {
         Self { out: None, ..Self::default_files("") }
     }
 }
 
 impl Sinks {
-    /// `cumulus3d stream` 과 같은 파일 출력(희소 모델 제외, 표준 출력에도 기록, 시작 때 폴더 새로 만듦).
+    /// The same file output as `cumulus3d stream` (excluding sparse models, also logged to standard output, folder recreated at start).
     pub fn default_files(out: impl Into<PathBuf>) -> Self {
         Self {
             out: Some(out.into()),
@@ -531,71 +677,130 @@ impl Sinks {
             zone_ply: true,
             snapshots: true,
             models: false,
+            live_stride: crate::post::LiveOptions::default().stride,
         }
     }
-    /// 파일 출력 없음(출력 폴더 없음, 표준 출력 기록 없음).
+    /// No file output (no output folder, no standard output logging).
     pub fn none() -> Self {
-        Self { out: None, clean: false, echo: false, timeline: false, run_log: false, zone_ply: false, snapshots: false, models: false }
+        Self {
+            out: None,
+            clean: false,
+            echo: false,
+            timeline: false,
+            run_log: false,
+            zone_ply: false,
+            snapshots: false,
+            models: false,
+            live_stride: crate::post::LiveOptions::default().stride,
+        }
     }
-    /// 시작 때 출력 폴더 지움 여부.
+    /// Whether to delete the output folder at start.
     pub fn clean(mut self, on: bool) -> Self {
         self.clean = on;
         self
     }
-    /// 표준 출력 기록 여부.
+    /// Whether to log to standard output.
     pub fn echo(mut self, on: bool) -> Self {
         self.echo = on;
         self
     }
-    /// `timeline.txt` 여부.
+    /// Whether to write `timeline.txt`.
     pub fn timeline(mut self, on: bool) -> Self {
         self.timeline = on;
         self
     }
-    /// `run.log` 여부.
+    /// Whether to write `run.log`.
     pub fn run_log(mut self, on: bool) -> Self {
         self.run_log = on;
         self
     }
-    /// 구역 PLY 여부.
+    /// Whether to write zone PLY.
     pub fn zone_ply(mut self, on: bool) -> Self {
         self.zone_ply = on;
         self
     }
-    /// 스냅샷·정렬 출력 여부.
+    /// Whether to write snapshot/alignment output.
     pub fn snapshots(mut self, on: bool) -> Self {
         self.snapshots = on;
         self
     }
-    /// 구역별 희소 모델 여부.
+    /// Whether to write per-zone sparse models.
     pub fn models(mut self, on: bool) -> Self {
         self.models = on;
         self
     }
+    /// Live display thinning stride (1 = keep all).
+    pub fn live_stride(mut self, stride: usize) -> Self {
+        self.live_stride = stride;
+        self
+    }
     fn set(&self) -> SinkSet {
-        SinkSet { timeline: self.timeline, run_log: self.run_log, zone_ply: self.zone_ply, models: self.models, snapshots: self.snapshots }
+        SinkSet {
+            timeline: self.timeline,
+            run_log: self.run_log,
+            zone_ply: self.zone_ply,
+            models: self.models,
+            snapshots: self.snapshots,
+            live_stream: None,
+            live_stride: self.live_stride,
+        }
     }
 }
 
 impl Plan {
-    /// TOML 문자열로.
+    /// As a TOML string.
     pub fn to_toml(&self) -> String {
         toml::to_string(self).expect("계획은 항상 TOML 로 바꿀 수 있다")
     }
 
-    /// TOML 문자열에서(없는 항목은 기본값, 모르는 항목은 오류).
+    /// TOML with the profile's effective dense defaults written as comments under empty
+    /// `[dense.fusion]` / `[dense.filter]` tables (what `cumulus3d plan --print-default` prints).
+    /// Comments do not change the plan: `from_toml` of the result equals `self`.
+    pub fn to_toml_annotated(&self) -> String {
+        let s = self.to_toml();
+        let Ok(profile) = parse_profile(&self.dense.profile) else { return s };
+        let o = DensifyOptions::with_profile(profile);
+        let (f, g) = (&o.fusion, &o.filter);
+        let mode = match f.mode {
+            FusionMode::Consistency => "consistency",
+            FusionMode::Traversal => "traversal",
+        };
+        let fusion = format!(
+            "# {} profile defaults:\n# mode = \"{mode}\"\n# min_views = {}\n# depth_error = {}\n# normal_error = {}\n# reproj_error = {}\n# residual = \"{}\"\n# smooth_iters = {}\n# smooth_radius = {}\n# smooth_range = {}\n# smooth_normal = {}\n",
+            self.dense.profile, f.min_consistent_views, f.max_depth_error, f.max_normal_error_deg, f.max_reproj_error, f.residual.name(), f.smooth.iterations, f.smooth.radius_gsd, f.smooth.sigma_range_gsd, f.smooth.normal_deg
+        );
+        let filter = format!(
+            "# {} profile defaults:\n# min_views = {}\n# geom_error = {}\n# min_ncc = {}\n# median = {}\n# fill_holes = {}\n",
+            self.dense.profile, g.min_num_consistent, g.geom_max_cost, g.min_ncc, g.median_filter, o.post.fill_holes
+        );
+        let mut out = String::with_capacity(s.len() + fusion.len() + filter.len());
+        let mut lines = s.lines().peekable();
+        while let Some(l) = lines.next() {
+            out.push_str(l);
+            out.push('\n');
+            let empty = lines.peek().is_none_or(|n| n.trim().is_empty() || n.starts_with('['));
+            if empty && l == "[dense.fusion]" {
+                out.push_str(&fusion);
+            } else if empty && l == "[dense.filter]" {
+                out.push_str(&filter);
+            }
+        }
+        out
+    }
+
+    /// From a TOML string (missing items take defaults, unknown items are an error).
     pub fn from_toml(s: &str) -> Result<Self, String> {
         toml::from_str(s).map_err(|e| format!("계획 TOML: {e}"))
     }
 
-    /// TOML 파일에서.
+    /// From a TOML file.
     pub fn load(path: impl AsRef<Path>) -> Result<Self, String> {
         let p = path.as_ref();
         let s = std::fs::read_to_string(p).map_err(|e| format!("{}: {e}", p.display()))?;
         Self::from_toml(&s).map_err(|e| format!("{}: {e}", p.display()))
     }
 
-    /// `cumulus3d stream` 설정과 같은 계획(`<src>/images`, `<src>/gps_ref.txt`, aerial-formation 카메라).
+    /// The plan equivalent to the `cumulus3d stream` settings (`<src>/images`, `<src>/gps_ref.txt`, aerial-formation cameras).
     pub fn from_stream(c: &StreamConfig) -> Self {
         Self {
             seed: c.seed,
@@ -616,45 +821,61 @@ impl Plan {
                 max_image_size: c.sift_max_image_size,
             },
             matching: Matching { backend: c.match_backend.clone() },
+<<<<<<< skylens (vendored)
             sparse: Sparse { incremental_triangulation: c.incremental_triangulation, ..Default::default() },
+||||||| base b9f4a9bda
+            sparse: Sparse { incremental_triangulation: c.incremental_triangulation },
+=======
+            sparse: Sparse {
+                incremental_triangulation: c.incremental_triangulation,
+                stable_display: c.stable_display,
+                settle_tol: c.settle_tol,
+                settle_max_zone: c.settle_max_zone,
+                intrinsics_prior: c.intrinsics_prior.clone(),
+                intrinsics_prior_sigma: c.intrinsics_prior_sigma,
+                intrinsics_prior_dist_sigma: c.intrinsics_prior_dist_sigma,
+            },
+>>>>>>> upstream v0.5.0
             dense: Dense {
                 enabled: !c.no_dense,
                 backend: c.pm_backend.clone(),
+                undistort_backend: c.undistort_backend.clone(),
                 profile: c.mvs_profile.clone(),
                 max_image_size: c.dense_max_image_size,
                 views: c.number_views,
+                max_levels: c.max_levels,
                 serialize: c.serialize_dense,
                 depth_cache: c.depth_cache,
-                fusion: Fusion::default(),
+                fusion: c.fusion.clone(),
                 filter: Filter::default(),
             },
-            sinks: Sinks { models: c.save_models, echo: c.echo, ..Sinks::default_files(&c.out) },
+            sinks: Sinks { models: c.save_models, echo: c.echo, live_stride: c.live_stride, ..Sinks::default_files(&c.out) },
         }
     }
 }
 
 // ============================================================================================
-// 검사 오류
+// Validation errors
 // ============================================================================================
 
-/// 계획 검사 문제 하나.
+/// One plan validation problem.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Problem {
-    /// 계획 항목(TOML 경로, 예: `zones.overlap`).
+    /// Plan item (TOML path, e.g. `zones.overlap`).
     pub field: String,
-    /// 설명.
+    /// Description.
     pub message: String,
 }
 
-/// [`ReconBuilder::build`] 의 검사 오류. 찾은 문제를 모두 담는다.
+/// Validation error of [`ReconBuilder::build`]. It holds all the problems found.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PlanError {
-    /// 문제 목록(찾은 순서).
+    /// List of problems (in the order found).
     pub problems: Vec<Problem>,
 }
 
 impl PlanError {
-    /// 해당 항목의 문제가 있는지.
+    /// Whether there is a problem for the given item.
     pub fn has(&self, field: &str) -> bool {
         self.problems.iter().any(|p| p.field == field)
     }
@@ -687,12 +908,12 @@ impl Problems {
 }
 
 // ============================================================================================
-// 빌더
+// Builder
 // ============================================================================================
 
 type Attach = Box<dyn FnOnce(Pipeline<Session>) -> Pipeline<Session>>;
 
-/// 계획 기록기. 메서드는 기록만 하고 실행하지 않는다. [`ReconBuilder::build`] 로 검사한다.
+/// Plan recorder. Methods only record and do not run anything. Validate with [`ReconBuilder::build`].
 pub struct ReconBuilder {
     plan: Plan,
     attach: Vec<Attach>,
@@ -707,12 +928,12 @@ impl fmt::Debug for ReconBuilder {
 }
 
 impl ReconBuilder {
-    /// 지금까지 기록한 계획.
+    /// The plan recorded so far.
     pub fn plan(&self) -> &Plan {
         &self.plan
     }
 
-    /// 입력 폴더: 영상 `<src>/images/<camera>/`, GPS `<src>/gps_ref.txt`.
+    /// Input folder: images `<src>/images/<camera>/`, GPS `<src>/gps_ref.txt`.
     pub fn input(mut self, src: impl AsRef<Path>) -> Self {
         let src = src.as_ref();
         self.plan.input.images = src.join("images");
@@ -720,20 +941,20 @@ impl ReconBuilder {
         self
     }
 
-    /// 영상 폴더(카메라 폴더들의 부모)만 지정.
+    /// Only specify the image folder (parent of the camera folders).
     pub fn images(mut self, dir: impl Into<PathBuf>) -> Self {
         self.plan.input.images = dir.into();
         self
     }
 
-    /// 카메라 폴더 목록(프레임 묶음 순서).
+    /// List of camera folders (frame-bundle order).
     pub fn cameras<S: Into<String>>(mut self, cams: impl IntoIterator<Item = S>) -> Self {
         self.plan.input.cameras = cams.into_iter().map(Into::into).collect();
         self
     }
 
-    /// 프리셋 적용(카메라·짝 전략·stride). 모르는 이름은 `build` 에서 오류.
-    /// `aerial-formation`: camF/camR/camL, 편대 짝 규칙, stride 3.
+    /// Apply a preset (cameras, pairing strategy, stride). An unknown name is an error in `build`.
+    /// `aerial-formation`: camF/camR/camL, formation pairing rule, stride 3.
     pub fn preset(mut self, name: &str) -> Self {
         match name {
             DEFAULT_PRESET => {
@@ -748,107 +969,132 @@ impl ReconBuilder {
         self
     }
 
-    /// 파일 번호 간격.
+    /// File number interval.
     pub fn stride(mut self, n: usize) -> Self {
         self.plan.input.stride = n;
         self
     }
 
-    /// 앞 N 위치만.
+    /// Only the first N positions.
     pub fn positions(mut self, n: usize) -> Self {
         self.plan.input.positions = Some(n);
         self
     }
 
-    /// 짝 전략.
+    /// Pairing strategy.
     pub fn pairing(mut self, p: Pairing) -> Self {
         self.plan.pairing = p;
         self
     }
 
-    /// 구역 크기·겹침(위치 수).
+    /// Zone size and overlap (number of positions).
     pub fn zones(mut self, span: usize, overlap: usize) -> Self {
         self.plan.zones = Zones { span, overlap };
         self
     }
 
-    /// GPS 기록 파일.
+    /// GPS record file.
     pub fn gps(mut self, path: impl Into<PathBuf>) -> Self {
         self.plan.gps = Some(path.into());
         self
     }
 
-    /// GPS 파일 없음(정렬도 함께 끄려면 [`ReconBuilder::align`] 에 [`AlignFrame::None`]).
+    /// No GPS file (to turn off alignment too, pass [`AlignFrame::None`] to [`ReconBuilder::align`]).
     pub fn no_gps(mut self) -> Self {
         self.plan.gps = None;
         self
     }
 
-    /// 정렬 좌표계.
+    /// Alignment coordinate frame.
     pub fn align(mut self, frame: AlignFrame) -> Self {
         self.plan.align.frame = frame;
         self
     }
 
-    /// 첫 GPS 줄로 세션 ENU 원점 고정.
+    /// Fix the session ENU origin to the first GPS line.
     pub fn fixed_enu_origin(mut self, on: bool) -> Self {
         self.plan.align.fixed_origin = on;
         self
     }
 
-    /// 특징 추출 설정.
+    /// Feature extraction settings.
     pub fn features(mut self, f: Features) -> Self {
         self.plan.features = f;
         self
     }
 
-    /// 매칭 백엔드(cpu|cuda).
+    /// Matching backend (cpu|cuda).
     pub fn match_backend(mut self, name: &str) -> Self {
         self.plan.matching.backend = name.to_string();
         self
     }
 
+<<<<<<< skylens (vendored)
     /// SIFT·매칭·희소 단계·PatchMatch·번들 조정 백엔드를 모두 cuda 로.
+||||||| base b9f4a9bda
+    /// SIFT·매칭·PatchMatch 백엔드를 모두 cuda 로.
+=======
+    /// Set the SIFT, matching and PatchMatch backends all to cuda.
+>>>>>>> upstream v0.5.0
     pub fn gpu(mut self) -> Self {
         self.plan.features.backend = "cuda".into();
         self.plan.matching.backend = "cuda".into();
         self.plan.sparse.backend = "cuda".into();
         self.plan.dense.backend = "cuda".into();
+<<<<<<< skylens (vendored)
         self.plan.sparse.ba_backend = "cuda".into();
+||||||| base b9f4a9bda
+=======
+        self.plan.dense.undistort_backend = "cuda".into();
+>>>>>>> upstream v0.5.0
         self
     }
 
-    /// 새로 등록된 영상만 삼각측량.
+    /// Triangulate only newly registered images.
     pub fn incremental_triangulation(mut self, on: bool) -> Self {
         self.plan.sparse.incremental_triangulation = on;
         self
     }
 
-    /// 조밀화 계획(켜짐).
+    /// Stable display (see [`SessionConfig::stable_display`]).
+    pub fn stable_display(mut self, on: bool) -> Self {
+        self.plan.sparse.stable_display = on;
+        self
+    }
+
+    /// Stable display settling: intrinsics change tolerance and the last zone that may still settle
+    /// (see [`SessionConfig::settle_tol`], [`SessionConfig::settle_max_zone`]).
+    pub fn settle(mut self, tol: f64, max_zone: usize) -> Self {
+        self.plan.sparse.settle_tol = tol;
+        self.plan.sparse.settle_max_zone = max_zone;
+        self
+    }
+
+    /// Densification plan (on).
     pub fn dense(mut self, d: Dense) -> Self {
         self.plan.dense = Dense { enabled: true, ..d };
         self
     }
 
-    /// 조밀화 끔.
+    /// Densification off.
     pub fn no_dense(mut self) -> Self {
         self.plan.dense.enabled = false;
         self
     }
 
-    /// 출력 훅 계획.
+    /// Output hook plan.
     pub fn sinks(mut self, s: Sinks) -> Self {
         self.plan.sinks = s;
         self
     }
 
-    /// RANSAC 시드.
+    /// RANSAC seed.
     pub fn seed(mut self, seed: u64) -> Self {
         self.plan.seed = Some(seed);
         self
     }
 
-    /// rayon 스레드 수(0 = 코어 수).
+    /// Number of rayon threads (0 = number of cores).
     pub fn threads(mut self, n: usize) -> Self {
         self.plan.threads = n;
         self
@@ -859,8 +1105,8 @@ impl ReconBuilder {
         self
     }
 
-    /// 특정 종류 훅([`Pipeline::on`]).
-    /// `EventKind::FrameDecoded` 를 고르면 프레임 디코딩이 켜진다.
+    /// A hook for a specific kind ([`Pipeline::on`]).
+    /// Choosing `EventKind::FrameDecoded` turns frame decoding on.
     pub fn on<F>(mut self, kind: EventKind, f: F) -> Self
     where
         F: FnMut(&crate::events::Event) + Send + 'static,
@@ -869,8 +1115,9 @@ impl ReconBuilder {
         self.hook(move |p| p.on(kind, f))
     }
 
-    /// 프레임 훅([`Pipeline::on_frame`]): 디코딩된 입력 프레임(RGB)을 카메라 한 장씩, 위치 처리 전에 받는다.
-    /// 등록하면 프레임 디코딩이 켜진다.
+    /// Frame hook ([`Pipeline::on_frame`]): receives each decoded input frame (RGB), one camera at a time, before the position is
+    /// processed.
+    /// Registering one turns frame decoding on.
     pub fn on_frame<F>(mut self, f: F) -> Self
     where
         F: FnMut(&Arc<Frame>) + Send + 'static,
@@ -879,7 +1126,7 @@ impl ReconBuilder {
         self.hook(move |p| p.on_frame(f))
     }
 
-    /// 모든 이벤트 훅([`Pipeline::on_any`]).
+    /// Hook for all events ([`Pipeline::on_any`]).
     pub fn on_any<F>(self, f: F) -> Self
     where
         F: FnMut(&crate::events::Event) + Send + 'static,
@@ -887,7 +1134,7 @@ impl ReconBuilder {
         self.hook(move |p| p.on_any(f))
     }
 
-    /// 구역 초벌 점군 훅([`Pipeline::on_zone_preview`]).
+    /// Zone preview point-cloud hook ([`Pipeline::on_zone_preview`]).
     pub fn on_zone_preview<F>(self, f: F) -> Self
     where
         F: FnMut(ZoneRange, &Arc<PointCloud>) + Send + 'static,
@@ -895,7 +1142,7 @@ impl ReconBuilder {
         self.hook(move |p| p.on_zone_preview(f))
     }
 
-    /// 구역 정밀 점군 훅([`Pipeline::on_zone_refined`]).
+    /// Zone refined point-cloud hook ([`Pipeline::on_zone_refined`]).
     pub fn on_zone_refined<F>(self, f: F) -> Self
     where
         F: FnMut(ZoneRange, &Arc<PointCloud>) + Send + 'static,
@@ -903,7 +1150,7 @@ impl ReconBuilder {
         self.hook(move |p| p.on_zone_refined(f))
     }
 
-    /// 스냅샷 훅([`Pipeline::on_snapshot`]).
+    /// Snapshot hook ([`Pipeline::on_snapshot`]).
     pub fn on_snapshot<F>(self, f: F) -> Self
     where
         F: FnMut(usize, &Arc<PointCloud>) + Send + 'static,
@@ -911,7 +1158,7 @@ impl ReconBuilder {
         self.hook(move |p| p.on_snapshot(f))
     }
 
-    /// 위치 처리 완료 훅([`Pipeline::on_position_done`]).
+    /// Position-done hook ([`Pipeline::on_position_done`]).
     pub fn on_position_done<F>(self, f: F) -> Self
     where
         F: FnMut(usize, usize, usize) + Send + 'static,
@@ -919,7 +1166,7 @@ impl ReconBuilder {
         self.hook(move |p| p.on_position_done(f))
     }
 
-    /// 경고·오류 메시지 훅([`Pipeline::on_message`]).
+    /// Warning/error message hook ([`Pipeline::on_message`]).
     pub fn on_message<F>(self, f: F) -> Self
     where
         F: FnMut(EventKind, &str) + Send + 'static,
@@ -927,15 +1174,17 @@ impl ReconBuilder {
         self.hook(move |p| p.on_message(f))
     }
 
-    /// 종류별 큐 정책([`Pipeline::policy`]).
+    /// Per-kind queue policy ([`Pipeline::policy`]).
     pub fn policy(self, kind: EventKind, p: QueuePolicy) -> Self {
         self.hook(move |pl| pl.policy(kind, p))
     }
 
-    /// 계획 검사 → 실행 가능한 [`Recon`]. 파일·폴더를 만들거나 지우지 않는다(입력 폴더 목록과 GPS 파일만 읽는다).
+    /// Validate the plan -> an executable [`Recon`]. It neither creates nor deletes files or folders (it only reads the input folder
+    /// listing and the GPS file).
     ///
-    /// 검사: 입력·카메라 폴더 존재, 선택된 위치 수, 정렬과 GPS 파일, 백엔드 이름과 장치(CUDA 요청 시),
-    /// 출력 폴더 쓰기 가능, 옵션 값 범위. 문제는 모두 모아 [`PlanError`] 로 한 번에 돌려준다.
+    /// Checks: input and camera folders exist, number of selected positions, alignment and GPS file, backend names and device (when CUDA
+    /// is requested),
+    /// output folder writable, option value ranges. All problems are collected and returned at once as a [`PlanError`].
     pub fn build(self) -> Result<Recon, PlanError> {
         let ReconBuilder { plan, attach, pending, frames } = self;
         let mut pr = Problems(pending);
@@ -958,7 +1207,7 @@ fn backend_ok(pr: &mut Problems, field: &str, name: &str, allowed: &[&str]) {
     }
 }
 
-/// 가장 가까운 기존 상위 폴더가 쓰기 가능한지(만들지 않고 검사).
+/// Whether the nearest existing ancestor folder is writable (checked without creating anything).
 fn writable_target(p: &Path) -> Result<(), String> {
     if p.exists() {
         let m = std::fs::metadata(p).map_err(|e| format!("{}: {e}", p.display()))?;
@@ -989,7 +1238,7 @@ fn writable_target(p: &Path) -> Result<(), String> {
 }
 
 fn check(plan: &Plan, pr: &mut Problems) -> (Option<Layout>, Option<Vec<GpsRecord>>) {
-    // 값 범위.
+    // Value ranges.
     let inp = &plan.input;
     pr.check(inp.stride >= 1, "input.stride", || "1 이상이어야 함".into());
     pr.check(inp.positions != Some(0), "input.positions", || "1 이상이어야 함".into());
@@ -1010,8 +1259,13 @@ fn check(plan: &Plan, pr: &mut Problems) -> (Option<Layout>, Option<Vec<GpsRecor
     pr.check(f.max_num_features >= 1, "features.max_num_features", || "1 이상이어야 함".into());
     pr.check(f.max_image_size >= 16, "features.max_image_size", || "16 이상이어야 함".into());
     backend_ok(pr, "matching.backend", &plan.matching.backend, &["cpu", "cuda"]);
+<<<<<<< skylens (vendored)
     backend_ok(pr, "sparse.backend", &plan.sparse.backend, &["cpu", "cuda"]);
     backend_ok(pr, "sparse.ba_backend", &plan.sparse.ba_backend, &["cpu", "cuda"]);
+||||||| base b9f4a9bda
+=======
+    backend_ok(pr, "dense.undistort_backend", &plan.dense.undistort_backend, &["cpu", "cuda"]);
+>>>>>>> upstream v0.5.0
 
     let d = &plan.dense;
     if d.enabled {
@@ -1025,6 +1279,9 @@ fn check(plan: &Plan, pr: &mut Problems) -> (Option<Layout>, Option<Vec<GpsRecor
         }
         pr.check(d.max_image_size >= 16, "dense.max_image_size", || "16 이상이어야 함".into());
         pr.check((1..=32).contains(&d.views), "dense.views", || format!("1..=32 이어야 함 (지금 {})", d.views));
+        if let Some(v) = d.max_levels {
+            pr.check(v >= 1, "dense.max_levels", || "1 이상이어야 함".into());
+        }
         let fu = &d.fusion;
         if let Some(m) = &fu.mode {
             if let Err(e) = parse_fusion_mode(m) {
@@ -1048,6 +1305,18 @@ fn check(plan: &Plan, pr: &mut Problems) -> (Option<Layout>, Option<Vec<GpsRecor
         if let Some(v) = fu.reproj_error {
             pr.check(v > 0.0 && v.is_finite(), "dense.fusion.reproj_error", || format!("양수여야 함 (지금 {v})"));
         }
+        if let Some(v) = fu.visibility_tau {
+            pr.check(v > 0.0 && v < 1.0, "dense.fusion.visibility_tau", || format!("(0, 1) 이어야 함 (지금 {v})"));
+        }
+        if let Some(v) = fu.smooth_radius {
+            pr.check(v > 0.0 && v.is_finite(), "dense.fusion.smooth_radius", || format!("양수여야 함 (지금 {v})"));
+        }
+        if let Some(v) = fu.smooth_range {
+            pr.check(v > 0.0 && v.is_finite(), "dense.fusion.smooth_range", || format!("양수여야 함 (지금 {v})"));
+        }
+        if let Some(v) = fu.smooth_normal {
+            pr.check(v > 0.0 && v <= 180.0, "dense.fusion.smooth_normal", || format!("(0, 180] 이어야 함 (지금 {v})"));
+        }
         let fi = &d.filter;
         if let Some(v) = fi.geom_error {
             pr.check(v > 0.0 && v.is_finite(), "dense.filter.geom_error", || format!("양수여야 함 (지금 {v})"));
@@ -1057,8 +1326,16 @@ fn check(plan: &Plan, pr: &mut Problems) -> (Option<Layout>, Option<Vec<GpsRecor
         }
     }
 
-    // 출력.
+    // Intrinsics prior file.
+    if let Some(p) = &plan.sparse.intrinsics_prior {
+        if let Err(e) = IntrinsicsPrior::load(p, plan.sparse.intrinsics_prior_sigma, plan.sparse.intrinsics_prior_dist_sigma) {
+            pr.add("sparse.intrinsics_prior", e);
+        }
+    }
+
+    // Output.
     let s = &plan.sinks;
+    pr.check(s.live_stride >= 1, "sinks.live_stride", || "must be >= 1 (1 = keep all)".into());
     if let Some(out) = &s.out {
         if let Err(e) = writable_target(out) {
             pr.add("sinks.out", e);
@@ -1068,7 +1345,7 @@ fn check(plan: &Plan, pr: &mut Problems) -> (Option<Layout>, Option<Vec<GpsRecor
         }
     }
 
-    // 입력 폴더.
+    // Input folders.
     let mut layout = None;
     if !inp.images.is_dir() {
         pr.add("input.images", format!("영상 폴더 없음: {}", inp.images.display()));
@@ -1102,7 +1379,7 @@ fn check(plan: &Plan, pr: &mut Problems) -> (Option<Layout>, Option<Vec<GpsRecor
         }
     }
 
-    // GPS·정렬.
+    // GPS and alignment.
     let mut gps = None;
     match (plan.align.frame, &plan.gps) {
         (AlignFrame::None, _) => gps = Some(Vec::new()),
@@ -1127,10 +1404,10 @@ fn check(plan: &Plan, pr: &mut Problems) -> (Option<Layout>, Option<Vec<GpsRecor
 }
 
 // ============================================================================================
-// 실행
+// Execution
 // ============================================================================================
 
-/// 검사를 마친 실행 가능한 재구성. [`Recon::run`] 으로 실행한다.
+/// An executable reconstruction that has passed validation. Run it with [`Recon::run`].
 pub struct Recon {
     plan: Plan,
     attach: Vec<Attach>,
@@ -1150,48 +1427,62 @@ impl fmt::Debug for Recon {
 }
 
 impl Recon {
-    /// 기본 계획([`Plan::default`])으로 기록을 시작한다.
+    /// Start recording with the default plan ([`Plan::default`]).
     pub fn declare() -> ReconBuilder {
         Self::from_plan(Plan::default())
     }
 
-    /// 주어진 계획으로 기록을 시작한다(TOML 에서 읽은 계획 등).
+    /// Start recording with the given plan (e.g. a plan read from TOML).
     pub fn from_plan(plan: Plan) -> ReconBuilder {
         ReconBuilder { plan, attach: Vec::new(), pending: Vec::new(), frames: false }
     }
 
-    /// 계획.
+    /// The plan.
     pub fn plan(&self) -> &Plan {
         &self.plan
     }
 
-    /// 선택된 위치 수.
+    /// Number of selected positions.
     pub fn positions(&self) -> usize {
         self.layout.frames.len()
     }
 
-    /// 위치 ↔ 영상 이름 배치.
+    /// Position <-> image name layout.
     pub fn layout(&self) -> &Layout {
         &self.layout
     }
 
-    /// 실행: 출력 폴더 준비 → 세션 + 파이프라인 + 기본 출력 훅 + 사용자 훅 → 위치 반복 → 배경 작업 대기·종료.
-    /// 치명 오류(세션 실패)면 후처리 없이 그 오류를 돌려준다.
+    /// Run: prepare the output folder -> session + pipeline + default output hook + user hooks -> position loop -> wait for background
+    /// jobs and shut down.
+    /// On a fatal error (session failure) it returns that error without post-processing.
     pub fn run(self) -> Result<Summary, String> {
         let Recon { plan, attach, layout, gps, frames } = self;
         if plan.threads > 0 {
-            // 이미 만들어졌으면(테스트 등) 무시.
+            // Ignore if it was already created (tests etc.).
             let _ = rayon::ThreadPoolBuilder::new().num_threads(plan.threads).build_global();
         }
-        // 백엔드가 없으면 조밀화 단계에서 오류로 기록한다.
+        // Without a backend, record an error in the densification stage.
         let dense = if plan.dense.enabled { Some(plan.dense.config()?) } else { None };
+        let prior = match &plan.sparse.intrinsics_prior {
+            Some(p) => {
+                Some(Arc::new(IntrinsicsPrior::load(p, plan.sparse.intrinsics_prior_sigma, plan.sparse.intrinsics_prior_dist_sigma)?))
+            }
+            None => None,
+        };
         let s = &plan.sinks;
         let sinks = match &s.out {
             Some(out) => {
                 if s.clean && out.exists() {
                     std::fs::remove_dir_all(out).map_err(|e| format!("{}: {e}", out.display()))?;
                 }
-                Some(DefaultSinks::with_set(out, s.echo, s.set()).map_err(|e| e.to_string())?)
+                let mut set = s.set();
+                // Live diff stream: stable display only. In stable display the display frame is the ENU frame of the first
+                // GPS record (zone 0 is brought into ENU and every later zone keeps that frame through the GPS priors).
+                if plan.sparse.stable_display {
+                    let origin = gps.first().map(|g| [g.lat, g.lon, g.alt]);
+                    set.live_stream = Some(LiveStream { enu: origin.is_some(), origin_gps: origin });
+                }
+                Some(DefaultSinks::with_set(out, s.echo, set).map_err(|e| e.to_string())?)
             }
             None => None,
         };
@@ -1202,6 +1493,10 @@ impl Recon {
         sc.overlap = plan.zones.overlap;
         sc.total_positions = Some(npos);
         sc.incremental_triangulation = plan.sparse.incremental_triangulation;
+        sc.stable_display = plan.sparse.stable_display;
+        sc.settle_tol = plan.sparse.settle_tol;
+        sc.settle_max_zone = plan.sparse.settle_max_zone;
+        sc.intrinsics_prior = prior;
         sc.fixed_enu_origin = plan.align.fixed_origin;
         sc.seed = plan.seed;
         sc.extraction.sift.max_num_features = plan.features.max_num_features;
@@ -1211,13 +1506,13 @@ impl Recon {
         sc.sparse = make_sparse_backend(&plan.sparse.backend)?;
         sc.ba_backend = make_ba_backend(&plan.sparse.ba_backend)?;
         sc.dense = dense;
-        // 되감지 않는다(메모리 절약).
+        // Do not rewind (saves memory).
         sc.history = 0;
         sc.decode_frames = frames;
 
         let mut pl = Pipeline::new(Session::new(sc));
         if let Some(sinks) = sinks {
-            // 출력 훅은 하나(on_any)라 비동기여도 이벤트 순서대로 처리된다.
+            // There is a single output hook (on_any), so even if asynchronous, events are processed in order.
             pl = pl.on_any(sinks.into_hook());
         }
         for a in attach {
@@ -1257,7 +1552,7 @@ impl Recon {
         for p in 0..npos {
             pl.push(frame_set_of(&layout, &plan.input.cameras, p).into());
             if let Some(e) = pl.reducer().failed() {
-                // 치명 오류: 후처리 없이 멈춘다(훅 큐는 파이프라인을 버릴 때 비워진다).
+                // Fatal error: stop without post-processing (the hook queue is drained when the pipeline is dropped).
                 return Err(e.to_string());
             }
         }
@@ -1275,7 +1570,7 @@ mod tests {
         let p = Plan::default();
         let s = p.to_toml();
         assert_eq!(Plan::from_toml(&s).unwrap(), p, "{s}");
-        // 빈 문서 = 기본 계획.
+        // Empty document = default plan.
         assert_eq!(Plan::from_toml("").unwrap(), p);
     }
 
@@ -1297,6 +1592,8 @@ mod tests {
                     .fusion_normal_error(12.5)
                     .fusion_reproj_error(1.5)
                     .fusion_residual("second-pass")
+                    .fusion_smooth_normal(30.0)
+                    .max_levels(1)
                     .filter_min_views(2)
                     .filter_geom_error(1.25)
                     .filter_min_ncc(0.1)
@@ -1311,6 +1608,7 @@ mod tests {
         let s = p.to_toml();
         assert_eq!(Plan::from_toml(&s).unwrap(), p, "{s}");
         assert!(s.contains("[dense.fusion]") && s.contains("min_views = 3"), "{s}");
+        assert!(s.contains("smooth_normal = 30.0") && s.contains("max_levels = 1"), "{s}");
     }
 
     #[test]
@@ -1350,7 +1648,7 @@ mod tests {
             .preset("grid")
             .stride(0)
             .zones(4, 4)
-            .dense(Dense::profile("slow").views(40).fusion_mode("magic").filter_min_ncc(2.0))
+            .dense(Dense::profile("slow").views(40).max_levels(0).fusion_smooth_normal(0.0).fusion_mode("magic").filter_min_ncc(2.0))
             .features(Features { backend: "fpga".into(), ..Features::default() })
             .sinks(Sinks::default_files(tmp.join("in")).clean(true))
             .build()
@@ -1363,6 +1661,8 @@ mod tests {
             "dense.profile",
             "dense.views",
             "dense.fusion.mode",
+            "dense.max_levels",
+            "dense.fusion.smooth_normal",
             "dense.filter.min_ncc",
             "sinks.out",
             "input.images",
@@ -1373,6 +1673,15 @@ mod tests {
         assert_eq!(e.has("dense.backend"), !cumulus3d_cuda::is_available());
         assert!(!tmp.exists());
         assert!(e.to_string().starts_with("계획 검사 실패("));
+    }
+
+    #[test]
+    fn live_stride_roundtrip_and_validation() {
+        assert_eq!(Sinks::default().live_stride, 6);
+        let p = Plan { sinks: Sinks::default_files("o").live_stride(3), ..Plan::default() };
+        assert_eq!(Plan::from_toml(&p.to_toml()).unwrap().sinks.live_stride, 3);
+        let e = Recon::declare().sinks(Sinks::default_files("o").live_stride(0)).no_dense().build().unwrap_err();
+        assert!(e.has("sinks.live_stride"), "{e}");
     }
 
     #[test]

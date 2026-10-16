@@ -234,6 +234,22 @@ let (_session, summary) = p.finish(); // 남은 정밀 작업을 기다리고 �
 
 합성 장면으로 바로 돌려 보는 예: `cargo run --release -p cumulus3d-cli --example hooks -- <출력 폴더>`.
 
+## 릴리스
+
+릴리스는 자동이다. 워크스페이스 버전이 아직 crates.io 에 없는 상태로 `main` 에 push 하면 모든 CI 검사, 마지막 배포본과의
+`cargo semver-checks` 비교, 의존 순서대로 전체 크레이트 배포(`scripts/publish.sh`, 다시 실행해도 안전), `cumulus3d` 바이너리 빌드,
+태그 `vX.Y.Z` 와 GitHub Release 생성까지 진행된다(`.github/workflows/release.yml`). 버전이 바뀌지 않은 push 는 아무것도 배포하지 않는다.
+저장소 시크릿 `CARGO_REGISTRY_TOKEN` 이 필요하다.
+
+릴리스하려면 변경 내용을 `CHANGELOG.md` 와 `CHANGELOG.ko.md` 의 `## Unreleased` 아래에 적은 뒤:
+
+```bash
+scripts/release.sh patch|minor|major --dry-run   # 검사만: fmt, clippy -D warnings, 시험, semver
+scripts/release.sh minor                          # 버전·Cargo.lock 갱신, 변경 기록 날짜 확정, "Release X.Y.Z" 커밋, push
+```
+
+0.x 에서는 공개 API 호환이 깨지면 `minor` 여야 하며, `cargo semver-checks` 가 이를 보고하면 스크립트가 `patch` 를 거부한다.
+
 ## 제3자 고지
 
 일부 알고리즘·기본값·데이터 형식은 허용 라이선스 오픈소스 프로젝트를 따른다.

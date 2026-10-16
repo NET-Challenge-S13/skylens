@@ -29,7 +29,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! `MatcherBackend` 의 CUDA 구현: 정수 내적(__dp4a) + 순차 top-2. 결과는 CPU 백엔드와 비트 단위로 같다.
+//! CUDA implementation of `MatcherBackend`: integer dot product (__dp4a) + sequential top-2. Results are bit-identical to the CPU backend.
 
 use crate::device::{CudaDevice, GpuError, SyncedCopy};
 use cudarc::driver::{CudaFunction, LaunchConfig, PushKernelArg};
@@ -39,11 +39,11 @@ use std::sync::{Arc, Mutex};
 pub(crate) const SRC: &str = include_str!("kernels/matcher.cu");
 const D: usize = 128;
 
-/// CUDA 기술자 매칭 백엔드.
+/// CUDA descriptor matching backend.
 pub struct CudaMatcher {
     dev: Arc<CudaDevice>,
     f: CudaFunction,
-    /// 한 번에 하나만 장치를 쓴다(스트림 공유).
+    /// Only one use of the device at a time (stream shared).
     lock: Mutex<()>,
 }
 
@@ -52,18 +52,18 @@ fn pack(d: &[u8], n: usize) -> Vec<u32> {
 }
 
 impl CudaMatcher {
-    /// 장치 `dev` 에 매칭 커널을 컴파일해 만든다.
+    /// Compiles the matching kernel on device `dev` and builds it.
     pub fn new(dev: Arc<CudaDevice>) -> Result<Self, GpuError> {
         let module = dev.compile(SRC, true, &[])?;
         Ok(Self { f: module.load_function("top2_rows")?, dev, lock: Mutex::new(()) })
     }
 
-    /// 장치 0 으로 만든다.
+    /// Builds with device 0.
     pub fn try_default() -> Result<Self, GpuError> {
         Self::new(CudaDevice::new(0)?)
     }
 
-    /// GPU top-2(행별, 열별).
+    /// GPU top-2 (per row, per column).
     pub fn top2_gpu(&self, d1: &[u8], n1: usize, d2: &[u8], n2: usize) -> Result<(Vec<Top2>, Vec<Top2>), GpuError> {
         let _g = self.lock.lock().unwrap_or_else(|e| e.into_inner());
         let s = &self.dev.stream;
@@ -79,7 +79,7 @@ impl CudaMatcher {
             let (nq_i, nt_i) = (nq as i32, nt as i32);
             let mut l = s.launch_builder(&self.f);
             l.arg(q).arg(&nq_i).arg(t).arg(&nt_i).arg(out);
-            // SAFETY: top2_rows(q[nq·32], nq, t[nt·32], nt, out[3·nq]) 와 같은 인자·크기.
+            // SAFETY: same arguments and sizes as top2_rows(q[nq·32], nq, t[nt·32], nt, out[3·nq]).
             unsafe { l.launch(cfg) }?;
         }
         let rh = s.clone_dtoh_synced(&ro)?;

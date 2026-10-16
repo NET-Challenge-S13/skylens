@@ -25,13 +25,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 작은 고정 크기 선형대수. nalgebra 0.35 의 3×3 SVD 는 특이값이 겹칠 때 틀린 값을 내므로
-//! 단측 야코비 구현을 여기 둔다(matching·sfm·align 공용).
+//! Small fixed-size linear algebra. The 3×3 SVD in nalgebra 0.35 gives wrong values when singular values coincide,
+//! so a one-sided Jacobi implementation lives here (shared by matching, sfm and align).
 
 use crate::geometry::{Mat3, Vec3};
 
-/// 3×3 SVD (U, σ 내림차순, V), M = U diag(σ) Vᵀ, det(U) = +1.
-/// 단측 야코비 회전으로 열을 직교화한다(중복 특이값에서도 정확).
+/// 3×3 SVD (U, σ in descending order, V), M = U diag(σ) Vᵀ, det(U) = +1.
+/// Columns are orthogonalized with one-sided Jacobi rotations (accurate even with repeated singular values).
 pub fn svd3(m: &Mat3) -> Option<(Mat3, Vec3, Mat3)> {
     if !m.iter().all(|x| x.is_finite()) {
         return None;
@@ -91,7 +91,7 @@ pub fn svd3(m: &Mat3) -> Option<(Mat3, Vec3, Mat3)> {
     let u2 = if s[1] > s[0] * 1e-300 && s[1] > 0.0 { cols[1] / s[1] } else { any_orthogonal(&u1) };
     let u2 = (u2 - u1 * u1.dot(&u2)).normalize();
     let u3 = u1.cross(&u2);
-    // σ3 의 부호: M v3 = σ3 u3 가 되도록(음이면 v3 뒤집음).
+    // Sign of σ3: chosen so that M v3 = σ3 u3 (flip v3 if negative).
     if s[2] > 0.0 && cols[2].dot(&u3) < 0.0 {
         let c = -vs.column(2);
         vs.set_column(2, &c);

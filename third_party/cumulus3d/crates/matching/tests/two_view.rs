@@ -25,7 +25,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 두 뷰 기하 통합 검증.
+//! Two-view geometry integration verification.
 
 use cumulus3d_core::{Camera, CameraModelKind, FeatureMatch, Keypoint, Mat3, Quat, TwoViewGeometryConfig as C, Vec2, Vec3};
 use cumulus3d_matching::*;
@@ -51,7 +51,7 @@ fn in_image(p: &Vec2) -> bool {
     p.x > 0.0 && p.y > 0.0 && p.x < W as f64 && p.y < H as f64
 }
 
-/// 장면 종류.
+/// Scene type.
 enum Scene {
     General,
     Planar,
@@ -96,7 +96,7 @@ fn make(seed: u64, scene: Scene, n_in: usize, n_out: usize, noise: f64) -> (Data
         let p2 = Vec2::new(r.random_range(0.0..W as f64), r.random_range(0.0..H as f64));
         items.push((p1, p2, false));
     }
-    // 섞기
+    // Shuffle
     for i in (1..items.len()).rev() {
         let j = r.random_range(0..=i);
         items.swap(i, j);
@@ -129,7 +129,7 @@ fn calibrated_with_outliers() {
     let precision = tp as f64 / inl.len() as f64;
     assert!(recall > 0.95 && precision > 0.98, "recall {recall} precision {precision}");
 
-    // 상대 자세(옵션) 복원.
+    // Recover the relative pose (option).
     let mut o = opts();
     o.compute_relative_pose = true;
     let g = estimate_two_view(&cam, &d.kps1, &cam, &d.kps2, &d.matches, &o);
@@ -137,7 +137,7 @@ fn calibrated_with_outliers() {
     assert!(Quat::from_rotation_matrix(&rot).angular_distance(&p.rotation) < 0.01);
     assert!(p.translation.normalize().dot(&t.normalize()) > 0.999);
     assert!(g.tri_angle.unwrap() > 0.0);
-    // 일괄 재맞춤 경로(행렬 없이).
+    // Batch re-fit path (without matrices).
     let mut g2 = g.clone();
     g2.e = None;
     g2.cam1_to_cam2 = None;
@@ -156,7 +156,7 @@ fn uncalibrated_path() {
     assert_eq!(g.config, C::Uncalibrated);
     assert!(g.e.is_none());
     assert!(g.inlier_matches.len() >= 285);
-    // UNCALIBRATED 자세 분해(E = K2ᵀ F K1, 왜곡 무시 → 대략적).
+    // UNCALIBRATED pose decomposition (E = K2ᵀ F K1, distortion ignored -> approximate).
     let mut g2 = g.clone();
     assert!(recover_two_view_pose(&c1, &c2, &d.kps1, &d.kps2, &mut g2));
 }
@@ -170,7 +170,7 @@ fn planar_and_panoramic() {
     let mut o = opts();
     o.compute_relative_pose = true;
     let g = estimate_two_view(&cam, &d.kps1, &cam, &d.kps2, &d.matches, &o);
-    // 왜곡이 있는 카메라라 H 는 근사 → PLANAR 확정만 확인.
+    // The camera has distortion so H is approximate -> only check PLANAR is confirmed.
     assert_eq!(g.config, C::Planar);
 
     let (d, _, _) = make(4, Scene::Rotation, 400, 50, 0.3);
@@ -180,7 +180,7 @@ fn planar_and_panoramic() {
 
 #[test]
 fn panoramic_pinhole_pose() {
-    // 왜곡 없는 카메라, 잡음 없는 순수 회전 → 분해 시 PANORAMIC(‖t‖² < 1e-12).
+    // Camera without distortion, noise-free pure rotation -> PANORAMIC on decomposition (‖t‖² < 1e-12).
     let mut cam = Camera::new(1, CameraModelKind::Pinhole, W, H, vec![1000.0, 1000.0, 1000.0, 750.0]).unwrap();
     cam.focal_from_prior = true;
     let rot = Quat::from_axis_angle(&Vec3::new(0.2, 1.0, 0.0).normalize(), 0.1).to_rotation_matrix();
@@ -218,30 +218,30 @@ fn degenerate_and_finalize() {
 fn decision_boundaries() {
     let o = TwoViewOptions::default();
     let m = |n: usize| ModelOutcome { success: true, num_inliers: n };
-    // r_EF = 0.95 정확히 → (가) 거부 → F 경로. r_HF = 0.5 → UNCALIBRATED.
+    // r_EF = 0.95 exactly -> (a) rejected -> F path. r_HF = 0.5 -> UNCALIBRATED.
     let d = decide_calibrated(m(95), m(100), m(50), &o);
     assert_eq!(d, Decision { config: C::Uncalibrated, mask: Some(MaskChoice::F) });
-    // r_EF 살짝 큼 → CALIBRATED. r_HE = 0.8 정확히 → CALIBRATED 유지.
+    // r_EF slightly larger -> CALIBRATED. r_HE = 0.8 exactly -> CALIBRATED kept.
     let d = decide_calibrated(m(100), m(100), m(80), &o);
     assert_eq!(d, Decision { config: C::Calibrated, mask: Some(MaskChoice::E) });
-    // n_E < n_F → F 마스크.
+    // n_E < n_F -> F mask.
     let d = decide_calibrated(m(99), m(100), m(10), &o);
     assert_eq!(d, Decision { config: C::Calibrated, mask: Some(MaskChoice::F) });
-    // 보정 경로에서 n_H = 선택 수 → 교체 안 함, PoP.
+    // On the calibrated path, n_H = selected count -> no replacement, PoP.
     let d = decide_calibrated(m(100), m(100), m(100), &o);
     assert_eq!(d, Decision { config: C::PlanarOrRotation, mask: Some(MaskChoice::E) });
     let d = decide_calibrated(m(100), m(100), m(101), &o);
     assert_eq!(d.mask, Some(MaskChoice::H));
-    // 비보정 경로에서 n_H = n_F → H 마스크.
+    // On the uncalibrated path, n_H = n_F -> H mask.
     let d = decide_uncalibrated(m(100), m(100), &o);
     assert_eq!(d, Decision { config: C::PlanarOrRotation, mask: Some(MaskChoice::H) });
-    // F 실패 + H 성공 → PoP(H).
+    // F fails + H succeeds -> PoP(H).
     let fail = ModelOutcome { success: false, num_inliers: 0 };
     assert_eq!(decide_uncalibrated(fail, m(30), &o).mask, Some(MaskChoice::H));
-    // 모두 15 미만 → DEGENERATE.
+    // All below 15 -> DEGENERATE.
     assert_eq!(decide_uncalibrated(m(14), m(14), &o).config, C::Degenerate);
     assert_eq!(decide_calibrated(m(14), m(14), m(14), &o).config, C::Degenerate);
-    // E 만 실패, H 만 15 이상 → (다).
+    // Only E fails, only H is 15 or more -> (c).
     assert_eq!(decide_calibrated(fail, m(10), m(20), &o), Decision { config: C::PlanarOrRotation, mask: Some(MaskChoice::H) });
 }
 
@@ -251,7 +251,7 @@ fn watermark_detection() {
     let mut r = Pcg64::seed_from_u64(11);
     let b = 0.1 * ((W * W + H * H) as f64).sqrt(); // 250
     let border_pt = |r: &mut Pcg64| -> Vec2 {
-        // 왼쪽/오른쪽 테두리 띠 안
+        // Inside the left/right border strips
         let x = if r.random_range(0.0..1.0) < 0.5 { r.random_range(0.0..b - 5.0) } else { r.random_range(W as f64 - b + 5.0..W as f64) };
         Vec2::new(x, r.random_range(0.0..H as f64))
     };
@@ -273,10 +273,10 @@ fn watermark_detection() {
     let o = opts();
     let (k1, k2, m) = make(&mut r, 100, 0);
     assert!(is_watermark(&cam, &k1, &cam, &k2, &m, &o));
-    // 전체 추정도 WATERMARK.
+    // Whole-image estimate is also WATERMARK.
     let g = estimate_two_view(&cam, &k1, &cam, &k2, &m, &o);
     assert_eq!(g.config, C::Watermark);
-    // 테두리 비율 69% → 아님.
+    // Border ratio 69% -> not a watermark.
     let (k1, k2, m) = make(&mut r, 69, 31);
     assert!(!is_watermark(&cam, &k1, &cam, &k2, &m, &o));
 }

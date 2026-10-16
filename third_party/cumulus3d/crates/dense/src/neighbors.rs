@@ -29,20 +29,21 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 이웃(원천) 뷰 선택과 뷰별 깊이 범위. 희소점 트랙만 쓴다.
+//! Neighbor (source) view selection and per-view depth ranges. Uses only sparse point tracks.
 
 use crate::math::quantile_sorted;
 use crate::scene::DenseScene;
 use std::collections::HashMap;
 
-/// 뷰 쌍 통계: 공유 점 수와 쌍마다 기록된 삼각측량각(라디안).
+/// View pair statistics: number of shared points and the triangulation angles (radians) recorded per pair.
 pub struct PairStats {
     n: usize,
     map: HashMap<(u32, u32), (u32, Vec<f32>)>,
 }
 
 impl PairStats {
-    /// 트랙의 서로 다른 뷰 쌍마다 공유 수 +1, 각 min(a, π − a) 기록. 같은 뷰가 트랙에 두 번 있으면 쌍이 중복 계수된다.
+    /// For every pair of distinct views in a track, shared count +1 and record angle min(a, π − a). If the same view appears twice in a
+    /// track, the pair is counted twice.
     pub fn new(scene: &DenseScene) -> Self {
         let centers: Vec<[f64; 3]> = scene.views.iter().map(|v| v.center()).collect();
         let mut map: HashMap<(u32, u32), (u32, Vec<f32>)> = HashMap::new();
@@ -77,7 +78,8 @@ impl PairStats {
         Self { n: scene.views.len(), map }
     }
 
-    /// 뷰 `r` 의 후보: 75 분위 각 ≥ `min_angle_rad` 인 뷰를 공유 수 내림차순(같으면 색인 오름차순)으로 최대 `max` 개.
+    /// Candidates of view `r`: views with 75th-percentile angle ≥ `min_angle_rad`, up to `max` of them, in descending shared-count order
+    /// (ascending index on ties).
     pub fn select(&self, r: usize, max: usize, min_angle_rad: f64) -> Vec<usize> {
         let mut cands: Vec<(u32, usize)> = Vec::new();
         for o in 0..self.n {
@@ -99,9 +101,12 @@ impl PairStats {
         cands.into_iter().take(max).map(|(_, o)| o).collect()
     }
 
-    /// 방향 다양성 선택: 후보(75 분위 각 ≥ 하한)의 점수 = 공유 수. 기준 카메라 좌표에서 기준선의 영상 평면 방위각을
-    /// `bins` 구간으로 나누고(기준선이 광축 방향에 가까우면 별도 구간), 같은 구간에서 이미 k 개 골랐으면 점수에 `decay^k` 를
-    /// 곱해 가장 큰 것부터 탐욕적으로 고른다. 같은 위치의 다른 카메라(광축 방향 기준선)와 앞뒤·좌우 위치가 섞인다.
+    /// Direction-diversity selection: score of a candidate (75th-percentile angle ≥ lower bound) = shared count. Divide the image-plane
+    /// azimuth of the baseline in the reference camera coordinates
+    /// into `bins` sectors (a separate sector if the baseline is close to the optical axis direction); if k views were already picked in
+    /// the same sector, multiply the score by `decay^k`
+    /// and greedily pick from the largest. Mixes other cameras at the same position (optical-axis baseline) with front/back and left/right
+    /// positions.
     pub fn select_diverse(&self, scene: &DenseScene, r: usize, max: usize, min_angle_rad: f64, bins: usize, decay: f64) -> Vec<usize> {
         let cands = self.select(r, usize::MAX, min_angle_rad);
         let vr = &scene.views[r];
@@ -145,14 +150,15 @@ impl PairStats {
         out
     }
 
-    /// 모든 뷰의 후보 목록.
+    /// Candidate lists of all views.
     pub fn select_all(&self, max: usize, min_angle_deg: f64) -> Vec<Vec<usize>> {
         let a = min_angle_deg.to_radians();
         (0..self.n).map(|r| self.select(r, max, a)).collect()
     }
 }
 
-/// 뷰별 깊이 범위: 관측 희소점 깊이(양수만)의 1%/99% 위치 값(보간 없음)에 0.75 / 1.25 배. 점이 없으면 None.
+/// Per-view depth range: the 1%/99% position values (no interpolation) of observed sparse point depths (positive only), times 0.75 / 1.25.
+/// None if there are no points.
 pub fn depth_ranges(scene: &DenseScene) -> Vec<Option<(f64, f64)>> {
     let mut lists: Vec<Vec<f64>> = vec![Vec::new(); scene.views.len()];
     for p in &scene.points {
@@ -168,7 +174,7 @@ pub fn depth_ranges(scene: &DenseScene) -> Vec<Option<(f64, f64)>> {
     lists.into_iter().map(|mut l| depth_range_of(&mut l)).collect()
 }
 
-/// 깊이 목록 하나의 범위(정렬함).
+/// Depth range of one depth list (sorted).
 pub fn depth_range_of(l: &mut [f64]) -> Option<(f64, f64)> {
     if l.is_empty() {
         return None;

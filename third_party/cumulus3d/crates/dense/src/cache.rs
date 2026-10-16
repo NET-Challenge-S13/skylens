@@ -25,32 +25,32 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 깊이맵 캐시: (영상 이름 + 자세·내부 매개변수·크기 해시, 설정 해시) → 최종 깊이·법선·유효 표시.
-//! 겹치는 구역에서 같은 자세의 영상을 다시 계산하지 않게 한다.
+//! Depth map cache: (image name + pose/intrinsics/size hash, settings hash) → final depth, normal and validity mask.
+//! Keeps overlapping zones from recomputing images with the same pose.
 
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 
-/// 캐시된 뷰 하나(최종 스케일): 필터 전 깊이(다른 뷰의 기하 실행 입력)와 최종 깊이·법선·비용(융합 입력).
+/// One cached view (final scale): pre-filter depth (input to other views' geometric runs) and final depth, normal and cost (fusion input).
 #[derive(Clone, Debug)]
 pub struct CachedDepth {
-    /// 너비(픽셀).
+    /// Width (pixels).
     pub width: usize,
-    /// 높이(픽셀).
+    /// Height (pixels).
     pub height: usize,
-    /// 필터 전 최종 깊이(다른 뷰의 기하 실행 입력).
+    /// Final depth before filtering (input to other views' geometric runs).
     pub raw_depth: Vec<f32>,
-    /// 필터 통과 깊이(무효 0).
+    /// Depth after the filter (0 = invalid).
     pub depth: Vec<f32>,
-    /// 기준 카메라 좌표 법선.
+    /// Normal in the reference camera coordinates.
     pub normal: Vec<[f32; 3]>,
-    /// 최종 집계 비용.
+    /// Final aggregated cost.
     pub cost: Vec<f32>,
 }
 
 type Entries = (HashMap<(u64, u64), Arc<CachedDepth>>, VecDeque<(u64, u64)>);
 
-/// 깊이맵 캐시(스레드 안전, 용량 초과 시 오래된 것부터 버림).
+/// Depth map cache (thread-safe; when over capacity, the oldest entries are dropped first).
 pub struct DepthMapCache {
     inner: Mutex<Entries>,
     capacity: usize,
@@ -63,19 +63,19 @@ impl Default for DepthMapCache {
 }
 
 impl DepthMapCache {
-    /// 용량 512 뷰.
+    /// Capacity of 512 views.
     pub fn new() -> Self {
         Self::with_capacity(512)
     }
-    /// 용량을 정해 만든다(최소 1).
+    /// Creates a cache with the given capacity (minimum 1).
     pub fn with_capacity(capacity: usize) -> Self {
         Self { inner: Mutex::new((HashMap::new(), VecDeque::new())), capacity: capacity.max(1) }
     }
-    /// 열쇠 (영상 기하 해시, 설정 해시) 로 찾는다.
+    /// Looks up by key (image geometry hash, settings hash).
     pub fn get(&self, key: (u64, u64)) -> Option<Arc<CachedDepth>> {
         self.inner.lock().unwrap_or_else(|e| e.into_inner()).0.get(&key).cloned()
     }
-    /// 넣는다. 용량을 넘으면 가장 오래된 항목부터 버린다.
+    /// Inserts. When over capacity, the oldest entries are dropped first.
     pub fn insert(&self, key: (u64, u64), v: Arc<CachedDepth>) {
         let mut g = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         if g.0.insert(key, v).is_none() {
@@ -87,11 +87,11 @@ impl DepthMapCache {
             }
         }
     }
-    /// 저장된 뷰 수.
+    /// Number of stored views.
     pub fn len(&self) -> usize {
         self.inner.lock().unwrap_or_else(|e| e.into_inner()).0.len()
     }
-    /// 비어 있는지.
+    /// Whether it is empty.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }

@@ -25,12 +25,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 장치·문맥·NVRTC 컴파일 공용부.
+//! Shared part for device, context and NVRTC compilation.
 
 use cudarc::driver::{CudaContext, CudaModule, CudaStream, DevicePtr, DeviceRepr, DriverError, HostSlice};
 use cudarc::nvrtc::{compile_ptx_with_opts, CompileOptions};
 use std::sync::Arc;
 
+<<<<<<< skylens (vendored)
 /// 내려 받기 전에 스트림을 먼저 기다리는 복사.
 ///
 /// 일반(페이지) 메모리로 내려 받는 `cuMemcpyDtoHAsync` 는 앞선 커널이 끝날 때까지 드라이버 전역 잠금을
@@ -64,23 +65,28 @@ impl SyncedCopy for Arc<CudaStream> {
 }
 
 /// CUDA 백엔드 오류.
+||||||| base b9f4a9bda
+/// CUDA 백엔드 오류.
+=======
+/// CUDA backend error.
+>>>>>>> upstream v0.5.0
 #[derive(Debug, thiserror::Error)]
 pub enum GpuError {
     #[error("CUDA 사용 불가: {0}")]
-    /// 드라이버·NVRTC 라이브러리 또는 장치가 없음.
+    /// Driver/NVRTC library or device is absent.
     NotAvailable(String),
     #[error("CUDA 드라이버 오류: {0:?}")]
-    /// CUDA 드라이버 호출 오류.
+    /// CUDA driver call error.
     Driver(#[from] cudarc::driver::DriverError),
     #[error("NVRTC 컴파일 실패: {0}")]
-    /// NVRTC 커널 컴파일 실패.
+    /// NVRTC kernel compilation failure.
     Compile(String),
 }
 
-/// 드라이버·NVRTC 라이브러리가 있고 장치가 하나 이상이면 참.
+/// True if the driver and NVRTC libraries exist and there is at least one device.
 pub fn is_available() -> bool {
-    // 동적 로딩: 라이브러리가 없으면 cudarc 가 panic 하므로 먼저 존재를 확인한다.
-    // SAFETY: 라이브러리 열기만 시도한다.
+    // Dynamic loading: cudarc panics if the library is missing, so check its presence first.
+    // SAFETY: only tries to open the library.
     let libs = unsafe { cudarc::driver::sys::is_culib_present() && cudarc::nvrtc::sys::is_culib_present() };
     if !libs {
         return false;
@@ -88,19 +94,19 @@ pub fn is_available() -> bool {
     std::panic::catch_unwind(|| CudaContext::device_count().map(|n| n > 0).unwrap_or(false)).unwrap_or(false)
 }
 
-/// 한 GPU 의 문맥과 전용 스트림.
+/// Context and dedicated stream of one GPU.
 pub struct CudaDevice {
     pub(crate) ctx: Arc<CudaContext>,
     pub(crate) stream: Arc<CudaStream>,
     arch: Option<&'static str>,
     name: String,
-    /// 텍스처 시작 주소·행 간격 정렬(바이트).
+    /// Texture base address and row pitch alignment (bytes).
     pub(crate) tex_align: usize,
     pub(crate) pitch_align: usize,
 }
 
 impl CudaDevice {
-    /// 장치 `ordinal` 을 연다.
+    /// Opens device `ordinal`.
     pub fn new(ordinal: usize) -> Result<Arc<Self>, GpuError> {
         Self::open(ordinal, false)
     }
@@ -145,17 +151,17 @@ impl CudaDevice {
         Ok(Arc::new(Self { ctx, stream, arch, name, tex_align, pitch_align }))
     }
 
-    /// 장치 이름(예: "Tesla V100-PCIE-16GB").
+    /// Device name (e.g. "Tesla V100-PCIE-16GB").
     pub fn name(&self) -> &str {
         &self.name
     }
 
-    /// CUDA C 소스를 NVRTC 로 컴파일해 적재한다. `fmad = false` 면 곱셈-덧셈 융합을 막아 CPU 와 반올림을 맞춘다.
+    /// Compiles CUDA C source with NVRTC and loads it. With `fmad = false`, fused multiply-add is prevented so rounding matches the CPU.
     pub(crate) fn compile(&self, src: &str, fmad: bool, defines: &[String]) -> Result<Arc<CudaModule>, GpuError> {
         self.compile_with(src, fmad, false, defines)
     }
 
-    /// `fast = true` 면 근사 나눗셈·제곱근과 비정규수 0 처리(속도 우선 커널용).
+    /// With `fast = true`: approximate division/square root and denormal flush to 0 (for speed-first kernels).
     pub(crate) fn compile_with(&self, src: &str, fmad: bool, fast: bool, defines: &[String]) -> Result<Arc<CudaModule>, GpuError> {
         let opts = compile_options(self.arch, fmad, fast, defines);
         let ptx = compile_ptx_with_opts(src, opts).map_err(|e| GpuError::Compile(format!("{e:?}")))?;
@@ -163,7 +169,7 @@ impl CudaDevice {
     }
 }
 
-/// NVRTC 옵션(장치 컴파일과 [`crate::check_kernels`] 가 같은 값을 쓴다).
+/// NVRTC options (device compilation and [`crate::check_kernels`] use the same values).
 pub(crate) fn compile_options(arch: Option<&'static str>, fmad: bool, fast: bool, defines: &[String]) -> CompileOptions {
     let mut options = vec!["--std=c++14".to_string()];
     options.extend(defines.iter().map(|d| format!("-D{d}")));

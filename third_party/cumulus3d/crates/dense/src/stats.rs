@@ -25,7 +25,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 점군 품질 통계: 이웃 점 간격, 이상점 비율(다른 뷰 깊이맵과의 재투영 불일치), 지상 표본 간격.
+//! Point cloud quality statistics: neighbor point spacing, outlier ratio (reprojection mismatch against other views' depth maps), ground
+//! sample distance.
 
 use crate::densify::DepthMapSet;
 use crate::neighbors::PairStats;
@@ -34,28 +35,30 @@ use cumulus3d_core::io::PointCloud;
 use rayon::prelude::*;
 use std::collections::HashMap;
 
-/// 점군 통계.
+/// Point cloud statistics.
 #[derive(Clone, Debug, Default)]
 pub struct CloudStats {
-    /// 점 수.
+    /// Number of points.
     pub points: usize,
-    /// 표본 점 수.
+    /// Number of sampled points.
     pub sampled: usize,
-    /// 최근접 이웃 거리 중앙값(m, 장면 단위).
+    /// Median nearest-neighbor distance (m, scene units).
     pub nn_spacing_median: f64,
-    /// 지상 표본 간격(픽셀 하나가 덮는 크기, 깊이 중앙값/초점).
+    /// Ground sample distance (size covered by one pixel, median depth / focal length).
     pub gsd: f64,
-    /// 이상점 비율: 겹침 뷰 깊이맵 중 재투영 오차 ≤ 허용치로 지지하는 뷰가 2개 미만인 점.
+    /// Outlier ratio: points supported by fewer than 2 of the overlapping views' depth maps with reprojection error ≤ tolerance.
     pub outlier_ratio: f64,
-    /// 중복률: 반경 GSD/2 안에 다른 점이 있는 점의 비율.
+    /// Duplicate ratio: fraction of points that have another point within radius GSD/2.
     pub duplicate_ratio: f64,
-    /// 국소 평면 이탈 비율: 반경 4·GSD 이웃이 6개 미만(고립)이거나, 이웃 주성분 평면까지 거리 > GSD 인 점.
+    /// Local plane deviation ratio: points with fewer than 6 neighbors within radius 4·GSD (isolated) or with distance to the neighbors'
+    /// principal plane > GSD.
     pub plane_outlier_ratio: f64,
-    /// 국소 평면 거리 중앙값(이웃이 충분한 점).
+    /// Median local plane distance (points with enough neighbors).
     pub plane_residual_median: f64,
 }
 
-/// 통계 계산. `vis` 는 점마다 기여 뷰(첫 뷰를 기준 뷰로 쓴다), `max_samples` 개를 고르게 뽑는다.
+/// Computes statistics. `vis` holds the contributing views per point (the first view is the reference view); `max_samples` points are
+/// picked evenly.
 pub fn cloud_stats(
     scene: &DenseScene,
     maps: &DepthMapSet,
@@ -86,7 +89,7 @@ pub fn cloud_stats(
     let step = (n / max_samples.max(1)).max(1);
     let idx: Vec<usize> = (0..n).step_by(step).collect();
     st.sampled = idx.len();
-    // 최근접 간격(격자 해시, 칸 = 2·GSD).
+    // Nearest spacing (grid hash, cell = 2·GSD).
     let cell = (2.0 * st.gsd).max(1e-9);
     let key =
         |p: &[f32; 3]| ((p[0] as f64 / cell).floor() as i64, (p[1] as f64 / cell).floor() as i64, (p[2] as f64 / cell).floor() as i64);
@@ -124,7 +127,7 @@ pub fn cloud_stats(
         st.nn_spacing_median = crate::math::median_in_place(&mut v);
         st.duplicate_ratio = nn.iter().filter(|&&d| d < 0.5 * st.gsd).count() as f64 / idx.len() as f64;
     }
-    // 국소 평면 이탈(점군만 쓰는 독립 지표).
+    // Local plane deviation (independent metric using only the point cloud).
     let cell4 = (4.0 * st.gsd).max(1e-9);
     let key4 =
         |p: &[f32; 3]| ((p[0] as f64 / cell4).floor() as i64, (p[1] as f64 / cell4).floor() as i64, (p[2] as f64 / cell4).floor() as i64);
@@ -175,7 +178,7 @@ pub fn cloud_stats(
             let e = nalgebra::SymmetricEigen::new(cov);
             let k = (0..3).min_by(|&x, &y| e.eigenvalues[x].total_cmp(&e.eigenvalues[y])).unwrap_or(0);
             let nrm = e.eigenvectors.column(k);
-            // 점(원점)에서 이웃 평균을 지나는 평면까지 거리.
+            // Distance from the point (origin) to the plane through the neighbor mean.
             Some((nrm[0] * m[0] + nrm[1] * m[1] + nrm[2] * m[2]).abs())
         })
         .collect();
@@ -185,7 +188,7 @@ pub fn cloud_stats(
     if !resid.is_empty() {
         st.plane_residual_median = crate::math::median_in_place(&mut resid);
     }
-    // 이상점.
+    // Outliers.
     let stats = PairStats::new(scene);
     let overlap: Vec<Vec<usize>> = (0..scene.views.len()).map(|v| stats.select(v, 12, 0.0)).collect();
     let outl = idx

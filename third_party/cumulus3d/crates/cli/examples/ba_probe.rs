@@ -25,7 +25,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 개발용: 모델에 BA 를 여러 설정으로 돌려 스케일·뒤쪽 관측 수를 본다.
+//! Development aid: run BA on a model with several settings and look at the scale and the number of rear observations.
 use cumulus3d_ba::{bundle_adjust, BaConfig};
 use cumulus3d_core::interop::read_model;
 use cumulus3d_core::Reconstruction;

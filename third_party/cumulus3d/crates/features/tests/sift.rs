@@ -25,7 +25,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! SIFT 검증 + 실제 사진(있을 때만).
+//! SIFT verification + real photo (only when available).
 
 use cumulus3d_features::sift::pyramid::{self, ScaleSpace};
 use cumulus3d_features::*;
@@ -74,7 +74,7 @@ fn scale_space_table() {
 
 #[test]
 fn upsample_rule() {
-    // 입력 c ↔ 업샘플 2c, 홀수 위치는 평균.
+    // Input c <-> upsampled 2c; odd positions are averaged.
     let src = vec![0.0f32, 1.0, 2.0, 3.0, 4.0, 5.0]; // 3x2
     let mut dst = vec![0f32; 6 * 4];
     pyramid::upsample2(&src, 3, 2, &mut dst);
@@ -119,7 +119,7 @@ fn translation_covariance() {
     let mut checked = 0;
     let mut bad = 0;
     for (i, f) in fa.features.iter().enumerate() {
-        // 이동이 정수인 옥타브(16 = 2^4 → o ≤ 3), 경계에서 먼 작은 스케일만.
+        // Octaves with integer shifts (16 = 2^4 -> o <= 3), only small scales far from the border.
         if f.octave > 2 || f.scale > 5.0 || f.x < 130.0 || f.y < 130.0 || f.x > 382.0 || f.y > 382.0 {
             continue;
         }
@@ -168,7 +168,7 @@ fn rotation_invariance_90() {
             continue;
         }
         let (tx, ty) = (f.y, w - f.x);
-        // 같은 위치·스케일 중 방향이 가장 가까운 것.
+        // Among the same position and scale, the one with the closest orientation.
         let target = f.orientation + PI / 2.0;
         let best = fb
             .features
@@ -205,7 +205,7 @@ fn descriptor_norms() {
         assert!((n - 512.0).abs() <= 10.0, "norm {n}");
     }
     assert_eq!(out.descriptors.len(), out.features.len());
-    // L2 정규화 옵션도 512 근처
+    // The L2 normalization option is also near 512
     let o2 = SiftOptions { normalization: DescriptorNormalization::L2, ..unlimited() };
     let out = CpuSift::new().extract(&img, &o2).unwrap();
     for i in 0..out.len() {
@@ -216,7 +216,7 @@ fn descriptor_norms() {
 
 #[test]
 fn edge_suppression() {
-    // 세로 직선 에지(가장자리까지 이어짐).
+    // Vertical straight edge (extending to the border).
     let img = GrayImage::from_f32(256, 256, |x, _| if x < 128 { 0.2 } else { 0.8 });
     let out = CpuSift::new().extract(&img, &unlimited()).unwrap();
     let on_edge = out
@@ -246,12 +246,12 @@ fn max_features_rules() {
     let compat = sift.extract(&img, &SiftOptions::default()).unwrap();
     let counts = level_counts(&compat);
     let n = compat.len();
-    // 가장 미세한 남은 레벨 = (옥타브, 레벨) 사전순 최소.
+    // Finest remaining level = minimum in (octave, level) lexicographic order.
     let finest = counts.first().unwrap().1;
     eprintln!("compat: {n}, levels {counts:?}");
     assert!(n >= 8192);
     assert!(n - finest <= 8192);
-    // 레벨은 통째로: 남은 레벨의 개수는 무제한 결과와 같다.
+    // Levels are kept whole: the count of remaining levels equals the unlimited result.
     let all_counts: std::collections::BTreeMap<_, _> = level_counts(&all).into_iter().collect();
     for (lv, c) in &counts {
         assert_eq!(all_counts[lv], *c, "레벨 {lv:?}");
@@ -295,7 +295,7 @@ fn deterministic() {
 
 #[test]
 fn real_photo_if_available() {
-    // CUMULUS3D_TEST_PHOTO=<jpg/png 경로> 가 있을 때만 실행.
+    // Runs only when CUMULUS3D_TEST_PHOTO=<jpg/png path> is set.
     let Some(path) = std::env::var_os("CUMULUS3D_TEST_PHOTO").map(std::path::PathBuf::from).filter(|p| p.exists()) else {
         eprintln!("CUMULUS3D_TEST_PHOTO 없음 → 건너뜀");
         return;
