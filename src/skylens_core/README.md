@@ -24,7 +24,7 @@
   ```
   `alt`는 다른 모든 `Gps.alt`처럼 절대 고도(m)다. 지점이 둘 미만이거나 위경도가 범위 밖이면 설정 오류로 시작하지 않는다.
 - **미션:** `idle → assigned → awaiting-drone → active`. 경로 지정 뒤 `SKYLENS_CORE_ASSIGNED_HOLD_MS` 동안 "태스크 지정 완료"를 보여 주고 드론 대기로 넘어간다. **드론 도착은 `drone_hello`로만 판정**하고 텔레메트리는 세지 않는다. 마지막 드론의 업링크가 끊기면 다시 대기로 돌아간다.
-- **보관(인메모리):** 정제본은 같은 구간의 미리보기와 이전 세대를 대체하고, 메시 블록은 더 높은 `version`만 받고, 탐지 결과는 도착 순서대로 쌓는다(구간당 상한). 지형·건물은 셀마다 하나를 두고, 정밀 셀이 같은 자리의 외곽 링 셀을 대체한다(반대로는 대체하지 않는다). 버려진 청크는 화면에도 보내지 않는다. 새 화면은 현재 상태(작전 구역 → 미리 계획된 경로(관제탑만, 배정 전) → 미션 → 링크 → 경로 → 텔레메트리 → 영상 위치 → 지형·건물(관제탑만) → 점 → 메시 → 탐지 → 서버 상태)를 먼저 받고 이어서 실시간을 받는다.
+- **보관(인메모리):** 정제본은 같은 구간의 미리보기와 이전 세대를 대체하고, 메시 블록은 더 높은 `version`만 받고, 탐지 결과는 도착 순서대로 쌓는다(구간당 상한). 지형·건물은 셀마다 하나를 두고, 정밀 셀이 같은 자리의 외곽 링 셀을 대체한다(반대로는 대체하지 않는다). 점 슬롯(`CHUNK_KIND_POINT_SLOTS`)은 합치지 않고 현재 스트림(`generation`)의 메시지를 순번(`version`)대로 모두 둔다. 빠진 순번 뒤의 것은 들고 있다가 빈 곳이 채워지면 순서대로 함께 보내고, 더 새 스트림 id가 오면 이전 스트림을 버린다. 버려진 청크는 화면에도 보내지 않는다. 새 화면은 현재 상태(작전 구역 → 미리 계획된 경로(관제탑만, 배정 전) → 미션 → 링크 → 경로 → 텔레메트리 → 영상 위치 → 지형·건물(관제탑만) → 점 → 점 슬롯 → 메시 → 탐지 → 서버 상태)를 먼저 받고 이어서 실시간을 받는다.
 - **모델 서버(gRPC :8101):** `SubscribeChunks`를 늘 열어 두고, 다시 붙을 때 `after_sequence`를 마지막으로 보관한 시퀀스로 준다. `PushFrames`는 모델이 없는 동안 묶음을 큐에 쌓아 두고, 다시 붙으면 최근에 보낸 묶음을 다시 선언한다(이미 받은 묶음의 재선언은 모델 쪽에서 무시된다).
 - **프레임:** 드론이 hello하면 대전 MediaMTX의 그 드론 경로를 `ffmpeg`로 읽어 JPEG를 뽑고, 같은 순간의 편대 카메라 프레임을 `FrameSet (source_id, sequence, revision)`으로 묶는다. 늦게 온 카메라가 있으면 같은 시퀀스를 다음 revision으로 다시 보낸다. 프레임 소스는 `frames.Source` 인터페이스라 데모나 테스트가 직접 넣을 수도 있다.
 - **영상 위치:** hello마다 `camera_feed`로 WHEP 주소(기본 `/live/drone<id>/whep`)를 알린다. 영상 자체는 MediaMTX가 보낸다.
@@ -67,7 +67,15 @@ VWorld 키는 저장소 **부모 폴더**의 `.env.vworld`(`VWORLD_KEY=...`, 예
 
 ## 실행
 
-생성 코드(`gen/`)가 먼저 있어야 한다. `src/shared/proto`에서 `protoc-gen-go`·`protoc-gen-go-grpc`로 `src/skylens_core/gen/`에 만든다.
+생성 코드(`gen/`)가 먼저 있어야 한다. `src/shared/proto`에서 `protoc-gen-go`·`protoc-gen-go-grpc`로 `src/skylens_core/gen/`에 만든다. 지금 생성본은 protoc 36.2, protoc-gen-go v1.36.12, protoc-gen-go-grpc v1.6.2로 만들었다(저장소 루트에서):
+
+```bash
+protoc -I src/shared/proto \
+  --go_out=src/skylens_core --go_opt=module=github.com/NET-Challenge-S13/skylens/src/skylens_core \
+  --go-grpc_out=src/skylens_core --go-grpc_opt=module=github.com/NET-Challenge-S13/skylens/src/skylens_core \
+  src/shared/proto/skylens/model/v1/model.proto src/shared/proto/skylens/payload/v1/payload.proto \
+  src/shared/proto/skylens/viewer/v1/viewer.proto
+```
 
 ```bash
 cd src/skylens_core

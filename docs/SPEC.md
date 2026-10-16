@@ -64,7 +64,7 @@ related: "[[INTENT.md]], [[COMPONENTS.md]], [[ARCHITECTURE.md]], [[NETWORK_ARCHI
 - 청크(`Chunk`)는 라우팅 메타데이터(종류·구간·수준·블록 id·version·세대)와 불투명한 `payload`로 되어 있다. 코어는 메타데이터만 읽고 `payload`는 그대로 보관·전달한다. `payload` 인코딩은 `shared`가 정하고 화면이 푼다.
 - 모델 서버는 `app.py`와 같은 REST 네 엔드포인트도 그대로 연다. 코어는 gRPC만 쓴다.
 - `ws /uplink`·`ws /viewer`의 모든 프레임은 바이너리 `skylens.viewer.v1.Envelope` 하나다. 청크는 모델이 준 `Chunk`를 그대로 싣는다.
-- `payload` 인코딩: 메시 블록·탐지 결과는 `skylens/payload/v1/payload.proto`, 점·지형·건물은 pointblitz 청크 포맷 v2.
+- `payload` 인코딩: 메시 블록·탐지 결과는 `skylens/payload/v1/payload.proto`, 점·지형·건물은 pointblitz 청크 포맷 v2, 점 슬롯(`CHUNK_KIND_POINT_SLOTS`)은 pointblitz 슬롯 차분 메시지(32바이트 `PBSD` 머리 + cumulus3d live diff stream v4 팩 그대로). 점 슬롯 청크는 `segment` = 사건을 낸 구간, `level` = 정제, `version` = 메시지 순번(1부터), `generation` = 스트림 id(모델 실행마다 하나, 새 id면 처음부터)다.
 - 영상 자체는 이 프로토콜을 타지 않는다. SRT(진입)와 WHEP(배포)로 따로 간다.
 
 ## 4. 좌표계
@@ -78,16 +78,19 @@ related: "[[INTENT.md]], [[COMPONENTS.md]], [[ARCHITECTURE.md]], [[NETWORK_ARCHI
 
 ## 5. 점진적 복원
 
-> 구간마다 미리보기를 먼저 내보내고 정제본으로 교체한다. 스케줄 결정권은 코어에만 있다.
+> 라이브 복원은 cumulus3d stable display로 돈다. 구간은 정제본으로 한 번 보이면 제자리에 있고, 점은 바뀐 것만(추가·이동·제거) 점 슬롯 차분으로 나간다.
 
-| 수준 | 출처 | 화면에서 하는 일 |
+| 경로 | 출처 | 화면에서 하는 일 |
 |---|---|---|
-| 미리보기 (preview) | cumulus3d `ZonePreview` | 점을 덧붙인다. 메시는 deltamesh `Level::Preview` |
-| 정제 (refined) | cumulus3d `ZoneRefined` | 같은 구간을 세대째 교체한다. 메시는 `Level::Refined`가 미리보기를 정확히 대체 |
+| 점 슬롯 (기본, stable display) | cumulus3d live diff stream v4(`<실행>/live/stream/`), 모델 서버가 따라 읽음 | 슬롯 장면 하나에 사건 순서대로 적용한다(추가·이동은 칸을 쓰고 보이게, 제거는 숨김). 빠진 순번이 있으면 기다린다 |
+| 정제 구간 (stable display) | cumulus3d `ZoneRefined` | 메시(deltamesh)와 탐지 융합의 입력. 점은 슬롯으로 나가므로 점 청크는 없다 |
+| 미리보기·정제 점 청크 (`SKYLENS_STABLE_DISPLAY=0`, 조밀화 없음, 잡) | `ZonePreview` / `ZoneRefined` | 미리보기는 점을 덧붙이고, 정제본이 같은 구간을 세대째 교체한다 |
 
-- **트리거는 시간이 아니라 들어온 프레임이다.** 구간(zone)에 프레임이 차면 그 구간의 미리보기가 나오고 정제본이 뒤따른다.
-- 메시는 바뀐 블록만 나가고, 블록마다 `version`이 있어 화면은 더 새 버전만 받는다. 삼각형이 0개인 블록은 지우라는 뜻이다.
-- 정제본은 성긴 점부터 보내 첫 반영을 빠르게 한다.
+- **트리거는 시간이 아니라 들어온 프레임이다.** 구간(zone)에 프레임이 차면 그 구간의 정제가 시작되고, 구간 K의 정제는 K−1을 기다린다(stable display에는 미리보기가 없다).
+- 구간은 GPS 위치 제약(σ 1 m)으로 ENU에 놓여 한 번 보이면 움직이지 않는다. 예외로 내부값이 안정되기 전(초점 변화 1 % 미만, 늦어도 구간 3까지)에는 앞 구간을 다시 놓거나 다시 조밀화하고, 그 결과는 `replace` 사건(대부분 이동)으로 나간다.
+- 점 슬롯은 화면용으로 1/6만 남긴 점(`SKYLENS_LIVE_STRIDE`, 기본 6)이고 구간 겹침은 지운 것이다. 메시는 정제 구간의 전체 점으로 만든다.
+- 메시는 바뀐 블록만 나가고, 블록마다 `version`이 있어 화면은 더 새 버전만 받는다. 삼각형이 0개인 블록은 지우라는 뜻이다. stable display에서 아직 다시 놓일 수 있는 구간(구간 3까지)은 미리보기 수준으로 메시를 만들고, 구간 4가 오면 그 구간들의 마지막 점으로 정제 수준 메시를 만든다.
+- 조밀화가 없으면(CUDA 없음) 차분 스트림이 비므로 정제 구간의 희소 점을 점 청크로 보낸다.
 - 화면은 도착한 것을 받을 뿐이다. 화면이 타이머로 스스로 단계를 진행시키지 않는다.
 
 ## 6. 관제탑 화면
@@ -110,7 +113,8 @@ related: "[[INTENT.md]], [[COMPONENTS.md]], [[ARCHITECTURE.md]], [[NETWORK_ARCHI
 
 - 코드는 `src/skylens_client/`이다. 이전 HTML/CSS를 Blitz로 그대로 그리고, 웹(wasm), 데스크톱 네이티브, Android가 같은 코드다. iOS는 후순위다.
 - 코어의 `ws /viewer`(읽기 전용)로 받는다. 바탕 지도는 받지 않는다.
-- 노출(reveal)은 드론 궤적이 아니라 **도착 기준**이다. 탐지 마커도 해당 구간이 복원돼야 표시된다.
+- 노출(reveal)은 드론 궤적이 아니라 **도착 기준**이다. 탐지 마커도 해당 구간이 복원돼야 표시된다. 점 슬롯에서는 추가 레코드의 구간 바이트가 점의 구간이고, 그 구간의 첫 점이 보이면 그 구간이 정제 수준으로 도착한 것이다.
+- 점 청크 구간은 도착하면 서서히 나타나지만, 점 슬롯은 슬롯 장면 하나라 사건이 오면 바로 불투명하게 보인다. 메시 블록의 구간별 서서히 나타나기는 그대로다.
 - 라이브 영상은 대전 MediaMTX에서 WHEP로 직접 받는다.
 - 좌측 상단 서버 패널에 구간별 현재 수준이 뜬다.
 - 파이프라인이 없으면 없다고 표시한다(`PipelineUnavailable`).
@@ -156,8 +160,9 @@ related: "[[INTENT.md]], [[COMPONENTS.md]], [[ARCHITECTURE.md]], [[NETWORK_ARCHI
 - 늦게 오거나 고쳐진 프레임은 노드의 reconcile 정책(append-only / replay window / zone invalidation / strict)을 따른다.
 - 구간은 `zones(span, overlap)`으로 나눈다. 같은 구간 번호는 항상 같은 공간 조각을 가리킨다.
 - 메시는 deltamesh `SdfMesher`(GPU는 `GpuMesher`, 프로세스당 장치 하나)다. 기본 0.2 m 복셀, 32³ 블록. 경계 정점이 이웃 블록과 비트 단위로 같아 균열 없이 이어진다.
-- 렌더링은 pointblitz다. 점 청크는 16비트 위치(포맷 v2)이고 파싱은 메인 스레드 밖에서 한다. 메시 블록은 pointblitz에 더한 메시 렌더 경로가 그리고, 법선은 클라이언트에서 계산한다.
-- cumulus3d는 GitHub 리비전을 고정해 쓴다(라이브 입력이 crates.io 0.3.1 릴리스에 없다).
+- 렌더링은 pointblitz(0.3)다. 점 청크는 16비트 위치(포맷 v2)이고 파싱은 메인 스레드 밖에서 한다. 점 슬롯은 `SlotScene` 하나(칸 = 슬롯 id, 칸당 16바이트)에 쌓고, 같은 패스에서 점 청크 장면들과 함께 그린다. 메시 블록은 pointblitz에 더한 메시 렌더 경로가 그리고, 법선은 클라이언트에서 계산한다.
+- cumulus3d는 0.4.0 릴리스 커밋을 `third_party/cumulus3d`에 두고 SkyLens 패치(CUDA 단계, 구성 층의 stable display·차분 스트림 연결)를 얹어 쓴다. 목록은 `third_party/cumulus3d/PATCHES.md`.
+- 라이브 노드는 실행마다 출력 폴더 `<work_dir>/runs/live-<스트림 id>-<pid>/`를 갖는다(run.log, 구간 PLY, 화면용 점군, 차분 스트림 `live/stream/`). 모델 서버의 follower가 `manifest.json`을 200 ms마다 다시 읽어 새 사건마다 점 슬롯 청크를 하나 낸다. 팩은 해석하지 않고 머리만 붙인다.
 - 이전 복원 방식(COLMAP·gsplat)의 측정 기록은 `src/skylens_model/models/skylens/RESULTS.md`에 근거로 남는다.
 
 ## 11. 데모 모드
@@ -209,6 +214,7 @@ related: "[[INTENT.md]], [[COMPONENTS.md]], [[ARCHITECTURE.md]], [[NETWORK_ARCHI
 
 > 이번 단계에는 DB가 없다. 코어가 프레임 메타·청크·마커·텔레메트리를 인메모리로 들고 있고, 세션이 끝나면 사라진다.
 
+- 점 슬롯 메시지는 합치지 않고 현재 스트림의 것을 순번대로 모두 들고 있다가, 화면이 붙으면 처음부터 다시 보낸다(theater30 한 번에 약 125 MB). 더 새 스트림 id가 오면 이전 스트림을 버린다.
 - 프록시는 코어 선호 경로가 죽으면 대기 경로로 넘기고, 일정 시간 뒤 선호 경로를 다시 시도한다. 열린 소켓은 옮기지 않으므로 드론·화면이 재접속한다.
 - 모델 서버가 없으면 코어가 잡을 재제출한다.
 - 코어가 없으면 화면은 마지막 상태를 유지한다.
