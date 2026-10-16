@@ -62,8 +62,9 @@ pub fn live_plan() -> Plan {
     plan
 }
 
-/// Focal-length sigma (relative) and distortion sigma (absolute) of the intrinsics prior: the
-/// `--intrinsics-prior` defaults of the V100 runs.
+/// Focal-length sigma (relative) and distortion sigma (absolute) of the intrinsics prior of the
+/// V100 runs (`--intrinsics-prior` defaults). The live node's own defaults are looser (the demo
+/// focal is an estimate); see `SKYLENS_INTRINSICS_SIGMA`.
 pub const PRIOR_FOCAL_SIGMA: f64 = 0.005;
 pub const PRIOR_DIST_SIGMA: f64 = 0.01;
 
@@ -75,6 +76,8 @@ pub fn intrinsics_prior(
     path: &Path,
     cameras: &[String],
     frame_width: Option<u32>,
+    focal_sigma: f64,
+    dist_sigma: f64,
 ) -> anyhow::Result<Option<IntrinsicsPrior>> {
     let raw = match std::fs::read(path) {
         Ok(r) => r,
@@ -88,7 +91,7 @@ pub fn intrinsics_prior(
         (Some(w), Some(vw)) if vw > 0.0 => f64::from(w) / vw,
         _ => 1.0,
     };
-    let mut prior = IntrinsicsPrior::new().sigmas(PRIOR_FOCAL_SIGMA, PRIOR_DIST_SIGMA);
+    let mut prior = IntrinsicsPrior::new().sigmas(focal_sigma, dist_sigma);
     for c in cameras {
         prior = prior.opencv(c.clone(), [fx * scale, fy * scale, cx * scale, cy * scale, 0.0, 0.0, 0.0, 0.0]);
     }
@@ -292,19 +295,19 @@ mod tests {
     fn the_intrinsics_prior_covers_every_camera_and_scales_with_the_frame_width() {
         let path = camera_file("prior");
         let cams: Vec<String> = ["left", "center", "right"].map(String::from).to_vec();
-        let p = intrinsics_prior(&path, &cams, None).unwrap().unwrap();
+        let p = intrinsics_prior(&path, &cams, None, PRIOR_FOCAL_SIGMA, PRIOR_DIST_SIGMA).unwrap().unwrap();
         assert_eq!(p.named.keys().collect::<Vec<_>>(), ["center", "left", "right"]);
         assert_eq!(p.named["left"], vec![1329.0, 1329.0, 960.0, 540.0, 0.0, 0.0, 0.0, 0.0]);
         assert_eq!((p.focal_sigma, p.dist_sigma), (0.005, 0.01));
         p.validate().unwrap();
-        let half = intrinsics_prior(&path, &cams, Some(960)).unwrap().unwrap();
+        let half = intrinsics_prior(&path, &cams, Some(960), PRIOR_FOCAL_SIGMA, PRIOR_DIST_SIGMA).unwrap().unwrap();
         assert_eq!(half.named["center"][..4], [664.5, 664.5, 480.0, 270.0]);
         let _ = std::fs::remove_file(path);
     }
 
     #[test]
     fn a_missing_camera_file_means_no_prior() {
-        let none = intrinsics_prior(Path::new("/nonexistent/camera.json"), &["left".into()], None);
+        let none = intrinsics_prior(Path::new("/nonexistent/camera.json"), &["left".into()], None, PRIOR_FOCAL_SIGMA, PRIOR_DIST_SIGMA);
         assert!(none.unwrap().is_none());
     }
 

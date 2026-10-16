@@ -461,6 +461,10 @@ pub fn build_engine(settings: &Settings) -> anyhow::Result<Engine> {
             live_stride: settings.live_stride,
             camera_json: settings.camera_json.clone(),
             frame_width: settings.frame_width,
+            settle_tol: settings.settle_tol,
+            settle_max_zone: settings.settle_max_zone,
+            focal_sigma: settings.focal_sigma,
+            dist_sigma: settings.dist_sigma,
         },
         detector,
     )

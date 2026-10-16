@@ -74,10 +74,10 @@ pub const LIVE_NODE: &str = "live";
 /// Folder under `work_dir` with job results; `ReconJobResult.url` is
 /// `/<RESULTS_DIR>/<file>`, so the HTTP server serves this folder at that path.
 pub const RESULTS_DIR: &str = "results";
-/// Stable display: the intrinsics count as settled once the focal length of two
-/// refined zones in a row differs by less than this (`--settle-tol`, cumulus3d's default, 1 %).
+/// Job nodes: the intrinsics count as settled once the focal length of two
+/// refined zones in a row differs by less than this (`--settle-tol`, cumulus3d's default, 1 %). The live node takes `SKYLENS_SETTLE_*` (`EngineConfig`).
 pub const SETTLE_TOL: f64 = 0.01;
-/// Stable display: the display settles at this zone at the latest (`--settle-max-zone`,
+/// Job nodes: the display settles at this zone at the latest (`--settle-max-zone`,
 /// cumulus3d's default). Zones up to it may be placed again while the intrinsics settle.
 pub const SETTLE_MAX_ZONE: usize = 3;
 /// RANSAC seed of the live node (the V100 runs used `--seed 1`).
@@ -109,6 +109,13 @@ pub struct EngineConfig {
     pub camera_json: Option<std::path::PathBuf>,
     /// Width of the pushed frames; the prior is scaled to it (`None` = the file's `video_width`).
     pub frame_width: Option<u32>,
+    /// Stable display: the intrinsics settle when two refined zones' focal lengths differ by less
+    /// than this (relative), and at zone `settle_max_zone` at the latest.
+    pub settle_tol: f64,
+    pub settle_max_zone: usize,
+    /// Relative focal sigma and absolute distortion sigma of the intrinsics prior.
+    pub focal_sigma: f64,
+    pub dist_sigma: f64,
 }
 
 /// Result of declaring one frame set to the reconstruction node.
@@ -159,6 +166,10 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 impl Engine {
     pub fn new(cfg: EngineConfig, detector: Option<Arc<dyn Detector>>) -> anyhow::Result<Self> {
         ensure!(!cfg.cameras.is_empty(), "engine needs at least one camera");
+        tracing::info!(
+            "live node: zones span {} overlap {}, settle tol {} max zone {}, intrinsics sigma focal {} dist {}",
+            cfg.zone_span, cfg.zone_overlap, cfg.settle_tol, cfg.settle_max_zone, cfg.focal_sigma, cfg.dist_sigma
+        );
         let live_dir = cfg.work_dir.join("live");
         std::fs::create_dir_all(&live_dir).with_context(|| format!("create {}", live_dir.display()))?;
 
@@ -174,7 +185,7 @@ impl Engine {
         let mut b = ReconNode::declare()
             // The plan comes first (it replaces every setting); the builder calls below refine it.
             .plan(jobs::live_plan())
-            .settle(SETTLE_TOL, SETTLE_MAX_ZONE)
+            .settle(cfg.settle_tol, cfg.settle_max_zone)
             .id(LIVE_NODE)
             .images(&live_dir)
             .cameras(cfg.cameras.clone())
@@ -195,7 +206,7 @@ impl Engine {
             b = b.stable_display(true);
         }
         if let Some(path) = &cfg.camera_json {
-            match jobs::intrinsics_prior(path, &cfg.cameras, cfg.frame_width) {
+            match jobs::intrinsics_prior(path, &cfg.cameras, cfg.frame_width, cfg.focal_sigma, cfg.dist_sigma) {
                 Ok(Some(p)) => {
                     tracing::info!("intrinsics prior from {} for {:?}", path.display(), cfg.cameras);
                     b = b.intrinsics_prior(p);
@@ -441,6 +452,10 @@ mod tests {
             live_stride: DEFAULT_LIVE_STRIDE,
             camera_json: None,
             frame_width: None,
+            settle_tol: 0.02,
+            settle_max_zone: 1,
+            focal_sigma: 0.02,
+            dist_sigma: 0.01,
         }
     }
 

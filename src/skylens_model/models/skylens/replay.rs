@@ -318,6 +318,10 @@ mod tests {
             live_stride: DEFAULT_LIVE_STRIDE,
             camera_json: None,
             frame_width: None,
+            settle_tol: 0.02,
+            settle_max_zone: 1,
+            focal_sigma: 0.02,
+            dist_sigma: 0.01,
         };
         let engine = Engine::new(cfg, None).unwrap();
         for e in &events {
