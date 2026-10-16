@@ -23,12 +23,14 @@
 //! | `SKYLENS_ZONE_OVERLAP`  | `2`            | cumulus3d zone overlap, in frame sets |
 //! | `SKYLENS_WORK_DIR`      | `<repo>/runs/model` | cumulus3d working directory |
 //! | `SKYLENS_GPU`           | unset (= CUDA available) | force the GPU backends on or off |
+//! | `SKYLENS_PRECISION`     | `auto`         | SkyLensNet arithmetic on CUDA: `auto` (by compute capability: >= 8.0 bf16, 7.x fp16 autocast, else fp32), `fp32`, `fp16`, `bf16` |
 
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use super::geo::Gps;
+use crate::models::skylensnet::modeling_skylensnet::Precision;
 
 /// `src/skylens_model` -> `src` -> repo.
 pub fn repo_root() -> PathBuf {
@@ -57,6 +59,8 @@ pub struct Settings {
     pub work_dir: PathBuf,
     /// `None` = decide from CUDA availability at engine build time.
     pub gpu: Option<bool>,
+    /// `None` = `auto`; an unparsable value is also `auto`.
+    pub precision: Option<Precision>,
 }
 
 impl Settings {
@@ -119,6 +123,14 @@ impl Settings {
                 .map(PathBuf::from)
                 .unwrap_or_else(|| repo_root().join("runs").join("model")),
             gpu: flag("SKYLENS_GPU"),
+            precision: get("SKYLENS_PRECISION").and_then(|raw| match raw.parse::<Precision>() {
+                Ok(Precision::Auto) => None,
+                Ok(p) => Some(p),
+                Err(err) => {
+                    tracing::warn!("SKYLENS_PRECISION ignored: {err}");
+                    None
+                }
+            }),
         }
     }
 
@@ -174,6 +186,16 @@ mod tests {
         assert_eq!(s.checkpoint, None);
         assert_eq!(s.cameras, vec!["left", "center", "right"]);
         assert_eq!(s.gpu, None);
+        assert_eq!(s.precision, None);
+    }
+
+    #[test]
+    fn precision_override_parses() {
+        assert_eq!(with(&[("SKYLENS_PRECISION", "FP16")]).precision, Some(Precision::Fp16Autocast));
+        assert_eq!(with(&[("SKYLENS_PRECISION", "bf16")]).precision, Some(Precision::Bf16));
+        assert_eq!(with(&[("SKYLENS_PRECISION", "fp32")]).precision, Some(Precision::Fp32));
+        assert_eq!(with(&[("SKYLENS_PRECISION", "auto")]).precision, None);
+        assert_eq!(with(&[("SKYLENS_PRECISION", "int8")]).precision, None);
     }
 
     #[test]

@@ -325,3 +325,47 @@ fire -2.68` 로 배경만 양수였다. 데이터 부족에서 온 클래스 불
 
 > 노트북의 저장 후 `복원 일치: False` 는 **오탐이다.** `final` 과 `checkpoint-14525` 의
 > 출력 차이는 정확히 `0.0` 이고 재로드도 정상이다. 검증 셀 쪽 문제이지 저장 문제가 아니다.
+
+---
+
+## 5. 추론 정밀도와 정밀도 벤치마크
+
+### 5.1 기본값: GPU 세대로 정한다
+
+Rust 추론(`modeling_skylensnet.rs`)의 `DetectorOptions::precision` 기본값은 `Precision::Auto`다. 모델을 올릴 때 CUDA compute capability를 읽어 한 번 정하고, 고른 정밀도와 이유를 `tracing::info!`로 한 줄 남긴다(`SkyLensNet precision`).
+
+| compute capability | 대표 GPU | 선택 | 이유 |
+|---|---|---|---|
+| 8.0 이상 | A100, RTX 30/40, H100 | `Bf16` (가중치·입력·활성값 bf16) | bf16 텐서코어가 있다. 가중치 메모리가 절반이 된다 |
+| 7.x | **V100 (7.0, KOREN 판교)**, T4 (7.5) | `Fp16Autocast` (fp32 가중치 + fp16 autocast) | fp16 텐서코어는 있고 bf16 하드웨어는 없다. bf16은 에뮬레이션이라 느리거나 cuDNN 합성곱이 지원하지 않을 수 있다 |
+| 7.0 미만 · 조회 실패 | | `Fp32` | 반정밀도 텐서코어가 없거나 알 수 없다 |
+| CPU | | `Fp32` | 항상 |
+
+compute capability는 CUDA 드라이버 API(`cuDeviceGetAttribute`)를 `cudarc`로 불러 읽는다. tch에는 노출돼 있지 않다. `cudarc`는 이미 cumulus3d-cuda를 통해 의존성 그래프에 있고 `dynamic-loading`이라 libcuda를 실행할 때 찾으므로 새 크레이트도 링크 의존도 늘지 않는다. 드라이버가 없거나 조회가 실패하면 `Fp32`로 내려간다.
+
+강제로 바꾸려면 모델 서버 환경변수 `SKYLENS_PRECISION`(`auto` 기본 | `fp32` | `fp16` | `bf16`)을 쓴다. 코드에서는 `DetectorOptions { precision, .. }`. 명시한 값은 GPU 세대와 상관없이 그대로 쓰며(CPU는 항상 fp32), 이유는 `set explicitly`로 로그에 남는다.
+
+### 5.2 벤치마크 실행 (Linux CUDA 서버)
+
+`src/skylens_model/examples/precision_bench.rs`. fp32, fp16 autocast, bf16을 같은 프레임으로 돌려 프레임당 지연(중앙값·p90), 프로세스 GPU 최대 메모리(`nvidia-smi` 샘플링), fp32 대비 일치도를 한 표로 낸다. 정밀도마다 자식 프로세스를 따로 띄우므로 메모리가 서로 섞이지 않고, bf16이 Volta에서 실패해도 그 줄만 `FAILED: 이유`로 찍고 계속 간다.
+
+사전 조건
+
+- NVIDIA 드라이버(`nvidia-smi` 동작), Rust 1.99 이상, 인터넷(첫 빌드가 libtorch를 받는다).
+- libtorch는 따로 설치하지 않는다. `tch` 0.24의 `download-libtorch`가 빌드 때 **libtorch 2.11.0 + CUDA 12.6(cu126)** 을 받는다. 판은 `.cargo/config.toml`의 `TORCH_CUDA_VERSION = "cu126"`이 정하고, cu126 빌드는 sm_70(V100) 커널을 포함한다. 이미 받아 둔 libtorch를 쓰려면 `LIBTORCH=<경로>` (그 안의 `lib`가 `LD_LIBRARY_PATH`에 있어야 한다).
+- 체크포인트는 `save_pretrained` 폴더(`config.json` + `model.safetensors`)다. 저장소에는 없다(`.gitignore`). 데모 런처와 같은 위치 `runs/skylens/final`이 기본 위치이고, 학습 노트북이 만든 폴더를 서버로 복사해 둔다. `--checkpoint`를 주지 않고 `SKYLENS_CHECKPOINT`도 없으면 resnet-50 + 디코더 256/128/64/32 + offset head의 무작위 가중치 모델을 만든다. 이 경우 지연·메모리는 실제 값이고, 일치도(특히 사람 검출)는 참고용이다.
+
+명령 (저장소 루트)
+
+```bash
+cargo run --release -p skylens-model --example precision_bench -- \
+    --checkpoint runs/skylens/final --size 1920x1080 --warmup 5 --iters 30
+```
+
+입력은 기본 1920x1080 RGB 합성 프레임이다(데모 영상 `left/center/right.mp4`와 같은 크기. 모델 안에서 짧은 변 765, 512 타일 6장으로 바뀐다). 실제 프레임은 `--image 파일.jpg`, 열화상 평면은 `--thermal`, 장치는 `--device N`, 일부만 돌리려면 `--precisions fp32,fp16`.
+
+출력은 두 표다. 첫 표는 정밀도별 median ms, p90 ms, fps, peak MiB(CUDA 컨텍스트 포함), 모델 로드 초. 둘째 표는 fp32 대비 위험구역 확률의 max|Δp|, mean|Δp|, argmax 일치율(%), 사람 검출 수, 8 px 안에서 짝지어진 수, 짝의 평균 위치 차(px)다.
+
+예상 시간(측정 전 추정): 첫 빌드는 libtorch 다운로드와 의존성 컴파일 때문에 십수 분, 실행은 정밀도 3개 x (모델 로드 + 5 워밍업 + 30 측정)이라 프레임당 지연이 수백 ms 이하면 몇 분 안에 끝난다. cuDNN 첫 호출이 느려 워밍업은 줄이지 않는다. 이 벤치마크는 아직 GPU에서 돌려 보지 않았다(개발 Mac에는 NVIDIA GPU가 없다). 첫 실행 결과를 §4.4 측정 이력에 옮겨 적는다.
+
+모델 서버에서 정밀도를 바꿔 실제 서비스를 돌릴 때는 `SKYLENS_PRECISION=fp32|fp16|bf16`만 설정하면 된다.

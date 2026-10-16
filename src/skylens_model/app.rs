@@ -413,7 +413,7 @@ impl ModelService for ModelGrpc {
 /// Build the reconstruction engine with the SkyLensNet detector when a
 /// checkpoint is configured. Blocking (loads libtorch weights).
 pub fn build_engine(settings: &Settings) -> anyhow::Result<Engine> {
-    use crate::models::skylensnet::modeling_skylensnet::SkyLensNetDetector;
+    use crate::models::skylensnet::modeling_skylensnet::{DetectorOptions, Precision, SkyLensNetDetector};
 
     let cuda = gpu_probe().cuda;
     let gpu = settings.gpu.unwrap_or(cuda);
@@ -424,7 +424,11 @@ pub fn build_engine(settings: &Settings) -> anyhow::Result<Engine> {
         }
         Some(path) => {
             let device = if cuda { tch::Device::Cuda(0) } else { tch::Device::Cpu };
-            match SkyLensNetDetector::load(path, device) {
+            let options = DetectorOptions {
+                precision: settings.precision.unwrap_or(Precision::Auto),
+                ..Default::default()
+            };
+            match SkyLensNetDetector::load_with_options(path, device, options) {
                 Ok(det) => {
                     tracing::info!("SkyLensNet loaded from {} on {device:?}", path.display());
                     Some(Arc::new(det) as Arc<dyn Detector>)
