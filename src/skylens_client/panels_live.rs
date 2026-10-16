@@ -362,11 +362,13 @@ pub struct LiveSettings {
     /// Replay speed multiplier (model seconds per wall second).
     pub speed: u32,
     pub fit_requested: bool,
+    /// Draw the reconstruction mesh under the points (off: points only, like the reference viewer).
+    pub show_mesh: bool,
 }
 
 impl Default for LiveSettings {
     fn default() -> Self {
-        LiveSettings { point_size: 2.0, color_mode: ColorMode::Rgb, speed: 20, fit_requested: false }
+        LiveSettings { point_size: 2.0, color_mode: ColorMode::Rgb, speed: 20, fit_requested: false, show_mesh: false }
     }
 }
 
@@ -536,11 +538,13 @@ pub fn live_markup(settings: &LiveSettings) -> String {
             "<span class=\"live-lbl\">색</span>{modes}",
             "<span class=\"live-sep\"></span>",
             "<button type=\"button\" class=\"live-btn\" id=\"live-fit\" data-live=\"fit\">전체 보기</button>",
+            "<button type=\"button\" class=\"live-btn live-mesh{mesh_on}\" id=\"live-mesh\" data-live=\"mesh\" title=\"복원 메시 표시\">메시</button>",
             "</div>",
         ),
         title = WAIT_TITLE,
         speed = settings.speed,
         size = size_text(settings.point_size),
+        mesh_on = if settings.show_mesh { " is-on" } else { "" },
         modes = color_buttons_markup(settings.color_mode),
     )
 }

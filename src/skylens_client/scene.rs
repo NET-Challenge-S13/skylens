@@ -203,10 +203,10 @@ impl ViewScreen for StatusScene {
         // Points: one scene per segment, faded in on arrival; the slot stream as the animated
         // live layer (fade and glide per point), coloured as the controls bar says.
         gpu.sync_segments(&board.store, 0.0);
-        let (mode, scale, fit) = {
+        let (mode, scale, fit, show_mesh) = {
             let mut st = board.settings.borrow_mut();
             let fit = std::mem::take(&mut st.fit_requested);
-            (st.color_mode, st.point_size / 2.0, fit)
+            (st.color_mode, st.point_size / 2.0, fit, st.show_mesh)
         };
         let paint = Paint::of(mode, board.height_range());
         self.layer.pump(gpu, &mut board, paint, BG_RGB, info.now_ms / 1000.0);
@@ -231,6 +231,11 @@ impl ViewScreen for StatusScene {
             self.mesh_alpha = alphas;
         }
 
+        // Live slot mode shows points only unless the operator turns the mesh on.
+        let mesh_visible = show_mesh || board.store.slots().is_empty();
+        for (id, _) in board.store.mesh_blocks() {
+            gpu.meshes.set_visible(skylens_viewer::view3d::mesh_block_key(id), mesh_visible);
+        }
         self.sync_markers(gpu, &board);
         self.camera(&board, info);
 

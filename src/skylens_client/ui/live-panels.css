@@ -321,7 +321,8 @@
   min-width: 38px;
   text-align: center;
 }
-.live-seg.is-on {
+.live-seg.is-on,
+.live-mesh.is-on {
   border-color: var(--border-focus);
   color: var(--info);
   background: rgba(94, 200, 255, 0.14);
