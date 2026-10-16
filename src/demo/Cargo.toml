@@ -11,8 +11,14 @@ publish.workspace = true
 name = "skylens-demo"
 path = "main.rs"
 
+[[bin]]
+name = "delta-replay"
+path = "delta_replay.rs"
+
 [dependencies]
-skylens-shared.workspace = true
+skylens-shared = { workspace = true, features = ["grpc"] }
+# delta-replay impersonates the model server
+tonic = { workspace = true, features = ["transport", "router"] }
 prost.workspace = true
 anyhow.workspace = true
 tokio.workspace = true
