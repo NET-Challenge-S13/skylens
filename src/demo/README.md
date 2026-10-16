@@ -65,6 +65,8 @@ Windows에서는 런처가 시작하자마자 자기 자신을 **kill-on-close J
 | `--native` | 끔 | `target/<profile>/skylens-control`·`skylens-client`도 띄운다 |
 | `--auto` | 끔 | 관제탑 대신 런처가 3초 뒤 미리 계획된 경로를 그대로 배정한다 |
 | `--follow-route` | 끔 | 드론이 촬영 기록 대신 배정된 경유 지점을 편대로 왕복 비행한다 |
+| `--no-loop` | 끔 | 촬영본을 반복하지 않고 한 번만 송출한다. 끝나면 드론은 마지막 위치에 머문다(발표용). 송출이 끝나도 데모는 계속 돈다 |
+| `--publish-delay S` | `0` | 촬영본 송출을 S초 늦춘다(드론도 영상 시각에 맞추므로 같이 늦는다). 드론이 연결된 뒤부터 영상이 시작되게 할 때 쓴다 |
 | `--synthetic` | 끔 | 실제 촬영본 대신 옛 `res/static/video/demo_*.mp4`와 합성 경로를 쓴다 |
 | `--footage-url URL` | 릴리스 `demo-footage-v1` | 촬영본 zip을 받을 주소 |
 | `--no-fetch` | 끔 | 촬영본이 없어도 내려받지 않고, 직접 받는 방법을 알려 주고 멈춘다 |

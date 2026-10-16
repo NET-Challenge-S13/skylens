@@ -46,16 +46,21 @@ pub enum Flight {
     /// `--synthetic`: the fixed track around the default anchor, at `ALTITUDE_M`.
     Synthetic,
     /// The recorded flight: drone i replays view i, `starts[i]` being when its publisher
-    /// started (clip time = elapsed since then, modulo the clip length). `ground_alt` turns
+    /// started (clip time = elapsed since then, modulo the clip length if `looped`, else held
+    /// at the last instant). `ground_alt` turns
     /// heights above takeoff into absolute altitudes.
-    Recorded { track: Track, starts: [Instant; 3], ground_alt: f64 },
+    Recorded { track: Track, starts: [Instant; 3], ground_alt: f64, looped: bool },
 }
 
 impl Flight {
+    fn looped(&self) -> bool {
+        !matches!(self, Flight::Recorded { looped: false, .. })
+    }
+
     fn view(&self, index: usize) -> Option<(&View, Instant, f64)> {
         match self {
             Flight::Synthetic => None,
-            Flight::Recorded { track, starts, ground_alt } => {
+            Flight::Recorded { track, starts, ground_alt, .. } => {
                 Some((track.views()[index], starts[index], *ground_alt))
             }
         }
@@ -71,8 +76,10 @@ pub struct Fix {
 }
 
 /// A recorded view at wall time `now`, in sync with a publisher that started at `start`.
-pub fn recorded_fix(view: &View, start: Instant, now: Instant, ground_alt: f64) -> Fix {
-    let t = footage::clip_time(now.saturating_duration_since(start).as_secs_f64(), view.duration);
+/// `looped` says whether the publisher repeats the clip; if not, the drone stays at the last fix.
+pub fn recorded_fix(view: &View, start: Instant, now: Instant, ground_alt: f64, looped: bool) -> Fix {
+    let elapsed = now.saturating_duration_since(start).as_secs_f64();
+    let t = if looped { footage::clip_time(elapsed, view.duration) } else { footage::clip_time_once(elapsed, view.duration) };
     let s = view.sample(t);
     Fix { gps: s.gps(ground_alt), heading_deg: s.heading_deg, speed: s.speed }
 }
@@ -215,7 +222,7 @@ fn approach_fixes(mode: &Mode, targets: &[(Gps, f64); 3], t: f64) -> [Fix; 3] {
 /// recorded views at `now`.
 fn flight_fixes(mode: &Mode, flight: &Flight, leg: f64, now: Instant) -> [Fix; 3] {
     std::array::from_fn(|i| match (mode, flight.view(i)) {
-        (Mode::Recorded, Some((view, start, ground))) => recorded_fix(view, start, now, ground),
+        (Mode::Recorded, Some((view, start, ground))) => recorded_fix(view, start, now, ground, flight.looped()),
         (Mode::Formation { path, alt }, _) => formation_fix(&path.pose_at(leg, SPEED_MPS), &FORMATION[i], *alt),
         // Recorded mode without a record cannot happen (choose_mode); fly the synthetic track.
         (Mode::Recorded, None) => formation_fix(&Path::footage_track().pose_at(leg, SPEED_MPS), &FORMATION[i], ALTITUDE_M),
@@ -225,7 +232,7 @@ fn flight_fixes(mode: &Mode, flight: &Flight, leg: f64, now: Instant) -> [Fix; 3
 /// Where each recorded drone will be when it arrives, and its direction of flight.
 fn arrival_targets(flight: &Flight, arrival: Instant) -> [(Gps, f64); 3] {
     std::array::from_fn(|i| match flight.view(i) {
-        Some((view, start, ground)) => (recorded_fix(view, start, arrival, ground).gps, view.course_deg()),
+        Some((view, start, ground)) => (recorded_fix(view, start, arrival, ground, flight.looped()).gps, view.course_deg()),
         None => (SITE_ANCHOR, 0.0),
     })
 }
@@ -399,7 +406,7 @@ mod tests {
                              {"t": 10.0, "lat": 36.3650, "lon": 127.3425, "rel_alt_m": 30.0, "aircraft_yaw": 285.0}]}}}"#;
 
     fn recorded(starts: [Instant; 3]) -> Flight {
-        Flight::Recorded { track: Track::parse(RECORD).unwrap(), starts, ground_alt: 50.0 }
+        Flight::Recorded { track: Track::parse(RECORD).unwrap(), starts, ground_alt: 50.0, looped: true }
     }
 
     #[test]
@@ -452,10 +459,10 @@ mod tests {
         assert!((fixes[1].gps.alt - 70.0).abs() < 1e-9);
         assert!((fixes[1].heading_deg - 165.0).abs() < 1e-9);
         // The clip loops: 12 s after the start is 2 s in.
-        let later = recorded_fix(&Track::parse(RECORD).unwrap().left, t0, t0 + Duration::from_secs(12), 50.0);
+        let later = recorded_fix(&Track::parse(RECORD).unwrap().left, t0, t0 + Duration::from_secs(12), 50.0, true);
         assert!((later.gps.lat - 36.3658).abs() < 1e-9);
         // A publisher that has not started yet reads as clip time 0.
-        let early = recorded_fix(&Track::parse(RECORD).unwrap().left, now, t0, 50.0);
+        let early = recorded_fix(&Track::parse(RECORD).unwrap().left, now, t0, 50.0, true);
         assert!((early.gps.lat - 36.3660).abs() < 1e-12);
     }
 
