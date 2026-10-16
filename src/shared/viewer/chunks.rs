@@ -136,6 +136,9 @@ pub enum Change {
     Detections { ids: Vec<String> },
     Terrain { cell: [i32; 2] },
     Buildings { cell: [i32; 2] },
+    /// A live point delta of the current run, in seq order (see [`Applied::delta`]). `new_run`:
+    /// it started a new run, so the legacy point state was dropped.
+    PointsDelta { seq: u32, zone: u32, new_run: bool },
     /// Older than what is stored; dropped.
     Stale,
     /// Undecodable or of an unknown kind; counted in [`ChunkStore::invalid`].
@@ -151,11 +154,13 @@ pub struct Applied {
     /// Detections that just became visible (their segment arrived, or they arrived for an
     /// already arrived segment), in arrival order. Each id is reported once.
     pub revealed: Vec<String>,
+    /// The decoded delta of a [`Change::PointsDelta`], for the board's delta log.
+    pub delta: Option<Rc<payload::PointsDelta>>,
 }
 
 impl Applied {
     fn of(change: Change) -> Self {
-        Applied { change, newly_arrived: None, revealed: Vec::new() }
+        Applied { change, newly_arrived: None, revealed: Vec::new(), delta: None }
     }
 }
 
@@ -172,6 +177,10 @@ pub struct ChunkStore {
     buildings: BTreeMap<[i32; 2], BuildingEntry>,
     arrived: BTreeSet<u32>,
     levels: BTreeMap<u32, model::Level>,
+    /// Run id and last seq of the point deltas seen. Once a delta has arrived, the per-segment
+    /// preview/refined point chunks are ignored: the delta stream is the one source of points.
+    delta_run: Option<u32>,
+    delta_seq: u32,
     /// Never reset, so a segment recreated after `clear` gets an epoch the GPU has not seen.
     next_stamp: u64,
     pub chunks_received: u64,
@@ -205,7 +214,7 @@ impl ChunkStore {
             model::ChunkKind::Detections => self.apply_detections(chunk),
             model::ChunkKind::Terrain => self.apply_terrain(chunk),
             model::ChunkKind::Buildings => self.apply_buildings(chunk),
-            model::ChunkKind::PointsDelta => Applied::of(Change::Invalid("points delta not handled yet".into())),
+            model::ChunkKind::PointsDelta => self.apply_points_delta(chunk),
             model::ChunkKind::Unspecified => Applied::of(Change::Invalid(format!("unknown chunk kind {}", chunk.kind))),
         };
         if matches!(out.change, Change::Invalid(_)) {
@@ -217,7 +226,45 @@ impl ChunkStore {
         out
     }
 
+    /// A live point delta: the first of a new run drops the old state, an older or repeated seq is
+    /// stale, and a zone's first refined/replace delta marks that zone as arrived (its detections
+    /// reveal). The delta itself goes to the board's log through [`Applied::delta`].
+    fn apply_points_delta(&mut self, chunk: &model::Chunk) -> Applied {
+        let d = match skylens_shared::delta::from_chunk(chunk) {
+            Ok(d) => d,
+            Err(e) => return Applied::of(Change::Invalid(e.to_string())),
+        };
+        let new_run = self.delta_run.is_some_and(|r| r != d.run);
+        let first = self.delta_run.is_none();
+        if !new_run && !first && d.seq <= self.delta_seq && !d.snapshot {
+            return Applied::of(Change::Stale);
+        }
+        if new_run || first {
+            // The legacy per-segment clouds (if any came first) make way for the delta stream.
+            self.points.clear();
+            self.arrived.clear();
+            self.levels.clear();
+            self.revealed.clear();
+        }
+        self.delta_run = Some(d.run);
+        self.delta_seq = d.seq;
+        let mut out = Applied::of(Change::PointsDelta { seq: d.seq, zone: d.zone, new_run });
+        if matches!(d.kind(), payload::DeltaKind::Refined | payload::DeltaKind::Replace) && !d.adds.is_empty() {
+            out.newly_arrived = self.mark_arrived(d.zone, model::Level::Refined);
+        }
+        out.delta = Some(Rc::new(d));
+        out
+    }
+
+    /// Whether the board is fed by point deltas (the legacy point chunks are ignored).
+    pub fn delta_mode(&self) -> bool {
+        self.delta_run.is_some()
+    }
+
     fn apply_points(&mut self, chunk: &model::Chunk) -> Applied {
+        if self.delta_mode() {
+            return Applied::of(Change::Stale);
+        }
         let header = match decode_header(&chunk.payload) {
             Ok(h) => h,
             Err(e) => return Applied::of(Change::Invalid(e.to_string())),
