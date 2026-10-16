@@ -26,7 +26,7 @@
 }
 .live-wait__big {
   font-family: var(--font-display);
-  font-size: 30px;
+  font-size: 38px;
   font-weight: 600;
   letter-spacing: 0.06em;
   color: #d8f0ff;
@@ -43,10 +43,10 @@
 /* --- Monitor (top-right, under the net badge) --- */
 .live-monitor {
   position: absolute;
-  top: 52px;
+  top: 56px;
   right: 16px;
-  width: 220px;
-  height: 120px;
+  width: 300px;
+  height: 138px;
   z-index: 4;
   display: none;
   box-sizing: border-box;
@@ -69,12 +69,12 @@
   position: absolute;
   left: 0;
   top: 0;
-  width: 220px;
-  height: 120px;
+  width: 300px;
+  height: 138px;
 }
 .live-monitor__label {
   position: absolute;
-  top: 9px;
+  top: 10px;
   left: 14px;
   right: 10px;
   font-size: var(--text-sm);
@@ -90,30 +90,30 @@
 }
 .live-monitor__sub {
   position: absolute;
-  top: 26px;
+  top: 36px;
   left: 14px;
-  font-size: 10px;
+  font-size: 12.5px;
   color: #4fa8d8;
   white-space: nowrap;
 }
 .live-monitor.is-done .live-monitor__sub {
-  top: 46px;
+  top: 64px;
 }
 .live-monitor__age {
   position: absolute;
-  bottom: 8px;
+  bottom: 10px;
   left: 14px;
-  font-size: 9.5px;
+  font-size: 12.5px;
   color: #3f8fbd;
 }
 
 /* --- Event timeline (right column) --- */
 .live-timeline {
   position: absolute;
-  top: 184px;
+  top: 204px;
   right: 16px;
   bottom: 240px;
-  width: 340px;
+  width: 440px;
   z-index: 4;
   display: none;
   flex-direction: column;
@@ -146,7 +146,7 @@
   background: transparent;
   color: var(--warn);
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 12.5px;
   letter-spacing: 0.08em;
   cursor: pointer;
 }
@@ -166,7 +166,7 @@
   box-shadow: 0 0 6px var(--person);
 }
 .live-legend {
-  font-size: 9.5px;
+  font-size: 12.5px;
   line-height: 1.35;
   color: var(--text-tertiary);
 }
@@ -183,10 +183,10 @@
   padding: 2px 6px;
   border: 1px solid;
   border-radius: var(--radius-sm);
-  font-size: 10px;
+  font-size: 12.5px;
 }
 .live-cnt__chip b {
-  font-size: 11.5px;
+  font-size: 14px;
 }
 .live-cnt__mv { color: #ff8a5c; border-color: rgba(255, 138, 92, 0.5); }
 .live-cnt__ap { color: var(--info); border-color: rgba(94, 200, 255, 0.55); }
@@ -196,7 +196,7 @@
 .live-bar-row {
   display: flex;
   justify-content: space-between;
-  font-size: 9.5px;
+  font-size: 12.5px;
   color: var(--text-tertiary);
 }
 .live-bar {
@@ -226,7 +226,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 3px 4px;
+  padding: 5px 6px;
   cursor: pointer;
   white-space: nowrap;
   opacity: 0.45;
@@ -246,8 +246,8 @@
 }
 .live-ev__dot {
   flex: 0 0 auto;
-  width: 7px;
-  height: 7px;
+  width: 9px;
+  height: 9px;
   border-radius: 50%;
   border: 1px solid var(--info);
   background: var(--bg-void);
@@ -259,27 +259,27 @@
   background: #ffffff;
   box-shadow: 0 0 8px 2px var(--info);
 }
-.live-ev__seq { flex: 0 0 18px; text-align: right; }
+.live-ev__seq { flex: 0 0 24px; text-align: right; }
 .live-ev__z {
-  flex: 0 0 26px;
+  flex: 0 0 34px;
   text-align: center;
   border: 1px solid var(--border-hairline);
   border-radius: 2px;
   color: #9fe2ff;
 }
 .live-ev__k {
-  flex: 0 0 58px;
+  flex: 0 0 74px;
   text-align: center;
   padding: 0 3px;
   border-radius: 2px;
-  font-size: 9.5px;
+  font-size: 12.5px;
   letter-spacing: 0.04em;
 }
 .k-refined { color: var(--info); background: rgba(94, 200, 255, 0.14); }
 .k-replace { color: var(--warn); background: rgba(255, 180, 84, 0.15); }
 .k-final { color: var(--person); background: rgba(57, 217, 138, 0.15); }
-.live-ev__tt { flex: 0 0 44px; color: #9fe2ff; }
-.live-ev__dl { flex: 0 0 34px; color: var(--warn); font-size: 10px; }
+.live-ev__tt { flex: 0 0 58px; color: #9fe2ff; }
+.live-ev__dl { flex: 0 0 44px; color: var(--warn); font-size: 12.5px; }
 .live-ev__p { flex: 1 1 auto; text-align: right; color: var(--text-secondary); }
 
 /* --- Controls bar (bottom center) --- */
@@ -287,8 +287,8 @@
   position: absolute;
   bottom: 16px;
   left: 50%;
-  margin-left: -270px;
-  width: 540px;
+  margin-left: -370px;
+  width: 740px;
   z-index: 5;
   display: none;
   flex-wrap: wrap;
@@ -305,7 +305,7 @@
   display: flex;
 }
 .live-btn {
-  padding: 3px 9px;
+  padding: 6px 12px;
   border: 1px solid var(--border-hairline);
   border-radius: var(--radius-sm);
   background: var(--surface-inset);
@@ -318,7 +318,7 @@
   border-color: var(--border-focus);
 }
 .live-ic {
-  min-width: 28px;
+  min-width: 38px;
   text-align: center;
 }
 .live-seg.is-on {
@@ -330,19 +330,28 @@
   color: var(--text-tertiary);
 }
 .live-val {
-  min-width: 26px;
+  min-width: 34px;
   text-align: center;
   color: var(--text-primary);
 }
 .live-sep {
   width: 1px;
-  height: 16px;
+  height: 22px;
   background: var(--divider);
+}
+
+/* Board-wide text scale: every panel uses these tokens (the shared tower style keeps its own). */
+:root {
+  --text-xs: 12.5px;
+  --text-sm: 13.5px;
+  --text-md: 15px;
+  --text-lg: 17px;
+  --text-xl: 21px;
 }
 
 /* Short viewports (a phone on its side): no room for the right column's timeline. */
 @media (max-height: 600px) {
-  .live-timeline { top: 52px; bottom: 228px; width: 300px; }
+  .live-timeline { top: 52px; bottom: 228px; width: 380px; }
   .live-monitor { display: none !important; }
-  .live-controls { margin-left: -220px; width: 440px; }
+  .live-controls { margin-left: -300px; width: 600px; }
 }

@@ -110,8 +110,6 @@ pub fn kind_class(kind: Kind) -> &'static str {
     }
 }
 
-/// The timeline legend (what T+ and the +s column mean).
-pub const LEGEND: &str = "T+ = 재구성 시작 후 경과 · +s = 이전 갱신 후 · REFINED 정제 · REPLACE 교체 · FINAL 완료";
 
 /// The change counts of one entry: points that moved, were added, were removed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -522,7 +520,6 @@ pub fn live_markup(settings: &LiveSettings) -> String {
             "<div id=\"live-monitor\" class=\"live-monitor\"><canvas id=\"live-monitor-wave\" class=\"live-monitor__wave\"></canvas><div class=\"live-monitor__label\" id=\"live-mon-label\"></div><div class=\"live-monitor__sub\" id=\"live-mon-sub\"></div><div class=\"live-monitor__age\" id=\"live-mon-age\"></div></div>",
             "<div id=\"live-timeline\" class=\"sl-surface sl-surface--panel live-timeline\">",
             "<div class=\"live-timeline__head\"><span class=\"live-timeline__title\">EVENTS</span><button type=\"button\" id=\"live-follow\" class=\"live-follow is-live\" data-live=\"golive\">LIVE</button></div>",
-            "<div class=\"live-legend\">{legend}</div>",
             "<div class=\"live-cnt\" id=\"live-cnt\"></div>",
             "<div class=\"live-bar-row\"><span class=\"live-bar-row__l\" id=\"live-bar-label\"></span><span class=\"live-bar-row__r\" id=\"live-bar-pct\"></span></div>",
             "<div class=\"live-bar\"><i id=\"live-bar-fill\"></i></div>",
@@ -542,7 +539,6 @@ pub fn live_markup(settings: &LiveSettings) -> String {
             "</div>",
         ),
         title = WAIT_TITLE,
-        legend = LEGEND,
         speed = settings.speed,
         size = size_text(settings.point_size),
         modes = color_buttons_markup(settings.color_mode),

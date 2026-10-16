@@ -388,7 +388,7 @@ impl StatusApp {
                 // The ladder's `flex: 1 0 100%` only wraps under the dot and body when the panel
                 // has a definite width; shrink-to-fit leaves it beside the body, squeezed to one
                 // glyph per line. 340px is the stylesheet's max-width.
-                dom.set_style("server-status", "width", "340px");
+                dom.set_style("server-status", "width", "400px");
             }
             None => {
                 for prop in ["left", "top", "bottom", "width", "height"] {

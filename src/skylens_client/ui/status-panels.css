@@ -20,7 +20,7 @@
   left: 9px;
   z-index: 1;
   font-family: var(--font-display);
-  font-size: 9px;
+  font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.12em;
   color: var(--text-tertiary);
@@ -245,7 +245,7 @@
   background: var(--surface-glass);
   border-bottom: 1px solid var(--divider);
   font-family: var(--font-display);
-  font-size: 10px;
+  font-size: 12.5px;
   font-weight: 600;
   letter-spacing: 0.12em;
   color: var(--text-tertiary);
@@ -279,7 +279,7 @@
   background: var(--surface-glass);
   border-left: 1px solid var(--divider);
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 12.5px;
   color: var(--text-secondary);
 }
 
@@ -290,7 +290,7 @@
 }
 
 .point-inset__caption {
-  font-size: 9px;
+  font-size: 12px;
   line-height: 1.25;
   text-align: center;
   color: var(--text-tertiary);

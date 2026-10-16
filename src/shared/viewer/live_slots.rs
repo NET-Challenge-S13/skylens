@@ -205,6 +205,9 @@ pub struct LiveSlots {
     settle: HashMap<u32, Settle>,
     /// Highest base slot id + 1 seen.
     need: u32,
+    /// Adds and removes fade; off (the default) they appear and disappear at once and only moves
+    /// glide: a fade of hundreds of thousands of points at once reads as a flash.
+    fades: bool,
 }
 
 impl Default for LiveSlots {
@@ -226,7 +229,13 @@ impl LiveSlots {
             overlay_gone: Vec::new(),
             settle: HashMap::new(),
             need: 0,
+            fades: false,
         }
+    }
+
+    /// Fade adds and removes (150 ms) instead of showing and hiding them at once.
+    pub fn set_fades(&mut self, on: bool) {
+        self.fades = on;
     }
 
     pub fn set_background(&mut self, bg: [u8; 3]) {
@@ -289,9 +298,10 @@ impl LiveSlots {
     pub fn apply(&mut self, batch: &Batch, now: f64) {
         self.need = self.need.max(batch.capacity);
         let animate = batch.animate;
+        let fade = animate && self.fades;
         let mut room = ANIM_BUDGET.saturating_sub(self.anims.len());
         for r in &batch.removes {
-            if animate && (room > 0 || self.by_id.contains_key(&r.id)) {
+            if fade && (room > 0 || self.by_id.contains_key(&r.id)) {
                 let (from, from_rgb) = self.look(r.id, now).unwrap_or((r.xyz, r.rgb));
                 if !self.by_id.contains_key(&r.id) {
                     room -= 1;
@@ -304,7 +314,7 @@ impl LiveSlots {
             }
         }
         for a in &batch.adds {
-            if animate && (room > 0 || self.by_id.contains_key(&a.id)) {
+            if fade && (room > 0 || self.by_id.contains_key(&a.id)) {
                 if !self.by_id.contains_key(&a.id) {
                     room -= 1;
                 }
@@ -429,6 +439,7 @@ mod tests {
     #[test]
     fn batches_queue_animations_and_hide_the_base_slot() {
         let mut l = LiveSlots::default();
+        l.set_fades(true);
         l.apply(&Batch { adds: vec![add(0, 1.0), add(1, 2.0)], capacity: 2, animate: true, ..Default::default() }, 0.0);
         assert_eq!(l.animating(), 2);
         assert_eq!(l.next_overlay, 2);
@@ -450,6 +461,7 @@ mod tests {
     #[test]
     fn a_snap_batch_animates_nothing_and_cancels_a_running_animation() {
         let mut l = LiveSlots::default();
+        l.set_fades(true);
         l.apply(&Batch { adds: vec![add(0, 1.0)], capacity: 1, animate: true, ..Default::default() }, 0.0);
         assert_eq!(l.animating(), 1);
         l.apply(&Batch { adds: vec![add(0, 3.0), add(1, 4.0)], capacity: 2, animate: false, ..Default::default() }, 0.01);
@@ -461,6 +473,7 @@ mod tests {
     #[test]
     fn the_animation_budget_snaps_the_rest() {
         let mut l = LiveSlots::default();
+        l.set_fades(true);
         let adds: Vec<AddRec> = (0..ANIM_BUDGET as u32 + 10).map(|i| add(i, i as f32)).collect();
         l.apply(&Batch { capacity: adds.len() as u32, adds, animate: true, ..Default::default() }, 0.0);
         assert_eq!(l.animating(), ANIM_BUDGET);
@@ -483,6 +496,7 @@ mod tests {
             return;
         };
         let mut l = LiveSlots::new([0, 0, 0]);
+        l.set_fades(true);
         // Two settled points.
         l.apply(&Batch { adds: vec![add(0, 0.0), add(1, 1.0)], capacity: 2, animate: false, ..Default::default() }, 0.0);
         l.tick(&device, &queue, 0.0);
@@ -520,8 +534,20 @@ mod tests {
     }
 
     #[test]
+    fn without_fades_adds_and_removes_are_instant_and_moves_glide() {
+        let mut l = LiveSlots::default();
+        let m = MoveRec { id: 1, from: [0.0; 3], from_rgb: [1; 3], xyz: [3.0, 0.0, 0.0], rgb: [2; 3], zone: 0 };
+        let r = RemoveRec { id: 2, xyz: [0.0; 3], rgb: [1; 3], zone: 0 };
+        l.apply(&Batch { adds: vec![add(0, 1.0)], moves: vec![m], removes: vec![r], capacity: 3, animate: true }, 0.0);
+        assert_eq!(l.animating(), 1, "only the move is in flight");
+        assert!(matches!(l.settle[&0], Settle::Show { .. }));
+        assert!(matches!(l.settle[&2], Settle::Hide));
+    }
+
+    #[test]
     fn reset_forgets_everything() {
         let mut l = LiveSlots::default();
+        l.set_fades(true);
         l.apply(&Batch { adds: vec![add(0, 1.0)], capacity: 1, animate: true, ..Default::default() }, 0.0);
         l.reset();
         assert_eq!((l.animating(), l.next_overlay, l.settle.len()), (0, 0, 0));
