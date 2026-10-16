@@ -898,18 +898,18 @@ impl SkyLensNetDetector {
         let cuda = self.device.is_cuda();
         let autocast = cuda && self.options.precision == Precision::Fp16Autocast;
         let bf16 = cuda && self.options.precision == Precision::Bf16;
-        Ok(tch::no_grad(|| {
-            tch::autocast(autocast, || {
-                let x = if bf16 { pixel_values.to_kind(Kind::BFloat16) } else { pixel_values.shallow_clone() };
-                let out = loaded.net.forward(&x, Some(modality_mask));
-                SkyLensOutput {
-                    danger_logits: out.danger_logits.to_kind(Kind::Float),
-                    person_heatmap: out.person_heatmap.to_kind(Kind::Float),
-                    person_wh: out.person_wh.to_kind(Kind::Float),
-                    person_offset: out.person_offset.map(|o| o.to_kind(Kind::Float)),
-                }
-            })
-        }))
+        let forward = || {
+            let x = if bf16 { pixel_values.to_kind(Kind::BFloat16) } else { pixel_values.shallow_clone() };
+            let out = loaded.net.forward(&x, Some(modality_mask));
+            SkyLensOutput {
+                danger_logits: out.danger_logits.to_kind(Kind::Float),
+                person_heatmap: out.person_heatmap.to_kind(Kind::Float),
+                person_wh: out.person_wh.to_kind(Kind::Float),
+                person_offset: out.person_offset.map(|o| o.to_kind(Kind::Float)),
+            }
+        };
+        // Only enter autocast when needed; calling it with `false` still triggers a libtorch deprecation warning.
+        Ok(tch::no_grad(|| if autocast { tch::autocast(true, forward) } else { forward() }))
     }
 
     /// Builds `(B, C, T, T)` pixel values and the `(B, 2)` modality mask from
