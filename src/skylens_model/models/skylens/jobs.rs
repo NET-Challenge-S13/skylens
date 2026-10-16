@@ -207,6 +207,7 @@ pub fn write_cloud(path: &Path, out: &JobOutput) -> anyhow::Result<u64> {
             positions: out.points.iter().map(|p| p.pos).collect(),
             normals: Vec::new(),
             colors: out.points.iter().map(|p| p.rgb).collect(),
+            keys: Vec::new(),
         }
     } else {
         (*out.cloud).clone()
