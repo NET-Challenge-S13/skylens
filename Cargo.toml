@@ -57,8 +57,9 @@ deltamesh = "0.1"
 tch = { version = "0.24", features = ["download-libtorch"] }
 
 # rendering and UI (skylens_client)
-pointblitz = "0.2"
-pointblitz-io = "0.2"
+# 0.2.1 carries the layers SkyLens needs (pass drawing, meshes, textures, lines, fog, background colour).
+pointblitz = "0.2.1"
+pointblitz-io = "0.2.1"
 # Blitz from git: the 0.3.0-beta.2 release renders with wgpu 29, pointblitz 0.2 needs wgpu 30.
 blitz-dom = { git = "https://github.com/DioxusLabs/blitz", rev = "45496d9288b063719ebeae4e0761273f7881b3d7" }
 blitz-html = { git = "https://github.com/DioxusLabs/blitz", rev = "45496d9288b063719ebeae4e0761273f7881b3d7" }
@@ -73,12 +74,7 @@ wgpu = "30"
 codegen-units = 1
 lto = "thin"
 
-# pointblitz with SkyLens changes kept in-repo (third_party/pointblitz/PATCHES.md):
-# drawing into a caller-owned pass, meshes, textures, lines, fog and background colour.
 [patch.crates-io]
-pointblitz = { path = "third_party/pointblitz/pointblitz" }
-pointblitz-core = { path = "third_party/pointblitz/pointblitz-core" }
-pointblitz-io = { path = "third_party/pointblitz/pointblitz-io" }
 deltamesh = { path = "third_party/deltamesh" }
 
 # cumulus3d with SkyLens changes kept in-repo (third_party/cumulus3d/PATCHES.md):

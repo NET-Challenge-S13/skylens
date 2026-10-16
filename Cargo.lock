@@ -4103,7 +4103,9 @@ dependencies = [
 
 [[package]]
 name = "pointblitz"
-version = "0.2.0"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "28321f634491d37bf5bf505c92fd549fbe8c80c75e58a9906249c1a8d6674a1a"
 dependencies = [
  "pointblitz-core",
  "pointblitz-io",
@@ -4111,7 +4113,9 @@ dependencies = [
 
 [[package]]
 name = "pointblitz-core"
-version = "0.2.0"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3a817bb80478d1d0433c92c65cf0d756a417022313e496534feac59e8a040b8e"
 dependencies = [
  "bytemuck",
  "glam 0.34.1",
@@ -4121,7 +4125,9 @@ dependencies = [
 
 [[package]]
 name = "pointblitz-io"
-version = "0.2.0"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e579b6b224d176162d1e1b82a8d2eb9b2f8eb0d9056d17d02cfee2bf9c371e0a"
 
 [[package]]
 name = "polling"

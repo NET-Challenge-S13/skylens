@@ -151,7 +151,7 @@ UNet 쪽 규칙:
 
 - **화면은 이전 TypeScript 화면과 같아야 한다.** 패널 배치, 문구, 색, 폰트, 애니메이션, 키 조작, 3D 모습까지 같다. 바뀌는 것은 렌더러(three.js → pointblitz)와 언어(TS → Rust)뿐이다.
 - **HTML/CSS는 이전 것을 그대로 쓴다.** CSS 파일(`style.css` · `panels.css` · `control.css` · `status-panels.css`)은 수정하지 않고 가져온다. 이전 화면은 HTML 셸이 비어 있고 TS가 런타임에 DOM을 만들었으므로, 이전 앱이 실제로 만든 DOM을 상태별로 떠 와서(`.worktrees/legacy-dom/`) 같은 태그·id·class 구조를 Blitz에 넘긴다. Rust는 마크업을 새로 짓지 않고 값과 class만 바꾼다.
-- **3D 뷰는 three.js 캔버스가 있던 자리에 pointblitz를 끼운다.** 이전 three.js 장면의 모습(지형 면과 위성 드레이프, 음영 프리즘 건물과 모서리선, 와이어프레임 드론과 궤적, 경로와 지상 패드, 안개와 배경색, 카메라 동작)을 pointblitz 패치(`third_party/pointblitz`)로 재현한다.
+- **3D 뷰는 three.js 캔버스가 있던 자리에 pointblitz를 끼운다.** 이전 three.js 장면의 모습(지형 면과 위성 드레이프, 음영 프리즘 건물과 모서리선, 와이어프레임 드론과 궤적, 경로와 지상 패드, 안개와 배경색, 카메라 동작)을 pointblitz 0.2.1(crates.io)의 레이어(패스 안 그리기 · 메시 · 텍스처 · 선 · 안개)로 재현한다.
 - 폰트(Oswald · Barlow · IBM Plex Mono · Noto Sans KR)는 앱에 포함해 웹과 네이티브가 같은 글꼴을 쓴다.
 
 ---
@@ -176,7 +176,6 @@ UNet 쪽 규칙:
 
 ```
 Cargo.toml              Rust 워크스페이스 (shared · shared/viewer · drone · model · core/control · client · demo · test)
-third_party/pointblitz/ pointblitz 패치본 ([patch.crates-io], 패스 안 그리기 · 메시 · 텍스처 · 선 · 안개)
 go.work                 Go 워크스페이스 (skylens_core)
 pyproject.toml          Python (UNet 학습 · 데이터셋)
 src/
@@ -296,7 +295,7 @@ pointblitz는 서버에서 헤드리스로 그려 영상으로 보내는 모드�
 | 4 | `skylens_core`: Go 서버 + gRPC 클라이언트 + 지형·건물 pointblitz 청크 | 코드 완료 (go test 통과) |
 | 5 | `skylens_model`: REST·gRPC + cumulus3d 라이브 복원 + deltamesh + UNet(tch) 훅·보간 | 코드 완료 (테스트 179개 통과, 실데이터 미검증) |
 | 6 | 화면: 1차 이식은 이전 화면과 달라 다시 한다. 관제탑은 `skylens_core/control`, 현황판은 `skylens_client`, 공용 층은 `shared/viewer`로 나누고 이전 HTML/CSS·DOM을 그대로 쓴다(§3.10) | 재작업 중 |
-| 6' | pointblitz 패치(`third_party/pointblitz`): 패스 안 그리기 · 메시 · 텍스처 · 선 · 안개 · 배경색 | 재작업 중 |
+| 6' | pointblitz 레이어(패스 안 그리기 · 메시 · 텍스처 · 선 · 안개 · 배경색): pointblitz 0.2.1 에 들어가 crates.io 에서 바로 받는다(`third_party/pointblitz` 패치 제거) | 완료 |
 | 7 | 게이트웨이 nginx 경로·터널 8082 | 완료 |
 | 8 | `demo`: 엔드 투 엔드 런처 | 대기 |
 | 9 | `legacy/` 전부 삭제 | 대기 |
