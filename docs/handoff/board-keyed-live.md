@@ -29,3 +29,14 @@
 
 ## 테스트 방법
 단위: `cargo test -p skylens-client -p skylens-viewer`. 시각 확인은 위 6번. 레퍼런스 뷰어는 `docs/reference/cumulus3d-viewer/serve.sh` 없이 `index.html?data=<스트림>` 로 정적 서빙해 비교 가능.
+
+## 현재 상태 (인계 시점)
+- `feat/pointblitz-anim`과 `feat/board-live-panels`를 이 브랜치에 머지 완료(충돌 없음). 머지본에서 `cargo check -p skylens-client` 통과. 웹 빌드와 테스트는 아직 돌리지 않았다.
+- 점 레이어 연결은 아직 시작 전이다(위 "남은 일" 2~4번이 그대로 남음). 코드 변경은 머지 외에 없다.
+
+## 이어서 할 일 (구체)
+1. `Gpu3d`(src/shared/viewer/view3d.rs)에 `live: Option<AnimatedPoints>` 추가. `render()`의 `Gpu3d { .. }` 구조분해에 포함하고, `points.draw` 다음에 `prepare(device, queue, size, &camera, now_s, fog)`와 `draw`. `FrameSpec`에 점 크기/색상 모드를 실을 필드가 필요하다.
+2. scene.rs/inset.rs `frame()`: `board.live_ops(LIVE_MAIN/LIVE_INSET)`의 Reset은 레이어 재생성, Apply(Batch)는 `AnimatedPoints.apply`(키 = 슬롯 id, animate=false면 now를 과거로, 프레임당 20만 점 분할). `board.store.delta_mode()`이면 `sync_segments`/RevealFade 점 경로를 건너뛴다. `gpu_lost`에서 `live_ops_reset`.
+3. 설정: `LivePanels.settings`(point_size 픽셀, color_mode, speed, fit_requested)를 레이어가 읽는다. Zone 모드는 AnimatedPoints에 없으므로 장면에서 Rgb로 두고 구역색 rgb로 레이어를 재구성(모드 변경 시 Reset + `live_ops_reset`). Height는 `ColorMode::Height{board.height_range()}`. fit은 `fit_requested`를 take하고 프레임 맞춤.
+4. `DeltaLog::unfollow()` 추가(live=false만 설정), `panels_live::Replay::control` PlayPause의 seek 우회를 `Cmd::Unfollow`로 교체.
+5. 테스트 추가(슬롯 버퍼 == DisplayMirror, undo 역연산, run 리셋, 패널 포맷은 이미 있음), 네이티브/웹 빌드, 가능하면 delta-replay(feat/delta-replay)로 스크린샷, PR(develop 대상, feat/cumulus3d-06-live 위에 쌓임 명시, 병합 금지).
