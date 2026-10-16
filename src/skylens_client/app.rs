@@ -9,6 +9,7 @@
 use crate::board::Board;
 use crate::card::Card;
 use crate::inset::InsetScene;
+use crate::live_ui::LivePanels;
 use crate::minimap::{MapData, MinimapWidget};
 use crate::panels::{self, BannerInput, PanelState};
 use crate::scene::StatusScene;
@@ -27,6 +28,8 @@ use std::rc::Rc;
 /// The legacy template and the board's own stylesheet, both unmodified.
 pub const STATUS_HTML: &str = include_str!("ui/status.html");
 pub const STATUS_PANELS_CSS: &str = include_str!("ui/status-panels.css");
+/// Waiting screen, monitor, timeline and controls bar of the live reconstruction.
+pub const LIVE_PANELS_CSS: &str = include_str!("ui/live-panels.css");
 
 pub const LOADING_TITLE: &str = "현황판 · 3D 복원 데이터 로딩";
 pub const WINDOW_TITLE: &str = "SkyLens · 현황판 - 실시간 3D 복원";
@@ -42,7 +45,7 @@ pub fn waiting_text(core_url: &str, attempts: u32) -> String {
 
 /// The page: legacy template plus the shared CSS and `status-panels.css`.
 pub fn page() -> Page {
-    Page::legacy(STATUS_HTML, &[STATUS_PANELS_CSS])
+    Page::legacy(STATUS_HTML, &[STATUS_PANELS_CSS, LIVE_PANELS_CSS])
 }
 
 /// How the board starts.
@@ -126,6 +129,8 @@ pub struct StatusApp {
     site_seen: bool,
     last_poll_ms: Option<f64>,
     gpu_alert: GpuLossAlert,
+    /// The panels of the live point stream (the log itself is `Board::live`).
+    pub live: LivePanels,
 }
 
 impl StatusApp {
@@ -147,6 +152,7 @@ impl StatusApp {
             gpu_alert: GpuLossAlert::default(),
             site_seen: false,
             last_poll_ms: None,
+            live: LivePanels::new(),
         }
     }
 
@@ -280,11 +286,18 @@ impl StatusApp {
             let mission = b.mission.as_ref().map(|m| (m.message.as_str(), m.drones_online));
             dom.set_text(*line, &panels::link_line(state, mission, status.badge_text()));
         }
-        // Ladder: one row per segment the core reports, appended in first-seen order.
-        let segments: Vec<(u32, u32)> =
+        // Ladder: one row per segment the core reports, plus one per timeline zone, so the ladder
+        // and the event timeline agree (`panels_live::zone_stats`).
+        let zones = crate::panels_live::zone_stats(b.live.entries());
+        let mut segments: std::collections::BTreeMap<u32, u32> =
             core.map(|c| c.segments.iter().map(|s| (s.index, panels::level_number(s.level()))).collect()).unwrap_or_default();
+        for z in zones.keys() {
+            segments.entry(*z).or_insert(0);
+        }
         drop(b);
-        for (index, level) in segments {
+        for (index, core_level) in segments {
+            let zone = zones.get(&index);
+            let level = crate::panels_live::ladder_level(core_level, zone);
             if !self.ladder.contains_key(&index) {
                 let added = dom.append_html(q(".server-status__ladder"), &panels::ladder_row_markup(index, level));
                 let Some(row) = added.first().copied() else { continue };
@@ -296,7 +309,7 @@ impl StatusApp {
             for (i, pip) in row.pips.iter().enumerate() {
                 dom.set_attr(*pip, "data-on", if (i as u32) < level { "1" } else { "0" });
             }
-            dom.set_text(row.note, &panels::ladder_note(level));
+            dom.set_text(row.note, &crate::panels_live::ladder_note_zone(level, zone));
             dom.set_attr(row.note, "data-refining", panels::ladder_refining(level));
         }
     }
@@ -445,6 +458,7 @@ impl ScreenApp for StatusApp {
             dom.set_style(q("#overlay-status .detect-card"), "bottom", "228px");
         }
         self.card = Card::bind(dom);
+        self.live.mount(dom);
         self.loading = LoadingScreen::mount(dom, LOADING_TITLE);
         if let Some(l) = &mut self.loading {
             l.progress(dom, 0.0, None);
@@ -473,6 +487,7 @@ impl ScreenApp for StatusApp {
         self.render_points(dom);
         self.size_minimap(dom);
         self.update_map();
+        self.live.poll(dom, &mut self.board.borrow_mut().live, now, dt);
 
         if let Some(l) = &mut self.loading {
             l.tick(dom, now);
@@ -485,6 +500,9 @@ impl ScreenApp for StatusApp {
     }
 
     fn input(&mut self, input: &UiInput, dom: &mut Dom<'_>) -> bool {
+        if self.live.input(input, dom, &mut self.board.borrow_mut().live) {
+            return true;
+        }
         if Card::is_confirm(input) {
             self.confirm(dom);
             return true;
@@ -549,7 +567,8 @@ mod tests {
     fn the_page_is_the_legacy_template_with_the_legacy_css() {
         let p = page();
         assert_eq!(p.template, STATUS_HTML);
-        assert_eq!(p.stylesheets.last().map(String::as_str), Some(STATUS_PANELS_CSS));
+        assert_eq!(p.stylesheets.last().map(String::as_str), Some(LIVE_PANELS_CSS));
+        assert!(p.stylesheets.iter().any(|c| c == STATUS_PANELS_CSS));
         let html = p.html();
         for id in ["status-view", "overlay-status", "net-status", "server-status", "minimap", "board-waiting", "point-toggle", "toast-root"] {
             assert!(html.contains(&format!("id=\"{id}\"")), "{id}");
