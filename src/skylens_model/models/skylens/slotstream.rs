@@ -13,6 +13,10 @@
 //! | `level` | refined (stable display has no preview) |
 //! | `version` | the message seq (1, 2, ... in delivery order, no gaps) |
 //! | `generation` | the stream id of this model run ([`next_stream_id`]) |
+//! | `slot_kind` | why the delta was emitted: [`SLOT_REFINED`], [`SLOT_REPLACE`] or [`SLOT_FINAL`] |
+//! | `slot_t_ms` | cumulus3d session time of the delta, milliseconds since the run's start |
+//!
+//! The last message of a run is the empty final one (0 adds, moves and removes, `slot_kind` final).
 //!
 //! | pack record | bytes (little endian) |
 //! |---|---|
@@ -28,7 +32,7 @@
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use cumulus3d_cli::live::{DisplayDelta, DisplayFrame};
+use cumulus3d_cli::live::{DeltaKind, DisplayDelta, DisplayFrame};
 use pointblitz_io::slots::{self, Record, SlotHeader};
 use skylens_shared::geo::{GeoAnchor, Gps, gps_to_enu};
 use skylens_shared::proto::model::v1::{Chunk, ChunkKind, Level};
@@ -61,6 +65,22 @@ pub fn next_stream_id(now: SystemTime) -> u32 {
 /// restarted model's chunks are all above that, so none of them is skipped.
 pub fn sequence_base(stream: u32) -> u64 {
     u64::from(stream) << 32
+}
+
+/// `Chunk.slot_kind`: a zone's first dense cloud was added.
+pub const SLOT_REFINED: u32 = 1;
+/// `Chunk.slot_kind`: a shown zone was re-densified or moved (stable display re-placement).
+pub const SLOT_REPLACE: u32 = 2;
+/// `Chunk.slot_kind`: all refinements finished; the message is empty.
+pub const SLOT_FINAL: u32 = 3;
+
+/// `Chunk.slot_kind` of a cumulus3d delta kind (an unknown future kind counts as refined).
+pub fn slot_kind(kind: DeltaKind) -> u32 {
+    match kind {
+        DeltaKind::Replace => SLOT_REPLACE,
+        DeltaKind::Final => SLOT_FINAL,
+        _ => SLOT_REFINED,
+    }
 }
 
 /// One slot message as a chunk.
@@ -144,7 +164,7 @@ impl SlotEncoder {
     /// The chunk for `delta` (already aligned to the anchor, see [`align_delta`]), caused by `zone`.
     /// The message seq is this encoder's own count, not the delta's: cumulus3d's seq also counts
     /// unchanged clouds and can skip, and the core holds a stream with a gap.
-    pub fn encode(&mut self, delta: &DisplayDelta, zone: usize) -> anyhow::Result<Chunk> {
+    pub fn encode(&mut self, delta: &DisplayDelta, zone: usize, kind: DeltaKind, t_s: f64) -> anyhow::Result<Chunk> {
         let header = SlotHeader {
             seq: self.next,
             n_add: u32::try_from(delta.adds.len())?,
@@ -154,7 +174,9 @@ impl SlotEncoder {
         };
         let message = slots::encode(&header, &pack(delta))?;
         slots::validate(&message)?;
-        let chunk = slots_chunk(self.stream, u32::try_from(zone).unwrap_or(u32::MAX), self.next, message);
+        let mut chunk = slots_chunk(self.stream, u32::try_from(zone).unwrap_or(u32::MAX), self.next, message);
+        chunk.slot_kind = slot_kind(kind);
+        chunk.slot_t_ms = (t_s.max(0.0) * 1000.0).round().min(f64::from(u32::MAX)) as u32;
         self.next += 1;
         Ok(chunk)
     }
@@ -199,7 +221,8 @@ mod tests {
             2,
         );
         let mut e = SlotEncoder::new(42);
-        let c = e.encode(&d, 1).unwrap();
+        let c = e.encode(&d, 1, DeltaKind::Replace, 12.3456).unwrap();
+        assert_eq!((c.slot_kind, c.slot_t_ms), (SLOT_REPLACE, 12_346));
         assert_eq!((c.kind, c.segment, c.level, c.version, c.generation), (ChunkKind::PointSlots as i32, 1, Level::Refined as i32, 1, 42));
         let h = slots::validate(&c.payload).unwrap();
         assert_eq!((h.seq, h.n_add, h.n_move, h.n_remove, h.capacity), (1, 2, 1, 0, 2));
@@ -228,7 +251,9 @@ mod tests {
             delta(vec![], vec![], vec![], 4),
         ];
         for (i, d) in deltas.iter().enumerate() {
-            let c = e.encode(d, i).unwrap();
+            let kind = if i == 2 { DeltaKind::Final } else { DeltaKind::Refined };
+            let c = e.encode(d, i, kind, i as f64).unwrap();
+            assert_eq!(c.slot_kind, if i == 2 { SLOT_FINAL } else { SLOT_REFINED });
             assert_eq!(c.version, i as u32 + 1);
             fold.apply(&c.payload).unwrap();
         }

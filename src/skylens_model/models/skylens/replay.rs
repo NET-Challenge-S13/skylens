@@ -345,6 +345,8 @@ mod tests {
             fold.apply(&c.payload).unwrap();
         }
         assert_eq!(chunks.iter().map(|c| c.segment).collect::<Vec<_>>(), [0, 1, 1]);
+        assert_eq!(chunks.iter().map(|c| (c.slot_kind, c.slot_t_ms)).collect::<Vec<_>>(), [(1, 1000), (2, 2000), (3, 3000)]);
+        assert_eq!(chunks[2].payload.len(), pointblitz_io::slots::HEADER_LEN, "the final message is empty");
         assert_eq!((fold.seq(), fold.capacity(), fold.points()), (3, 8, want.iter().flatten().count()));
         // The mirror of the recorded deltas has the same points as the message fold.
         let mut mirror = DisplayMirror::new();

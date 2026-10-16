@@ -1471,15 +1471,19 @@ func (x *SubscribeRequest) GetAfterSequence() uint64 {
 
 // Routing metadata is all the core reads. payload goes to viewers unchanged.
 type Chunk struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Sequence      uint64                 `protobuf:"varint,1,opt,name=sequence,proto3" json:"sequence,omitempty"` // monotonic per model server
-	Kind          ChunkKind              `protobuf:"varint,2,opt,name=kind,proto3,enum=skylens.model.v1.ChunkKind" json:"kind,omitempty"`
-	Segment       uint32                 `protobuf:"varint,3,opt,name=segment,proto3" json:"segment,omitempty"`
-	Level         Level                  `protobuf:"varint,4,opt,name=level,proto3,enum=skylens.model.v1.Level" json:"level,omitempty"`
-	BlockId       []int32                `protobuf:"varint,5,rep,packed,name=block_id,json=blockId,proto3" json:"block_id,omitempty"` // [x, y, z] for mesh blocks
-	Version       uint32                 `protobuf:"varint,6,opt,name=version,proto3" json:"version,omitempty"`                       // mesh block version; keep only if newer. Point slots: message seq
-	Generation    uint32                 `protobuf:"varint,7,opt,name=generation,proto3" json:"generation,omitempty"`                 // refined snapshot generation; replaces older ones. Point slots: stream id
-	Payload       []byte                 `protobuf:"bytes,8,opt,name=payload,proto3" json:"payload,omitempty"`
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	Sequence   uint64                 `protobuf:"varint,1,opt,name=sequence,proto3" json:"sequence,omitempty"` // monotonic per model server
+	Kind       ChunkKind              `protobuf:"varint,2,opt,name=kind,proto3,enum=skylens.model.v1.ChunkKind" json:"kind,omitempty"`
+	Segment    uint32                 `protobuf:"varint,3,opt,name=segment,proto3" json:"segment,omitempty"`
+	Level      Level                  `protobuf:"varint,4,opt,name=level,proto3,enum=skylens.model.v1.Level" json:"level,omitempty"`
+	BlockId    []int32                `protobuf:"varint,5,rep,packed,name=block_id,json=blockId,proto3" json:"block_id,omitempty"` // [x, y, z] for mesh blocks
+	Version    uint32                 `protobuf:"varint,6,opt,name=version,proto3" json:"version,omitempty"`                       // mesh block version; keep only if newer. Point slots: message seq
+	Generation uint32                 `protobuf:"varint,7,opt,name=generation,proto3" json:"generation,omitempty"`                 // refined snapshot generation; replaces older ones. Point slots: stream id
+	Payload    []byte                 `protobuf:"bytes,8,opt,name=payload,proto3" json:"payload,omitempty"`
+	// Point slots only (CHUNK_KIND_POINT_SLOTS; 0 and 0 for every other kind). Metadata about the
+	// slot message in payload; the PBSD/v4 bytes carry none of it. The core never reads them.
+	SlotKind      uint32 `protobuf:"varint,9,opt,name=slot_kind,json=slotKind,proto3" json:"slot_kind,omitempty"` // why the message was emitted: 1 refined, 2 replace, 3 final (empty message, last of the run)
+	SlotTMs       uint32 `protobuf:"varint,10,opt,name=slot_t_ms,json=slotTMs,proto3" json:"slot_t_ms,omitempty"` // cumulus3d session time of the delta, milliseconds since the run's start
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1568,6 +1572,20 @@ func (x *Chunk) GetPayload() []byte {
 		return x.Payload
 	}
 	return nil
+}
+
+func (x *Chunk) GetSlotKind() uint32 {
+	if x != nil {
+		return x.SlotKind
+	}
+	return 0
+}
+
+func (x *Chunk) GetSlotTMs() uint32 {
+	if x != nil {
+		return x.SlotTMs
+	}
+	return 0
 }
 
 var File_skylens_model_v1_model_proto protoreflect.FileDescriptor
@@ -1661,7 +1679,7 @@ const file_skylens_model_v1_model_proto_rawDesc = "" +
 	"\aignored\x18\x02 \x01(\x04R\aignored\x12\x18\n" +
 	"\apending\x18\x03 \x01(\x04R\apending\"9\n" +
 	"\x10SubscribeRequest\x12%\n" +
-	"\x0eafter_sequence\x18\x01 \x01(\x04R\rafterSequence\"\x8c\x02\n" +
+	"\x0eafter_sequence\x18\x01 \x01(\x04R\rafterSequence\"\xc5\x02\n" +
 	"\x05Chunk\x12\x1a\n" +
 	"\bsequence\x18\x01 \x01(\x04R\bsequence\x12/\n" +
 	"\x04kind\x18\x02 \x01(\x0e2\x1b.skylens.model.v1.ChunkKindR\x04kind\x12\x18\n" +
@@ -1672,7 +1690,10 @@ const file_skylens_model_v1_model_proto_rawDesc = "" +
 	"\n" +
 	"generation\x18\a \x01(\rR\n" +
 	"generation\x12\x18\n" +
-	"\apayload\x18\b \x01(\fR\apayload*x\n" +
+	"\apayload\x18\b \x01(\fR\apayload\x12\x1b\n" +
+	"\tslot_kind\x18\t \x01(\rR\bslotKind\x12\x1a\n" +
+	"\tslot_t_ms\x18\n" +
+	" \x01(\rR\aslotTMs*x\n" +
 	"\fDroneStation\x12\x1d\n" +
 	"\x19DRONE_STATION_UNSPECIFIED\x10\x00\x12\x16\n" +
 	"\x12DRONE_STATION_LEFT\x10\x01\x12\x18\n" +

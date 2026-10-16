@@ -32,7 +32,7 @@ use std::time::Duration;
 
 use cumulus3d_cli::compose::ReconNode;
 use cumulus3d_cli::events::{Event, Frame, ZoneRange};
-use cumulus3d_cli::live::{DisplayDelta, DisplayFrame, DisplayMirror};
+use cumulus3d_cli::live::{DeltaKind, DisplayDelta, DisplayFrame, DisplayMirror};
 use cumulus3d_core::io::ply::PointCloud;
 use cumulus3d_core::Reconstruction;
 use deltamesh::Mesher;
@@ -296,7 +296,9 @@ impl Consumer {
                     let z = ZoneIn { range, cloud: &cloud, model: &model, level: Level::Refined, dense };
                     self.zone(z, mesher, dirty);
                 }
-                Event::DisplayDelta { delta, zone, frame, .. } => self.display_delta(&delta, zone, &frame, mesher),
+                Event::DisplayDelta { delta, zone, kind, t, frame, .. } => {
+                    self.display_delta(&delta, zone, kind, t, &frame, mesher)
+                }
                 Event::Warning { message, .. } => tracing::warn!("recon: {message}"),
                 Event::Error { message, .. } => tracing::error!("recon: {message}"),
                 _ => {}
@@ -351,7 +353,15 @@ impl Consumer {
     }
 
     /// Publishes one display delta as a point slot chunk and re-meshes the zones it touched.
-    fn display_delta(&mut self, delta: &DisplayDelta, zone: usize, frame: &DisplayFrame, mesher: &mut dyn Mesher) {
+    fn display_delta(
+        &mut self,
+        delta: &DisplayDelta,
+        zone: usize,
+        kind: DeltaKind,
+        t: f64,
+        frame: &DisplayFrame,
+        mesher: &mut dyn Mesher,
+    ) {
         let Some(out) = self.display.as_mut() else { return };
         let Some(delta) = align_delta(delta, frame, out.anchor) else {
             tracing::warn!("display delta {} skipped: its points are not in an ENU frame", delta.seq);
@@ -366,7 +376,7 @@ impl Consumer {
         if let Err(e) = out.mirror.apply(&delta) {
             tracing::warn!("display delta {} does not fit the model mirror: {e}", delta.seq);
         }
-        let chunk = match out.encoder.encode(&delta, zone) {
+        let chunk = match out.encoder.encode(&delta, zone, kind, t) {
             Ok(c) => c,
             Err(e) => {
                 tracing::warn!("display delta {} skipped: {e:#}", delta.seq);
@@ -519,7 +529,7 @@ mod tests {
         assert!(dirty.is_empty(), "no detector, no detection batches");
     }
 
-    use cumulus3d_cli::live::{DeltaKind, PointAdd, PointMove};
+    use cumulus3d_cli::live::{PointAdd, PointMove};
     use pointblitz_io::slots::Fold;
 
     fn blocks_since(log: &ChunkLog, after: u64) -> Vec<(u32, i32)> {
@@ -538,12 +548,16 @@ mod tests {
     }
 
     fn delta_event(zone: usize, delta: DisplayDelta, enu: bool) -> Msg {
+        delta_event_of(zone, delta, enu, DeltaKind::Refined, 1.0)
+    }
+
+    fn delta_event_of(zone: usize, delta: DisplayDelta, enu: bool, kind: DeltaKind, t: f64) -> Msg {
         Msg::Event(Event::DisplayDelta {
             meta: Meta { version: 1, at: SystemTime::now() },
             delta: Arc::new(delta),
             zone,
-            kind: DeltaKind::Refined,
-            t: 1.0,
+            kind,
+            t,
             frame: DisplayFrame { enu, origin_gps: Some([ANCHOR.lat, ANCHOR.lon, ANCHOR.alt]) },
         })
     }
@@ -579,10 +593,19 @@ mod tests {
         c.handle(delta_event(1, d2, true), mesher.as_mut(), &mut dirty);
         assert!(blocks_since(&log, s).iter().any(|b| b.0 == 1), "the zone 1 delta meshes zone 1");
 
+        // The run ends with an empty final message carrying kind and time.
+        let end = delta(vec![], vec![], vec![], 19_999, 20_000);
+        c.handle(delta_event_of(1, end, true, DeltaKind::Final, 7.25), mesher.as_mut(), &mut dirty);
         let slots = slots_in(&log);
+        let last = slots.last().unwrap();
+        assert_eq!((last.version, last.slot_kind, last.slot_t_ms), (3, 3, 7250));
+        let h = pointblitz_io::slots::validate(&last.payload).unwrap();
+        assert_eq!((h.n_add, h.n_move, h.n_remove), (0, 0, 0));
+        assert_eq!(slots.iter().map(|x| (x.slot_kind, x.slot_t_ms)).collect::<Vec<_>>()[..2], [(1, 1000), (1, 1000)]);
+        let slots = &slots[..2];
         assert_eq!(slots.iter().map(|x| (x.version, x.generation, x.segment, x.level)).collect::<Vec<_>>(), vec![(1, 5, 0, fin), (2, 5, 1, fin)]);
         let mut fold = Fold::new();
-        for x in &slots {
+        for x in slots {
             fold.apply(&x.payload).unwrap();
         }
         assert_eq!((fold.seq(), fold.points(), fold.capacity()), (2, 19_999, 20_000));
