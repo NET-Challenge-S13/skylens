@@ -195,25 +195,25 @@ enum Action {
     Create(Vec3, Vec<TrackEntry>),
 }
 
-/// RANSAC 삼각측량 결과(점, 인라이어 마스크).
+/// RANSAC triangulation result (point, inlier mask).
 type TriResult = Option<(Vec3, Vec<bool>)>;
 
-/// 2D 점 하나의 읽기 전용 준비(연장까지 반영, 첫 생성 RANSAC 직전).
+/// Read-only preparation of one 2D point (extension applied, right before the first creation RANSAC).
 struct Prepared {
     snapshot: Vec<(Correspondence, Point3DId)>,
     state: HashMap<Correspondence, Point3DId>,
     actions: Vec<Action>,
     input: Vec<Correspondence>,
-    /// 첫 생성 RANSAC 의 관측(생성 단계로 가지 않으면 None).
+    /// Observations of the first creation RANSAC (None if it does not reach the creation step).
     first: Option<Vec<TriObservation>>,
 }
 
-/// 증분 삼각측량기. 생성 시점 등록 영상의 자세·역투영 광선을 캐시한다(자세 고정 전제).
+/// Incremental triangulator. At creation it caches the poses and back-projection rays of the registered images (assumes poses are fixed).
 pub struct TrackTriangulator<'a> {
     graph: &'a MatchGraph,
-    /// 생성 RANSAC 을 묶음으로 푸는 백엔드.
+    /// Backend that solves creation RANSAC in batches.
     backend: &'a dyn TriangulationBackend,
-    /// 삼각측량 옵션.
+    /// Triangulation options.
     pub opts: TrackTriangulatorOptions,
     poses: HashMap<ImageId, PoseInfo>,
     merge_trials: HashSet<(Point3DId, Point3DId)>,
@@ -225,12 +225,12 @@ pub struct TrackTriangulator<'a> {
 }
 
 impl<'a> TrackTriangulator<'a> {
-    /// 재구성의 등록 영상 자세·광선을 캐시해 삼각측량기를 만든다(CPU 백엔드).
+    /// Builds a triangulator by caching the poses and rays of the registered images of the reconstruction (CPU backend).
     pub fn new(rec: &Reconstruction, graph: &'a MatchGraph, opts: TrackTriangulatorOptions) -> Self {
         Self::with_backend(rec, graph, opts, &CpuTriangulation)
     }
 
-    /// [`new`](Self::new) 와 같되 생성 RANSAC 을 `backend` 로 묶어 푼다.
+    /// Like [`new`](Self::new), but creation RANSAC is solved in batches by `backend`.
     pub fn with_backend(
         rec: &Reconstruction,
         graph: &'a MatchGraph,
@@ -287,7 +287,7 @@ impl<'a> TrackTriangulator<'a> {
         Some((snapshot, actions))
     }
 
-    /// [`plan_point`](Self::plan_point) 의 앞부분: 연장까지 계획하고 첫 생성 RANSAC 의 관측을 모은다.
+    /// First part of [`plan_point`](Self::plan_point): plans up to extension and gathers the observations of the first creation RANSAC.
     fn prepare_point(&self, rec: &Reconstruction, image_id: ImageId, idx: Point2DIdx) -> Option<Prepared> {
         let corrs = self.corrs(image_id, idx);
         if corrs.is_empty() {
@@ -331,7 +331,7 @@ impl<'a> TrackTriangulator<'a> {
         TriangulationRansacParams { max_angle_error_deg: angle_limit_deg, min_tri_angle_deg: self.opts.min_angle, ..Default::default() }
     }
 
-    /// 생성 한 차례의 입력: 아직 점이 없는 대응과 그 관측. 생성으로 가지 않으면 None.
+    /// Input of one creation round: correspondences without a point yet and their observations. None if it does not go to creation.
     fn create_round(
         &self,
         input: &[Correspondence],
@@ -369,8 +369,8 @@ impl<'a> TrackTriangulator<'a> {
         self.plan_create_with(input, state, actions, angle_limit_deg, None);
     }
 
-    /// [`plan_create`](Self::plan_create) 와 같되 첫 차례 RANSAC 결과가 `first` 로 미리 주어질 수 있다
-    /// (백엔드가 묶음으로 푼 값). 다음 차례(드묾)는 CPU 로 푼다.
+    /// Like [`plan_create`](Self::plan_create), but the RANSAC result of the first round may be given in advance as `first`
+    /// (solved in a batch by the backend). Later rounds (rare) are solved on the CPU.
     fn plan_create_with(
         &self,
         input: &[Correspondence],
@@ -425,7 +425,8 @@ impl<'a> TrackTriangulator<'a> {
         Ok(n)
     }
 
-    /// 준비된 점들의 첫 생성 RANSAC 을 백엔드로 한꺼번에 푼다(준비 순서대로, 생성으로 가지 않는 점은 None).
+    /// Solves the first creation RANSAC of the prepared points in one backend call (in preparation order, None for points that
+    /// do not go to creation).
     fn estimate_firsts(&self, preps: &[Option<Prepared>]) -> Vec<Option<TriResult>> {
         let params = self.create_params(self.opts.create_angle_tol);
         let problems: Vec<TriProblem<'_>> =
@@ -439,8 +440,8 @@ impl<'a> TrackTriangulator<'a> {
         preps.iter().map(|p| p.as_ref().and_then(|p| p.first.as_ref()).map(|_| it.next().expect("결과 수"))).collect()
     }
 
-    /// 영상 하나 삼각측량. 2D 점별 계획은 병렬, 적용은 순차 + 상태 검증
-    /// (계획 후 참조 상태가 바뀌었으면 다시 계획) → 순차 실행과 같은 결과.
+    /// Triangulates one image. Per-2D-point planning is parallel, application is sequential with state validation
+    /// (re-plan if the referenced state changed after planning) so the result equals the sequential run.
     pub fn triangulate_image(&mut self, rec: &mut Reconstruction, image_id: ImageId) -> Result<usize> {
         if !self.poses.contains_key(&image_id) {
             return Ok(0);
@@ -451,7 +452,7 @@ impl<'a> TrackTriangulator<'a> {
             let this: &Self = self;
             let preps: Vec<Option<Prepared>> =
                 (0..n as Point2DIdx).into_par_iter().map(|i| this.prepare_point(rec_ref, image_id, i)).collect();
-            // 첫 생성 RANSAC 은 모든 2D 점을 백엔드 호출 한 번으로.
+            // The first creation RANSAC of all 2D points in a single backend call.
             let firsts = this.estimate_firsts(&preps);
             preps
                 .into_par_iter()
@@ -614,8 +615,8 @@ impl<'a> TrackTriangulator<'a> {
                 continue;
             }
             *trials += 1;
-            // 두 쪽 모두 점이 없는 매칭의 생성 RANSAC 을 짝 단위로 한꺼번에(모델 상태와 무관한 계산이라
-            // 미리 풀어 둔 값을 순차 처리에서 그대로 쓴다).
+            // Creation RANSAC of the matches with no point on either side, in one batch per pair (the computation does not
+            // depend on the model state, so the values solved in advance are used as is in the sequential pass).
             let mut pre: HashMap<usize, TriResult> = HashMap::new();
             {
                 let rec_ref: &Reconstruction = rec;
@@ -684,7 +685,7 @@ fn depth_and_filter_ids(touched: &HashSet<Point3DId>, rec: &Reconstruction, scop
     }
 }
 
-/// 관측 검사용 표: 자세가 있는 영상의 (카메라, 자세)와 영상 id → (카메라 번호, 자세 번호).
+/// Table for observation checks: (camera, pose) of the images with a pose, and image id -> (camera index, pose index).
 struct PoseTable {
     cameras: Vec<Camera>,
     poses: Vec<Rigid3>,
@@ -710,7 +711,8 @@ fn pose_table(rec: &Reconstruction) -> PoseTable {
     PoseTable { cameras, poses, index }
 }
 
-/// 등록 영상 기준 깊이가 양수가 아닌 관측 삭제(BA 사전 처리). 깊이는 `backend` 가 한꺼번에 계산.
+/// Removes observations whose depth relative to the registered image is not positive (BA preprocessing).
+/// Depths are computed in bulk by `backend`.
 fn delete_negative_depth(rec: &mut Reconstruction, ids: Option<&[Point3DId]>, backend: &dyn TriangulationBackend) -> Result<usize> {
     let ids: Vec<Point3DId> = ids.map_or_else(|| rec.point3d_ids(), |v| v.to_vec());
     let table = pose_table(rec);
@@ -730,7 +732,7 @@ fn delete_negative_depth(rec: &mut Reconstruction, ids: Option<&[Point3DId]>, ba
     }
     let checks = if queries.is_empty() { Vec::new() } else { backend.check_observations(&table.cameras, &table.poses, &queries) };
     assert_eq!(checks.len(), queries.len(), "관측 검사 결과 수");
-    // has_positive_depth: 깊이 ≥ ε (NaN 은 음수 취급).
+    // has_positive_depth: depth ≥ ε (NaN counts as negative).
     let positive = |d: f64| d >= f64::EPSILON;
     let del: Vec<TrackEntry> = entries.into_iter().zip(&checks).filter(|(_, c)| !positive(c.depth)).map(|(t, _)| t).collect();
     let mut n = 0;
@@ -743,8 +745,8 @@ fn delete_negative_depth(rec: &mut Reconstruction, ids: Option<&[Point3DId]>, ba
     Ok(n)
 }
 
-/// 픽셀 재투영 오차 필터(`Reconstruction::filter_observations_with_large_reprojection_error` 와 같은 규칙).
-/// 오차는 `backend` 가 한꺼번에 계산. 반환: 삭제된 관측 수.
+/// Pixel reprojection error filter (same rules as `Reconstruction::filter_observations_with_large_reprojection_error`).
+/// The errors are computed in bulk by `backend`. Returns: number of removed observations.
 fn filter_large_reprojection_error(
     rec: &mut Reconstruction,
     max_reproj_error_px: f64,
@@ -757,7 +759,7 @@ fn filter_large_reprojection_error(
     };
     let table = pose_table(rec);
     let mut queries = Vec::new();
-    // 점마다 관측별 질의 번호(자세 없는 영상이면 None → 오차 +∞).
+    // Query index per observation of each point (None for an image without a pose -> error +∞).
     let mut layout: Vec<(Point3DId, Vec<Option<usize>>)> = Vec::with_capacity(ids.len());
     for id in ids {
         let Some(p) = rec.point3d(id) else { continue };
@@ -782,7 +784,7 @@ fn filter_large_reprojection_error(
     rec.apply_observation_filter(evals, max_reproj_error_px, FilterErrorUpdate::SumOverOriginalLength)
 }
 
-/// 자세·내부 고정 점 정제. `ids` None = 모든 점.
+/// Pose- and intrinsics-fixed point refinement. `ids` None = all points.
 pub fn refine_points(rec: &mut Reconstruction, ids: Option<&[Point3DId]>, refiner: PointRefiner, max_iterations: usize) -> Result<()> {
     match refiner {
         PointRefiner::None => Ok(()),
@@ -900,8 +902,8 @@ pub fn triangulate_points(rec: &mut Reconstruction, graph: &MatchGraph, opts: &P
     triangulate_points_with(rec, graph, opts, &CpuTriangulation)
 }
 
-/// [`triangulate_points`] 와 같되 생성 RANSAC·깊이 검사·재투영 오차 필터를 `backend` 로 묶어 계산한다.
-/// 모델을 바꾸는 일(점 추가·연장·병합·삭제)은 CPU 가 같은 순서로 한다.
+/// Like [`triangulate_points`], but creation RANSAC, depth checks and the reprojection error filter are computed in batches by
+/// `backend`. Model-changing work (adding, extending, merging and deleting points) is done by the CPU in the same order.
 pub fn triangulate_points_with(
     rec: &mut Reconstruction,
     graph: &MatchGraph,

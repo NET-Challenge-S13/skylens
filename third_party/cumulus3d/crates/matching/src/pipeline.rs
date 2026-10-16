@@ -100,7 +100,7 @@ pub fn match_pairs(
     match_pairs_with(store, pairs, opts, backend, &CpuTwoView)
 }
 
-/// [`match_pairs`] 와 같되 두 뷰 기하 검증을 `verifier` 로 한다(블록마다 짝 묶음 한 번).
+/// Like [`match_pairs`], but two-view geometry verification is done by `verifier` (one batch of pairs per block).
 pub fn match_pairs_with(
     store: &FeatureStore,
     pairs: &[(ImageId, ImageId)],
@@ -156,7 +156,7 @@ pub fn match_pairs_with(
                 }
             }
         }
-        // 2) 짝 단위 병렬 매칭 → 블록 단위 검증.
+        // 2) Per-pair parallel matching -> per-block verification.
         let raws: Vec<(ImageId, ImageId, Vec<FeatureMatch>, bool)> = tasks
             .into_par_iter()
             .map(|t| {
@@ -185,7 +185,7 @@ pub fn match_pairs_with(
         };
         let results: Vec<PairResult> =
             raws.into_iter().zip(tvgs).map(|((id1, id2, raw, matched), tvg)| (id1, id2, raw, tvg, matched)).collect();
-        // 3) 블록 단위 기록(입력 순서).
+        // 3) Per-block writes (in input order).
         for (id1, id2, raw, tvg, matched) in results {
             if matched {
                 stats.num_matched += 1;

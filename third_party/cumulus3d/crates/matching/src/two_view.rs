@@ -262,12 +262,12 @@ pub fn estimate_two_view(
     }
 }
 
-/// 추정 경로.
+/// Estimation path.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum EstimationPath {
-    /// 다중 모델(인라이어를 지우며 반복).
+    /// Multiple models (repeat while removing inliers).
     Multiple,
-    /// H 만.
+    /// H only.
     HomographyOnly,
     /// E/F/H.
     Calibrated,
@@ -287,7 +287,7 @@ pub(crate) fn path_of(cam1: &Camera, cam2: &Camera, opts: &TwoViewOptions) -> Es
     }
 }
 
-/// 정지 매칭 사전 제거(옵션이 꺼져 있으면 그대로).
+/// Pre-removal of stationary matches (unchanged if the option is off).
 pub(crate) fn filter_stationary<'m>(
     kps1: &[Keypoint],
     kps2: &[Keypoint],
@@ -342,7 +342,7 @@ fn finish(
     tvg
 }
 
-/// 보정 경로 입력: (픽셀1, 픽셀2, 광선1, 광선2, E 오차 임계).
+/// Calibrated path inputs: (pixels 1, pixels 2, rays 1, rays 2, E error threshold).
 pub(crate) type CalibratedInputs = (Vec<Vec2>, Vec<Vec2>, Vec<Vec3>, Vec<Vec3>, f64);
 
 pub(crate) fn calibrated_inputs(
@@ -380,7 +380,7 @@ fn estimate_calibrated(
     assemble_calibrated(cam1, kps1, cam2, kps2, matches, opts, er, fr, hr)
 }
 
-/// 보정 경로 마무리: E/F/H RANSAC 결과로 판정·인라이어·워터마크.
+/// Finishes the calibrated path: decision, inliers and watermark from the E/F/H RANSAC results.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn assemble_calibrated(
     cam1: &Camera,
@@ -437,7 +437,7 @@ fn estimate_uncalibrated(
     assemble_uncalibrated(cam1, kps1, cam2, kps2, matches, opts, fr, hr)
 }
 
-/// 비보정 경로 마무리.
+/// Finishes the uncalibrated path.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn assemble_uncalibrated(
     cam1: &Camera,
@@ -478,7 +478,7 @@ fn estimate_homography_only(
     assemble_homography_only(cam1, kps1, cam2, kps2, matches, opts, hr)
 }
 
-/// H 전용 경로 마무리.
+/// Finishes the H-only path.
 pub(crate) fn assemble_homography_only(
     cam1: &Camera,
     kps1: &[Keypoint],

@@ -27,12 +27,13 @@
 
 //! Descriptor matching and two-view geometry verification.
 //!
-//! - [`descriptor`]: 정수 내적 무차별 매칭(비율·거리·교차 검사), [`MatcherBackend`] 로 GPU 교체 가능.
-//! - [`estimators`], [`essential`]: 5점 E, 7/8점 F, DLT H, 평행이동 해법과 잔차(core RANSAC 추정기).
-//! - [`two_view`]: E/F/H LO-RANSAC 과 구성 판정, 워터마크.
-//! - [`batched`]: 짝 묶음 검증 백엔드([`TwoViewBackend`])와 가설 일괄 채점(GPU 교체용).
-//! - [`pose`]: E/H 분해, 중점 삼각측량 cheirality, 상대 자세(sfm 공용).
-//! - [`pairs`], [`pipeline`]: 짝 목록 파일과 FeatureStore 기록.
+//! - [`descriptor`]: brute-force integer dot-product matching (ratio, distance, cross-check); the GPU can be swapped
+//!   in via [`MatcherBackend`].
+//! - [`estimators`], [`essential`]: 5-point E, 7/8-point F, DLT H, translation solver and residuals (core RANSAC estimators).
+//! - [`two_view`]: E/F/H LO-RANSAC, configuration decision, watermark.
+//! - [`batched`]: batched pair verification backend ([`TwoViewBackend`]) and bulk hypothesis scoring (for swapping in the GPU).
+//! - [`pose`]: E/H decomposition, midpoint triangulation cheirality, relative pose (shared with sfm).
+//! - [`pairs`], [`pipeline`]: pair list file and FeatureStore writes.
 //!
 //! # Usage example
 //!

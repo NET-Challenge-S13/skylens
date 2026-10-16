@@ -431,13 +431,13 @@ where
     run(est, local, sampler, opts, x, y)
 }
 
-/// 가설을 묶음으로 내놓고 그 지지도를 바깥(예: GPU)에서 받아 진행하는 RANSAC.
+/// RANSAC that emits hypotheses in batches and proceeds with their support computed outside (e.g. on the GPU).
 ///
-/// [`ransac_with_sampler`] 와 같은 표본·모델·판정 순서를 따른다. 한 번에 여러 반복의 가설을
-/// 만들어 내놓고([`propose`](Self::propose)), 받은 지지도로 반복을 차례대로 재생한다
-/// ([`consume`](Self::consume)). 받은 지지도가 CPU 계산([`Support::measure`])과 같으면 결과도 같다.
-/// 묶음 끝까지 가기 전에 멈출 조건이 되면 나머지 가설은 버린다(결과에는 영향 없음).
-/// 국소 최적화(LO)와 마지막 인라이어 마스크는 드물게 불리므로 CPU 로 계산한다.
+/// Follows the same sample, model and decision order as [`ransac_with_sampler`]. It emits the hypotheses of several
+/// iterations at once ([`propose`](Self::propose)) and replays the iterations in order with the received support
+/// ([`consume`](Self::consume)). If the received support equals the CPU computation ([`Support::measure`]), the result is the
+/// same. If a stop condition is reached before the end of a batch, the remaining hypotheses are discarded (no effect on the
+/// result). Local optimization (LO) and the final inlier mask are rarely invoked, so they are computed on the CPU.
 pub struct BatchedRansac<'a, E: Estimator, L, S> {
     est: E,
     local: Option<L>,
@@ -455,11 +455,11 @@ pub struct BatchedRansac<'a, E: Estimator, L, S> {
     best_support: Support,
     trials: usize,
     done: bool,
-    /// 이번 묶음의 반복별 모델 수.
+    /// Number of models per iteration in the current batch.
     counts: Vec<usize>,
-    /// 이번 묶음의 모델(반복 순서대로 이어 붙임).
+    /// Models of the current batch (concatenated in iteration order).
     models: Vec<E::Model>,
-    /// 다음 묶음 크기 상한. 처음엔 min_batch 에서 시작해 묶음마다 두 배로 는다.
+    /// Upper bound of the next batch size. Starts at min_batch and doubles with each batch.
     ramp: usize,
 }
 
@@ -469,7 +469,7 @@ where
     L: Estimator<X = E::X, Y = E::Y, Model = E::Model>,
     S: Sampler,
 {
-    /// `local` 이 있으면 LO-RANSAC. 자료가 최소 표본 수보다 적으면 곧바로 끝난 상태.
+    /// LO-RANSAC if `local` is set. With less data than the minimal sample size, it starts in the finished state.
     pub fn new(est: E, local: Option<L>, mut sampler: S, opts: &RansacParams, x: &'a [E::X], y: &'a [E::Y]) -> Self {
         let n = x.len();
         let k = est.min_num_samples();
@@ -505,31 +505,31 @@ where
         }
     }
 
-    /// 끝났는지(더 낼 가설이 없음).
+    /// Whether it is finished (no more hypotheses to emit).
     pub fn is_done(&self) -> bool {
         self.done
     }
 
-    /// 인라이어 제곱 임계(max_error²).
+    /// Squared inlier threshold (max_error²).
     pub fn max_residual(&self) -> f64 {
         self.max_residual
     }
 
-    /// 지금까지 수행한 반복 수.
+    /// Number of iterations performed so far.
     pub fn num_trials(&self) -> usize {
         self.trials
     }
 
-    /// 마지막 [`propose`](Self::propose) 가 만든 모델(지지도를 기다리는 것).
+    /// Models made by the last [`propose`](Self::propose) (awaiting their support).
     pub fn models(&self) -> &[E::Model] {
         &self.models
     }
 
-    /// 다음 반복 묶음의 가설을 만든다. 묶음 크기 = 멈출 때까지 남은 반복 수를
-    /// [min_batch, 상한] 으로 자른 값(반복 상한 이내). 상한은 첫 묶음에 min_batch 이고 묶음마다
-    /// 두 배로 늘어 max_batch 까지 간다. 좋은 가설이 일찍 나오면 동적 반복 수가 작아지므로, 처음부터
-    /// 큰 묶음을 내면 CPU 경로가 하지 않을 반복까지 채점하게 된다. 표본은 순서대로 뽑고(난수 순서 보존)
-    /// 최소 해법은 병렬로 푼다. 끝난 상태면 빈 목록.
+    /// Makes the hypotheses of the next batch of iterations. Batch size = the number of iterations left until stopping,
+    /// clamped to [min_batch, cap] (within the iteration limit). The cap is min_batch for the first batch and doubles with each
+    /// batch up to max_batch. A good hypothesis found early shrinks the dynamic iteration count, so emitting a large batch from
+    /// the start would score iterations the CPU path would never run. Samples are drawn in order (preserving the random
+    /// sequence) and the minimal solvers run in parallel. Empty list if finished.
     pub fn propose(&mut self, min_batch: usize, max_batch: usize) -> &[E::Model]
     where
         E: Sync,
@@ -575,7 +575,7 @@ where
         &self.models
     }
 
-    /// [`models`](Self::models) 의 지지도(같은 순서, 같은 길이)로 반복을 재생한다.
+    /// Replays the iterations with the support of [`models`](Self::models) (same order, same length).
     pub fn consume(&mut self, supports: &[Support]) {
         assert_eq!(supports.len(), self.models.len(), "지지도 수가 모델 수와 다름");
         let models = std::mem::take(&mut self.models);
@@ -615,7 +615,7 @@ where
         }
     }
 
-    /// 결과(끝나기 전에 불러도 지금까지의 최선으로 마무리).
+    /// The result (if called before finishing, it wraps up with the best so far).
     pub fn finish(self) -> RansacReport<E::Model> {
         let k = self.est.min_num_samples();
         let trials = self.trials;
@@ -634,7 +634,7 @@ where
     }
 }
 
-/// LO 단계([`lo_ransac`] 의 국소 최적화와 같은 규칙). `residuals` = 후보 모델의 잔차.
+/// LO step (same rule as the local optimization of [`lo_ransac`]). `residuals` = residuals of the candidate model.
 fn local_optimize<L: Estimator>(
     le: &L,
     x: &[L::X],
@@ -764,7 +764,7 @@ mod tests {
 
     #[test]
     fn batched_ramps_batch_size() {
-        // 첫 묶음은 min_batch, 이후 두 배씩(동적 반복 수가 아직 클 때).
+        // The first batch is min_batch, then it doubles (while the dynamic iteration count is still large).
         let (x, y, _) = data(5);
         let opts = RansacParams { max_error: 0.1, random_seed: Some(1), min_trials: 1000, max_trials: 1000, ..Default::default() };
         let mut b = BatchedRansac::new(Line, Some(Line), RandomSubsetSampler::new(2), &opts, &x[..], &y[..]);
@@ -788,7 +788,7 @@ mod tests {
 
     #[test]
     fn batched_matches_sequential() {
-        // 지지도를 CPU 로 계산하면 묶음 크기와 무관하게 lo_ransac / ransac_with_sampler 와 같다.
+        // With support computed on the CPU, the result equals lo_ransac / ransac_with_sampler regardless of the batch size.
         let (x, y, _) = data(5);
         for seed in 0..5u64 {
             let opts = RansacParams { max_error: 0.1, random_seed: Some(seed), min_trials: 20, ..Default::default() };
@@ -815,7 +815,7 @@ mod tests {
                 assert_eq!(got.support, want.support);
             }
         }
-        // 조합 표본 + 너무 적은 자료.
+        // Exhaustive sampler + too little data.
         let opts = RansacParams { max_error: 0.1, random_seed: Some(1), ..Default::default() };
         let want = ransac_with_sampler(&Line, Some(&Line), ExhaustiveSampler::new(2), &opts, &x[..20], &y[..20]);
         let mut b = BatchedRansac::new(Line, Some(Line), ExhaustiveSampler::new(2), &opts, &x[..20], &y[..20]);

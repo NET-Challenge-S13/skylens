@@ -557,7 +557,7 @@ fn pose_result(rep: RansacReport<Rigid3>) -> Option<AbsolutePoseResult> {
     Some(AbsolutePoseResult { world_to_cam: rep.model?, inlier_mask: rep.inlier_mask, num_inliers, num_trials: rep.num_trials })
 }
 
-/// P3P + EPnP LO-RANSAC (초점 고정 경로). 인라이어 < 3 이면 None.
+/// P3P + EPnP LO-RANSAC (fixed-focal path). None if inliers < 3.
 pub fn solve_abs_pose(camera: &Camera, points2d: &[Vec2], points3d: &[Vec3], opts: &AbsolutePoseOptions) -> Option<AbsolutePoseResult> {
     if points2d.len() != points3d.len() || points2d.len() < 3 {
         return None;
@@ -567,20 +567,20 @@ pub fn solve_abs_pose(camera: &Camera, points2d: &[Vec2], points3d: &[Vec3], opt
     pose_result(rep)
 }
 
-/// 절대 자세 가설 일괄 채점기(GPU 백엔드가 구현). 대응 자료는 채점기를 만들 때 올려 둔다.
+/// Bulk scorer of absolute pose hypotheses (implemented by the GPU backend). The correspondences are uploaded when it is built.
 pub trait PoseScorer {
-    /// 자세(world_to_cam)마다, 픽셀 재투영 제곱 오차(투영 실패면 f64::MAX)가 `max_residual` 이하인
-    /// 대응의 지지도. [`Support::measure`] 와 같은 값이어야 한다(잔차 합은 대응 순서대로).
+    /// For each pose (world_to_cam), the support of the correspondences whose squared pixel reprojection error (f64::MAX if
+    /// the projection fails) is at most `max_residual`. Must equal [`Support::measure`] (residuals summed in correspondence order).
     fn score(&mut self, poses: &[Rigid3], max_residual: f64) -> Result<Vec<Support>, String>;
 }
 
-/// 한 라운드의 최소 반복 수.
+/// Minimum number of iterations per round.
 const POSE_MIN_BATCH: usize = 16;
-/// 한 라운드의 최대 반복 수.
+/// Maximum number of iterations per round.
 const POSE_MAX_BATCH: usize = 256;
 
-/// [`solve_abs_pose`] 와 같되 가설 채점을 `scorer` 에 묶음으로 맡긴다(표본·해법·LO 는 같음).
-/// 채점 결과가 CPU 와 같으면 결과도 같다. 채점기 오류는 그대로 돌려준다.
+/// Like [`solve_abs_pose`], but hands hypothesis scoring to `scorer` in batches (sampling, solvers and LO are the same).
+/// If the scores equal the CPU ones, the result is the same. Scorer errors are returned as is.
 pub fn solve_abs_pose_scored(
     camera: &Camera,
     points2d: &[Vec2],
@@ -607,13 +607,13 @@ pub fn solve_abs_pose_scored(
     Ok(pose_result(r.finish()))
 }
 
-/// 절대 자세 RANSAC 백엔드(등록 단계). CPU 기본 구현은 [`CpuAbsPose`].
+/// Absolute pose RANSAC backend (registration stage). The default CPU implementation is [`CpuAbsPose`].
 pub trait AbsPoseBackend: Send + Sync {
-    /// [`solve_abs_pose`] 와 같은 규칙의 결과.
+    /// Result under the same rules as [`solve_abs_pose`].
     fn solve(&self, camera: &Camera, points2d: &[Vec2], points3d: &[Vec3], opts: &AbsolutePoseOptions) -> Option<AbsolutePoseResult>;
 }
 
-/// CPU 기본 구현([`solve_abs_pose`]).
+/// Default CPU implementation ([`solve_abs_pose`]).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct CpuAbsPose;
 
@@ -623,7 +623,7 @@ impl AbsPoseBackend for CpuAbsPose {
     }
 }
 
-/// CPU 채점기(대조·시험용): CPU 잔차와 [`Support::measure`].
+/// CPU scorer (for comparison and tests): CPU residuals and [`Support::measure`].
 pub struct CpuPoseScorer<'a> {
     camera: &'a Camera,
     corrs: Vec<Corr2D>,
@@ -631,7 +631,7 @@ pub struct CpuPoseScorer<'a> {
 }
 
 impl<'a> CpuPoseScorer<'a> {
-    /// 대응을 담아 만든다.
+    /// Builds it holding the correspondences.
     pub fn new(camera: &'a Camera, points2d: &[Vec2], points3d: &'a [Vec3]) -> Self {
         Self { camera, corrs: correspondences(camera, points2d), points3d }
     }

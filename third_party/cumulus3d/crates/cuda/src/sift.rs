@@ -29,19 +29,23 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! `SiftEngine` 의 CUDA 구현. SIFT 전 과정을 GPU 에서 한다.
+//! CUDA implementation of `SiftEngine`. The whole SIFT runs on the GPU.
 //!
-//! 1. 가우시안 스케일 공간(정규화·2배 업샘플·분리형 블러·축소): CPU 피라미드와 비트 단위로 같다.
-//! 2. DoG, 극값 검출 + 엣지·대비 억제 + 부분화소 보정: 화소 하나당 스레드 하나, 후보는 원자적 덧붙임.
-//! 3. 방향 할당(키포인트당 여러 방향 포함): 후보 하나당 워프 하나.
-//! 4. 최대 특징 수 선택(`FeatureSelection`): 레벨별 개수만 내려받아 CPU 와 같은 규칙으로 계획을 세우고,
-//!    레벨 안 순위(TopK)·격자 칸 안 순위(SpatialGrid)는 GPU 에서 센다.
-//! 5. 128차원 기술자(정규화 → 0.2 절단 → 재정규화 → L1-ROOT 또는 L2 → ×512 양자화): 남긴 특징 하나당 워프 하나.
+//! 1. Gaussian scale space (normalization, 2x upsampling, separable blur, downscaling): bit-identical to the CPU pyramid.
+//! 2. DoG, extremum detection + edge and contrast suppression + sub-pixel refinement: one thread per pixel, candidates are
+//!    appended atomically.
+//! 3. Orientation assignment (including multiple orientations per keypoint): one warp per candidate.
+//! 4. Maximum feature count selection (`FeatureSelection`): only the per-level counts are downloaded to plan with the same
+//!    rules as the CPU, and the rank within a level (TopK) or within a grid cell (SpatialGrid) is counted on the GPU.
+//! 5. 128-dimensional descriptors (normalize -> clip at 0.2 -> renormalize -> L1-ROOT or L2 -> ×512 quantization): one warp
+//!    per kept feature.
 //!
-//! 내려받는 것은 레벨별 개수(작은 배열)와 최종 특징·기술자뿐이다. 식과 매개변수, 좌표 규칙(옥타브, 레벨,
-//! 화소 중심 0.5), 출력 순서(옥타브 → 레벨 → 검출 화소 → 방향 순번)는 `CpuSift` 와 같다. 다만 히스토그램
-//! 합산 순서와 초월함수(exp, atan2, sin/cos, pow) 구현이 달라 결과가 비트 단위로 같지는 않다. 위치·방향·기술자가
-//! 사실상 같고 특징 수도 거의 같다(시험 참고). 합산 순서는 고정이라 같은 입력이면 실행마다 결과가 같다.
+//! Only the per-level counts (small arrays) and the final features and descriptors are downloaded. The formulas and
+//! parameters, coordinate rules (octave, level, pixel center 0.5) and output order (octave -> level -> detection pixel ->
+//! orientation slot) are the same as `CpuSift`. However, the histogram summation order and the transcendental function
+//! implementations (exp, atan2, sin/cos, pow) differ, so the result is not bit-identical. Positions, orientations and
+//! descriptors are practically the same and the feature count is nearly the same (see the tests). The summation order is
+//! fixed, so the same input gives the same result on every run.
 
 use crate::device::{CudaDevice, GpuError, SyncedCopy};
 use cudarc::driver::{CudaFunction, CudaSlice, CudaStream, DevicePtr, DriverError, LaunchConfig, PushKernelArg};
@@ -53,18 +57,18 @@ use std::time::Instant;
 
 pub(crate) const SRC: &str = include_str!("kernels/sift.cu");
 const TILE_W: u32 = 128;
-/// 방향 히스토그램 빈 수(sift.cu 의 ORI_NB).
+/// Number of orientation histogram bins (ORI_NB in sift.cu).
 const ORI_NB: usize = 36;
-/// 방향 커널 블록당 워프 수(sift.cu 의 ORI_WARPS).
+/// Warps per block of the orientation kernel (ORI_WARPS in sift.cu).
 const ORI_WARPS: u32 = 4;
-/// 기술자 커널 블록당 워프 수(sift.cu 의 DESC_WARPS).
+/// Warps per block of the descriptor kernel (DESC_WARPS in sift.cu).
 const DESC_WARPS: u32 = 2;
-/// 순위 커널 블록 크기(sift.cu 의 RANK_T).
+/// Block size of the rank kernel (RANK_T in sift.cu).
 const RANK_T: u32 = 256;
-/// 후보 버퍼 첫 용량.
+/// Initial capacity of the candidate buffer.
 const MIN_CAND_CAP: usize = 1 << 14;
 
-/// CUDA SIFT 백엔드.
+/// CUDA SIFT backend.
 pub struct CudaSift {
     dev: Arc<CudaDevice>,
     f_norm: CudaFunction,
@@ -79,18 +83,18 @@ pub struct CudaSift {
     f_rank: CudaFunction,
     f_keep: CudaFunction,
     f_desc: CudaFunction,
-    /// 장치 사용 직렬화(스트림 공유) + 영상 사이에 이어 쓰는 상태.
+    /// Device use serialization (stream shared) + state carried over between images.
     lock: Mutex<State>,
 }
 
-/// 영상 사이에 이어 쓰는 상태.
+/// State carried over between images.
 #[derive(Default)]
 struct State {
-    /// 지난번에 충분했던 후보 버퍼 용량(넘치면 다시 검출하므로 기억해 둔다).
+    /// Candidate buffer capacity that sufficed last time (remembered because an overflow means detecting again).
     cand_cap: usize,
 }
 
-/// 장치 위 옥타브.
+/// Octave on the device.
 struct DevOctave {
     o: i32,
     w: usize,
@@ -106,7 +110,7 @@ fn cfg1(n: usize) -> LaunchConfig {
     LaunchConfig { grid_dim: ((n as u32).div_ceil(256).max(1), 1, 1), block_dim: (256, 1, 1), shared_mem_bytes: 0 }
 }
 
-/// 입력 오류(그대로 돌려줌)와 장치 오류(CPU 로 대신 계산)를 나눈다.
+/// Separates input errors (returned as is) from device errors (computed on the CPU instead).
 enum Fail {
     Input(Error),
     Device(GpuError),
@@ -124,24 +128,24 @@ impl From<DriverError> for Fail {
     }
 }
 
-/// 최대 특징 수 선택 계획. 레벨 번호 = 옥타브 색인 · S + j (옥타브 색인 0 이 가장 미세).
+/// Maximum feature count selection plan. Level index = octave index · S + j (octave index 0 is the finest).
 #[derive(Clone, Debug, PartialEq)]
 struct Plan {
-    /// 레벨별 상태: 0 버림(처리 안 됨 포함), 1 통째 유지, 2 순위로 고름.
+    /// Per-level state: 0 dropped (including not processed), 1 kept whole, 2 picked by rank.
     state: Vec<i32>,
-    /// 순위 선택 방식: 0 없음, 1 TopK(상태 2 레벨에서 순위 < `limit`), 2 SpatialGrid(격자 칸 라운드 로빈).
+    /// Rank selection mode: 0 none, 1 TopK (rank < `limit` in state-2 levels), 2 SpatialGrid (round robin over grid cells).
     mode: i32,
-    /// TopK 경계 레벨에서 남길 수.
+    /// Number to keep in the TopK boundary level.
     limit: usize,
-    /// 남는 특징 수.
+    /// Number of remaining features.
     n_out: usize,
 }
 
-/// `CpuSift::extract` 의 레벨 처리 순서·조기 중단과 `select` 규칙을 레벨별 개수만으로 재현한다.
-/// `det[l]` = 레벨 l 검출 후보 수, `items[l]` = 방향까지 붙인 특징 수.
+/// Reproduces the level processing order and early stop of `CpuSift::extract` and the `select` rules from per-level counts
+/// only. `det[l]` = number of detected candidates at level l, `items[l]` = number of features with orientations attached.
 fn plan_selection(det: &[usize], items: &[usize], n_oct: usize, s: usize, mode: FeatureSelection, k: usize) -> Plan {
     let nl = n_oct * s;
-    // 거친 옥타브·높은 레벨부터. CPU 는 잘릴 레벨의 검출을 생략하므로 같은 조건으로 멈춘다.
+    // From coarse octaves and high levels first. The CPU skips detection of levels that get cut, so stop under the same condition.
     let mut order: Vec<usize> = Vec::with_capacity(nl);
     let (mut cum_det, mut cum_or) = (0usize, 0usize);
     'outer: for oi in (0..n_oct).rev() {
@@ -171,7 +175,7 @@ fn plan_selection(det: &[usize], items: &[usize], n_oct: usize, s: usize, mode: 
     }
     match mode {
         FeatureSelection::CompatLevels => {
-            // 가장 미세한 레벨부터 "전체 − 그 레벨 > K" 인 동안 통째 제거.
+            // From the finest level, remove whole levels while "total - that level > K".
             let mut t = total;
             for &l in order.iter().rev() {
                 if t - items[l] > k {
@@ -184,7 +188,7 @@ fn plan_selection(det: &[usize], items: &[usize], n_oct: usize, s: usize, mode: 
             plan.n_out = t;
         }
         FeatureSelection::TopK => {
-            // 거친 레벨부터 통째로, 넘치는 첫 레벨은 |응답| 순으로 남은 수만큼, 그 뒤는 버림.
+            // Coarse levels whole first, the first overflowing level by |response| for the remaining count, then drop the rest.
             let mut rem = k;
             for &l in &order {
                 if items[l] <= rem {
@@ -213,8 +217,8 @@ fn plan_selection(det: &[usize], items: &[usize], n_oct: usize, s: usize, mode: 
     plan
 }
 
-/// 격자 칸 라운드 로빈(칸 순서대로 칸마다 다음 순위 하나씩, K 개가 되면 멈춤)의 경계.
-/// 칸 b 의 순위 r 항목은 `r < rcut || (r == rcut && b < bcut)` 일 때 남는다. `sizes[b]` = 칸 b 의 항목 수.
+/// Boundary of the grid-cell round robin (in cell order, the next rank from each cell, stopping at K items).
+/// The item of rank r in cell b is kept when `r < rcut || (r == rcut && b < bcut)`. `sizes[b]` = number of items in cell b.
 fn grid_cut(sizes: &[usize], k: usize) -> (usize, usize) {
     let mut sorted = sizes.to_vec();
     sorted.sort_unstable();
@@ -236,7 +240,7 @@ fn grid_cut(sizes: &[usize], k: usize) -> (usize, usize) {
             }
             continue;
         }
-        // 이번 라운드는 앞쪽 칸 `k − taken` 개만.
+        // This round covers only the first `k - taken` cells.
         let left = k - taken;
         let mut seen = 0usize;
         for (b, &sz) in sizes.iter().enumerate() {
@@ -252,9 +256,10 @@ fn grid_cut(sizes: &[usize], k: usize) -> (usize, usize) {
 }
 
 impl CudaSift {
-    /// 장치 `dev` 에 SIFT 커널을 컴파일해 만든다.
+    /// Compiles the SIFT kernels on device `dev` and builds it.
     pub fn new(dev: Arc<CudaDevice>) -> std::result::Result<Self, GpuError> {
-        // 곱셈-덧셈 융합을 끄고 IEEE 나눗셈: 피라미드는 CPU 와 비트 단위로 같게, 검출도 CPU 식과 같은 반올림으로.
+        // Turn off fused multiply-add and use IEEE division: the pyramid is bit-identical to the CPU, and detection rounds the
+        // same way as the CPU formulas.
         let m = dev.compile(SRC, false, &[])?;
         Ok(Self {
             f_norm: m.load_function("sift_normalize")?,
@@ -274,7 +279,7 @@ impl CudaSift {
         })
     }
 
-    /// 장치 0 으로 만든다.
+    /// Builds with device 0.
     pub fn try_default() -> std::result::Result<Self, GpuError> {
         Self::new(CudaDevice::new(0)?)
     }
@@ -302,12 +307,12 @@ impl CudaSift {
         }
         let mut l = s.launch_builder(&self.f_bv);
         l.arg(&*tmp).arg(dst).arg(&wi).arg(&hi).arg(&kd).arg(&r);
-        // SAFETY: sift_blur_v 같은 형.
+        // SAFETY: same type as sift_blur_v.
         unsafe { l.launch(cfg2(w, h)) }?;
         Ok(())
     }
 
-    /// GPU 피라미드(CPU `pyramid::build_pyramid` 와 같은 규칙).
+    /// GPU pyramid (same rules as CPU `pyramid::build_pyramid`).
     fn build(
         &self,
         s: &Arc<CudaStream>,
@@ -362,7 +367,7 @@ impl CudaSift {
                 let mut g0 = s.alloc_zeros::<f32>(nw * nh)?;
                 let (pwi, nwi, nhi) = (pw as i32, nw as i32, nh as i32);
                 let mut l = s.launch_builder(&self.f_dec);
-                // 이전 옥타브 레벨 S−1 (gauss 색인 S).
+                // Previous octave level S−1 (gauss index S).
                 l.arg(&prev.gauss[ss.s]).arg(&pwi).arg(&mut g0).arg(&nwi).arg(&nhi);
                 // SAFETY: sift_decimate2(src[pw·ph], pw, dst[nw·nh], nw, nh).
                 unsafe { l.launch(cfg2(nw, nh)) }?;
@@ -401,13 +406,13 @@ impl CudaSift {
         let st = self.dev.stream.clone();
         let t0 = Instant::now();
 
-        // 1. 스케일 공간.
+        // 1. Scale space.
         let pyr = self.build(&st, image, w, h, opts, ss)?;
         let s = ss.s;
         let n_oct = pyr.len();
         let nl = n_oct * s;
-        // 레벨 표: 레벨 l = oi·S + j 의 가우시안(gauss[j + 1]) 장치 주소와 (w, h, 옥타브, j).
-        // 원시 주소이므로 `pyr` 는 마지막 동기화 뒤에 놓는다.
+        // Level table: device address of the Gaussian (gauss[j + 1]) of level l = oi·S + j, and (w, h, octave, j).
+        // These are raw addresses, so `pyr` is released only after the last synchronization.
         let mut lv_ptr: Vec<u64> = Vec::with_capacity(nl);
         let mut lv_i: Vec<i32> = Vec::with_capacity(4 * nl);
         for oct in &pyr {
@@ -419,7 +424,7 @@ impl CudaSift {
         let lv_ptr_d = st.clone_htod(&lv_ptr)?;
         let lv_i_d = st.clone_htod(&lv_i)?;
 
-        // 2. DoG + 검출(모든 레벨). 후보가 용량을 넘으면 용량을 늘려 다시 한다.
+        // 2. DoG + detection (all levels). If the candidates exceed the capacity, grow it and redo.
         let (w0, h0) = (pyr[0].w, pyr[0].h);
         let mut dog = st.alloc_zeros::<f32>((s + 2) * w0 * h0)?;
         let iters = opts.refinement_iterations.max(1) as i32;
@@ -436,7 +441,7 @@ impl CudaSift {
                     let di = d as i32;
                     let mut l = st.launch_builder(&self.f_dog);
                     l.arg(&oct.gauss[d + 1]).arg(&oct.gauss[d]).arg(&mut dog).arg(&di).arg(&ni);
-                    // SAFETY: sift_dog(hi[n], lo[n], dog[(S+2)·n 이상], d < S+2, n).
+                    // SAFETY: sift_dog(hi[n], lo[n], dog[at least (S+2)·n], d < S+2, n).
                     unsafe { l.launch(cfg1(n)) }?;
                 }
                 if oct.w < 3 || oct.h < 3 {
@@ -463,8 +468,8 @@ impl CudaSift {
                     .arg(&mut ci)
                     .arg(&capi)
                     .arg(&mut cnt);
-                // SAFETY: sift_detect(dog[(S+2)·w·h], w, h, 레벨 기준, …, cf[4·cap], ci[2·cap], cap, counters[1 + 레벨 수]),
-                // 그리드 z = S 이고 레벨 번호 base + j < 레벨 수.
+                // SAFETY: sift_detect(dog[(S+2)·w·h], w, h, level base, …, cf[4·cap], ci[2·cap], cap, counters[1 + level count]),
+                // grid z = S and level index base + j < level count.
                 unsafe { l.launch(cfg) }?;
             }
             let counts = st.clone_dtoh_synced(&cnt)?;
@@ -484,7 +489,7 @@ impl CudaSift {
             return Ok(SiftOutput::default());
         }
 
-        // 3. 방향 할당.
+        // 3. Orientation assignment.
         let per = if opts.upright { 1 } else { opts.max_num_orientations.clamp(1, ORI_NB) };
         let icap = ncand * per;
         let mut items = st.alloc_zeros::<i32>(3 * icap)?;
@@ -499,8 +504,8 @@ impl CudaSift {
             };
             let mut l = st.launch_builder(&self.f_orient);
             l.arg(&cf).arg(&ci).arg(&nc).arg(&lv_ptr_d).arg(&lv_i_d).arg(&mo).arg(&interp).arg(&up).arg(&mut items).arg(&ic).arg(&mut icnt);
-            // SAFETY: sift_orient(cf[4·ncand], ci[2·ncand], ncand, lv_ptr[레벨 수], lv_i[4·레벨 수], …,
-            // items[3·icap], icap, counters[1 + 레벨 수]). 후보 하나가 내는 항목은 최대 per 개라 icap 을 넘지 않는다.
+            // SAFETY: sift_orient(cf[4·ncand], ci[2·ncand], ncand, lv_ptr[level count], lv_i[4·level count], …,
+            // items[3·icap], icap, counters[1 + level count]). One candidate emits at most `per` items, so icap is not exceeded.
             unsafe { l.launch(cfg) }?;
         }
         let icounts = st.clone_dtoh_synced(&icnt)?;
@@ -509,7 +514,7 @@ impl CudaSift {
         let lv_items: Vec<usize> = icounts[1..].iter().map(|&c| c.max(0) as usize).collect();
         let t_orient = t0.elapsed();
 
-        // 4. 최대 특징 수 선택.
+        // 4. Maximum feature count selection.
         let k_max = if opts.max_num_features == 0 { usize::MAX } else { opts.max_num_features };
         let plan = plan_selection(&det, &lv_items, n_oct, s, opts.selection, k_max);
         let n_out = plan.n_out.min(nitems);
@@ -527,7 +532,7 @@ impl CudaSift {
                 _ => 1,
             };
             let mut bcount = st.alloc_zeros::<i32>(cells * cells)?;
-            // 입력 영상 크기 ≈ 첫 옥타브 크기 × 2^o_min (CPU 와 같은 식).
+            // Input image size ~ first octave size x 2^o_min (same formula as the CPU).
             let sc = 2f32.powi(pyr[0].o);
             let (iw, ih) = (pyr[0].w as f32 * sc, pyr[0].h as f32 * sc);
             let (gridi, cellsi) = ((plan.mode == 2) as i32, cells as i32);
@@ -545,7 +550,7 @@ impl CudaSift {
                     .arg(&ih)
                     .arg(&mut group)
                     .arg(&mut bcount);
-                // SAFETY: sift_group(items[3·n], n, cf, ci, lv_i, lv_state[레벨 수], …, group[n], bucket_count[cells²]).
+                // SAFETY: sift_group(items[3·n], n, cf, ci, lv_i, lv_state[level count], …, group[n], bucket_count[cells²]).
                 unsafe { l.launch(cfg1(nitems)) }?;
             }
             if plan.mode == 2 {
@@ -559,7 +564,7 @@ impl CudaSift {
             let cfg = LaunchConfig { grid_dim: ((nitems as u32).div_ceil(RANK_T), 1, 1), block_dim: (RANK_T, 1, 1), shared_mem_bytes: 0 };
             let mut l = st.launch_builder(&self.f_rank);
             l.arg(&items).arg(&ni).arg(&cf).arg(&ci).arg(&group).arg(&mut rank);
-            // SAFETY: sift_rank(items[3·n], n, cf, ci, group[n], rank[n]), 블록 크기 = RANK_T.
+            // SAFETY: sift_rank(items[3·n], n, cf, ci, group[n], rank[n]), block size = RANK_T.
             unsafe { l.launch(cfg) }?;
         }
         let mut keep = st.alloc_zeros::<i32>(n_out)?;
@@ -585,7 +590,7 @@ impl CudaSift {
             unsafe { l.launch(cfg1(nitems)) }?;
         }
 
-        // 5. 기술자 + 출력 특징.
+        // 5. Descriptors + output features.
         let mut fo = st.alloc_zeros::<f32>(5 * n_out)?;
         let mut io = st.alloc_zeros::<i32>(4 * n_out)?;
         let mut dd = st.alloc_zeros::<u8>(128 * n_out)?;
@@ -610,7 +615,7 @@ impl CudaSift {
                 .arg(&mut io)
                 .arg(&mut dd);
             // SAFETY: sift_descriptor(keep[cap], kcount[1], cap, items, cf, ci, lv_ptr, lv_i, l1root,
-            // fo[5·cap], io[4·cap], desc[128·cap]); 처리 개수 min(*kcount, cap), 공유 메모리는 정적(32 KiB).
+            // fo[5·cap], io[4·cap], desc[128·cap]); processed count min(*kcount, cap), shared memory is static (32 KiB).
             unsafe { l.launch(cfg) }?;
         }
         let kc = st.clone_dtoh_synced(&kcnt)?;
@@ -618,11 +623,11 @@ impl CudaSift {
         let io_h = st.clone_dtoh_synced(&io)?;
         let dd_h = st.clone_dtoh_synced(&dd)?;
         st.synchronize()?;
-        // 레벨 표의 원시 주소가 가리키던 피라미드는 여기서 놓는다.
+        // Release here the pyramid that the raw addresses of the level table pointed to.
         drop(pyr);
         let m = (kc[0].max(0) as usize).min(n_out);
 
-        // CpuSift 와 같은 출력 순서: 옥타브 오름차순, 레벨 오름차순, 검출 화소 순, 방향 순번.
+        // Same output order as CpuSift: octave ascending, level ascending, detection pixel order, orientation slot.
         let mut order: Vec<usize> = (0..m).collect();
         order.sort_unstable_by_key(|&i| (io_h[4 * i], io_h[4 * i + 1], io_h[4 * i + 2], io_h[4 * i + 3]));
         let mut features = Vec::with_capacity(m);
@@ -671,9 +676,9 @@ impl SiftEngine for CudaSift {
 mod tests {
     use super::*;
 
-    // ----- 선택 계획(장치 없이) -----
+    // ----- Selection plan (without a device) -----
 
-    /// 칸 순서 라운드 로빈을 그대로 돌린 기준값: 칸별로 남는 수.
+    /// Reference from running the cell-order round robin literally: number kept per cell.
     fn round_robin(sizes: &[usize], k: usize) -> Vec<usize> {
         let mut kept = vec![0usize; sizes.len()];
         let (mut taken, mut r) = (0usize, 0usize);
@@ -712,32 +717,35 @@ mod tests {
 
     #[test]
     fn plan_follows_cpu_rules() {
-        // 옥타브 2개 × S = 2 → 레벨 0..4, 거친 순서 3, 2, 1, 0.
+        // 2 octaves × S = 2 -> levels 0..4, coarse order 3, 2, 1, 0.
         let det = [10, 10, 10, 10];
         let items = [12, 11, 10, 9];
-        // CompatLevels: 레벨 3, 2, 1 처리(누적 검출 30 > 25 에서 멈춤), 30 − 11 > 25 가 아니므로 그대로.
+        // CompatLevels: levels 3, 2, 1 processed (stops at cumulative detections 30 > 25), 30 - 11 > 25 does not hold, so
+        // nothing is removed.
         let p = plan_selection(&det, &items, 2, 2, FeatureSelection::CompatLevels, 25);
         assert_eq!(p, Plan { state: vec![0, 1, 1, 1], mode: 0, limit: 0, n_out: 30 });
-        // K = 15: 레벨 3 은 15 이하라 처리(누적 검출 10), 레벨 2 처리(20 > 15), 레벨 1 에서 멈춤. 19 − 10 > 15 아님.
+        // K = 15: level 3 processed since it is within 15 (cumulative detections 10), level 2 processed (20 > 15), stop at
+        // level 1. 19 - 10 > 15 does not hold.
         let p = plan_selection(&det, &items, 2, 2, FeatureSelection::CompatLevels, 15);
         assert_eq!(p.state, vec![0, 0, 1, 1]);
         assert_eq!(p.n_out, 19);
-        // K = 5: 레벨 3, 2 처리(누적 검출 20 > 5 는 레벨 2 처리 뒤), 19 − 10 = 9 > 5 이므로 레벨 2 제거.
+        // K = 5: levels 3, 2 processed (cumulative detections 20 > 5 only after level 2), 19 - 10 = 9 > 5, so level 2 is
+        // removed.
         let p = plan_selection(&det, &items, 2, 2, FeatureSelection::CompatLevels, 5);
         assert_eq!(p.state, vec![0, 0, 0, 1]);
         assert_eq!(p.n_out, 9);
-        // TopK: 레벨 3 (9), 레벨 2 (누적 9 < 15 → 처리), 레벨 1 에서 멈춤(19 ≥ 15). 레벨 2 는 6 개만.
+        // TopK: level 3 (9), level 2 (cumulative 9 < 15 -> processed), stop at level 1 (19 ≥ 15). Only 6 from level 2.
         let p = plan_selection(&det, &items, 2, 2, FeatureSelection::TopK, 15);
         assert_eq!(p, Plan { state: vec![0, 0, 2, 1], mode: 1, limit: 6, n_out: 15 });
-        // SpatialGrid: 모두 처리, 모두 순위 선택.
+        // SpatialGrid: all processed, all selected by rank.
         let p = plan_selection(&det, &items, 2, 2, FeatureSelection::SpatialGrid { cells: 4 }, 15);
         assert_eq!(p, Plan { state: vec![2, 2, 2, 2], mode: 2, limit: 0, n_out: 15 });
-        // 상한 안이면 모두 유지.
+        // Within the cap, everything is kept.
         let p = plan_selection(&det, &items, 2, 2, FeatureSelection::TopK, 100);
         assert_eq!(p, Plan { state: vec![1, 1, 1, 1], mode: 0, limit: 0, n_out: 42 });
     }
 
-    // ----- GPU 대 CPU (장치가 없으면 건너뜀) -----
+    // ----- GPU vs CPU (skipped without a device) -----
 
     fn gpu() -> Option<CudaSift> {
         if !crate::is_available() {
@@ -747,7 +755,7 @@ mod tests {
         Some(CudaSift::try_default().expect("CUDA SIFT"))
     }
 
-    /// (중심 x, 중심 y, σ, 진폭) 가우시안 얼룩들(결정적).
+    /// Gaussian blobs (center x, center y, σ, amplitude) (deterministic).
     fn blobs(seed: u64, n: u64, w: f64, h: f64) -> Vec<(f64, f64, f64, f64)> {
         (0..n)
             .map(|i| {
@@ -763,7 +771,7 @@ mod tests {
             .collect()
     }
 
-    /// 화소 (i, j) 의 중심 좌표 (i + 0.5, j + 0.5) 에서 `base` + 얼룩 합을 [0, 1] 로 잘라 8비트로.
+    /// `base` + sum of blobs at the center (i + 0.5, j + 0.5) of pixel (i, j), clamped to [0, 1] and converted to 8 bits.
     fn render(w: usize, h: usize, blobs: &[(f64, f64, f64, f64)], base: impl Fn(f64, f64) -> f64) -> GrayImage {
         let mut acc: Vec<f64> = (0..w * h).map(|i| base((i % w) as f64 + 0.5, (i / w) as f64 + 0.5)).collect();
         for &(cx, cy, s, a) in blobs {
@@ -794,7 +802,8 @@ mod tests {
         a.iter().zip(b).map(|(&x, &y)| (x as f32 - y as f32).powi(2)).sum::<f32>().sqrt()
     }
 
-    /// GPU 특징 대부분에 같은 옥타브·1 화소 안·비슷한 방향의 CPU 특징이 있고 기술자도 가까운지.
+    /// Whether most GPU features have a CPU feature in the same octave, within 1 pixel, with a similar orientation, and with a
+    /// close descriptor.
     fn assert_equivalent(cpu: &SiftOutput, gpu: &SiftOutput, label: &str) {
         let (nc, ng) = (cpu.len(), gpu.len());
         eprintln!("{label}: CPU {nc} GPU {ng} 특징");
@@ -837,7 +846,7 @@ mod tests {
         let Some(gpu) = gpu() else { return };
         let cpu = CpuSift::new();
         let blob_img = |w: usize, h: usize, seed: u64| render(w, h, &blobs(seed, 400, w as f64, h as f64), |_, _| 0.5);
-        // 17° 돌린 체커보드(주기 24 화소, tanh 로 부드럽게) + 얼룩.
+        // Checkerboard rotated by 17° (period 24 pixels, smoothed with tanh) + blobs.
         let checker = |w: usize, h: usize| {
             let (c, s) = (0.3f64.cos(), 0.3f64.sin());
             let k = std::f64::consts::PI / 24.0;
@@ -884,7 +893,7 @@ mod tests {
             if opts.max_num_features > 0 && opts.selection != FeatureSelection::CompatLevels {
                 assert!(g.len() <= opts.max_num_features, "{label}: 상한 {} 초과 {}", opts.max_num_features, g.len());
             }
-            // 합산 순서가 고정이라 다시 돌려도 같다.
+            // The summation order is fixed, so running again gives the same result.
             let g2 = gpu.extract(img, opts).unwrap();
             assert_eq!(g.features, g2.features, "{label}: 실행마다 다름");
             assert_eq!(g.descriptors.as_slice(), g2.descriptors.as_slice(), "{label}: 기술자가 실행마다 다름");
@@ -896,7 +905,8 @@ mod tests {
         let Some(gpu) = gpu() else { return };
         let (w, h) = (640usize, 480usize);
         let b = blobs(7, 500, w as f64, h as f64);
-        // T p = s·R(θ)·(p − c) + c. 가우시안 얼룩은 닮음 변환 뒤에도 얼룩이라 중심·σ 만 옮겨 그린다.
+        // T p = s·R(θ)·(p − c) + c. A Gaussian blob is still a blob after a similarity transform, so only the center and σ
+        // are moved.
         let (ang, sc) = (0.5f64, 0.8f64);
         let (cx, cy) = (w as f64 / 2.0, h as f64 / 2.0);
         let (cs, sn) = (ang.cos(), ang.sin());
@@ -917,7 +927,7 @@ mod tests {
         let fb = gpu.extract(&img_b, &SiftOptions::default()).unwrap();
         eprintln!("회전·축소 사본: A {} B {} 특징", fa.len(), fb.len());
         assert!(fa.len() > 50 && fb.len() > 50);
-        // 최근접 이웃 + 비율 검사(0.8).
+        // Nearest neighbor + ratio test (0.8).
         let (mut n_match, mut n_ok) = (0usize, 0usize);
         for (i, f) in fa.features.iter().enumerate() {
             let da = fa.descriptors.row(i);

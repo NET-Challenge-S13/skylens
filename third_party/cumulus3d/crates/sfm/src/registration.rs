@@ -250,7 +250,7 @@ pub fn register_image(
     register_image_with(rec, graph, image_id, opts, &CpuAbsPose)
 }
 
-/// [`register_image`] 와 같되 절대 자세 RANSAC 을 `backend` 로 한다.
+/// Like [`register_image`], but absolute pose RANSAC is done by `backend`.
 pub fn register_image_with(
     rec: &mut Reconstruction,
     graph: &MatchGraph,
@@ -318,7 +318,7 @@ pub fn register_images(
     register_images_with(rec, store, graph, opts, &CpuAbsPose)
 }
 
-/// [`register_images`] 와 같되 절대 자세 RANSAC 을 `backend` 로 한다.
+/// Like [`register_images`], but absolute pose RANSAC is done by `backend`.
 pub fn register_images_with(
     rec: &mut Reconstruction,
     store: &FeatureStore,

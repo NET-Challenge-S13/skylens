@@ -321,9 +321,9 @@ pub fn bundle_adjust(rec: &mut Reconstruction, config: &BaConfig) -> cumulus3d_c
     bundle_adjust_with(rec, config, &CpuBaBackend)
 }
 
-/// [`bundle_adjust`] 와 같되 풀이를 `backend` 에 맡긴다(예: cumulus3d-cuda 의 GPU 백엔드).
+/// Like [`bundle_adjust`], but leaves the solve to `backend` (e.g. the GPU backend of cumulus3d-cuda).
 ///
-/// 문제 구성(관측 수집·게이지 고정)과 결과 써 넣기는 백엔드와 무관하게 같다.
+/// Problem assembly (observation gathering, gauge fixing) and writing back the result are the same regardless of the backend.
 pub fn bundle_adjust_with(rec: &mut Reconstruction, config: &BaConfig, backend: &dyn BaBackend) -> cumulus3d_core::Result<BaSummary> {
     if config.num_threads > 0 {
         let pool = rayon::ThreadPoolBuilder::new()

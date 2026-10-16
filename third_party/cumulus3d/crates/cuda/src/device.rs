@@ -105,10 +105,11 @@ impl CudaDevice {
         Self::open(ordinal, false)
     }
 
-    /// 장치 `ordinal` 을 열고 스트림을 가장 높은 우선순위로 만든다. 작은 커널을 자주 내고 결과를 곧바로
-    /// 기다리는 희소 단계(`CudaSparse`)만 쓴다. 조밀화(PatchMatch)·번들 조정의 긴 커널 대기열 뒤에 줄 서지
-    /// 않게 하기 위해서다. SIFT·매칭까지 올리면 희소 단계와 서로 앞지르려 해 삼각측량이 1.2초에서
-    /// 2.3~3.2초로, 번들 조정까지 올려도 2.3초로 느려졌다(290초 데모, 위치당 평균).
+    /// Opens device `ordinal` and creates its stream with the highest priority. Used only by the sparse stages (`CudaSparse`),
+    /// which launch small kernels often and wait for the results right away, so that they do not queue behind the long kernel
+    /// queues of densification (PatchMatch) and bundle adjustment. Raising SIFT and matching as well made them race the sparse
+    /// stages and slowed triangulation from 1.2 s to 2.3-3.2 s, and raising bundle adjustment as well slowed it to 2.3 s (290 s
+    /// demo, mean per position).
     pub fn new_high_priority(ordinal: usize) -> Result<Arc<Self>, GpuError> {
         Self::open(ordinal, true)
     }

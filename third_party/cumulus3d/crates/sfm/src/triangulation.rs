@@ -240,50 +240,50 @@ pub fn estimate_triangulation(obs: &[TriObservation], opts: &TriangulationRansac
     rep.model.map(|m| (m, rep.inlier_mask))
 }
 
-/// RANSAC 삼각측량 문제 하나.
+/// One RANSAC triangulation problem.
 #[derive(Clone, Debug)]
 pub struct TriProblem<'a> {
-    /// 관측.
+    /// Observations.
     pub obs: &'a [TriObservation],
-    /// 옵션.
+    /// Options.
     pub params: TriangulationRansacParams,
 }
 
-/// 관측 검사 하나: 등록 영상의 관측(픽셀)과 3D 점.
+/// One observation check: an observation (pixel) in a registered image and a 3D point.
 #[derive(Clone, Copy, Debug)]
 pub struct ObsQuery {
-    /// `cameras` 안 번호.
+    /// Index into `cameras`.
     pub camera: u32,
-    /// `poses` 안 번호(world_to_cam).
+    /// Index into `poses` (world_to_cam).
     pub pose: u32,
-    /// 관측 픽셀.
+    /// Observed pixel.
     pub xy: Vec2,
-    /// 3D 점(세계 좌표).
+    /// 3D point (world coordinates).
     pub xyz: Vec3,
 }
 
-/// 관측 검사 결과.
+/// Observation check result.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ObsCheck {
-    /// 픽셀 재투영 제곱 오차(`Reconstruction::squared_reprojection_error` 와 같음, 투영 실패면 f64::MAX).
+    /// Squared pixel reprojection error (same as `Reconstruction::squared_reprojection_error`, f64::MAX if the projection fails).
     pub sq_reproj_error: f64,
-    /// 카메라 깊이 = P 의 셋째 행 · (X, 1) ([`has_positive_depth`] 는 이 값 ≥ ε).
+    /// Camera depth = third row of P · (X, 1) ([`has_positive_depth`] means this value ≥ ε).
     pub depth: f64,
 }
 
-/// 삼각측량 일괄 계산 백엔드. CPU 기본 구현은 [`CpuTriangulation`].
+/// Batched triangulation backend. The default CPU implementation is [`CpuTriangulation`].
 pub trait TriangulationBackend: Send + Sync {
-    /// RANSAC 삼각측량 여러 문제. 결과는 문제마다 [`estimate_triangulation`] 과 같은 규칙, 순서는 입력 순서.
+    /// Several RANSAC triangulation problems. Each result follows the same rules as [`estimate_triangulation`], in input order.
     fn estimate_batch(&self, problems: &[TriProblem<'_>]) -> Vec<Option<(Vec3, Vec<bool>)>>;
-    /// 관측 여러 개의 재투영 오차와 깊이.
+    /// Reprojection errors and depths of several observations.
     fn check_observations(&self, cameras: &[Camera], poses: &[Rigid3], queries: &[ObsQuery]) -> Vec<ObsCheck>;
 }
 
-/// CPU 기본 구현.
+/// Default CPU implementation.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct CpuTriangulation;
 
-/// 관측 검사 하나(CPU).
+/// One observation check (CPU).
 pub fn check_observation(camera: &Camera, pose: &Rigid3, xy: &Vec2, xyz: &Vec3) -> ObsCheck {
     let p = pose.matrix();
     let depth = p[(2, 0)] * xyz.x + p[(2, 1)] * xyz.y + p[(2, 2)] * xyz.z + p[(2, 3)];

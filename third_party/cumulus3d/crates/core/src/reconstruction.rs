@@ -885,9 +885,10 @@ impl Reconstruction {
         self.apply_observation_filter(evals, max_error, update)
     }
 
-    /// [`filter_observations`](Self::filter_observations) 의 삭제 단계: 미리 계산한 관측별 오차
-    /// (`evals` = (점 id, 트랙 순서의 오차))로 같은 규칙을 적용한다. 오차는 GPU 등 바깥에서 한꺼번에
-    /// 계산할 수 있다. 없는 점이나 트랙 길이와 오차 수가 다른 항목은 건너뛴다. 반환: 삭제된 관측 수.
+    /// Removal step of [`filter_observations`](Self::filter_observations): applies the same rule with precomputed
+    /// per-observation errors (`evals` = (point id, errors in track order)). The errors can be computed in bulk outside, e.g. on
+    /// the GPU. Missing points and entries whose error count differs from the track length are skipped. Returns: number of
+    /// removed observations.
     pub fn apply_observation_filter(&mut self, evals: Vec<(Point3DId, Vec<f64>)>, max_error: f64, update: FilterErrorUpdate) -> usize {
         let mut removed = 0usize;
         for (id, errs) in evals {

@@ -99,8 +99,8 @@ pub struct GlobalSfmOptions {
     pub retri_max_refinement_change: f64,
     /// Maximum iterations of the point-refinement BA in re-triangulation.
     pub retri_ba_max_num_iterations: usize,
-    /// 번들 조정 풀이 백엔드(기본 CPU). BA 단계와 재삼각측량 끝의 전체 BA 에 쓴다.
-    /// 재삼각측량 중 점만 정제하는 BA(`refine_points`)는 CPU 그대로다.
+    /// Bundle adjustment solver backend (CPU by default). Used for the BA stage and the full BA at the end of re-triangulation.
+    /// The point-only refinement BA during re-triangulation (`refine_points`) stays on the CPU.
     pub ba_backend: BaBackendRef,
 }
 
