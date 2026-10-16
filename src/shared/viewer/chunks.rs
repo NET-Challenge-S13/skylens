@@ -108,6 +108,10 @@ impl SegmentPoints {
 /// only those (a view further behind rebuilds from [`SlotPoints::state_message`]).
 pub const RECENT_SLOT_MESSAGES: usize = 8;
 
+/// Slot messages held ahead of a gap at most. The core forwards them in order, so a gap here
+/// means the start of a stream was missed and will not fill; past this the held ones are dropped.
+pub const MAX_HELD_SLOT_MESSAGES: usize = 64;
+
 /// The zone byte cumulus3d writes for zone 255 and every zone after it (`zone.min(255)`).
 const ZONE_SATURATED: u8 = 255;
 
@@ -551,6 +555,14 @@ impl ChunkStore {
         }
         let payload: Payload = Rc::from(chunk.payload.as_slice());
         if seq > self.slots.seq + 1 {
+            if self.slots.held.len() >= MAX_HELD_SLOT_MESSAGES {
+                let held = std::mem::take(&mut self.slots.held).len();
+                return Applied::of(Change::Invalid(format!(
+                    "point slot stream {}: message {} still missing with {held} held; dropped them",
+                    self.slots.stream,
+                    self.slots.seq + 1
+                )));
+            }
             self.slots.held.insert(seq, (chunk.segment, payload));
             return Applied::of(Change::SlotsHeld { seq });
         }
@@ -1160,6 +1172,23 @@ mod tests {
         let a = s.apply(&slot_chunk(1, 0, slot_msg(1, 1, &[(0, 1.0, 0)], &[], &[])));
         assert!(matches!(a.change, Change::SlotsApplied { .. }));
         assert_eq!(a.newly_arrived, Some(0));
+    }
+
+    #[test]
+    fn held_slot_messages_are_bounded() {
+        let mut s = ChunkStore::new();
+        // A stream whose start was missed: nothing can be applied, and the held ones stay bounded.
+        for seq in 2..2 + MAX_HELD_SLOT_MESSAGES as u32 {
+            assert_eq!(s.apply(&slot_chunk(1, 0, slot_msg(seq, 1, &[], &[], &[]))).change, Change::SlotsHeld { seq });
+        }
+        assert_eq!(s.slots().held(), MAX_HELD_SLOT_MESSAGES);
+        let over = 2 + MAX_HELD_SLOT_MESSAGES as u32;
+        assert!(matches!(s.apply(&slot_chunk(1, 0, slot_msg(over, 1, &[], &[], &[]))).change, Change::Invalid(_)));
+        assert_eq!(s.slots().held(), 0);
+        // A newer stream from seq 1 shows normally.
+        let a = s.apply(&slot_chunk(2, 0, slot_msg(1, 1, &[(0, 1.0, 0)], &[], &[])));
+        assert!(matches!(a.change, Change::SlotsApplied { .. }));
+        assert_eq!(s.slots().points(), 1);
     }
 
     #[test]
