@@ -42,9 +42,15 @@ webrtcHandshakeTimeout: 10s
 webrtcTrackGatherTimeout: 2s
 
 # ---- 경로 ----
+# 이름은 코어가 정한다 — SKYLENS_CORE_STREAM_PATH 기본값이 `drone{id}` 이고, 코어는
+# 프레임을 srt://127.0.0.1:10890?streamid=read:droneN 으로 읽고 화면에는
+# /live/droneN/whep 을 내려준다. 그래서 세 경로 이름이 그대로 맞아야 한다.
+# (데모는 이 파일을 읽어 paths 만 all_others 로 바꿔 쓴다 — src/demo/paths.rs)
 pathDefaults:
   source: publisher
   sourceOnDemand: no
 
 paths:
-  drone:                        # 드론 영상 (1단계: ffmpeg 테스트 소스)
+  drone1:                       # 좌 (1단계: ffmpeg 테스트 소스)
+  drone2:                       # 중
+  drone3:                       # 우

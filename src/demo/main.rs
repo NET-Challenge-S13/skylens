@@ -272,26 +272,34 @@ async fn start_all(
     );
 
     // ---- MediaMTX ----
-    let deploy = std::fs::read_to_string(&plan.mediamtx_deploy_config)
-        .map_err(|e| Stop::Failed(format!("{}: {e}", plan.mediamtx_deploy_config.display())))?;
-    let config = plan.run_dir.join("mediamtx.yml");
-    std::fs::write(&config, paths::local_mediamtx_config(&deploy)).map_err(|e| Stop::Failed(format!("{}: {e}", config.display())))?;
-    log("launch", &format!("MediaMTX 시작 ({})", config.display()));
-    children.push(
-        procs::spawn(spec(plan, "mediamtx", "mtx", &plan.mediamtx, vec![config.display().to_string()], vec![]), events.clone())
-            .map_err(fail)?,
-    );
+    let remote = o.remote_core.is_some();
     let whep = format!("127.0.0.1:{}", args::WHEP_PORT);
-    wait_ready("MediaMTX", Duration::from_secs(20), rx, || http1::listening(&whep)).await?;
+    if !remote {
+        let deploy = std::fs::read_to_string(&plan.mediamtx_deploy_config)
+            .map_err(|e| Stop::Failed(format!("{}: {e}", plan.mediamtx_deploy_config.display())))?;
+        let config = plan.run_dir.join("mediamtx.yml");
+        std::fs::write(&config, paths::local_mediamtx_config(&deploy)).map_err(|e| Stop::Failed(format!("{}: {e}", config.display())))?;
+        log("launch", &format!("MediaMTX 시작 ({})", config.display()));
+        children.push(
+            procs::spawn(spec(plan, "mediamtx", "mtx", &plan.mediamtx, vec![config.display().to_string()], vec![]), events.clone())
+                .map_err(fail)?,
+        );
+            wait_ready("MediaMTX", Duration::from_secs(20), rx, || http1::listening(&whep)).await?;
+    }
 
     // ---- footage publishers ----
     // Each publisher's start is the zero of its clip's timeline; the drone replaying that
     // view's flight record counts from it.
+    let srt_addr = o.srt_addr.clone().unwrap_or_else(|| format!("127.0.0.1:{}", args::SRT_PORT));
     let mut starts = [Instant::now(); 3];
     for (i, (drone, file)) in paths::FORMATION.iter().zip(&plan.footage).enumerate() {
         let tag = format!("pub-{}", &drone.name[..1].to_uppercase());
         let name = format!("송출 drone{} ({})", drone.id, drone.name);
-        let argv = paths::publisher_args(file, args::SRT_PORT, drone);
+        let url = match &o.feed_tcp {
+            Some(base) => paths::tcp_publish_url(base, drone),
+            None => paths::srt_publish_url(&srt_addr, drone),
+        };
+        let argv = paths::publisher_args(file, &url);
         children.push(procs::spawn(spec(plan, &name, &tag, &plan.ffmpeg, argv, vec![]), events.clone()).map_err(fail)?);
         starts[i] = Instant::now();
     }
@@ -299,7 +307,9 @@ async fn start_all(
     log("launch", "영상 송출 3개 시작 (drone1=left, drone2=center, drone3=right, 반복 재생)");
 
     // ---- model server ----
-    if let Some(m) = &plan.model {
+    if remote {
+        log("launch", &format!("--remote-core: 코어 {} 를 쓰고 모델 서버·MediaMTX·현황판 서버는 띄우지 않습니다", o.remote_core.as_deref().unwrap_or("")));
+    } else if let Some(m) = &plan.model {
         log("launch", "모델 서버 시작 (libtorch·CUDA 로딩에 시간이 걸릴 수 있습니다)");
         if s.anchor.is_none() {
             log("launch", "경고: --site 에서 기준점을 알 수 없어 모델 서버는 기본 기준점(대전)으로 청크를 냅니다");
@@ -319,24 +329,28 @@ async fn start_all(
         log("launch", "--no-model: 모델 서버 없이 진행 (프레임 추출 끔)");
     }
 
-    // ---- core ----
-    match &s.site {
-        Some(site) => log("launch", &format!("코어 시작 (작전 구역 SKYLENS_CORE_SITE={site})")),
-        None => log("launch", "코어 시작 (작전 구역: 코어 기본값 daejeon)"),
-    }
-    let env = core_env(plan, o, s, &planned_file);
-    children.push(procs::spawn(spec(plan, "skylens-core", "core", &plan.core_bin, vec![], env), events.clone()).map_err(fail)?);
-    let core = format!("127.0.0.1:{}", o.core_port);
-    wait_ready("코어", Duration::from_secs(60), rx, || http1::ok(&core, "/health")).await?;
+    // ---- core and board server ----
+    let core = o.remote_core.clone().unwrap_or_else(|| format!("127.0.0.1:{}", o.core_port));
+    if remote {
+        wait_ready("원격 코어", Duration::from_secs(60), rx, || http1::ok(&core, "/health")).await?;
+    } else {
+        match &s.site {
+            Some(site) => log("launch", &format!("코어 시작 (작전 구역 SKYLENS_CORE_SITE={site})")),
+            None => log("launch", "코어 시작 (작전 구역: 코어 기본값 daejeon)"),
+        }
+        let env = core_env(plan, o, s, &planned_file);
+        children.push(procs::spawn(spec(plan, "skylens-core", "core", &plan.core_bin, vec![], env), events.clone()).map_err(fail)?);
+            wait_ready("코어", Duration::from_secs(60), rx, || http1::ok(&core, "/health")).await?;
 
-    // ---- board server ----
-    let listener = tokio::net::TcpListener::bind(("0.0.0.0", o.board_port))
-        .await
-        .map_err(|e| Stop::Failed(format!("현황판 서버 :{}: {e}", o.board_port)))?;
-    let app = board::router(board::BoardConfig { dist: plan.client_dist.clone(), core: core.clone(), whep: whep.clone() });
-    tasks.push(task("board", events, async move { axum::serve(listener, app).await.map_err(anyhow::Error::from) }));
-    let board_addr = format!("127.0.0.1:{}", o.board_port);
-    wait_ready("현황판 서버", Duration::from_secs(10), rx, || http1::ok(&board_addr, "/health")).await?;
+        // ---- board server ----
+        let listener = tokio::net::TcpListener::bind(("0.0.0.0", o.board_port))
+            .await
+            .map_err(|e| Stop::Failed(format!("현황판 서버 :{}: {e}", o.board_port)))?;
+        let app = board::router(board::BoardConfig { dist: plan.client_dist.clone(), core: core.clone(), whep: whep.clone() });
+        tasks.push(task("board", events, async move { axum::serve(listener, app).await.map_err(anyhow::Error::from) }));
+        let board_addr = format!("127.0.0.1:{}", o.board_port);
+        wait_ready("현황판 서버", Duration::from_secs(10), rx, || http1::ok(&board_addr, "/health")).await?;
+    }
 
     // ---- drones and the control watcher ----
     let flight = match &s.track {
@@ -345,7 +359,18 @@ async fn start_all(
     };
     tasks.push(task("drone", events, sim::run_drones(core.clone(), o.follow_route, flight)));
     let auto = o.auto.then(|| s.planned.clone());
-    tasks.push(task("tower-watch", events, sim::run_control_watch(core.clone(), auto)));
+    // On a slow tunnel the core drops this socket (its send queue overflows on the base map). The
+    // drones are what the demo needs, so with a remote core a lost watcher is only a warning.
+    let watch = sim::run_control_watch(core.clone(), auto);
+    tasks.push(task("tower-watch", events, async move {
+        match watch.await {
+            Err(e) if remote => {
+                log("tower", &format!("관제탑 감시가 끊겼습니다 (원격 코어라 계속 진행): {e:#}"));
+                Ok(())
+            }
+            other => other,
+        }
+    }));
 
     // ---- native screens ----
     if let Some((control, client)) = &plan.native {

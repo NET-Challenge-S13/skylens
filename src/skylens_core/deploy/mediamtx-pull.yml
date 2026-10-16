@@ -39,7 +39,16 @@ webrtcTrackGatherTimeout: 2s
 pathDefaults:
   sourceOnDemand: no
 
+# 세 경로를 각각 브리지에서 당겨온다. 이름은 코어가 정한 drone1·drone2·drone3 이다
+# (SKYLENS_CORE_STREAM_PATH = `drone{id}`). 브리지 MediaMTX 가 116.89.187.181 의
+# read 를 비밀번호 없이 허용하므로 streamid 에 계정이 없다.
 paths:
-  drone:
-    source: srt://175.126.98.44:10890?streamid=read:drone
+  drone1:
+    source: srt://175.126.98.44:10890?streamid=read:drone1
+    sourceOnDemand: no
+  drone2:
+    source: srt://175.126.98.44:10890?streamid=read:drone2
+    sourceOnDemand: no
+  drone3:
+    source: srt://175.126.98.44:10890?streamid=read:drone3
     sourceOnDemand: no

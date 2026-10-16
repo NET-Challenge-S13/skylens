@@ -74,11 +74,12 @@ pub fn resolve(o: &Options, repo: &Path) -> (Option<Plan>, Findings) {
         );
     }
 
-    // MediaMTX
+    // MediaMTX, core, model and the web builds belong to the remote side with `--remote-core`
+    let remote = o.remote_core.is_some();
     let home = paths::home_dir();
     let mut mtx_candidates = paths::mediamtx_candidates(o.mediamtx.as_deref(), home.as_deref());
     let mediamtx = paths::first_file(&mtx_candidates).or_else(|| if o.mediamtx.is_none() { paths::which("mediamtx") } else { None });
-    if mediamtx.is_none() {
+    if mediamtx.is_none() && !remote {
         if o.mediamtx.is_none() {
             mtx_candidates.push(PathBuf::from("PATH 의 mediamtx"));
         }
@@ -92,14 +93,14 @@ pub fn resolve(o: &Options, repo: &Path) -> (Option<Plan>, Findings) {
         ));
     }
     let mediamtx_deploy_config = repo.join("src").join("skylens_core").join("deploy").join("mediamtx.yml");
-    if !mediamtx_deploy_config.is_file() {
+    if !mediamtx_deploy_config.is_file() && !remote {
         f.errors.push(format!("MediaMTX 설정 원본이 없습니다: {}", rel(repo, &mediamtx_deploy_config)));
     }
 
     // Go core
     let core_candidates = paths::core_candidates(o.core_bin.as_deref(), repo, &target);
     let core_bin = paths::first_file(&core_candidates);
-    if core_bin.is_none() {
+    if core_bin.is_none() && !remote {
         f.errors.push(format!(
             "Go 코어 실행 파일이 없습니다 (찾아본 곳: {}).\n    빌드: cd src/skylens_core && go build -o ../../target/{} .",
             core_candidates.iter().map(|p| rel(repo, p)).collect::<Vec<_>>().join(", "),
@@ -108,7 +109,7 @@ pub fn resolve(o: &Options, repo: &Path) -> (Option<Plan>, Findings) {
     }
 
     // model server
-    let model = if o.no_model || o.model_addr.is_some() {
+    let model = if o.no_model || o.model_addr.is_some() || remote {
         None
     } else {
         let release = target.join("release");
@@ -139,14 +140,14 @@ pub fn resolve(o: &Options, repo: &Path) -> (Option<Plan>, Findings) {
 
     // web builds: warn only, the native screens still work
     let control_dist = repo.join("src").join("skylens_core").join("control").join("dist");
-    if !control_dist.join("index.html").is_file() {
+    if !remote && !control_dist.join("index.html").is_file() {
         f.warnings.push(format!(
             "관제탑 웹 빌드가 없습니다 ({}). 브라우저 관제탑은 비어 있습니다.\n    빌드: bash src/skylens_core/control/build-web.sh   (또는 --native)",
             rel(repo, &control_dist)
         ));
     }
     let client_dist = repo.join("src").join("skylens_client").join("dist");
-    if !client_dist.join("status.html").is_file() {
+    if !remote && !client_dist.join("status.html").is_file() {
         f.warnings.push(format!(
             "현황판 웹 빌드가 없습니다 ({}). 브라우저 현황판은 안내 문구만 보입니다.\n    빌드: bash src/skylens_client/build-web.sh   (또는 --native)",
             rel(repo, &client_dist)
@@ -182,10 +183,10 @@ pub fn resolve(o: &Options, repo: &Path) -> (Option<Plan>, Findings) {
         repo: repo.to_path_buf(),
         run_dir: target.join("demo"),
         footage,
-        mediamtx: mediamtx.expect("checked"),
+        mediamtx: mediamtx.unwrap_or_default(),
         mediamtx_deploy_config,
         ffmpeg: ffmpeg.expect("checked"),
-        core_bin: core_bin.expect("checked"),
+        core_bin: core_bin.unwrap_or_default(),
         model,
         control_dist,
         client_dist,
@@ -198,6 +199,9 @@ pub fn resolve(o: &Options, repo: &Path) -> (Option<Plan>, Findings) {
 /// Ports another process already holds. A leftover from an earlier run would
 /// answer the readiness checks and the demo would quietly run against old code.
 pub async fn ports_in_use(o: &Options) -> Vec<String> {
+    if o.remote_core.is_some() {
+        return Vec::new(); // nothing local is started
+    }
     let mut tcp = vec![(o.core_port, "코어"), (o.board_port, "현황판 서버"), (args::WHEP_PORT, "MediaMTX WHEP")];
     if !o.no_model && o.model_addr.is_none() {
         tcp.push((args::MODEL_REST_PORT, "모델 REST"));

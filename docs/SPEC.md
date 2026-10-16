@@ -200,7 +200,7 @@ related: "[[INTENT.md]], [[COMPONENTS.md]], [[ARCHITECTURE.md]], [[NETWORK_ARCHI
 |---|---:|---|
 | `skylens_core` | 8080 | `ws /uplink` · `ws /control` · `ws /viewer` · `GET /site` · `GET /vworld/*` · `GET /health` · 관제탑 웹 |
 | `skylens_proxy` | 8082 | 코어로 넘김 · `GET /health` · `GET /core/health` |
-| `skylens_gateway` | 80 | `/` 현황판 웹 · `/live/` WHEP · `/healthz` |
+| `skylens_gateway` | 80 | `/` 현황판 웹 · `ws /viewer`·`ws /uplink`(터널 20882 → 프록시) · `/live/{path}/whep` WHEP · `/healthz` · `/health` |
 | `skylens_drone` | 8091 | `/health` · `/missions` · `/formation` · `/cloud/*` |
 | `skylens_model` | 8100 | REST `POST /recon/jobs` · `POST /detect/jobs` · `GET /jobs/{id}` · `GET /health` (`app.py`와 같음) |
 | `skylens_model` | 8101 | gRPC `skylens.model.v1.ModelService` (코어가 쓰는 쪽) |

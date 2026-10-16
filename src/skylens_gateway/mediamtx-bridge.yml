@@ -25,6 +25,8 @@ srtAddress: :__SRT_PORT__
 
 # ---- 인증 ----
 # 게이트웨이는 비밀번호로 publish, 대전만 read.
+# 경로 이름은 코어가 정한다(SKYLENS_CORE_STREAM_PATH 기본값 `drone{id}`) — 편대가
+# 좌·중·우 셋이므로 drone1·drone2·drone3 이다. 경로를 늘리면 여기도 함께 늘린다.
 authMethod: internal
 authInternalUsers:
   - user: drone
@@ -32,16 +34,26 @@ authInternalUsers:
     ips: []
     permissions:
       - action: publish
-        path: drone
+        path: drone1
+      - action: publish
+        path: drone2
+      - action: publish
+        path: drone3
   - user: any
     pass:
     ips: ['127.0.0.1/32', '116.89.187.181/32']   # 로컬 점검 + 대전
     permissions:
       - action: read
-        path: drone
+        path: drone1
+      - action: read
+        path: drone2
+      - action: read
+        path: drone3
 
 pathDefaults:
   source: publisher
 
 paths:
-  drone:
+  drone1:
+  drone2:
+  drone3:
