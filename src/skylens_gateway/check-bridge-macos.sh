@@ -1,5 +1,6 @@
 #!/bin/bash
-# 브리지 상태 점검 — macOS. 설치 후, 그리고 문제가 있을 때 실행한다. root 불필요.
+# Bridge health check for macOS: run it after installing and whenever
+# something looks wrong. No root needed.
 set -u
 cd "$(dirname "$0")"; cd "$(pwd -P)"
 

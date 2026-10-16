@@ -1,11 +1,12 @@
-# MediaMTX — 대전 VM, 2단계 (브리지에서 당겨오기)
+# MediaMTX on the Daejeon VM, stage 2: pull from the bridge.
 #
-# mediamtx.yml 과 같되 drone 경로의 소스가 다르다:
-#   1단계 mediamtx.yml       : publisher (로컬 ffmpeg 테스트 소스가 밀어넣음)
-#   2단계 mediamtx-pull.yml  : 브리지 SRT 에서 대전이 당겨옴 (대전→브리지 아웃바운드)
+# Same as mediamtx.yml except where the drone paths get their source:
+#   stage 1, mediamtx.yml      : publisher (a local ffmpeg test source pushes in)
+#   stage 2, mediamtx-pull.yml : Daejeon pulls the bridge SRT (outbound from here)
 #
-# 게이트웨이는 5G 라 KOREN 에 직접 못 들어가므로 브리지가 받아두고 대전이 가져간다.
-# 브리지 MediaMTX 는 116.89.187.181 에서의 read 를 비밀번호 없이 허용한다.
+# The gateway rides 5G and cannot enter KOREN, so the bridge holds the feed and
+# Daejeon fetches it. The bridge MediaMTX allows a password-less read from
+# 116.89.187.181.
 
 logLevel: info
 logDestinations: [stdout]
@@ -39,9 +40,9 @@ webrtcTrackGatherTimeout: 2s
 pathDefaults:
   sourceOnDemand: no
 
-# 세 경로를 각각 브리지에서 당겨온다. 이름은 코어가 정한 drone1·drone2·drone3 이다
-# (SKYLENS_CORE_STREAM_PATH = `drone{id}`). 브리지 MediaMTX 가 116.89.187.181 의
-# read 를 비밀번호 없이 허용하므로 streamid 에 계정이 없다.
+# Pull all three paths from the bridge. The names are the core's drone1, drone2
+# and drone3 (SKYLENS_CORE_STREAM_PATH = `drone{id}`). The streamid carries no
+# account because the bridge lets this address read without a password.
 paths:
   drone1:
     source: srt://175.126.98.44:10890?streamid=read:drone1

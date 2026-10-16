@@ -1,20 +1,22 @@
 #!/usr/bin/env bash
-# SkyLens 브리지 설치 — 175.126.98.44 (Ubuntu 20.04+, amd64)
+# SkyLens bridge installer for 175.126.98.44 (Debian/Ubuntu, any CPU).
 #
-# 이 서버가 맡는 일:
-#   1. nginx 가 브라우저 요청을 받는다          (:HTTP_PORT → / 는 WEB_DIR 정적 현황판,
-#                                              /viewer · /uplink 는 터널 :20882 → 대전 프록시,
-#                                              /live/ 는 터널 :20889 → 대전 WHEP)
-#   2. 대전 VM 으로 SSH 터널을 건다             (로컬 :20889 → 대전 :10889, 로컬 :20882 → 대전 프록시 :8082,
-#                                              autossh 로 상시 유지)
-#   3. MediaMTX 가 드론 게이트웨이의 SRT 영상을 받아둔다 (:SRT_PORT/udp)
+# What this host does:
+#   1. nginx takes the browser requests  (:HTTP_PORT; / is the static board in
+#      WEB_DIR, /viewer and /uplink go through tunnel :20882 to the Daejeon
+#      proxy, /live/ through tunnel :20889 to the Daejeon WHEP endpoint)
+#   2. autossh holds one SSH tunnel to the Daejeon VM, carrying both forwards
+#      (local :20889 -> Daejeon :10889, local :20882 -> Daejeon proxy :8082)
+#   3. MediaMTX takes the SRT feed from the drone gateway (:SRT_PORT/udp)
 #
-# 터널 방향: 이 서버 → 대전. 175 는 KOREN 등록 IP 라 대전 SSH(26022)에 들어갈 수 있다.
-# 반대 방향(대전 → 175)은 175 에 SSH 포트를 열어야 해서 쓰지 않는다.
+# Tunnel direction is this host -> Daejeon: 175 is a KOREN-registered address,
+# so it may reach Daejeon SSH (26022). The other direction would mean opening
+# an SSH port here, so we do not use it.
 #
-# 기존 서비스(WireGuard 등)는 건드리지 않는다. 추가만 한다. 여러 번 실행해도 안전하다.
+# Existing services (WireGuard and such) are left alone; this only adds. Safe
+# to run again.
 #
-# 사용:  sudo ./setup-bridge.sh
+# Usage: sudo ./setup-bridge.sh
 set -euo pipefail
 cd "$(dirname "$(readlink -f "$0")")"
 
@@ -22,7 +24,7 @@ if [ "$(id -u)" -ne 0 ]; then
   echo "root 로 실행하세요:  sudo ./setup-bridge.sh" >&2; exit 1
 fi
 
-# ---------- 설정 ----------
+# ---------- settings ----------
 HTTP_PORT=80
 PUBLISH_PASS=""
 SRT_PORT=10890
@@ -36,9 +38,9 @@ if [ -f bridge.env ]; then
   . ./bridge.env
 fi
 if [ -z "$PUBLISH_PASS" ]; then
-  # head 를 뒤에 두면(`tr ... | head -c 20`) head 가 20바이트에서 먼저 끝나 tr 이 SIGPIPE 로
-  # 죽고, set -o pipefail + set -e 때문에 스크립트가 아무 말도 없이 141 로 멈춘다.
-  # 그래서 읽는 양을 head 로 먼저 자르고 그 뒤에 걸러낸다.
+  # With `tr ... | head -c 20` head exits at 20 bytes, tr dies of SIGPIPE, and
+  # set -e plus pipefail then stops the script at 141 without printing a word.
+  # So cut the input with head first and filter afterwards.
   PUBLISH_PASS="$(LC_ALL=C head -c 512 /dev/urandom | LC_ALL=C tr -dc 'A-Za-z0-9' | cut -c1-20)"
   [ ${#PUBLISH_PASS} -eq 20 ] || { echo "비밀번호 생성 실패 (${#PUBLISH_PASS}자)" >&2; exit 1; }
   GENERATED_PASS=1
@@ -56,14 +58,14 @@ step() { printf '\n\033[1;36m== %s ==\033[0m\n' "$*"; }
 ok()   { printf '   \033[32m✓\033[0m %s\n' "$*"; }
 warn() { printf '   \033[33m!\033[0m %s\n' "$*"; }
 
-# ---------- 0. 패키지 ----------
+# ---------- 0. packages ----------
 step "패키지 설치"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y -qq nginx curl ca-certificates autossh openssh-client >/dev/null
 ok "nginx, curl, autossh"
 
-# ---------- 1. 대전으로 가는 터널 ----------
+# ---------- 1. the tunnel to Daejeon ----------
 step "대전 터널 ($TUNNEL_USER: 로컬 :$TUNNEL_PORT → $DAEJEON_HOST:10889, 로컬 :$PROXY_TUNNEL_PORT → :8082)"
 id "$TUNNEL_USER" >/dev/null 2>&1 || useradd -r -M -s /usr/sbin/nologin "$TUNNEL_USER"
 install -d -m 0750 -o "$TUNNEL_USER" -g "$TUNNEL_USER" "$TUNNEL_DIR"
@@ -130,11 +132,12 @@ systemctl enable --now nginx >/dev/null 2>&1
 systemctl reload nginx
 ok "nginx 활성"
 
-# ---------- 3. MediaMTX (SRT 수신) ----------
+# ---------- 3. MediaMTX (SRT ingest) ----------
 step "MediaMTX $MEDIAMTX_VERSION (SRT :$SRT_PORT)"
 mkdir -p /opt/mediamtx
-# 브리지 호스트는 라즈베리파이 5(arm64)다. amd64 를 고정으로 받으면 파일은 받아지고
-# 실행만 안 돼서 원인 찾기가 오래 걸린다. 자산 이름은 linux_arm64 다(arm64v8 이 아니다).
+# The bridge host is a Raspberry Pi 5 (arm64). A hardcoded amd64 download
+# succeeds and only fails to execute, which takes a long time to track down.
+# The asset is named linux_arm64, not linux_arm64v8.
 case "$(uname -m)" in
   x86_64)        MARCH=amd64 ;;
   aarch64|arm64) MARCH=arm64 ;;
@@ -181,7 +184,7 @@ systemctl restart mediamtx
 sleep 1
 systemctl is-active --quiet mediamtx && ok "mediamtx 활성" || { journalctl -u mediamtx -n 20 --no-pager; exit 1; }
 
-# ---------- 4. 방화벽 (ufw 가 켜져 있을 때만) ----------
+# ---------- 4. firewall (only when ufw is already on) ----------
 step "방화벽"
 if command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q '^Status: active'; then
   ufw allow "$HTTP_PORT/tcp" >/dev/null
@@ -191,7 +194,7 @@ else
   ok "ufw 비활성 — 변경 없음"
 fi
 
-# ---------- 5. 요약 ----------
+# ---------- 5. summary ----------
 PUB_IP="$(curl -4 -s -m 5 ifconfig.me || echo '?')"
 cat <<SUMMARY
 

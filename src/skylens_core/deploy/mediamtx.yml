@@ -1,18 +1,19 @@
-# MediaMTX — 대전 VM (배포 노드)
+# MediaMTX on the Daejeon VM (the distribution node).
 #
-# 역할: 드론 영상을 받아 지휘관 브라우저에 WebRTC(WHEP)로 내보낸다.
-# 포트: KOREN 정책(10000~15000)에 맞춰 기본값에서 이동.
-#   WHEP 시그널링  8889 → 10889 (TCP)   브리지 리버스 터널로만 접근
-#   WebRTC 미디어  8189 → 10189 (UDP)   대전 → 브라우저 직결
-#   SRT 수신       8890 → 10890 (UDP)   1단계는 로컬 테스트 소스만
+# Role: take the drone video and send it to commander browsers over WebRTC (WHEP).
+# Ports moved off the defaults to fit the KOREN policy range (10000-15000):
+#   WHEP signalling  8889 -> 10889 (TCP)   reachable only through the bridge tunnel
+#   WebRTC media     8189 -> 10189 (UDP)   straight from Daejeon to the browser
+#   SRT ingest       8890 -> 10890 (UDP)   stage 1 takes the local test source only
 #
-# 대전은 공인 IP가 ens3에 직결(NAT 없음)이므로 서버 측 STUN이 필요 없다.
-# webrtcIPsFromInterfacesList 로 ens3 주소(116.89.187.181)만 ICE 후보로 낸다.
+# The public address sits directly on ens3 with no NAT, so no server-side STUN
+# is needed; webrtcIPsFromInterfacesList offers only the ens3 address
+# (116.89.187.181) as an ICE candidate.
 
 logLevel: info
 logDestinations: [stdout]
 
-# 쓰지 않는 프로토콜은 끈다 — 열리는 포트를 최소화
+# Turn off the protocols we do not use, to open as few ports as possible.
 api: no
 metrics: no
 pprof: no
@@ -20,37 +21,38 @@ playback: no
 rtsp: no
 rtmp: no
 hls: no
-moq: no                         # v1.21 기본 on — 8892/8893 을 열므로 끈다
+moq: no                         # on by default in v1.21; it would open 8892/8893
 
-# ---- SRT (수신) ----
+# ---- SRT (ingest) ----
 srt: yes
 srtAddress: :10890
 
-# ---- WebRTC (송출) ----
+# ---- WebRTC (egress) ----
 webrtc: yes
 webrtcAddress: :10889
-webrtcEncryption: no            # TLS는 브리지 nginx가 담당
+webrtcEncryption: no            # TLS is the bridge nginx's job
 webrtcAllowOrigins: ['*']
 webrtcTrustedProxies: [127.0.0.1]
 webrtcLocalUDPAddress: :10189
-webrtcLocalTCPAddress: ''       # TCP 폴백 없음 — UDP 직결만
+webrtcLocalTCPAddress: ''       # no TCP fallback, UDP only
 webrtcIPsFromInterfaces: yes
 webrtcIPsFromInterfacesList: [ens3]
 webrtcAdditionalHosts: []
-webrtcICEServers2: []           # NAT 없음 → STUN 불필요
+webrtcICEServers2: []           # no NAT, so no STUN
 webrtcHandshakeTimeout: 10s
 webrtcTrackGatherTimeout: 2s
 
-# ---- 경로 ----
-# 이름은 코어가 정한다 — SKYLENS_CORE_STREAM_PATH 기본값이 `drone{id}` 이고, 코어는
-# 프레임을 srt://127.0.0.1:10890?streamid=read:droneN 으로 읽고 화면에는
-# /live/droneN/whep 을 내려준다. 그래서 세 경로 이름이 그대로 맞아야 한다.
-# (데모는 이 파일을 읽어 paths 만 all_others 로 바꿔 쓴다 — src/demo/paths.rs)
+# ---- paths ----
+# The core owns these names. SKYLENS_CORE_STREAM_PATH defaults to `drone{id}`,
+# the core reads frames from srt://127.0.0.1:10890?streamid=read:droneN, and it
+# hands the screens /live/droneN/whep. All three names have to line up.
+# (The demo reads this file and swaps only `paths` for all_others; see
+# src/demo/paths.rs.)
 pathDefaults:
   source: publisher
   sourceOnDemand: no
 
 paths:
-  drone1:                       # 좌 (1단계: ffmpeg 테스트 소스)
-  drone2:                       # 중
-  drone3:                       # 우
+  drone1:                       # left  (stage 1: the ffmpeg test source)
+  drone2:                       # center
+  drone3:                       # right

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# MediaMTX 설치 (Ubuntu, amd64). /opt/mediamtx 에 바이너리와 설정을 둔다.
-# 사용: sudo ./install-mediamtx.sh <config.yml> [version]
-#   version 생략 시 GitHub 최신 릴리스.
+# Install MediaMTX into /opt/mediamtx, binary and config. The build is picked
+# from uname -m, so this also works on an arm64 host.
+# Usage: sudo ./install-mediamtx.sh <config.yml> [version]
+#   Without a version, the latest GitHub release is used.
 set -euo pipefail
 
 CFG="$(readlink -f "${1:?config.yml 경로 필요}")"
@@ -13,7 +14,14 @@ if [ -z "$VER" ]; then
 fi
 echo "MediaMTX $VER"
 
-TARBALL="mediamtx_${VER}_linux_amd64.tar.gz"
+case "$(uname -m)" in
+  x86_64)        MARCH=amd64 ;;
+  aarch64|arm64) MARCH=arm64 ;;
+  armv7l)        MARCH=armv7 ;;
+  armv6l)        MARCH=armv6 ;;
+  *) echo "unsupported CPU: $(uname -m)" >&2; exit 1 ;;
+esac
+TARBALL="mediamtx_${VER}_linux_${MARCH}.tar.gz"
 URL="https://github.com/bluenviron/mediamtx/releases/download/${VER}/${TARBALL}"
 
 mkdir -p /opt/mediamtx

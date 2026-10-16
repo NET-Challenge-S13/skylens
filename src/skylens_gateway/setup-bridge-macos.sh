@@ -1,23 +1,27 @@
 #!/bin/bash
-# SkyLens 브리지 설치 — macOS (맥미니 175.126.98.44)
+# SkyLens bridge installer for macOS. The bridge host is a Raspberry Pi today,
+# so this is the spare for moving the role onto a Mac; the Linux installer is
+# setup-bridge.sh.
 #
-# 이 서버가 맡는 일:
-#   1. nginx 가 브라우저 요청을 받는다          (:HTTP_PORT → / 는 WEB_DIR 정적 현황판,
-#                                              /viewer · /uplink 는 터널 :20882 → 대전 프록시,
-#                                              /live/ 는 터널 :20889 → 대전 WHEP)
-#   2. 대전 VM 으로 SSH 터널을 건다             (로컬 :20889 → 대전 :10889, 로컬 :20882 → 대전 프록시 :8082,
-#                                              autossh 로 상시 유지)
-#   3. MediaMTX 가 드론 게이트웨이의 SRT 영상을 받아둔다 (:SRT_PORT/udp)
+# What this host does:
+#   1. nginx takes the browser requests  (:HTTP_PORT; / is the static board in
+#      WEB_DIR, /viewer and /uplink go through tunnel :20882 to the Daejeon
+#      proxy, /live/ through tunnel :20889 to the Daejeon WHEP endpoint)
+#   2. autossh holds one SSH tunnel to the Daejeon VM, carrying both forwards
+#      (local :20889 -> Daejeon :10889, local :20882 -> Daejeon proxy :8082)
+#   3. MediaMTX takes the SRT feed from the drone gateway (:SRT_PORT/udp)
 #
-# 터널 하나에 포워드 둘을 싣고 ExitOnForwardFailure=yes 라, 대전 키에 permitopen 8082 가
-# 없으면 SSH 자체가 끊겨 WHEP(20889)까지 같이 죽는다. 그래서 순서가 있다 — README 를 본다.
+# One tunnel carries both forwards with ExitOnForwardFailure=yes, so if the
+# Daejeon key lacks permitopen for 8082 the whole SSH connection drops and
+# takes WHEP (20889) down with it. Hence the install order in the README.
 #
-# Ubuntu 판(setup-bridge.sh)과 같은 설계. 패키지는 Homebrew, 서비스는 launchd 로 올린다.
-# 서비스는 /opt/skylens 아래에 두고, 로그인 없이도 돌도록 LaunchDaemon 으로 등록한다.
-# 기존 설정은 건드리지 않고 추가만 한다. 여러 번 실행해도 안전하다.
+# Same design as the Linux installer; packages come from Homebrew and services
+# run as launchd LaunchDaemons under /opt/skylens, so they start without a
+# login. Existing configuration is left alone; this only adds. Safe to run
+# again.
 #
-# 준비: Homebrew 가 설치돼 있어야 한다 (https://brew.sh)
-# 사용: sudo ./setup-bridge-macos.sh
+# Needs Homebrew (https://brew.sh).
+# Usage: sudo ./setup-bridge-macos.sh
 set -euo pipefail
 cd "$(dirname "$0")"; cd "$(pwd -P)"
 
@@ -28,7 +32,7 @@ if [ -z "$RUN_USER" ] || [ "$RUN_USER" = root ]; then
   echo "일반 계정에서 sudo 로 실행하세요 (root 로그인 상태 불가)" >&2; exit 1
 fi
 
-# ---------- 설정 ----------
+# ---------- settings ----------
 HTTP_PORT=80
 PUBLISH_PASS=""
 SRT_PORT=10890
@@ -42,8 +46,8 @@ if [ -f bridge.env ]; then
   . ./bridge.env
 fi
 if [ -z "$PUBLISH_PASS" ]; then
-  # head 를 뒤에 두면 head 가 먼저 끝나 tr 이 SIGPIPE 로 죽고, pipefail + set -e 때문에
-  # 스크립트가 아무 말도 없이 141 로 멈춘다. 읽는 양을 먼저 자르고 그 뒤에 걸러낸다.
+  # With head last it exits first, tr dies of SIGPIPE, and set -e plus pipefail
+  # stops the script at 141 without a word. Cut the input first, filter after.
   PUBLISH_PASS="$(LC_ALL=C head -c 512 /dev/urandom | LC_ALL=C tr -dc 'A-Za-z0-9' | cut -c1-20)"
   [ ${#PUBLISH_PASS} -eq 20 ] || { echo "비밀번호 생성 실패 (${#PUBLISH_PASS}자)" >&2; exit 1; }
   GENERATED_PASS=1
@@ -65,7 +69,7 @@ ok()   { printf '   \033[32m✓\033[0m %s\n' "$*"; }
 warn() { printf '   \033[33m!\033[0m %s\n' "$*"; }
 as_user() { sudo -u "$RUN_USER" -H "$@"; }
 
-# ---------- 0. Homebrew / 패키지 ----------
+# ---------- 0. Homebrew packages ----------
 step "Homebrew 패키지"
 BREW="$(as_user bash -lc 'command -v brew' 2>/dev/null || true)"
 [ -n "$BREW" ] || { echo "Homebrew 가 없습니다. https://brew.sh 안내대로 설치 후 다시 실행하세요." >&2; exit 1; }
@@ -76,7 +80,7 @@ ok "nginx, autossh  ($PREFIX)"
 mkdir -p "$BASE/mediamtx" "$BASE/tunnel" "$LOGS"
 chown "$RUN_USER" "$BASE/mediamtx" "$BASE/tunnel" "$LOGS"
 
-# ---------- 1. 대전으로 가는 터널 ----------
+# ---------- 1. the tunnel to Daejeon ----------
 step "대전 터널 (로컬 :$TUNNEL_PORT → $DAEJEON_HOST:10889, 로컬 :$PROXY_TUNNEL_PORT → :8082)"
 if [ ! -f "$TUNNEL_KEY" ]; then
   as_user ssh-keygen -q -t ed25519 -N '' -C 'bridge-tunnel@skylens' -f "$TUNNEL_KEY"
@@ -125,7 +129,7 @@ launchctl bootout system/com.skylens.daejeon-tunnel 2>/dev/null || true
 launchctl bootstrap system /Library/LaunchDaemons/com.skylens.daejeon-tunnel.plist
 ok "daejeon-tunnel 등록 (대전에 키가 등록될 때까지 재시도 상태로 대기)"
 
-# ---------- 2. 현황판 정적 파일 ----------
+# ---------- 2. the static board files ----------
 step "현황판 정적 파일 ($WEB_DIR)"
 mkdir -p "$WEB_DIR"
 chmod 0755 "$WEB_DIR"
@@ -175,7 +179,7 @@ PLIST
   ok "nginx 를 LaunchDaemon(root) 으로 기동"
 fi
 
-# ---------- 4. MediaMTX (SRT 수신) ----------
+# ---------- 4. MediaMTX (SRT ingest) ----------
 step "MediaMTX $MEDIAMTX_VERSION (SRT :$SRT_PORT)"
 case "$(uname -m)" in arm64) MARCH=arm64 ;; x86_64) MARCH=amd64 ;; *) echo "지원하지 않는 CPU" >&2; exit 1 ;; esac
 if [ ! -x "$BASE/mediamtx/mediamtx" ] || [ "$(cat "$BASE/mediamtx/VERSION" 2>/dev/null)" != "$MEDIAMTX_VERSION" ]; then
@@ -221,7 +225,7 @@ else
   warn "mediamtx 상태 확인 실패 — 로그: $LOGS/mediamtx.log"; tail -n 15 "$LOGS/mediamtx.log" 2>/dev/null || true
 fi
 
-# ---------- 5. macOS 방화벽 (켜져 있을 때만) ----------
+# ---------- 5. macOS firewall (only when it is already on) ----------
 step "방화벽"
 SFW=/usr/libexec/ApplicationFirewall/socketfilterfw
 if "$SFW" --getglobalstate 2>/dev/null | grep -qi 'enabled'; then
@@ -234,7 +238,7 @@ else
   ok "macOS 방화벽 꺼짐 — 변경 없음"
 fi
 
-# ---------- 6. 요약 ----------
+# ---------- 6. summary ----------
 PUB_IP="$(curl -4 -s -m 5 ifconfig.me || echo '?')"
 cat <<SUMMARY
 
