@@ -320,7 +320,7 @@ impl StatusApp {
             let b = self.board.borrow();
             let delivered = b.segments.len();
             let refined = b.segments.values().filter(|s| s.refined).count();
-            (b.point_layer_on, delivered, refined, b.total_points(), b.store.segments().next().is_some(), b.height_range())
+            (b.point_layer_on, delivered, refined, b.total_points(), !b.point_segments().is_empty(), b.height_range())
         };
         dom.set_text(q(".point-toggle__meta"), &panels::point_meta(on, delivered, refined, total));
         dom.toggle_class("point-toggle", "is-on", on);

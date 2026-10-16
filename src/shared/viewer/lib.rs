@@ -33,12 +33,12 @@ pub use keyboard_types::Code;
 pub use {anyrender, glam, peniko, pointblitz, skylens_shared, wgpu};
 
 pub use camera::{Pose, Projector};
-pub use chunks::{Applied, Change, ChunkStore};
+pub use chunks::{Applied, Change, ChunkStore, SlotPoints, ZoneSlots};
 pub use dom::{Dom, Sel, q};
 pub use link::{CoreLink, LinkEvent, LinkStatus};
 pub use shell::{Page, PollCx, ScreenApp, ScreenDocument, UiInput, WindowOptions};
 pub use site::SiteFrame;
-pub use view3d::{FrameInfo, FrameSpec, Gpu3d, View3d, ViewInput, ViewScreen};
+pub use view3d::{FrameInfo, FrameSpec, Gpu3d, SlotSync, View3d, ViewInput, ViewScreen};
 
 /// Wall-clock milliseconds since the Unix epoch.
 #[cfg(not(target_arch = "wasm32"))]

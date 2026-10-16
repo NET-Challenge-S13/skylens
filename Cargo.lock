@@ -5356,6 +5356,14 @@ dependencies = [
 [[package]]
 name = "skylens-tests"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "pointblitz-io",
+ "serde_json",
+ "skylens-shared",
+ "skylens-viewer",
+ "tracing",
+]
 
 [[package]]
 name = "skylens-viewer"

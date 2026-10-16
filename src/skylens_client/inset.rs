@@ -1,9 +1,9 @@
 //! The point panel's own view (legacy `pointInset.ts`), mounted on `.point-inset__view`.
 //!
-//! A separate scene and camera: every delivered point segment coloured by height over the range
-//! the points actually span, on `#06090e`. The camera frames everything delivered obliquely from
-//! the south-east and widens as segments arrive, until the operator drags or zooms inside the
-//! panel; a double click hands the framing back.
+//! A separate scene and camera: every delivered point segment (and the point slot stream)
+//! coloured by height over the range the points actually span, on `#06090e`. The camera frames
+//! everything delivered obliquely from the south-east and widens as segments arrive, until the
+//! operator drags or zooms inside the panel; a double click hands the framing back.
 
 use crate::board::{Board, FIT_SAMPLES_PER_SEGMENT};
 use crate::glam::DVec3;
@@ -163,6 +163,10 @@ impl InsetScene {
                 self.uploaded.remove(&s);
             }
         }
+        // The slot stream: recoloured message by message; a new range rebuilds it.
+        let key = range.0.to_bits().rotate_left(17) ^ range.1.to_bits();
+        let (device, queue) = (&gpu.device, &gpu.queue);
+        gpu.clouds.sync_slots_with(device, queue, &board.store, key, |m| points::recolor_slots_by_height(m, range.0, range.1));
     }
 
     fn desired(&mut self, board: &Board, aspect: f64) -> Option<Pose> {

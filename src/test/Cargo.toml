@@ -9,3 +9,13 @@ publish.workspace = true
 
 [lib]
 path = "lib.rs"
+
+[dev-dependencies]
+# slots.rs: the model's live stream follower (compiled from its source, without libtorch) feeding
+# the screens' chunk store.
+anyhow.workspace = true
+tracing.workspace = true
+serde_json.workspace = true
+skylens-shared.workspace = true
+skylens-viewer.workspace = true
+pointblitz-io = { workspace = true, features = ["stream"] }
