@@ -323,3 +323,47 @@ func TestPointSlotsReplayBetweenPointsAndMesh(t *testing.T) {
 	s.Put(&modelv1.Chunk{Sequence: 4, Kind: dets, Payload: []byte("d")})
 	sameTags(t, s.ModelChunks(), "p", "s1", "m", "d")
 }
+
+func TestPointSlotsHeldMessagesAreBounded(t *testing.T) {
+	s := New(Options{MaxHeldSlots: 3})
+	// A stream whose start was missed: every message waits for seq 1.
+	for seq := uint32(2); seq <= 4; seq++ {
+		if got := s.PutAll(slot(uint64(seq), 8, seq, 0, "h")); got != nil {
+			t.Fatalf("seq %d forwarded %v", seq, tags(got))
+		}
+	}
+	if _, held := s.SlotMessages(); held != 3 {
+		t.Fatalf("held %d", held)
+	}
+	// One more would pass the limit: the held messages are dropped, not kept without bound.
+	if got := s.PutAll(slot(5, 8, 5, 0, "h")); got != nil {
+		t.Fatalf("forwarded %v", tags(got))
+	}
+	if kept, held := s.SlotMessages(); kept != 0 || held != 0 {
+		t.Fatalf("kept %d held %d", kept, held)
+	}
+	if c := s.Counters(); c.Rejected != 4 {
+		t.Fatalf("counters %+v", c)
+	}
+	// The stream can still start once seq 1 arrives, and a newer stream replaces it.
+	sameTags(t, s.PutAll(slot(6, 8, 1, 0, "one")), "one")
+	sameTags(t, s.PutAll(slot(7, 9, 1, 0, "new")), "new")
+	sameTags(t, s.ModelChunks(), "new")
+}
+
+func TestPointSlotsHeldBytesAreBounded(t *testing.T) {
+	s := New(Options{MaxHeldSlotBytes: 10})
+	s.Put(slot(1, 3, 1, 0, "a"))
+	if got := s.PutAll(slot(2, 3, 3, 0, "123456")); got != nil {
+		t.Fatalf("forwarded %v", tags(got))
+	}
+	if _, held := s.SlotMessages(); held != 1 {
+		t.Fatalf("held %d", held)
+	}
+	s.PutAll(slot(3, 3, 4, 0, "123456")) // 12 bytes held would pass 10
+	if _, held := s.SlotMessages(); held != 0 {
+		t.Fatalf("held %d after the byte limit", held)
+	}
+	sameTags(t, s.PutAll(slot(4, 3, 2, 0, "b")), "b")
+	sameTags(t, s.ModelChunks(), "a", "b")
+}

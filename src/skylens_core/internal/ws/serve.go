@@ -30,7 +30,8 @@ type Options struct {
 	Name         string        // for logs, e.g. "viewer"
 	ReadLimit    int64         // largest inbound frame; default 4 MiB
 	BacklogLimit int           // live bytes a peer may lag behind; default 64 MiB
-	WriteTimeout time.Duration // per frame; default 15 s
+	WriteTimeout time.Duration // per frame, plus the frame's size at WriteRate; default 15 s
+	WriteRate    int           // slowest acceptable write, bytes per second; default 1 MiB/s
 	PingInterval time.Duration // default 20 s
 }
 
@@ -43,6 +44,9 @@ func (o *Options) defaults() {
 	}
 	if o.WriteTimeout <= 0 {
 		o.WriteTimeout = 15 * time.Second
+	}
+	if o.WriteRate <= 0 {
+		o.WriteRate = 1 << 20
 	}
 	if o.PingInterval <= 0 {
 		o.PingInterval = 20 * time.Second
@@ -84,7 +88,7 @@ func serve(parent context.Context, conn *websocket.Conn, remote string, hub *Hub
 	}()
 	go pingLoop(ctx, cancel, conn, opts.PingInterval)
 
-	writeErr := writeLoop(ctx, conn, p, opts.WriteTimeout)
+	writeErr := writeLoop(ctx, conn, p, opts.WriteTimeout, opts.WriteRate)
 	cancel()
 
 	hub.Detach(p)
@@ -120,13 +124,20 @@ func readLoop(ctx context.Context, conn *websocket.Conn, p *Peer, h Handler, nam
 	}
 }
 
-func writeLoop(ctx context.Context, conn *websocket.Conn, p *Peer, timeout time.Duration) error {
+// frameTimeout is the time one frame of n bytes may take: base plus n at rate
+// bytes per second (a point slot message of a live diff stream event can be
+// tens of MB).
+func frameTimeout(base time.Duration, rate, n int) time.Duration {
+	return base + time.Duration(int64(n)*int64(time.Second)/int64(rate))
+}
+
+func writeLoop(ctx context.Context, conn *websocket.Conn, p *Peer, timeout time.Duration, rate int) error {
 	for {
 		prefix, body, err := p.NextParts(ctx.Done())
 		if err != nil {
 			return err
 		}
-		wctx, cancel := context.WithTimeout(ctx, timeout)
+		wctx, cancel := context.WithTimeout(ctx, frameTimeout(timeout, rate, len(prefix)+len(body)))
 		err = writeFrame(wctx, conn, prefix, body)
 		cancel()
 		if err != nil {

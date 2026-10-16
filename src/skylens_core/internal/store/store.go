@@ -23,7 +23,10 @@
 //     points by applying all of them. A message ahead of a gap is held until
 //     the gap fills; a repeated one is stale. A newer stream (higher
 //     generation, a new model run) drops the older stream's messages; an
-//     older stream's message is stale.
+//     older stream's message is stale. Held messages are bounded
+//     (Options.MaxHeldSlots, Options.MaxHeldSlotBytes): past either limit the
+//     held ones are dropped and logged, so a gap that never fills (the start
+//     of a stream missed) cannot grow memory without limit.
 //
 // Rejected chunks must not reach viewers either: PutAll returns the chunks to
 // forward (a slot message can release held ones), Put whether any was kept.
@@ -31,6 +34,7 @@ package store
 
 import (
 	"fmt"
+	"log"
 	"sort"
 	"sync"
 	"time"
@@ -44,6 +48,12 @@ type Options struct {
 	// DetectionsPerSegment caps detection chunks kept for one segment; the
 	// oldest are dropped first. Zero means 256.
 	DetectionsPerSegment int
+	// MaxHeldSlots caps the point slot messages held ahead of a gap. Zero
+	// means 64.
+	MaxHeldSlots int
+	// MaxHeldSlotBytes caps the payload bytes of the held point slot
+	// messages. Zero means 256 MiB.
+	MaxHeldSlotBytes int
 }
 
 type segmentPoints struct {
@@ -56,9 +66,10 @@ type segmentPoints struct {
 // slotStream holds one point slot stream: messages seq 1..len(msgs) in order,
 // and the messages that arrived ahead of a gap.
 type slotStream struct {
-	id   uint32
-	msgs []*modelv1.Chunk
-	held map[uint32]*modelv1.Chunk
+	id        uint32
+	msgs      []*modelv1.Chunk
+	held      map[uint32]*modelv1.Chunk
+	heldBytes int
 }
 
 // ordered keeps keyed chunks in first-insertion order so replay is stable.
@@ -122,6 +133,12 @@ type Store struct {
 func New(opts Options) *Store {
 	if opts.DetectionsPerSegment <= 0 {
 		opts.DetectionsPerSegment = 256
+	}
+	if opts.MaxHeldSlots <= 0 {
+		opts.MaxHeldSlots = 64
+	}
+	if opts.MaxHeldSlotBytes <= 0 {
+		opts.MaxHeldSlotBytes = 256 << 20
 	}
 	return &Store{
 		opts:        opts,
@@ -226,6 +243,10 @@ func (s *Store) putSlotsLocked(c *modelv1.Chunk) ([]*modelv1.Chunk, bool) {
 	}
 	if s.slots == nil || id > s.slots.id {
 		// A new stream (a new model run) starts over at seq 1.
+		if seq != 1 {
+			log.Printf("[store] point slot stream %d starts at message %d, not 1: its start was missed; "+
+				"the screens show nothing of it until messages 1..%d arrive", id, seq, seq-1)
+		}
 		s.slots = &slotStream{id: id, held: map[uint32]*modelv1.Chunk{}}
 	}
 	st := s.slots
@@ -240,7 +261,18 @@ func (s *Store) putSlotsLocked(c *modelv1.Chunk) ([]*modelv1.Chunk, bool) {
 		if _, dup := st.held[seq]; dup {
 			return nil, false
 		}
+		size := len(c.GetPayload())
+		if len(st.held)+1 > s.opts.MaxHeldSlots || st.heldBytes+size > s.opts.MaxHeldSlotBytes {
+			log.Printf("[store] point slot stream %d: message %d still missing with %d message(s), %d bytes held; "+
+				"dropping the held messages (a newer stream or the missing message starts over)",
+				st.id, next, len(st.held), st.heldBytes)
+			s.counters.Rejected += uint64(len(st.held))
+			st.held = map[uint32]*modelv1.Chunk{}
+			st.heldBytes = 0
+			return nil, false
+		}
 		st.held[seq] = c
+		st.heldBytes += size
 		return nil, true
 	}
 	out := []*modelv1.Chunk{c}
@@ -251,6 +283,7 @@ func (s *Store) putSlotsLocked(c *modelv1.Chunk) ([]*modelv1.Chunk, bool) {
 			break
 		}
 		delete(st.held, h.GetVersion())
+		st.heldBytes -= len(h.GetPayload())
 		st.msgs = append(st.msgs, h)
 		out = append(out, h)
 	}

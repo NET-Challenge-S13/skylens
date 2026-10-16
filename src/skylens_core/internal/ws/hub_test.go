@@ -223,3 +223,15 @@ func TestRouteOverRealSocket(t *testing.T) {
 		t.Fatalf("live frame %+v", env)
 	}
 }
+
+func TestFrameTimeoutGrowsWithTheFrameSize(t *testing.T) {
+	o := Options{}
+	o.defaults()
+	if got := frameTimeout(o.WriteTimeout, o.WriteRate, 1000); got < 15*time.Second || got > 15*time.Second+time.Millisecond {
+		t.Fatalf("small frame %v", got)
+	}
+	// A 14.6 MB point slot message (theater30 event 6) at the 1 MiB/s floor.
+	if got := frameTimeout(o.WriteTimeout, o.WriteRate, 14_600_000); got < 28*time.Second || got > 30*time.Second {
+		t.Fatalf("large frame %v", got)
+	}
+}
