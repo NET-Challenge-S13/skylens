@@ -290,3 +290,17 @@ func TestPointsDeltaReplayOrderAndBoards(t *testing.T) {
 	sameTags(t, s.Chunks(), "ter", "pts", "delta", "mesh", "det")
 	sameTags(t, s.ModelChunks(), "pts", "delta", "mesh", "det")
 }
+
+func TestPointsDeltaNewRunReplacesThePreviousOne(t *testing.T) {
+	s := New(Options{})
+	s.Put(delta(1, 0, 0, "a1"))
+	s.Put(delta(2, 0, 0, "a2"))
+	s.Put(delta(3, 0, 1, "snapA")) // run A got as far as a snapshot generation
+	// The model restarted: seq 1 again at generation 0 starts a new run.
+	if !s.Put(delta(1, 0, 0, "b1")) {
+		t.Fatal("new run rejected")
+	}
+	sameTags(t, s.Chunks(), "b1")
+	s.Put(delta(2, 0, 0, "b2"))
+	sameTags(t, s.Chunks(), "b1", "b2")
+}

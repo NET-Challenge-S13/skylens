@@ -102,4 +102,5 @@ message PointsDelta {
   bytes adds = 10;         // N x 20 B little-endian: id u32, x f32, y f32, z f32 (ENU metres about the anchor), r u8, g u8, b u8, zone u8
   bytes moves = 11;        // N x 20 B: id u32, x,y,z f32, r u8, g u8, b u8, pad u8
   bytes removes = 12;      // N x 4 B: id u32
+  uint32 run = 13;         // id of the model run (start time, unix seconds); a change means a new mission: viewers drop the old state
 }

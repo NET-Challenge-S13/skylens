@@ -620,6 +620,7 @@ type PointsDelta struct {
 	Adds           []byte                 `protobuf:"bytes,10,opt,name=adds,proto3" json:"adds,omitempty"`                                           // N x 20 B little-endian: id u32, x f32, y f32, z f32 (ENU metres about the anchor), r u8, g u8, b u8, zone u8
 	Moves          []byte                 `protobuf:"bytes,11,opt,name=moves,proto3" json:"moves,omitempty"`                                         // N x 20 B: id u32, x,y,z f32, r u8, g u8, b u8, pad u8
 	Removes        []byte                 `protobuf:"bytes,12,opt,name=removes,proto3" json:"removes,omitempty"`                                     // N x 4 B: id u32
+	Run            uint32                 `protobuf:"varint,13,opt,name=run,proto3" json:"run,omitempty"`                                            // id of the model run (start time, unix seconds); a change means a new mission: viewers drop the old state
 	unknownFields  protoimpl.UnknownFields
 	sizeCache      protoimpl.SizeCache
 }
@@ -738,6 +739,13 @@ func (x *PointsDelta) GetRemoves() []byte {
 	return nil
 }
 
+func (x *PointsDelta) GetRun() uint32 {
+	if x != nil {
+		return x.Run
+	}
+	return 0
+}
+
 var File_skylens_payload_v1_payload_proto protoreflect.FileDescriptor
 
 const file_skylens_payload_v1_payload_proto_rawDesc = "" +
@@ -783,7 +791,7 @@ const file_skylens_payload_v1_payload_proto_rawDesc = "" +
 	"\x06height\x18\x04 \x01(\x01R\x06height\"]\n" +
 	"\vBuildingSet\x12\x12\n" +
 	"\x04cell\x18\x01 \x03(\x05R\x04cell\x12:\n" +
-	"\tbuildings\x18\x02 \x03(\v2\x1c.skylens.payload.v1.BuildingR\tbuildings\"\xdd\x02\n" +
+	"\tbuildings\x18\x02 \x03(\v2\x1c.skylens.payload.v1.BuildingR\tbuildings\"\xef\x02\n" +
 	"\vPointsDelta\x12\x10\n" +
 	"\x03seq\x18\x01 \x01(\rR\x03seq\x121\n" +
 	"\x04kind\x18\x02 \x01(\x0e2\x1d.skylens.payload.v1.DeltaKindR\x04kind\x12\x12\n" +
@@ -797,7 +805,8 @@ const file_skylens_payload_v1_payload_proto_rawDesc = "" +
 	"\x04adds\x18\n" +
 	" \x01(\fR\x04adds\x12\x14\n" +
 	"\x05moves\x18\v \x01(\fR\x05moves\x12\x18\n" +
-	"\aremoves\x18\f \x01(\fR\aremoves*\xb9\x01\n" +
+	"\aremoves\x18\f \x01(\fR\aremoves\x12\x10\n" +
+	"\x03run\x18\r \x01(\rR\x03run*\xb9\x01\n" +
 	"\x11DetectionCategory\x12\"\n" +
 	"\x1eDETECTION_CATEGORY_UNSPECIFIED\x10\x00\x12\x1d\n" +
 	"\x19DETECTION_CATEGORY_PERSON\x10\x01\x12\x1b\n" +

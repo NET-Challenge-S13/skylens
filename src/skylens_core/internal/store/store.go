@@ -222,6 +222,12 @@ func (s *Store) putPointsLocked(c *modelv1.Chunk) bool {
 
 func (s *Store) putDeltaLocked(c *modelv1.Chunk) bool {
 	switch {
+	// Delta seq 1 at generation 0 is the first delta of a run. A model that restarts (a new
+	// mission) starts over at seq 1, so whatever the previous run left here must not stay
+	// in the replay: viewers would stack the two runs.
+	case c.GetVersion() == 1 && c.GetGeneration() == 0:
+		s.deltas = []*modelv1.Chunk{c}
+		s.deltaGen = 0
 	case len(s.deltas) == 0 || c.GetGeneration() > s.deltaGen:
 		s.deltas = []*modelv1.Chunk{c}
 		s.deltaGen = c.GetGeneration()
