@@ -1,0 +1,3 @@
+# 실제 설치값. SRT publish 비밀번호가 들어가므로 커밋하지 않는다.
+# 올리는 것은 bridge.env.example 뿐이다.
+bridge.env
