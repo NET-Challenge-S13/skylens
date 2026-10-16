@@ -18,7 +18,7 @@ use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, anyhow, bail};
 use cumulus3d_cli::compose::{CompositionHost, FrameKey, FrameState, LiveFrameSet, ReconNode, ReconcilePolicy};
-use cumulus3d_cli::declare::{AlignFrame, Dense};
+use cumulus3d_cli::declare::{AlignFrame, Dense, Plan};
 use cumulus3d_cli::events::{Event, ZoneRange};
 use cumulus3d_core::io::ply::PointCloud;
 use cumulus3d_core::Reconstruction;
@@ -29,7 +29,7 @@ use super::frames::ANCHOR_RECORD;
 use super::fusion::{FrameObservation, View};
 use super::recon::{zone_points, zone_views};
 use super::sources;
-use super::EngineConfig;
+use super::{EngineConfig, SETTLE_MAX_ZONE, SETTLE_TOL};
 use crate::detect::Detector;
 
 /// `steps` at or above this produce the refined level; below, the preview.
@@ -49,9 +49,37 @@ pub struct JobOutput {
     pub cloud: Arc<PointCloud>,
 }
 
-/// Dense settings shared by the live node and jobs. Densification needs CUDA.
+/// Plan the live node and the jobs start from: cumulus3d's defaults with the stable-display settle
+/// parameters written out (`--settle-tol 0.01 --settle-max-zone 3`, the defaults), no densification
+/// until [`dense_for`] and no GPS file (the sets carry their GPS fixes).
+///
+/// The intrinsics prior of the V100 runs (`--intrinsics-prior`, the demo camera.json: fx = fy =
+/// 1329 at 1920x1080) cannot be expressed here: in cumulus3d 0.7 `Plan.sparse.intrinsics_prior` is
+/// read only by the file driven `Recon` builder, while `NodeBuilder::build` (the `ReconNode` of the
+/// live node and the jobs) never passes it on to the session.
+pub fn live_plan() -> Plan {
+    let mut plan = Plan::default();
+    plan.dense.enabled = false;
+    plan.gps = None;
+    plan.sparse.settle_tol = SETTLE_TOL;
+    plan.sparse.settle_max_zone = SETTLE_MAX_ZONE;
+    plan
+}
+
+/// Dense settings shared by the live node and jobs, equal to the V100 live runs: `fast` profile,
+/// `--max-levels 1`, `--visibility-views 8`, `--fusion-smooth-iters 2 --fusion-smooth-radius 1.5
+/// --fusion-smooth-normal 15`; everything else is the profile default (views 10, 960 px, fusion min
+/// views 3). Densification needs CUDA.
 pub fn dense_for(gpu: bool) -> Option<Dense> {
-    gpu.then(|| Dense::profile("fast").fusion_min_views(2))
+    gpu.then(|| {
+        let mut d = Dense::profile("fast")
+            .max_levels(1)
+            .fusion_smooth_iters(2)
+            .fusion_smooth_radius(1.5)
+            .fusion_smooth_normal(15.0);
+        d.fusion.visibility_views = Some(8);
+        d
+    })
 }
 
 /// Runs one job node over `sources` in `dir` (created, left for the caller to remove).
@@ -80,6 +108,7 @@ pub fn run(
 
     let host = CompositionHost::new();
     let mut b = ReconNode::declare()
+        .plan(live_plan())
         .id("job")
         .images(&images)
         .cameras(input.cameras.clone())

@@ -1099,7 +1099,9 @@ dependencies = [
 
 [[package]]
 name = "cumulus3d-align"
-version = "0.4.0"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "85e50b92385fa6afde45c36200bffe79aa59b88c8473ffcd23606d687357ab77"
 dependencies = [
  "cumulus3d-core",
  "nalgebra",
@@ -1109,7 +1111,9 @@ dependencies = [
 
 [[package]]
 name = "cumulus3d-ba"
-version = "0.4.0"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "55057d2169805dcb56280b528f845d5efc6a348041de674455c3c5595010d24e"
 dependencies = [
  "cumulus3d-core",
  "faer",
@@ -1120,7 +1124,9 @@ dependencies = [
 
 [[package]]
 name = "cumulus3d-cli"
-version = "0.4.0"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3a001697bcb86475346138ec3cb1d51950eea53b530bfd85a786c75fe3bcd012"
 dependencies = [
  "clap",
  "cumulus3d-align",
@@ -1140,7 +1146,9 @@ dependencies = [
 
 [[package]]
 name = "cumulus3d-core"
-version = "0.4.0"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3d2647efeefda717e1d394b1c0ea1a6588955554972f43f4fd4f753009925b78"
 dependencies = [
  "nalgebra",
  "rand 0.10.3",
@@ -1151,7 +1159,9 @@ dependencies = [
 
 [[package]]
 name = "cumulus3d-cuda"
-version = "0.4.0"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "99152f29b80ef2a86171c6973f394b37e90be2d331f8f72e563a16ccd77943d6"
 dependencies = [
  "cudarc",
  "cumulus3d-ba",
@@ -1167,7 +1177,9 @@ dependencies = [
 
 [[package]]
 name = "cumulus3d-dense"
-version = "0.4.0"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b4c1a2f37558ad1c61c4fefe87ec3af975e4282c93ea8c64c9c25cb3b3399e5f"
 dependencies = [
  "cumulus3d-core",
  "image",
@@ -1178,7 +1190,9 @@ dependencies = [
 
 [[package]]
 name = "cumulus3d-features"
-version = "0.4.0"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ccaf0568907b98dca34562e16d102bf0cd4e3f4e63983e5c8c4c67dcde8349c7"
 dependencies = [
  "cumulus3d-core",
  "image",
@@ -1190,7 +1204,9 @@ dependencies = [
 
 [[package]]
 name = "cumulus3d-matching"
-version = "0.4.0"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ee5a2bb2d160b83531ce60c3ab2c34d9d353dfaf8243feb4c7b900c44b71d619"
 dependencies = [
  "cumulus3d-core",
  "nalgebra",
@@ -1202,7 +1218,9 @@ dependencies = [
 
 [[package]]
 name = "cumulus3d-sfm"
-version = "0.4.0"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1a38638111b78185da69c5411094bdc486d350940be3c7076b19744baec843f1"
 dependencies = [
  "cumulus3d-ba",
  "cumulus3d-core",
@@ -4128,9 +4146,6 @@ name = "pointblitz-io"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0b0ba76cecaf68f819502a611791ec2adc9fe090e1f7bda3d5ad76362aace934"
-dependencies = [
- "serde_json",
-]
 
 [[package]]
 name = "polling"
@@ -5358,6 +5373,8 @@ name = "skylens-tests"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "cumulus3d-cli",
+ "cumulus3d-core",
  "pointblitz-io",
  "serde_json",
  "skylens-shared",
