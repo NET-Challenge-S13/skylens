@@ -41,17 +41,18 @@ pub struct Fit {
 /// an even sample is projected and the aim and distance corrected until its 2nd..98th percentile
 /// sits centred in the panel (a round capture leaves its box mostly empty, and the near side of an
 /// oblique view projects larger than the far side).
-pub fn fit(samples: &[DVec3], bmin: DVec3, bmax: DVec3, fov_deg: f64, aspect: f64) -> Option<Fit> {
-    if samples.is_empty() || !(bmin.x <= bmax.x && bmin.y <= bmax.y && bmin.z <= bmax.z) {
-        return None;
-    }
-    let r = ((bmax - bmin).length() / 2.0).max(1.0);
+pub fn fit(samples: &[DVec3], fov_deg: f64, aspect: f64) -> Option<Fit> {
+    let (bmin, bmax) = crate::points::robust_bounds(samples)?;
+    let diag = (bmax - bmin).length().max(1.0);
+    let r = diag / 2.0;
     let v_half = fov_deg.to_radians() / 2.0;
     let tan = v_half.tan();
     // three.js (0.45, 0.7, 0.6) in its y-up, z-south frame.
     let dir = DVec3::new(0.45, -0.6, 0.7).normalize();
     let mut target = (bmin + bmax) / 2.0;
-    let mut dist = r / v_half.sin();
+    // Never inside the cloud: at least 1.2 x diagonal / tan(fov/2) from the robust centre.
+    let min_dist = 1.2 * diag / tan;
+    let mut dist = (r / v_half.sin()).max(min_dist);
     let pct = |v: &[f64], q: f64| v[((q * v.len() as f64).floor() as usize).min(v.len() - 1)];
     for _ in 0..4 {
         let eye = target + dir * dist;
@@ -77,7 +78,7 @@ pub fn fit(samples: &[DVec3], bmin: DVec3, bmax: DVec3, fov_deg: f64, aspect: f6
         let half_w = half_h * aspect;
         target += s * ((x0 + x1) / 2.0 * half_w) + u * ((y0 + y1) / 2.0 * half_h);
         let extent = ((x1 - x0) / 2.0).max((y1 - y0) / 2.0);
-        dist *= (extent / 0.9).max(0.2);
+        dist = (dist * (extent / 0.9).max(0.2)).max(min_dist);
     }
     Some(Fit {
         pose: Pose::new(target + dir * dist, target),
@@ -172,18 +173,14 @@ impl InsetScene {
     }
 
     fn desired(&mut self, board: &Board, aspect: f64) -> Option<Pose> {
-        let (bmin, bmax) = board.points_box()?;
-        // Refit only when what is shown or the panel's shape changes.
-        // Only a box that really grew (or a reshaped panel) refits: a point count that changes
-        // with every event must not pump the zoom.
+        let samples = board.fit_samples(FIT_SAMPLES_PER_SEGMENT);
+        let (bmin, bmax) = crate::points::robust_bounds(&samples)?;
+        // Only robust bounds that really changed (>15 %) or a reshaped panel refit: a point count
+        // that changes with every event must not pump the zoom.
         let key = (bmin, bmax, (aspect * 1000.0).round() as i64);
-        let grew = self.fit_key.is_none_or(|(lo, hi, a)| {
-            let span = (hi - lo).max_element().max(1.0);
-            a != key.2 || (bmin.cmplt(lo - DVec3::splat(span * 0.1)).any()) || (bmax.cmpgt(hi + DVec3::splat(span * 0.1)).any())
-        });
+        let grew = self.fit_key.is_none_or(|(lo, hi, a)| a != key.2 || crate::points::bounds_changed((lo, hi), (bmin, bmax), 0.15));
         if grew {
-            let samples = board.fit_samples(FIT_SAMPLES_PER_SEGMENT);
-            self.fit = fit(&samples, bmin, bmax, FOV_DEG, aspect);
+            self.fit = fit(&samples, FOV_DEG, aspect);
             self.fit_key = Some(key);
             if let Some(f) = self.fit {
                 self.near = f.near;
@@ -222,7 +219,8 @@ impl ViewScreen for InsetScene {
         }
         self.orbit.update(info.dt);
 
-        let size = board.point_size_m;
+        let pose = self.orbit.pose();
+        let size = crate::points::clamp_point_m(board.point_size_m, pose.eye.distance(pose.target) * 0.5, info.height_px, FOV_DEG, 6.0 * info.scale);
         let point_size = (self.point_size != Some(size)).then(|| {
             self.point_size = Some(size);
             PointSize::Metres(size)
@@ -273,9 +271,7 @@ mod tests {
                 DVec3::new(100.0 + 30.0 * a.cos(), 50.0 + 30.0 * a.sin(), f64::from(i % 5))
             })
             .collect();
-        let bmin = DVec3::new(70.0, 20.0, 0.0);
-        let bmax = DVec3::new(130.0, 80.0, 4.0);
-        let f = fit(&samples, bmin, bmax, FOV_DEG, 1.5).unwrap();
+        let f = fit(&samples, FOV_DEG, 1.5).unwrap();
         // From the south-east and above.
         let d = f.pose.eye - f.pose.target;
         assert!(d.x > 0.0 && d.y < 0.0 && d.z > 0.0);
@@ -285,6 +281,6 @@ mod tests {
         let seen = samples.iter().filter(|s| p.project_visible(s.to_array()).is_some()).count();
         assert!(seen >= 390, "{seen}");
         assert!(f.max_distance >= 10.0);
-        assert!(fit(&[], bmin, bmax, FOV_DEG, 1.5).is_none());
+        assert!(fit(&[], FOV_DEG, 1.5).is_none());
     }
 }

@@ -410,15 +410,15 @@ impl Board {
         out.into_iter().collect()
     }
 
-    /// Height range of the points on screen: union of the segments' 1..99 % ranges, at least
+    /// Height range of the points on screen: robust 2..98 % of all samples, at least
     /// 0.5 m tall (legacy `recomputeRange`).
     pub fn height_range(&self) -> Option<(f64, f64)> {
-        let (lo, hi) = self
-            .segments
-            .values()
-            .filter_map(|i| i.range)
-            .fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), (l, h)| (a.min(l), b.max(h)));
-        (lo.is_finite() && hi.is_finite()).then(|| (lo, hi.max(lo + 0.5)))
+        let all: Vec<DVec3> = self.segments.values().flat_map(|i| i.samples.iter().copied()).collect();
+        let n = all.len().div_ceil(points::MAX_BOUNDS_SAMPLES).max(1);
+        let mut z: Vec<f64> = all.iter().step_by(n).map(|p| p.z).filter(|v| v.is_finite()).collect();
+        z.sort_by(f64::total_cmp);
+        let (lo, hi) = (points::quantile(&z, 0.02)?, points::quantile(&z, 0.98)?);
+        Some((lo, hi.max(lo + 0.5)))
     }
 
     /// Box of every segment's core (the point panel's framing), or None.

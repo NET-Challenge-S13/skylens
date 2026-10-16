@@ -13,6 +13,7 @@
 
 use crate::board::{Board, FIT_SAMPLES_PER_SEGMENT, LiveView};
 use crate::inset;
+use skylens_shared::proto::model::v1 as model;
 use crate::live_layer::{LiveLayer, Paint};
 use crate::follow::{self, FollowInput, Follower};
 use crate::glam::DVec3;
@@ -82,6 +83,9 @@ pub struct StatusScene {
     /// Point count at the last automatic fit, and when (ms).
     auto_fit_points: u64,
     auto_fit_at: f64,
+    /// Robust bounds at the last fit, and whether a refined zone existed then.
+    fitted_bounds: Option<(DVec3, DVec3)>,
+    fitted_refined: bool,
 }
 
 impl StatusScene {
@@ -109,6 +113,8 @@ impl StatusScene {
             auto_fit: true,
             auto_fit_points: 0,
             auto_fit_at: f64::NEG_INFINITY,
+            fitted_bounds: None,
+            fitted_refined: false,
         }
     }
 
@@ -150,9 +156,11 @@ impl StatusScene {
 
     /// "화면 맞춤": frame everything delivered, obliquely, and keep the automatic camera off for a while.
     fn fit_view(&mut self, board: &Board, info: &FrameInfo) {
-        let Some((lo, hi)) = board.points_box() else { return };
         let aspect = info.css_width() / info.css_height().max(1.0);
-        if let Some(f) = inset::fit(&board.fit_samples(FIT_SAMPLES_PER_SEGMENT), lo, hi, FOV_DEG, aspect) {
+        let samples = board.fit_samples(FIT_SAMPLES_PER_SEGMENT);
+        self.fitted_bounds = crate::points::robust_bounds(&samples);
+        self.fitted_refined = board.store.levels().values().any(|l| *l == model::Level::Refined);
+        if let Some(f) = inset::fit(&samples, FOV_DEG, aspect) {
             self.orbit.set_pose(f.pose);
             self.orbit.max_distance = self.orbit.max_distance.max(f.max_distance);
             self.fit_hold_until = info.now_ms + if self.auto_fit { 2_000.0 } else { 30_000.0 };
@@ -236,11 +244,21 @@ impl ViewScreen for StatusScene {
             self.fit_view(&board, info);
         } else if self.auto_fit {
             // Live slot mode: frame the growing cloud like "전체 보기" until the operator moves the view.
+            // Refit only on the first refined zone or when the robust bounds moved >15 %.
             let points = board.total_points();
             if points > 0 && points != self.auto_fit_points && info.now_ms - self.auto_fit_at > 700.0 {
-                self.fit_view(&board, info);
                 self.auto_fit_points = points;
                 self.auto_fit_at = info.now_ms;
+                let refined = board.store.levels().values().any(|l| *l == model::Level::Refined);
+                let now = crate::points::robust_bounds(&board.fit_samples(FIT_SAMPLES_PER_SEGMENT));
+                let moved = match (self.fitted_bounds, now) {
+                    (None, Some(_)) => true,
+                    (Some(a), Some(b)) => crate::points::bounds_changed(a, b, 0.15),
+                    _ => false,
+                };
+                if moved || (refined && !self.fitted_refined && now.is_some()) {
+                    self.fit_view(&board, info);
+                }
             }
         }
         for (seg, level) in board.store.levels() {
@@ -269,7 +287,8 @@ impl ViewScreen for StatusScene {
         self.sync_markers(gpu, &board);
         self.camera(&board, info);
 
-        let size = board.point_size_m * scale;
+        let pose = self.orbit.pose();
+        let size = crate::points::clamp_point_m(board.point_size_m * scale, pose.eye.distance(pose.target) * 0.5, info.height_px, FOV_DEG, 6.0 * info.scale);
         let point_size = (self.point_size != Some(size)).then(|| {
             self.point_size = Some(size);
             PointSize::Metres(size)
