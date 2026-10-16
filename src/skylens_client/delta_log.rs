@@ -180,6 +180,14 @@ impl SlotTable {
     }
 }
 
+/// The producer's own words about a slot message (`Chunk.slot_kind`: 1 refined, 2 replace,
+/// 3 final, 0 unknown; `slot_t_ms`: ms since the run's start).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SlotMeta {
+    pub kind: u32,
+    pub t_ms: u32,
+}
+
 /// What [`DeltaLog::push`] did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Pushed {
@@ -219,6 +227,13 @@ impl DeltaLog {
     /// Takes one slot message of run `run` (animated when following live). `zone` is the chunk's
     /// segment, `t_ms` the board clock in milliseconds.
     pub fn push(&mut self, run: u32, zone: u32, msg: &[u8], t_ms: f64) -> Pushed {
+        self.push_meta(run, zone, msg, t_ms, SlotMeta::default())
+    }
+
+    /// Like [`DeltaLog::push`] with what the producer said (`Chunk.slot_kind`, `slot_t_ms`):
+    /// a non-zero kind is used as it is and then `slot_t_ms` is the row's clock; zeros fall back
+    /// to the content and the arrival clock (old recordings, producers without the fields).
+    pub fn push_meta(&mut self, run: u32, zone: u32, msg: &[u8], t_ms: f64, meta: SlotMeta) -> Pushed {
         let Ok(h) = slots::validate(msg) else { return Pushed::Ignored };
         let new_run = self.run_id.is_some_and(|r| r != run);
         if new_run {
@@ -232,19 +247,21 @@ impl DeltaLog {
             self.t0 = t_ms;
         }
         self.stored_total += i64::from(h.n_add) - i64::from(h.n_remove);
-        let kind = if h.n_add + h.n_move + h.n_remove == 0 {
-            Kind::Final
-        } else if h.n_move + h.n_remove > 0 {
-            Kind::Replace
-        } else {
-            Kind::Refined
+        let kind = match meta.kind {
+            1 => Kind::Refined,
+            2 => Kind::Replace,
+            3 => Kind::Final,
+            _ if h.n_add + h.n_move + h.n_remove == 0 => Kind::Final,
+            _ if h.n_move + h.n_remove > 0 => Kind::Replace,
+            _ => Kind::Refined,
         };
+        let row_t = if meta.kind != 0 { f64::from(meta.t_ms) } else { (t_ms - self.t0).max(0.0) };
         let entry = LogEntry {
             seq: h.seq,
             run_id: run,
             kind,
             zone,
-            t_ms: (t_ms - self.t0).max(0.0),
+            t_ms: row_t,
             n_add: h.n_add,
             n_move: h.n_move,
             n_remove: h.n_remove,
@@ -686,6 +703,25 @@ mod tests {
         assert_eq!(take(&log, &mut b).len(), 1);
         log.trim_ops(a.unwrap().min(b.unwrap()));
         assert!(take(&log, &mut a).is_empty());
+    }
+
+    #[test]
+    fn the_producers_kind_and_clock_win_over_the_content_and_arrival() {
+        let msgs = sequence();
+        let mut log = DeltaLog::new();
+        // Arrival times are all the same (a late join); the producer's clock spaces the rows.
+        for (i, m) in msgs.iter().enumerate() {
+            // The producer calls the first REPLACE-looking event refined on purpose.
+            let kind = [1, 1, 1, 3][i];
+            log.push_meta(1, 0, m, 5.0, SlotMeta { kind, t_ms: 1000 * (i as u32 + 1) });
+        }
+        let e = log.entries();
+        assert_eq!(e.iter().map(|e| e.kind).collect::<Vec<_>>(), vec![Kind::Refined, Kind::Refined, Kind::Refined, Kind::Final]);
+        assert_eq!(e.iter().map(|e| e.t_ms).collect::<Vec<_>>(), vec![1000.0, 2000.0, 3000.0, 4000.0]);
+        // Zeros fall back to the content.
+        let mut log = DeltaLog::new();
+        log.push_meta(1, 0, &msgs[2], 9.0, SlotMeta::default());
+        assert_eq!(log.entries()[0].kind, Kind::Replace);
     }
 
     #[test]

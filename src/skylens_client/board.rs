@@ -11,7 +11,7 @@
 //! decision 0052); a segment of the slot stream is the zone its slots belong to, read off the
 //! store's slot state the same way (samples, height range, box, point count).
 
-use crate::delta_log::{DeltaLog, LayerOp};
+use crate::delta_log::{DeltaLog, LayerOp, SlotMeta};
 use crate::follow::{self, CorridorPath, DronePose, Framing, Interior};
 use crate::panels_live::LiveSettings;
 use crate::glam::DVec3;
@@ -111,7 +111,7 @@ pub struct Board {
     /// The controls bar's choices (point size, colour mode, speed, fit), written by the panels.
     pub settings: Rc<RefCell<LiveSettings>>,
     /// Slot messages seen but not yet applied by the store: seq -> (zone, message).
-    pending_slots: BTreeMap<u32, (u32, Vec<u8>)>,
+    pending_slots: BTreeMap<u32, (u32, SlotMeta, Vec<u8>)>,
     /// Stream id the live log follows.
     live_stream: u32,
     cursors: [Option<u64>; 2],
@@ -243,15 +243,15 @@ impl Board {
         if self.pending_slots.len() >= MAX_PENDING_SLOT_MESSAGES {
             self.pending_slots.clear();
         }
-        self.pending_slots.insert(h.seq, (chunk.segment, chunk.payload.clone()));
+        self.pending_slots.insert(h.seq, (chunk.segment, SlotMeta { kind: chunk.slot_kind, t_ms: chunk.slot_t_ms }, chunk.payload.clone()));
     }
 
     /// Logs the messages the store applied, in order, with the board clock.
     fn feed_live(&mut self, seqs: &[u32]) {
         let t_ms = skylens_viewer::now_ms();
         for seq in seqs {
-            if let Some((zone, msg)) = self.pending_slots.remove(seq) {
-                self.live.push(self.live_stream, zone, &msg, t_ms);
+            if let Some((zone, meta, msg)) = self.pending_slots.remove(seq) {
+                self.live.push_meta(self.live_stream, zone, &msg, t_ms, meta);
             }
         }
     }
@@ -686,6 +686,24 @@ mod tests {
         assert_eq!(b.live.len(), 0);
         b.chunk(&in_stream(slots_chunk(1, 0, &[0], 4), 6));
         assert_eq!(b.live.len(), 1);
+    }
+
+    #[test]
+    fn the_chunk_fields_set_the_row_kind_and_clock() {
+        let mut b = board();
+        let mut c = slots_chunk(1, 0, &[0], 5);
+        c.slot_kind = 1;
+        c.slot_t_ms = 1500;
+        b.chunk(&c);
+        let header = crate::pointblitz::io::slots::SlotHeader { seq: 2, n_add: 0, n_move: 0, n_remove: 0, capacity: 5 };
+        let mut f = model::Chunk { sequence: 2, version: 2, generation: 1, payload: crate::pointblitz::io::slots::encode(&header, &[]).unwrap(), ..c.clone() };
+        f.slot_kind = 3;
+        f.slot_t_ms = 9000;
+        b.chunk(&f);
+        let e = b.live.entries();
+        assert_eq!((e[0].kind, e[0].t_ms), (crate::delta_log::Kind::Refined, 1500.0));
+        assert_eq!((e[1].kind, e[1].t_ms), (crate::delta_log::Kind::Final, 9000.0));
+        assert!(b.live.is_final());
     }
 
     #[test]
