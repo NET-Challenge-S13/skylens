@@ -23,6 +23,8 @@ use std::rc::Rc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
+    /// Sparse zone preview (`slot_kind` 4), replaced by the zone's refined delta.
+    Preview,
     Refined,
     Replace,
     Final,
@@ -181,7 +183,7 @@ impl SlotTable {
 }
 
 /// The producer's own words about a slot message (`Chunk.slot_kind`: 1 refined, 2 replace,
-/// 3 final, 0 unknown; `slot_t_ms`: ms since the run's start).
+/// 3 final, 4 preview, 0 unknown; `slot_t_ms`: ms since the run's start).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct SlotMeta {
     pub kind: u32,
@@ -251,6 +253,7 @@ impl DeltaLog {
             1 => Kind::Refined,
             2 => Kind::Replace,
             3 => Kind::Final,
+            4 => Kind::Preview,
             _ if h.n_add + h.n_move + h.n_remove == 0 => Kind::Final,
             _ if h.n_move + h.n_remove > 0 => Kind::Replace,
             _ => Kind::Refined,

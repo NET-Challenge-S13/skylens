@@ -212,6 +212,6 @@ message Chunk {
   bytes payload = 8;
   // Point slots only (CHUNK_KIND_POINT_SLOTS; 0 and 0 for every other kind). Metadata about the
   // slot message in payload; the PBSD/v4 bytes carry none of it. The core never reads them.
-  uint32 slot_kind = 9;        // why the message was emitted: 1 refined, 2 replace, 3 final (empty message, last of the run)
+  uint32 slot_kind = 9;        // why the message was emitted: 1 refined, 2 replace, 3 final (empty message, last of the run), 4 preview (sparse zone preview, replaced by that zone's refined delta)
   uint32 slot_t_ms = 10;       // cumulus3d session time of the delta, milliseconds since the run's start
 }

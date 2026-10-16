@@ -82,6 +82,7 @@ fn kind_of(s: &str) -> Result<DeltaKind> {
         "refined" => DeltaKind::Refined,
         "replace" => DeltaKind::Replace,
         "final" => DeltaKind::Final,
+        "preview" => DeltaKind::Preview,
         other => bail!("unknown event kind {other:?}"),
     })
 }
@@ -316,6 +317,8 @@ mod tests {
             gpu: false,
             stable_display: true,
             live_stride: DEFAULT_LIVE_STRIDE,
+            zone_preview: false,
+            backlog_batch: None,
             camera_json: None,
             frame_width: None,
             settle_tol: 0.02,

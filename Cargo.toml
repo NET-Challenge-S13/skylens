@@ -49,7 +49,7 @@ tonic-prost-build = "0.14"
 protox = "0.10" # pure-Rust protobuf compiler, so builds do not need protoc
 
 # reconstruction: 0.8 has the live CompositionHost input, the in-memory display deltas and the SkyLens GPU stages
-cumulus3d-cli = "0.10"
+cumulus3d-cli = "0.11"
 deltamesh = "0.1"
 
 # UNet inference links libtorch 2.13, downloaded at build time (CUDA flavour from

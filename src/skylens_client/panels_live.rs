@@ -95,6 +95,7 @@ pub fn zone_label(zone: u32) -> String {
 /// The badge text of a kind (upper case, as the legend and the rows print it).
 pub fn kind_label(kind: Kind) -> &'static str {
     match kind {
+        Kind::Preview => "PREVIEW",
         Kind::Refined => "REFINED",
         Kind::Replace => "REPLACE",
         Kind::Final => "FINAL",
@@ -104,6 +105,7 @@ pub fn kind_label(kind: Kind) -> &'static str {
 /// The badge's CSS class suffix: `k-refined`, `k-replace`, `k-final`.
 pub fn kind_class(kind: Kind) -> &'static str {
     match kind {
+        Kind::Preview => "k-preview",
         Kind::Refined => "k-refined",
         Kind::Replace => "k-replace",
         Kind::Final => "k-final",
@@ -483,7 +485,11 @@ pub fn zone_stats(entries: &[LogEntry]) -> BTreeMap<u32, ZoneStat> {
 /// Ladder level of a segment: the timeline's deltas are refined point sets, so a segment with a
 /// delta is at the top level; otherwise the core's own level stands.
 pub fn ladder_level(core_level: u32, zone: Option<&ZoneStat>) -> u32 {
-    if zone.is_some() { crate::panels::LADDER_LEVELS } else { core_level }
+    match zone {
+        Some(z) if z.last == Kind::Preview => 1,
+        Some(_) => crate::panels::LADDER_LEVELS,
+        None => core_level,
+    }
 }
 
 /// `수준 2 · 정제본 · Z0 REFINED ×3`: the ladder note with the zone and its latest kind.

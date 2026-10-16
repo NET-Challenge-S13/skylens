@@ -28,6 +28,8 @@
 //! | `SKYLENS_GPU`           | unset (= CUDA available) | force the GPU backends on or off |
 //! | `SKYLENS_STABLE_DISPLAY` | `1`           | cumulus3d stable display: points leave as the live diff stream (point slot chunks); `0` = zone previews and refined zones as point chunks |
 //! | `SKYLENS_LIVE_STRIDE`   | `6`            | stable display: keep 1 of this many points in the live display (1 = every point) |
+//! | `SKYLENS_ZONE_PREVIEW`  | `1`            | stable display: sparse zone previews as `Preview` deltas (slot_kind 4) before the refined zone |
+//! | `SKYLENS_BACKLOG_BATCH` | unset          | backlog batching threshold (cumulus3d default 3); positions waiting at least this many are processed as one batch |
 //! | `SKYLENS_CAMERA_JSON`  | `<repo>/data/demo/camera.json` | camera intrinsics estimate used as the live node's intrinsics prior; a missing file means no prior |
 //! | `SKYLENS_FRAME_WIDTH`   | unset (= the file's `video_width`) | width of the pushed frames; the prior's fx, fy, cx, cy are scaled by this / `video_width` |
 //! | `SKYLENS_PRECISION`     | `auto`         | SkyLensNet arithmetic on CUDA: `auto` (by compute capability: >= 8.0 bf16, 7.x fp16 autocast, else fp32), `fp32`, `fp16`, `bf16` |
@@ -71,6 +73,10 @@ pub struct Settings {
     pub stable_display: bool,
     /// Stable display: live display thinning (1 of this many points, at least 1).
     pub live_stride: usize,
+    /// Stable display: sparse zone previews as `Preview` deltas (`SKYLENS_ZONE_PREVIEW`, default on).
+    pub zone_preview: bool,
+    /// Backlog batch threshold (`SKYLENS_BACKLOG_BATCH`; unset = cumulus3d default, 0/1 = off).
+    pub backlog_batch: Option<usize>,
     /// Camera intrinsics estimate for the intrinsics prior (`None` = no prior).
     pub camera_json: Option<PathBuf>,
     /// Width of the pushed frames (`None` = the file's `video_width`).
@@ -147,6 +153,8 @@ impl Settings {
                 .unwrap_or_else(|| repo_root().join("runs").join("model")),
             gpu: flag("SKYLENS_GPU"),
             stable_display: flag("SKYLENS_STABLE_DISPLAY").unwrap_or(true),
+            zone_preview: flag("SKYLENS_ZONE_PREVIEW").unwrap_or(true),
+            backlog_batch: get("SKYLENS_BACKLOG_BATCH").and_then(|v| v.trim().parse().ok()),
             live_stride: int("SKYLENS_LIVE_STRIDE", crate::models::skylens::DEFAULT_LIVE_STRIDE).max(1),
             camera_json: Some(
                 get("SKYLENS_CAMERA_JSON")
@@ -224,6 +232,8 @@ mod tests {
         assert_eq!(s.precision, None);
         assert!(s.stable_display);
         assert_eq!(s.live_stride, 6);
+        assert!(s.zone_preview);
+        assert_eq!(s.backlog_batch, None);
         assert_eq!((s.zone_span, s.zone_overlap), (6, 2));
         assert_eq!((s.settle_tol, s.settle_max_zone), (0.02, 1));
         assert_eq!((s.focal_sigma, s.dist_sigma), (0.02, 0.01));

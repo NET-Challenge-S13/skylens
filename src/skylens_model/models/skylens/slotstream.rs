@@ -13,7 +13,7 @@
 //! | `level` | refined (stable display has no preview) |
 //! | `version` | the message seq (1, 2, ... in delivery order, no gaps) |
 //! | `generation` | the stream id of this model run ([`next_stream_id`]) |
-//! | `slot_kind` | why the delta was emitted: [`SLOT_REFINED`], [`SLOT_REPLACE`] or [`SLOT_FINAL`] |
+//! | `slot_kind` | why the delta was emitted: [`SLOT_REFINED`], [`SLOT_REPLACE`], [`SLOT_FINAL`] or [`SLOT_PREVIEW`] |
 //! | `slot_t_ms` | cumulus3d session time of the delta, milliseconds since the run's start |
 //!
 //! The last message of a run is the empty final one (0 adds, moves and removes, `slot_kind` final).
@@ -73,12 +73,15 @@ pub const SLOT_REFINED: u32 = 1;
 pub const SLOT_REPLACE: u32 = 2;
 /// `Chunk.slot_kind`: all refinements finished; the message is empty.
 pub const SLOT_FINAL: u32 = 3;
+/// `Chunk.slot_kind`: a sparse preview of a closed zone (adds only); its refined delta removes these points.
+pub const SLOT_PREVIEW: u32 = 4;
 
 /// `Chunk.slot_kind` of a cumulus3d delta kind (an unknown future kind counts as refined).
 pub fn slot_kind(kind: DeltaKind) -> u32 {
     match kind {
         DeltaKind::Replace => SLOT_REPLACE,
         DeltaKind::Final => SLOT_FINAL,
+        DeltaKind::Preview => SLOT_PREVIEW,
         _ => SLOT_REFINED,
     }
 }
@@ -200,6 +203,13 @@ mod tests {
 
     fn enu_frame(origin: Option<[f64; 3]>) -> DisplayFrame {
         DisplayFrame { enu: true, origin_gps: origin }
+    }
+
+    #[test]
+    fn preview_kind_maps_to_4() {
+        assert_eq!(slot_kind(DeltaKind::Preview), SLOT_PREVIEW);
+        assert_eq!(SLOT_PREVIEW, 4);
+        assert_eq!(slot_kind(DeltaKind::Refined), SLOT_REFINED);
     }
 
     #[test]

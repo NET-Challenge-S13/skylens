@@ -459,6 +459,8 @@ pub fn build_engine(settings: &Settings) -> anyhow::Result<Engine> {
             gpu,
             stable_display: settings.stable_display,
             live_stride: settings.live_stride,
+            zone_preview: settings.zone_preview,
+            backlog_batch: settings.backlog_batch,
             camera_json: settings.camera_json.clone(),
             frame_width: settings.frame_width,
             settle_tol: settings.settle_tol,

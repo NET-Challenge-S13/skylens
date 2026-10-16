@@ -104,6 +104,10 @@ pub struct EngineConfig {
     pub stable_display: bool,
     /// Live display thinning (1 of this many points, 1 = every point).
     pub live_stride: usize,
+    /// Sparse zone previews as `Preview` display deltas (stable display only).
+    pub zone_preview: bool,
+    /// Backlog batch threshold of the live node (`None` = cumulus3d default).
+    pub backlog_batch: Option<usize>,
     /// Camera intrinsics estimate (`data/demo/camera.json`) for the intrinsics prior of the live
     /// node; `None` or a missing file means no prior.
     pub camera_json: Option<std::path::PathBuf>,
@@ -182,9 +186,14 @@ impl Engine {
         // Display deltas need dense clouds with point keys.
         let dense = jobs::dense_for(cfg.gpu);
         let deltas = cfg.stable_display && dense.is_some();
+        let mut plan = jobs::live_plan();
+        if let Some(n) = cfg.backlog_batch {
+            plan.live.batch = n;
+        }
+        let (lookahead, batch) = (plan.live.lookahead, plan.live.batch);
         let mut b = ReconNode::declare()
             // The plan comes first (it replaces every setting); the builder calls below refine it.
-            .plan(jobs::live_plan())
+            .plan(plan)
             .settle(cfg.settle_tol, cfg.settle_max_zone)
             .id(LIVE_NODE)
             .images(&live_dir)
@@ -203,7 +212,7 @@ impl Engine {
         if cfg.stable_display {
             ensure!(cfg.live_stride >= 1, "live stride must be at least 1");
             // Settle-then-freeze display: shown zones are only refined, never jump.
-            b = b.stable_display(true);
+            b = b.stable_display(true).preview(cfg.zone_preview);
         }
         if let Some(path) = &cfg.camera_json {
             match jobs::intrinsics_prior(path, &cfg.cameras, cfg.frame_width, cfg.focal_sigma, cfg.dist_sigma) {
@@ -240,7 +249,11 @@ impl Engine {
             // With densification the points leave as display deltas; without it there are none (and
             // the refined zone points go out as point chunks). The consumer also takes deltas that
             // `inject_event` hands it (recorded streams), so it is set up either way.
-            tracing::info!("live display: stable, 1 of {} points, slot stream {stream}, deltas {deltas}", cfg.live_stride);
+            tracing::info!(
+                "live display: stable, 1 of {} points, slot stream {stream}, deltas {deltas}, zone preview {}, backlog batch {batch}, lookahead {lookahead}",
+                cfg.live_stride,
+                cfg.zone_preview
+            );
             consumer = consumer.display_stream(stream);
         }
         consumer.spawn(rx)?;
@@ -450,6 +463,8 @@ mod tests {
             gpu: false,
             stable_display: true,
             live_stride: DEFAULT_LIVE_STRIDE,
+            zone_preview: true,
+            backlog_batch: None,
             camera_json: None,
             frame_width: None,
             settle_tol: 0.02,

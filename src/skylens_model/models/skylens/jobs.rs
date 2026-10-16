@@ -59,6 +59,8 @@ pub fn live_plan() -> Plan {
     let mut plan = Plan::default();
     plan.dense.enabled = false;
     plan.gps = None;
+    // Live throughput of a node: feature lookahead 4, backlog batch from 3 waiting positions.
+    plan.live = cumulus3d_cli::declare::Live::live_node();
     plan
 }
 

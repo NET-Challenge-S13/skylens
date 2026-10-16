@@ -285,6 +285,10 @@ impl Consumer {
                     self.positions.entry(image).or_insert(position);
                 }
                 Event::ZonePreview { range, cloud, model, frame, .. } => {
+                    if frame == "display" {
+                        // Stable display: the zone's preview leaves as a `Preview` display delta.
+                        return;
+                    }
                     if frame == "unaligned" {
                         tracing::debug!("zone {} preview is not GPS-aligned yet; waiting for the refined zone", range.zone);
                         return;
