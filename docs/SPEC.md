@@ -161,7 +161,7 @@ related: "[[INTENT.md]], [[COMPONENTS.md]], [[ARCHITECTURE.md]], [[NETWORK_ARCHI
 - 구간은 `zones(span, overlap)`으로 나눈다. 같은 구간 번호는 항상 같은 공간 조각을 가리킨다.
 - 메시는 deltamesh `SdfMesher`(GPU는 `GpuMesher`, 프로세스당 장치 하나)다. 기본 0.2 m 복셀, 32³ 블록. 경계 정점이 이웃 블록과 비트 단위로 같아 균열 없이 이어진다.
 - 렌더링은 pointblitz(0.3)다. 점 청크는 16비트 위치(포맷 v2)이고 파싱은 메인 스레드 밖에서 한다. 점 슬롯은 `SlotScene` 하나(칸 = 슬롯 id, 칸당 16바이트)에 쌓고, 같은 패스에서 점 청크 장면들과 함께 그린다. 메시 블록은 pointblitz에 더한 메시 렌더 경로가 그리고, 법선은 클라이언트에서 계산한다.
-- cumulus3d는 crates.io 릴리스(0.8)를 쓴다. 전체 GPU SIFT, CUDA BA·희소 단계는 릴리스에 들어 있고 `.gpu()`가 고른다. 벤더 복사본은 없다.
+- cumulus3d는 crates.io 릴리스(0.9)를 쓴다. 전체 GPU SIFT, CUDA BA·희소 단계는 릴리스에 들어 있고 `.gpu()`가 고른다. 벤더 복사본은 없다.
 - 점 슬롯 스트림 id는 모델 실행마다 늘어난다(시작 시각 초, 같은 프로세스에서는 앞선 id + 1 이상). 코어와 화면은 더 큰 id의 첫 메시지가 오면 옛 실행의 메시지를 버리고 빈 점 버퍼에서 시작한다. 라이브 노드는 파일을 쓰지 않는다.
 - 이전 복원 방식(COLMAP·gsplat)의 측정 기록은 `src/skylens_model/models/skylens/RESULTS.md`에 근거로 남는다.
 

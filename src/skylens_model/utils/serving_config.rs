@@ -25,6 +25,8 @@
 //! | `SKYLENS_GPU`           | unset (= CUDA available) | force the GPU backends on or off |
 //! | `SKYLENS_STABLE_DISPLAY` | `1`           | cumulus3d stable display: points leave as the live diff stream (point slot chunks); `0` = zone previews and refined zones as point chunks |
 //! | `SKYLENS_LIVE_STRIDE`   | `6`            | stable display: keep 1 of this many points in the live display (1 = every point) |
+//! | `SKYLENS_CAMERA_JSON`  | `<repo>/data/demo/camera.json` | camera intrinsics estimate used as the live node's intrinsics prior; a missing file means no prior |
+//! | `SKYLENS_FRAME_WIDTH`   | unset (= the file's `video_width`) | width of the pushed frames; the prior's fx, fy, cx, cy are scaled by this / `video_width` |
 //! | `SKYLENS_PRECISION`     | `auto`         | SkyLensNet arithmetic on CUDA: `auto` (by compute capability: >= 8.0 bf16, 7.x fp16 autocast, else fp32), `fp32`, `fp16`, `bf16` |
 //! | `DELTAMESH_EXTRACT_BATCH` | `128` (set by `app::main`) | deltamesh GPU mesher blocks per extraction batch; deltamesh's own default 512 holds about 0.7 GB more GPU memory |
 
@@ -66,6 +68,10 @@ pub struct Settings {
     pub stable_display: bool,
     /// Stable display: live display thinning (1 of this many points, at least 1).
     pub live_stride: usize,
+    /// Camera intrinsics estimate for the intrinsics prior (`None` = no prior).
+    pub camera_json: Option<PathBuf>,
+    /// Width of the pushed frames (`None` = the file's `video_width`).
+    pub frame_width: Option<u32>,
     /// `None` = `auto`; an unparsable value is also `auto`.
     pub precision: Option<Precision>,
 }
@@ -132,6 +138,12 @@ impl Settings {
             gpu: flag("SKYLENS_GPU"),
             stable_display: flag("SKYLENS_STABLE_DISPLAY").unwrap_or(true),
             live_stride: int("SKYLENS_LIVE_STRIDE", crate::models::skylens::DEFAULT_LIVE_STRIDE).max(1),
+            camera_json: Some(
+                get("SKYLENS_CAMERA_JSON")
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| repo_root().join("data").join("demo").join("camera.json")),
+            ),
+            frame_width: get("SKYLENS_FRAME_WIDTH").and_then(|v| v.trim().parse().ok()).filter(|w| *w > 0),
             precision: get("SKYLENS_PRECISION").and_then(|raw| match raw.parse::<Precision>() {
                 Ok(Precision::Auto) => None,
                 Ok(p) => Some(p),
