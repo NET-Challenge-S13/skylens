@@ -28,25 +28,16 @@
 //! CUDA backend (cudarc + NVRTC runtime compilation). Builds on machines without CUDA (dynamic loading),
 //! and at run time [`is_available`] is false if there is no device.
 //!
-<<<<<<< skylens (vendored)
-//! - [`CudaPatchMatch`]: `cumulus3d_dense::PatchMatchBackend` 구현(다중 스케일 조밀화의 스케일별 실행·평가·판독).
-//! - [`CudaMatcher`]: `cumulus3d_matching::MatcherBackend` 구현(정수 내적 top-2).
-//! - [`CudaSift`]: `cumulus3d_features::SiftEngine` 구현(스케일 공간·검출·방향·선택·기술자 모두 GPU, CpuSift 와 같은 품질이나 비트 단위로 같지는 않음).
-//! - [`CudaBundleAdjuster`]: `cumulus3d_ba::BaBackend` 구현(잔차·야코비안·Schur 조립·축소 계통 풀이·역대입을 GPU 에서, LM 루프는 CPU).
-//! - [`CudaSparse`]: `cumulus3d_matching::TwoViewBackend`(두 뷰 기하 가설 채점), `cumulus3d_sfm::AbsPoseBackend`
-//!   (절대 자세 가설 채점), `cumulus3d_sfm::TriangulationBackend`(RANSAC 삼각측량·관측 검사) 구현.
-||||||| base b9f4a9bda
-//! - [`CudaPatchMatch`]: `cumulus3d_dense::PatchMatchBackend` 구현(다중 스케일 조밀화의 스케일별 실행·평가·판독).
-//! - [`CudaMatcher`]: `cumulus3d_matching::MatcherBackend` 구현(정수 내적 top-2).
-//! - [`CudaSift`]: `cumulus3d_features::SiftEngine` 구현(GPU 스케일 공간 + CPU 검출·기술자, CpuSift 와 같은 결과).
-=======
 //! - [`CudaPatchMatch`]: implementation of `cumulus3d_dense::PatchMatchBackend` (per-scale run, evaluation and readout of multi-scale
 //!   densification).
 //! - [`CudaMatcher`]: implementation of `cumulus3d_matching::MatcherBackend` (integer dot product top-2).
-//! - [`CudaSift`]: implementation of `cumulus3d_features::SiftEngine` (GPU scale space + CPU detection/descriptors, same result as
-//!   CpuSift).
->>>>>>> upstream v0.5.0
-//!
+//! - [`CudaSift`]: implementation of `cumulus3d_features::SiftEngine` (scale space, detection, orientation, selection and descriptors
+//!   all on the GPU; same quality as CpuSift but not bit-identical).
+//! - [`CudaBundleAdjuster`]: implementation of `cumulus3d_ba::BaBackend` (residuals, Jacobians, Schur assembly, reduced system solve
+//!   and back-substitution on the GPU; the LM loop stays on the CPU).
+//! - [`CudaSparse`]: implementation of `cumulus3d_matching::TwoViewBackend` (two-view geometry hypothesis scoring),
+//!   `cumulus3d_sfm::AbsPoseBackend` (absolute pose hypothesis scoring) and `cumulus3d_sfm::TriangulationBackend` (RANSAC
+//!   triangulation and observation checks).
 //! - [`CudaUndistort`]: implementation of `cumulus3d_dense::UndistortBackend` (fused lens undistortion + area downscale).
 //!
 //! `unsafe` is used only where cudarc marks things unsafe (kernel launch, pinned host memory allocation, `DeviceRepr` marking).
@@ -84,24 +75,16 @@ mod device;
 mod matcher;
 mod patchmatch;
 mod sift;
-<<<<<<< skylens (vendored)
 mod sparse;
-||||||| base b9f4a9bda
-=======
 mod undistort;
->>>>>>> upstream v0.5.0
 
 pub use ba::{CudaBaError, CudaBundleAdjuster, CPU_CHOLESKY_N, MAX_DENSE_N};
 pub use device::{is_available, CudaDevice, GpuError};
 pub use matcher::CudaMatcher;
 pub use patchmatch::{CudaPatchMatch, CudaPatchMatchOptions};
 pub use sift::CudaSift;
-<<<<<<< skylens (vendored)
 pub use sparse::CudaSparse;
-||||||| base b9f4a9bda
-=======
 pub use undistort::CudaUndistort;
->>>>>>> upstream v0.5.0
 
 /// Tries compiling all kernels with NVRTC without a device (for CI checks). `arch` example: `"compute_70"`.
 /// Uses the same options and define combinations as real runs (patchmatch: window step 1 and 2, hardware interpolation on and off, fast
@@ -113,22 +96,13 @@ pub fn check_kernels(arch: &'static str) -> Result<Vec<(String, usize)>, String>
         let opts = device::compile_options(Some(arch), fmad, fast, defs);
         compile_ptx_with_opts(src, opts).map(|ptx| (name.clone(), ptx.to_src().len())).map_err(|e| format!("{name}: {e:?}"))
     };
-<<<<<<< skylens (vendored)
     let mut out = vec![
         compile("sift".into(), sift::SRC, false, false, &[])?,
         compile("matcher".into(), matcher::SRC, true, false, &[])?,
         compile("ba".into(), ba::SRC, true, false, &[])?,
         compile("sparse".into(), sparse::SRC, false, false, &[])?,
-    ];
-||||||| base b9f4a9bda
-    let mut out = vec![compile("sift".into(), sift::SRC, false, false, &[])?, compile("matcher".into(), matcher::SRC, true, false, &[])?];
-=======
-    let mut out = vec![
-        compile("sift".into(), sift::SRC, false, false, &[])?,
-        compile("matcher".into(), matcher::SRC, true, false, &[])?,
         compile("undistort".into(), undistort::SRC, false, false, &[])?,
     ];
->>>>>>> upstream v0.5.0
     for step in [1, 2] {
         for hw in [false, true] {
             for fast in [false, true] {

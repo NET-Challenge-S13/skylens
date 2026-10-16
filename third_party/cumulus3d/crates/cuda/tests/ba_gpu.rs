@@ -136,6 +136,8 @@ fn make_problem(np: usize, npt: usize, loss: Loss, seed: u64) -> ProblemInput {
         obs_img,
         obs_pt,
         obs_xy,
+        pose_priors: Vec::new(),
+        cam_priors: Vec::new(),
         loss,
         solver: LinearSolverType::DenseSchur,
         max_linear_solver_iterations: 500,

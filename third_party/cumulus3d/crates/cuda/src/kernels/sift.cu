@@ -29,18 +29,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-<<<<<<< skylens (vendored)
-// SIFT 전 과정. 앞부분(정규화·업샘플·블러·축소)은 cumulus3d-features 의 CPU 피라미드와 같은 식·같은 연산 순서이고
-// 곱셈-덧셈 융합을 끈 채(--fmad=false) 컴파일해 CPU 와 비트 단위로 같다. 뒷부분(DoG·검출·방향·선택·기술자)은
-// CPU 의 detect.rs / orient.rs / mod.rs 와 같은 식이지만 합산 순서(워프 분할)와 초월함수 구현이 달라
-// 결과가 비트 단위로 같지는 않다(같은 품질). 합산 순서는 고정이라 실행마다 결과는 같다.
-||||||| base b9f4a9bda
-// SIFT 가우시안 스케일 공간. cumulus3d-features 의 CPU 피라미드와 같은 식·같은 연산 순서.
-// 곱셈-덧셈 융합을 끈 채(--fmad=false) 컴파일해 CPU 결과와 비트 단위로 맞춘다.
-=======
-// SIFT Gaussian scale space. Same formulas and operation order as the CPU pyramid of cumulus3d-features.
-// Compiled with fused multiply-add off (--fmad=false) so it matches the CPU result bit for bit.
->>>>>>> upstream v0.5.0
+// The whole SIFT pipeline. The first part (normalization, upsampling, blur, downscale) uses the same formulas and operation order
+// as the CPU pyramid of cumulus3d-features and is compiled with fused multiply-add off (--fmad=false), so it matches the CPU bit for
+// bit. The second part (DoG, detection, orientation, selection, descriptors) uses the same formulas as the CPU detect.rs / orient.rs /
+// mod.rs, but the summation order (warp split) and transcendental function implementations differ, so results are not bit-identical
+// (same quality). The summation order is fixed, so results are the same from run to run.
 
 typedef unsigned char u8;
 

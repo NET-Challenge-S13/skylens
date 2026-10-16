@@ -107,15 +107,14 @@ impl FrameSet {
     }
 }
 
-<<<<<<< skylens (vendored)
-/// 위치마다 도는 희소 단계의 백엔드 묶음. 기본은 모두 CPU.
+/// Backends of the sparse stages that run per position. All CPU by default.
 #[derive(Clone)]
 pub struct SparseBackends {
-    /// 두 뷰 기하 검증.
+    /// Two-view geometric verification.
     pub two_view: Arc<dyn TwoViewBackend>,
-    /// 등록의 절대 자세 RANSAC.
+    /// Absolute pose RANSAC of registration.
     pub abs_pose: Arc<dyn AbsPoseBackend>,
-    /// 삼각측량(생성 RANSAC·깊이·재투영 검사).
+    /// Triangulation (creation RANSAC, depth and reprojection checks).
     pub triangulation: Arc<dyn TriangulationBackend>,
 }
 
@@ -129,12 +128,7 @@ impl Default for SparseBackends {
     }
 }
 
-/// 세션 설정.
-||||||| base b9f4a9bda
-/// 세션 설정.
-=======
 /// Session settings.
->>>>>>> upstream v0.5.0
 #[derive(Clone)]
 pub struct SessionConfig {
     /// Input image folder (base of the image names).
@@ -159,17 +153,11 @@ pub struct SessionConfig {
     pub sift: Arc<dyn SiftEngine>,
     /// Descriptor matching backend.
     pub matcher: Arc<dyn MatcherBackend>,
-<<<<<<< skylens (vendored)
-    /// 번들 조정 백엔드(구역 정밀 BA, 첫 모델 전역 매퍼의 BA).
+    /// Bundle adjustment backend (zone refinement BA, BA of the first model's global mapper).
     pub ba_backend: Arc<dyn BaBackend>,
-    /// 희소 단계(기하 검증·등록·삼각측량) 백엔드.
+    /// Sparse-stage backends (geometric verification, registration, triangulation).
     pub sparse: SparseBackends,
-    /// 조밀화 설정(None = 조밀화 생략, 점군 이벤트는 `dense: false`).
-||||||| base b9f4a9bda
-    /// 조밀화 설정(None = 조밀화 생략, 점군 이벤트는 `dense: false`).
-=======
     /// Densification settings (None = skip densification, point-cloud events carry `dense: false`).
->>>>>>> upstream v0.5.0
     pub dense: Option<DenseConfig>,
     /// Number of per-position rewind points kept for [`Command::ResetFrom`] (0 = no rewind, saves memory).
     pub history: usize,
@@ -678,13 +666,7 @@ impl Shared {
             }
         }
         let t0 = Instant::now();
-<<<<<<< skylens (vendored)
-        let r = bundle_adjust_with(&mut rec, &BaConfig::default(), &*sh.cfg.ba_backend);
-||||||| base b9f4a9bda
-        let r = bundle_adjust(&mut rec, &BaConfig::default());
-=======
-        let r = bundle_adjust(&mut rec, &ba);
->>>>>>> upstream v0.5.0
+        let r = bundle_adjust_with(&mut rec, &ba, &*sh.cfg.ba_backend);
         out.stage("ba", &format!("refined {k}"), t0);
         match r {
             Ok(s) => out.log(format!(

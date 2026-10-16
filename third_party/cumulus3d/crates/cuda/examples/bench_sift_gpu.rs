@@ -25,16 +25,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-<<<<<<< skylens (vendored)
-//! 실영상 SIFT 시간: CpuSift 대 CudaSift(비트 단위로 같은지도 출력. GPU 검출·기술자는 같은 품질이지만 보통 비트 단위로는 다르다).
-//! 실행: cargo run --release -p cumulus3d-cuda --example bench_sift -- <영상 폴더> [N=6]
-||||||| base b9f4a9bda
-//! 실영상 SIFT 시간: CpuSift 대 CudaSift(같은 결과인지도 확인).
-//! 실행: cargo run --release -p cumulus3d-cuda --example bench_sift -- <영상 폴더> [N=6]
-=======
-//! Real-image SIFT timing: CpuSift vs CudaSift (also checks the results are the same).
+//! Real-image SIFT timing: CpuSift vs CudaSift (also prints whether results are bit-identical; GPU detection/descriptors have the
+//! same quality but usually differ bit-wise).
 //! Run: cargo run --release -p cumulus3d-cuda --example bench_sift -- <image folder> [N=6]
->>>>>>> upstream v0.5.0
 
 use cumulus3d_cuda::{CudaMatcher, CudaSift};
 use cumulus3d_features::{read_gray, CpuSift, SiftEngine, SiftOptions};

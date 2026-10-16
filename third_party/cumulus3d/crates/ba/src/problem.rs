@@ -49,20 +49,12 @@ pub(crate) const NONE: u32 = u32::MAX;
 const CHUNK: usize = 8192;
 const MAX_CAM_DIM: usize = 16;
 
-<<<<<<< skylens (vendored)
-/// 번들 조정 문제 입력(lib.rs 가 재구성에서 만든다). 관측은 점 순서로 정렬돼 있어야 한다.
+/// Problem input (built from the reconstruction by lib.rs). Observations must be sorted in point order.
 ///
-/// [`crate::BaBackend`] 구현(CPU·CUDA)이 같은 입력을 받는다.
+/// Every [`crate::BaBackend`] implementation (CPU, CUDA) receives the same input.
 #[derive(Clone, Debug)]
 pub struct ProblemInput {
-    /// 프레임(world_to_rig) 자세. 쿼터니언은 정규화돼 있다.
-||||||| base b9f4a9bda
-/// 문제 입력(lib.rs 가 재구성에서 만든다). 관측은 점 순서로 정렬돼 있어야 한다.
-pub(crate) struct ProblemInput {
-=======
-/// Problem input (built from the reconstruction by lib.rs). Observations must be sorted in point order.
-pub(crate) struct ProblemInput {
->>>>>>> upstream v0.5.0
+    /// Frame (world_to_rig) poses. Quaternions are normalized.
     pub poses: Vec<Rigid3>,
     /// 자세 고정 여부.
     pub pose_const: Vec<bool>,
@@ -88,16 +80,12 @@ pub(crate) struct ProblemInput {
     pub obs_pt: Vec<u32>,
     /// 관측 픽셀 좌표.
     pub obs_xy: Vec<Vec2>,
-<<<<<<< skylens (vendored)
-    /// 견고 손실.
-||||||| base b9f4a9bda
-=======
     /// Camera position priors: (pose index, target center, σ).
     pub pose_priors: Vec<(usize, Vec3, f64)>,
     /// Intrinsics priors: (camera index, parameter slot in the camera's parameter vector, target value, 1/σ).
     /// Only slots listed in `cam_var` of that camera take part.
     pub cam_priors: Vec<(usize, usize, f64, f64)>,
->>>>>>> upstream v0.5.0
+    /// Robust loss.
     pub loss: Loss,
     /// 축소 계통 풀이기(CPU 기준 선택).
     pub solver: LinearSolverType,
@@ -184,16 +172,8 @@ pub(crate) struct BaProblem {
     rhs: Vec<f64>,
 }
 
-<<<<<<< skylens (vendored)
-/// 라이브러리 쿼터니언 다양체의 ⊞: Exp_q(δ) ⊗ q.
-pub fn quat_plus(q: &Quat, d: &[f64]) -> Quat {
-||||||| base b9f4a9bda
-/// 라이브러리 쿼터니언 다양체의 ⊞: Exp_q(δ) ⊗ q.
-pub(crate) fn quat_plus(q: &Quat, d: &[f64]) -> Quat {
-=======
 /// ⊞ of the library quaternion manifold: Exp_q(δ) ⊗ q.
-pub(crate) fn quat_plus(q: &Quat, d: &[f64]) -> Quat {
->>>>>>> upstream v0.5.0
+pub fn quat_plus(q: &Quat, d: &[f64]) -> Quat {
     let n = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
     if n == 0.0 {
         return *q;

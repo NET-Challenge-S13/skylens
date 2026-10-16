@@ -71,17 +71,9 @@ impl TrOptions {
     }
 }
 
-<<<<<<< skylens (vendored)
-/// 한 LM 단계의 모형 정보.
+/// Linear model information for one LM step.
 pub struct StepInfo {
-    /// 선형 모형이 예측한 비용 감소(양수 기대).
-||||||| base b9f4a9bda
-pub(crate) struct StepInfo {
-    /// 선형 모형이 예측한 비용 감소(양수 기대).
-=======
-pub(crate) struct StepInfo {
     /// Cost decrease predicted by the linear model (expected positive).
->>>>>>> upstream v0.5.0
     pub model_cost_change: f64,
     /// ‖x_candidate - x‖ (ambient space).
     pub step_norm: f64,
@@ -89,20 +81,10 @@ pub(crate) struct StepInfo {
     pub x_norm: f64,
 }
 
-<<<<<<< skylens (vendored)
-/// 신뢰 영역 루프가 다루는 문제. CPU·GPU 번들 조정이 같은 바깥 루프를 쓰도록 공개한다.
+/// Problem handled by the trust-region loop. Public so that CPU and GPU bundle adjustment share the same outer loop.
 pub trait TrProblem {
-    /// 현재 x 에서 잔차·야코비안·기울기를 평가. `first` 면 야코비 열 배율도 정한다.
-    /// 반환: 비용(½Σρ). 평가 실패(비유한) 면 None.
-||||||| base b9f4a9bda
-pub(crate) trait TrProblem {
-    /// 현재 x 에서 잔차·야코비안·기울기를 평가. `first` 면 야코비 열 배율도 정한다.
-    /// 반환: 비용(½Σρ). 평가 실패(비유한) 면 None.
-=======
-pub(crate) trait TrProblem {
     /// Evaluates residuals, Jacobian, and gradient at the current x. If `first`, also sets the Jacobian column scaling.
     /// Returns: cost (½Σρ). None if evaluation fails (non-finite).
->>>>>>> upstream v0.5.0
     fn linearize(&mut self, first: bool) -> Option<f64>;
     /// ‖x − ⊞(x, −g)‖∞.
     fn grad_inf_norm(&self) -> f64;

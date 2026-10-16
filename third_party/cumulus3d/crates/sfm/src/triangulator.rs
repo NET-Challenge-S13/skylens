@@ -195,37 +195,25 @@ enum Action {
     Create(Vec3, Vec<TrackEntry>),
 }
 
-<<<<<<< skylens (vendored)
-/// RANSAC 삼각측량 결과(점, 인라이어 마스크).
+/// RANSAC triangulation result (point, inlier mask).
 type TriResult = Option<(Vec3, Vec<bool>)>;
 
-/// 2D 점 하나의 읽기 전용 준비(연장까지 반영, 첫 생성 RANSAC 직전).
+/// Read-only preparation of one 2D point (continuation applied, just before the first creation RANSAC).
 struct Prepared {
     snapshot: Vec<(Correspondence, Point3DId)>,
     state: HashMap<Correspondence, Point3DId>,
     actions: Vec<Action>,
     input: Vec<Correspondence>,
-    /// 첫 생성 RANSAC 의 관측(생성 단계로 가지 않으면 None).
+    /// Observations for the first creation RANSAC (None if the point does not reach the creation step).
     first: Option<Vec<TriObservation>>,
 }
 
-/// 증분 삼각측량기. 생성 시점 등록 영상의 자세·역투영 광선을 캐시한다(자세 고정 전제).
-||||||| base b9f4a9bda
-/// 증분 삼각측량기. 생성 시점 등록 영상의 자세·역투영 광선을 캐시한다(자세 고정 전제).
-=======
 /// Incremental triangulator. At creation it caches the poses and back-projection rays of the registered images (assumes poses are fixed).
->>>>>>> upstream v0.5.0
 pub struct TrackTriangulator<'a> {
     graph: &'a MatchGraph,
-<<<<<<< skylens (vendored)
-    /// 생성 RANSAC 을 묶음으로 푸는 백엔드.
+    /// Backend that solves the creation RANSAC in batches.
     backend: &'a dyn TriangulationBackend,
-    /// 삼각측량 옵션.
-||||||| base b9f4a9bda
-    /// 삼각측량 옵션.
-=======
     /// Triangulation options.
->>>>>>> upstream v0.5.0
     pub opts: TrackTriangulatorOptions,
     poses: HashMap<ImageId, PoseInfo>,
     merge_trials: HashSet<(Point3DId, Point3DId)>,
@@ -237,13 +225,7 @@ pub struct TrackTriangulator<'a> {
 }
 
 impl<'a> TrackTriangulator<'a> {
-<<<<<<< skylens (vendored)
-    /// 재구성의 등록 영상 자세·광선을 캐시해 삼각측량기를 만든다(CPU 백엔드).
-||||||| base b9f4a9bda
-    /// 재구성의 등록 영상 자세·광선을 캐시해 삼각측량기를 만든다.
-=======
-    /// Builds a triangulator by caching the poses and rays of the registered images of the reconstruction.
->>>>>>> upstream v0.5.0
+    /// Builds a triangulator by caching the poses and rays of the registered images of the reconstruction (CPU backend).
     pub fn new(rec: &Reconstruction, graph: &'a MatchGraph, opts: TrackTriangulatorOptions) -> Self {
         Self::with_backend(rec, graph, opts, &CpuTriangulation)
     }
@@ -443,8 +425,8 @@ impl<'a> TrackTriangulator<'a> {
         Ok(n)
     }
 
-<<<<<<< skylens (vendored)
-    /// 준비된 점들의 첫 생성 RANSAC 을 백엔드로 한꺼번에 푼다(준비 순서대로, 생성으로 가지 않는 점은 None).
+    /// Solves the first creation RANSAC of the prepared points in one backend call
+    /// (in preparation order; None for points that do not reach the creation step).
     fn estimate_firsts(&self, preps: &[Option<Prepared>]) -> Vec<Option<TriResult>> {
         let params = self.create_params(self.opts.create_angle_tol);
         let problems: Vec<TriProblem<'_>> = preps
@@ -461,15 +443,8 @@ impl<'a> TrackTriangulator<'a> {
         preps.iter().map(|p| p.as_ref().and_then(|p| p.first.as_ref()).map(|_| it.next().expect("결과 수"))).collect()
     }
 
-    /// 영상 하나 삼각측량. 2D 점별 계획은 병렬, 적용은 순차 + 상태 검증
-    /// (계획 후 참조 상태가 바뀌었으면 다시 계획) → 순차 실행과 같은 결과.
-||||||| base b9f4a9bda
-    /// 영상 하나 삼각측량. 2D 점별 계획은 병렬, 적용은 순차 + 상태 검증
-    /// (계획 후 참조 상태가 바뀌었으면 다시 계획) → 순차 실행과 같은 결과.
-=======
     /// Triangulates one image. Per-2D-point planning is parallel, application is sequential with state validation
     /// (re-plan if the referenced state changed after planning) so the result equals the sequential run.
->>>>>>> upstream v0.5.0
     pub fn triangulate_image(&mut self, rec: &mut Reconstruction, image_id: ImageId) -> Result<usize> {
         if !self.poses.contains_key(&image_id) {
             return Ok(0);
@@ -713,8 +688,7 @@ fn depth_and_filter_ids(touched: &HashSet<Point3DId>, rec: &Reconstruction, scop
     }
 }
 
-<<<<<<< skylens (vendored)
-/// 관측 검사용 표: 자세가 있는 영상의 (카메라, 자세)와 영상 id → (카메라 번호, 자세 번호).
+/// Observation-check table: (camera, pose) of images that have a pose, and image id -> (camera index, pose index).
 struct PoseTable {
     cameras: Vec<Camera>,
     poses: Vec<Rigid3>,
@@ -740,15 +714,9 @@ fn pose_table(rec: &Reconstruction) -> PoseTable {
     PoseTable { cameras, poses, index }
 }
 
-/// 등록 영상 기준 깊이가 양수가 아닌 관측 삭제(BA 사전 처리). 깊이는 `backend` 가 한꺼번에 계산.
-fn delete_negative_depth(rec: &mut Reconstruction, ids: Option<&[Point3DId]>, backend: &dyn TriangulationBackend) -> Result<usize> {
-||||||| base b9f4a9bda
-/// 등록 영상 기준 깊이가 양수가 아닌 관측 삭제(BA 사전 처리).
-fn delete_negative_depth(rec: &mut Reconstruction, ids: Option<&[Point3DId]>) -> Result<usize> {
-=======
 /// Removes observations whose depth relative to the registered image is not positive (BA preprocessing).
-fn delete_negative_depth(rec: &mut Reconstruction, ids: Option<&[Point3DId]>) -> Result<usize> {
->>>>>>> upstream v0.5.0
+/// Depths are computed in one batch by `backend`.
+fn delete_negative_depth(rec: &mut Reconstruction, ids: Option<&[Point3DId]>, backend: &dyn TriangulationBackend) -> Result<usize> {
     let ids: Vec<Point3DId> = ids.map_or_else(|| rec.point3d_ids(), |v| v.to_vec());
     let table = pose_table(rec);
     let mut queries = Vec::new();
@@ -780,9 +748,8 @@ fn delete_negative_depth(rec: &mut Reconstruction, ids: Option<&[Point3DId]>) ->
     Ok(n)
 }
 
-<<<<<<< skylens (vendored)
-/// 픽셀 재투영 오차 필터(`Reconstruction::filter_observations_with_large_reprojection_error` 와 같은 규칙).
-/// 오차는 `backend` 가 한꺼번에 계산. 반환: 삭제된 관측 수.
+/// Pixel reprojection error filter (same rule as `Reconstruction::filter_observations_with_large_reprojection_error`).
+/// Errors are computed in one batch by `backend`. Returns: number of removed observations.
 fn filter_large_reprojection_error(
     rec: &mut Reconstruction,
     max_reproj_error_px: f64,
@@ -795,7 +762,7 @@ fn filter_large_reprojection_error(
     };
     let table = pose_table(rec);
     let mut queries = Vec::new();
-    // 점마다 관측별 질의 번호(자세 없는 영상이면 None → 오차 +∞).
+    // Per point, the query index of each observation (None for an image without a pose -> error +inf).
     let mut layout: Vec<(Point3DId, Vec<Option<usize>>)> = Vec::with_capacity(ids.len());
     for id in ids {
         let Some(p) = rec.point3d(id) else { continue };
@@ -820,12 +787,7 @@ fn filter_large_reprojection_error(
     rec.apply_observation_filter(evals, max_reproj_error_px, FilterErrorUpdate::SumOverOriginalLength)
 }
 
-/// 자세·내부 고정 점 정제. `ids` None = 모든 점.
-||||||| base b9f4a9bda
-/// 자세·내부 고정 점 정제. `ids` None = 모든 점.
-=======
 /// Pose- and intrinsics-fixed point refinement. `ids` None = all points.
->>>>>>> upstream v0.5.0
 pub fn refine_points(rec: &mut Reconstruction, ids: Option<&[Point3DId]>, refiner: PointRefiner, max_iterations: usize) -> Result<()> {
     match refiner {
         PointRefiner::None => Ok(()),

@@ -156,16 +156,8 @@ pub fn match_pairs_with(
                 }
             }
         }
-<<<<<<< skylens (vendored)
-        // 2) 짝 단위 병렬 매칭 → 블록 단위 검증.
+        // 2) Per-pair parallel matching, then per-block verification.
         let raws: Vec<(ImageId, ImageId, Vec<FeatureMatch>, bool)> = tasks
-||||||| base b9f4a9bda
-        // 2) 짝 단위 병렬: 매칭 + 검증.
-        let results: Vec<PairResult> = tasks
-=======
-        // 2) Per-pair parallelism: matching + verification.
-        let results: Vec<PairResult> = tasks
->>>>>>> upstream v0.5.0
             .into_par_iter()
             .map(|t| {
                 let matched = t.pre.is_none();
@@ -185,7 +177,6 @@ pub fn match_pairs_with(
                 (t.id1, t.id2, raw, matched)
             })
             .collect();
-<<<<<<< skylens (vendored)
         let tvgs: Vec<Option<TwoViewGeometry>> = if opts.skip_geometric_verification {
             raws.iter().map(|_| None).collect()
         } else {
@@ -194,12 +185,7 @@ pub fn match_pairs_with(
         };
         let results: Vec<PairResult> =
             raws.into_iter().zip(tvgs).map(|((id1, id2, raw, matched), tvg)| (id1, id2, raw, tvg, matched)).collect();
-        // 3) 블록 단위 기록(입력 순서).
-||||||| base b9f4a9bda
-        // 3) 블록 단위 기록(입력 순서).
-=======
         // 3) Per-block writes (in input order).
->>>>>>> upstream v0.5.0
         for (id1, id2, raw, tvg, matched) in results {
             if matched {
                 stats.num_matched += 1;

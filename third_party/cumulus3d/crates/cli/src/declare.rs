@@ -69,14 +69,11 @@
 //! Run from a TOML plan file: `cumulus3d run plan.toml`. The default plan is `cumulus3d plan --print-default`.
 //! Relative paths in a plan file are relative to the working location (current folder).
 
-<<<<<<< skylens (vendored)
-use crate::densewrap::{make_ba_backend, make_match_backend, make_pm_backend, make_sift_backend, make_sparse_backend, parse_profile, DenseConfig};
-||||||| base b9f4a9bda
-use crate::densewrap::{make_match_backend, make_pm_backend, make_sift_backend, parse_profile, DenseConfig};
-=======
 use crate::blocks::LiveStream;
-use crate::densewrap::{make_match_backend, make_pm_backend, make_sift_backend, make_undistort_backend, parse_profile, DenseConfig};
->>>>>>> upstream v0.5.0
+use crate::densewrap::{
+    make_ba_backend, make_match_backend, make_pm_backend, make_sift_backend, make_sparse_backend, make_undistort_backend, parse_profile,
+    DenseConfig,
+};
 use crate::events::{EventKind, Frame, ZoneRange};
 use crate::intrinsics::IntrinsicsPrior;
 use crate::pipeline::{Pipeline, QueuePolicy, Summary};
@@ -255,33 +252,16 @@ impl Default for Matching {
     }
 }
 
-<<<<<<< skylens (vendored)
-/// 희소 재구성.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-||||||| base b9f4a9bda
-/// 희소 재구성.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-=======
 /// Sparse reconstruction.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
->>>>>>> upstream v0.5.0
 #[serde(default, deny_unknown_fields)]
 pub struct Sparse {
     /// Triangulate only newly registered images (an improvement that can change the result).
     pub incremental_triangulation: bool,
-<<<<<<< skylens (vendored)
-    /// 두 뷰 기하 검증·등록·삼각측량 백엔드(cpu|cuda).
+    /// Two-view geometric verification, registration and triangulation backend (cpu|cuda).
     pub backend: String,
-    /// 번들 조정 백엔드(cpu|cuda). cuda 는 실행 중 실패하면 경고 뒤 CPU 로 푼다.
+    /// Bundle adjustment backend (cpu|cuda). cuda falls back to the CPU with a warning if it fails at run time.
     pub ba_backend: String,
-}
-
-impl Default for Sparse {
-    fn default() -> Self {
-        Self { incremental_triangulation: false, backend: "cpu".into(), ba_backend: "cpu".into() }
-    }
-||||||| base b9f4a9bda
-=======
     /// Stable display (see [`SessionConfig::stable_display`]).
     pub stable_display: bool,
     /// Stable display: settle tolerance (see [`SessionConfig::settle_tol`]).
@@ -301,6 +281,8 @@ impl Default for Sparse {
     fn default() -> Self {
         Self {
             incremental_triangulation: false,
+            backend: "cpu".into(),
+            ba_backend: "cpu".into(),
             stable_display: false,
             settle_tol: 0.01,
             settle_max_zone: 3,
@@ -309,7 +291,6 @@ impl Default for Sparse {
             intrinsics_prior_dist_sigma: crate::intrinsics::DEFAULT_DIST_SIGMA,
         }
     }
->>>>>>> upstream v0.5.0
 }
 
 /// Densification plan. Start from [`Dense::profile`] and add to it with methods. Unset fusion/filter values use the profile defaults.
@@ -821,11 +802,6 @@ impl Plan {
                 max_image_size: c.sift_max_image_size,
             },
             matching: Matching { backend: c.match_backend.clone() },
-<<<<<<< skylens (vendored)
-            sparse: Sparse { incremental_triangulation: c.incremental_triangulation, ..Default::default() },
-||||||| base b9f4a9bda
-            sparse: Sparse { incremental_triangulation: c.incremental_triangulation },
-=======
             sparse: Sparse {
                 incremental_triangulation: c.incremental_triangulation,
                 stable_display: c.stable_display,
@@ -834,8 +810,8 @@ impl Plan {
                 intrinsics_prior: c.intrinsics_prior.clone(),
                 intrinsics_prior_sigma: c.intrinsics_prior_sigma,
                 intrinsics_prior_dist_sigma: c.intrinsics_prior_dist_sigma,
+                ..Default::default()
             },
->>>>>>> upstream v0.5.0
             dense: Dense {
                 enabled: !c.no_dense,
                 backend: c.pm_backend.clone(),
@@ -1029,24 +1005,14 @@ impl ReconBuilder {
         self
     }
 
-<<<<<<< skylens (vendored)
-    /// SIFT·매칭·희소 단계·PatchMatch·번들 조정 백엔드를 모두 cuda 로.
-||||||| base b9f4a9bda
-    /// SIFT·매칭·PatchMatch 백엔드를 모두 cuda 로.
-=======
-    /// Set the SIFT, matching and PatchMatch backends all to cuda.
->>>>>>> upstream v0.5.0
+    /// Set the SIFT, matching, sparse-stage, PatchMatch, undistortion and bundle adjustment backends all to cuda.
     pub fn gpu(mut self) -> Self {
         self.plan.features.backend = "cuda".into();
         self.plan.matching.backend = "cuda".into();
         self.plan.sparse.backend = "cuda".into();
         self.plan.dense.backend = "cuda".into();
-<<<<<<< skylens (vendored)
         self.plan.sparse.ba_backend = "cuda".into();
-||||||| base b9f4a9bda
-=======
         self.plan.dense.undistort_backend = "cuda".into();
->>>>>>> upstream v0.5.0
         self
     }
 
@@ -1259,13 +1225,9 @@ fn check(plan: &Plan, pr: &mut Problems) -> (Option<Layout>, Option<Vec<GpsRecor
     pr.check(f.max_num_features >= 1, "features.max_num_features", || "1 이상이어야 함".into());
     pr.check(f.max_image_size >= 16, "features.max_image_size", || "16 이상이어야 함".into());
     backend_ok(pr, "matching.backend", &plan.matching.backend, &["cpu", "cuda"]);
-<<<<<<< skylens (vendored)
     backend_ok(pr, "sparse.backend", &plan.sparse.backend, &["cpu", "cuda"]);
     backend_ok(pr, "sparse.ba_backend", &plan.sparse.ba_backend, &["cpu", "cuda"]);
-||||||| base b9f4a9bda
-=======
     backend_ok(pr, "dense.undistort_backend", &plan.dense.undistort_backend, &["cpu", "cuda"]);
->>>>>>> upstream v0.5.0
 
     let d = &plan.dense;
     if d.enabled {

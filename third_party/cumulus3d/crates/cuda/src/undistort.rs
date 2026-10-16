@@ -33,7 +33,7 @@
 //! `CameraUndistortion::undistort_image` fused in one kernel. Output camera geometry still comes from the CPU code (computed once
 //! per camera and cached), so only the pixel resampling moves to the device.
 
-use crate::device::{CudaDevice, GpuError};
+use crate::device::{CudaDevice, GpuError, SyncedCopy};
 use cudarc::driver::{CudaFunction, LaunchConfig, PushKernelArg};
 use cumulus3d_core::{CameraModelKind, Error, Result};
 use cumulus3d_dense::{CameraUndistortion, ImageBuffer, UndistortBackend};
@@ -106,7 +106,7 @@ impl CudaUndistort {
         l.arg(&d_src).arg(&sw_i).arg(&sh_i).arg(&ch_i).arg(&mut d_dst).arg(&ow_i).arg(&oh_i).arg(&d_cam);
         // SAFETY: same arguments and sizes as undistort_resample(src[sw·sh·ch], sw, sh, ch, dst[ow·oh·ch], ow, oh, cam[12]).
         unsafe { l.launch(cfg) }?;
-        let data = s.clone_dtoh(&d_dst)?;
+        let data = s.clone_dtoh_synced(&d_dst)?;
         s.synchronize()?;
         Ok(ImageBuffer { width: ow, height: oh, channels: ch, data })
     }

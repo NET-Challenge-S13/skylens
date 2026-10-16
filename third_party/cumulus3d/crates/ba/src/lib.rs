@@ -30,17 +30,10 @@
 //! The public signatures of this file are a contract with the sfm crate. Do not change them during implementation (adding fields is
 //! allowed).
 //!
-<<<<<<< skylens (vendored)
-//! 구성: 신뢰 영역 LM(`tr`), Schur 보수 조립·역대입(`problem`), 축소 계통 풀이기(`linsolve`),
-//! 단일 자세 정제(`abspose`), 견고 손실(`loss`), 풀이 백엔드(`backend`: CPU 기본, GPU 는 다른 크레이트가 구현).
-||||||| base b9f4a9bda
-//! 구성: 신뢰 영역 LM(`tr`), Schur 보수 조립·역대입(`problem`), 축소 계통 풀이기(`linsolve`),
-//! 단일 자세 정제(`abspose`), 견고 손실(`loss`).
-=======
 //! Components: trust-region LM (`tr`), Schur complement assembly and back-substitution (`problem`), reduced camera system solvers
 //! (`linsolve`),
-//! single-pose refinement (`abspose`), robust losses (`loss`).
->>>>>>> upstream v0.5.0
+//! single-pose refinement (`abspose`), robust losses (`loss`), solver backends (`backend`: CPU by default, GPU implemented by
+//! another crate).
 //!
 //! # Usage example
 //!
@@ -89,17 +82,7 @@ pub use problem::{quat_plus, ProblemInput};
 pub use tr::{minimize, StepInfo, TrOptions, TrProblem, TrResult};
 
 use cumulus3d_core::{CameraId, Error, FrameId, ImageId, Point3DId, Reconstruction, Rigid3, SensorKey, Vec2, Vec3};
-<<<<<<< skylens (vendored)
-use std::collections::{BTreeMap, HashSet};
-||||||| base b9f4a9bda
-use problem::{BaProblem, ProblemInput};
-use std::collections::{BTreeMap, HashSet};
-use tr::TrOptions;
-=======
-use problem::{BaProblem, ProblemInput};
 use std::collections::{BTreeMap, HashMap, HashSet};
-use tr::TrOptions;
->>>>>>> upstream v0.5.0
 
 /// Robust loss function. The scale is in residual (pixel) units.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -385,7 +368,11 @@ fn bundle_adjust_impl(rec: &mut Reconstruction, config: &BaConfig, backend: &dyn
     summary.num_residuals = 2 * input.obs_img.len();
     summary.free_point_count = input.point_const.iter().filter(|&&c| !c).count();
     let opts = TrOptions::new(config.max_num_iterations, config.function_tolerance, config.gradient_tolerance, config.parameter_tolerance);
-    let sol = backend.solve(&input, &opts)?;
+    // Backends other than the CPU one (e.g. the CUDA bundle adjuster) only evaluate reprojection residuals and do not know
+    // the position / intrinsics prior terms. Silently dropping those terms would change the problem, so when any prior is
+    // present the problem is solved on the CPU regardless of the requested backend.
+    let has_priors = !input.pose_priors.is_empty() || !input.cam_priors.is_empty();
+    let sol = if has_priors { CpuBaBackend.solve(&input, &opts)? } else { backend.solve(&input, &opts)? };
     summary.linear_solver = sol.linear_solver;
     let r = &sol.result;
     summary.num_iterations = r.num_iterations;

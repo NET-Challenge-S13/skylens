@@ -31,7 +31,6 @@ use cudarc::driver::{CudaContext, CudaModule, CudaStream, DevicePtr, DeviceRepr,
 use cudarc::nvrtc::{compile_ptx_with_opts, CompileOptions};
 use std::sync::Arc;
 
-<<<<<<< skylens (vendored)
 /// 내려 받기 전에 스트림을 먼저 기다리는 복사.
 ///
 /// 일반(페이지) 메모리로 내려 받는 `cuMemcpyDtoHAsync` 는 앞선 커널이 끝날 때까지 드라이버 전역 잠금을
@@ -64,12 +63,7 @@ impl SyncedCopy for Arc<CudaStream> {
     }
 }
 
-/// CUDA 백엔드 오류.
-||||||| base b9f4a9bda
-/// CUDA 백엔드 오류.
-=======
 /// CUDA backend error.
->>>>>>> upstream v0.5.0
 #[derive(Debug, thiserror::Error)]
 pub enum GpuError {
     #[error("CUDA 사용 불가: {0}")]

@@ -64,8 +64,7 @@ pub fn parse_profile(s: &str) -> Result<MvsProfile, String> {
     MvsProfile::parse(s).ok_or_else(|| format!("알 수 없는 --mvs-profile {s} (fast|quality)"))
 }
 
-<<<<<<< skylens (vendored)
-/// 번들 조정 백엔드 선택(cpu|cuda). cuda 는 실행 중 실패하면 경고를 찍고 CPU 로 다시 푼다.
+/// Bundle adjustment backend selection (cpu|cuda). cuda prints a warning and solves again on the CPU if it fails at run time.
 pub fn make_ba_backend(name: &str) -> Result<Arc<dyn cumulus3d_ba::BaBackend>, String> {
     match name {
         "cpu" => Ok(Arc::new(cumulus3d_ba::CpuBaBackend)),
@@ -76,12 +75,7 @@ pub fn make_ba_backend(name: &str) -> Result<Arc<dyn cumulus3d_ba::BaBackend>, S
     }
 }
 
-/// SIFT 백엔드 선택(cpu|cuda).
-||||||| base b9f4a9bda
-/// SIFT 백엔드 선택(cpu|cuda).
-=======
 /// SIFT backend selection (cpu|cuda).
->>>>>>> upstream v0.5.0
 pub fn make_sift_backend(name: &str) -> Result<Arc<dyn cumulus3d_features::SiftEngine>, String> {
     match name {
         "cpu" => Ok(Arc::new(cumulus3d_features::CpuSift::default())),
@@ -103,8 +97,8 @@ pub fn make_match_backend(name: &str) -> Result<Box<dyn cumulus3d_matching::Matc
     }
 }
 
-<<<<<<< skylens (vendored)
-/// 희소 단계(두 뷰 기하 검증·등록·삼각측량) 백엔드 선택(cpu|cuda). cuda 는 장치 하나를 세 단계가 함께 쓴다.
+/// Sparse-stage (two-view geometric verification, registration, triangulation) backend selection (cpu|cuda). With cuda the
+/// three stages share one device.
 pub fn make_sparse_backend(name: &str) -> Result<crate::session::SparseBackends, String> {
     match name {
         "cpu" => Ok(crate::session::SparseBackends::default()),
@@ -118,12 +112,7 @@ pub fn make_sparse_backend(name: &str) -> Result<crate::session::SparseBackends,
     }
 }
 
-/// 조밀화 설정.
-||||||| base b9f4a9bda
-/// 조밀화 설정.
-=======
 /// Densification settings.
->>>>>>> upstream v0.5.0
 #[derive(Clone)]
 pub struct DenseConfig {
     /// Undistortion options.

@@ -29,7 +29,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-<<<<<<< skylens (vendored)
 //! `SiftEngine` 의 CUDA 구현. SIFT 전 과정을 GPU 에서 한다.
 //!
 //! 1. 가우시안 스케일 공간(정규화·2배 업샘플·분리형 블러·축소): CPU 피라미드와 비트 단위로 같다.
@@ -43,18 +42,6 @@
 //! 화소 중심 0.5), 출력 순서(옥타브 → 레벨 → 검출 화소 → 방향 순번)는 `CpuSift` 와 같다. 다만 히스토그램
 //! 합산 순서와 초월함수(exp, atan2, sin/cos, pow) 구현이 달라 결과가 비트 단위로 같지는 않다. 위치·방향·기술자가
 //! 사실상 같고 특징 수도 거의 같다(시험 참고). 합산 순서는 고정이라 같은 입력이면 실행마다 결과가 같다.
-||||||| base b9f4a9bda
-//! `SiftEngine` 의 CUDA 구현(혼합형): 가우시안 스케일 공간(정규화·2배 업샘플·분리형 블러·축소)을 GPU 에서
-//! CPU 와 비트 단위로 같게 만들고, 옥타브를 필요할 때만(거친 쪽부터) 내려받아 DoG·검출·방향·기술자는
-//! cumulus3d-features 의 CPU 함수로 계산한다. 따라서 결과는 `CpuSift` 와 같다.
-//! 최대 특징 수에 먼저 닿으면 미세 옥타브(2배 업샘플 해상도)는 내려받지도 않는다.
-=======
-//! CUDA implementation of `SiftEngine` (hybrid): the Gaussian scale space (normalization, 2x upsampling, separable blur, downscaling) is
-//! made bit-identical to
-//! the CPU on the GPU, octaves are downloaded only when needed (coarse ones first), and DoG, detection, orientation and descriptors are
-//! computed with the CPU functions of cumulus3d-features. So the result equals `CpuSift`.
-//! If the maximum feature count is reached first, the fine octave (2x upsampled resolution) is not even downloaded.
->>>>>>> upstream v0.5.0
 
 use crate::device::{CudaDevice, GpuError, SyncedCopy};
 use cudarc::driver::{CudaFunction, CudaSlice, CudaStream, DevicePtr, DriverError, LaunchConfig, PushKernelArg};
@@ -87,7 +74,6 @@ pub struct CudaSift {
     f_bh: CudaFunction,
     f_bv: CudaFunction,
     f_dec: CudaFunction,
-<<<<<<< skylens (vendored)
     f_dog: CudaFunction,
     f_detect: CudaFunction,
     f_orient: CudaFunction,
@@ -97,22 +83,9 @@ pub struct CudaSift {
     f_desc: CudaFunction,
     /// 장치 사용 직렬화(스트림 공유) + 영상 사이에 이어 쓰는 상태.
     lock: Mutex<State>,
-||||||| base b9f4a9bda
-    /// 장치 사용 직렬화(스트림 공유) + 내림용 고정 호스트 버퍼(영상 사이 재사용).
-    lock: Mutex<HostBufs>,
-=======
-    /// Device use serialization (stream shared) + pinned host buffers for download (reused between images).
-    lock: Mutex<HostBufs>,
->>>>>>> upstream v0.5.0
 }
 
-<<<<<<< skylens (vendored)
 /// 영상 사이에 이어 쓰는 상태.
-||||||| base b9f4a9bda
-/// 영상 사이에 재사용하는 호스트 버퍼(고정 메모리 피라미드, DoG 작업 버퍼).
-=======
-/// Host buffers reused between images (pinned-memory pyramid, DoG work buffer).
->>>>>>> upstream v0.5.0
 #[derive(Default)]
 struct State {
     /// 지난번에 충분했던 후보 버퍼 용량(넘치면 다시 검출하므로 기억해 둔다).
@@ -127,69 +100,15 @@ struct DevOctave {
     gauss: Vec<CudaSlice<f32>>,
 }
 
-<<<<<<< skylens (vendored)
-||||||| base b9f4a9bda
-/// 내려받은 옥타브(필요할 때만 채움).
-/// 레벨들은 고정 호스트 버퍼의 구간으로 가리킨다(복사 없이 CPU 함수에 슬라이스로 넘김).
-struct HostOctave {
-    o: i32,
-    w: usize,
-    h: usize,
-    ranges: Vec<std::ops::Range<usize>>,
-    fetched: bool,
-}
-
-impl HostOctave {
-    fn level<'a>(&self, hb: &'a [f32], l: i32) -> &'a [f32] {
-        &hb[self.ranges[(l + 1) as usize].clone()]
-    }
-}
-
-struct LevelFeats {
-    oi: usize,
-    j: usize,
-    items: Vec<(Candidate, u16)>,
-}
-
-=======
-/// Downloaded octave (filled only when needed).
-/// Levels point to ranges of the pinned host buffer (passed as slices to CPU functions without copying).
-struct HostOctave {
-    o: i32,
-    w: usize,
-    h: usize,
-    ranges: Vec<std::ops::Range<usize>>,
-    fetched: bool,
-}
-
-impl HostOctave {
-    fn level<'a>(&self, hb: &'a [f32], l: i32) -> &'a [f32] {
-        &hb[self.ranges[(l + 1) as usize].clone()]
-    }
-}
-
-struct LevelFeats {
-    oi: usize,
-    j: usize,
-    items: Vec<(Candidate, u16)>,
-}
-
->>>>>>> upstream v0.5.0
 fn cfg2(w: usize, h: usize) -> LaunchConfig {
     LaunchConfig { grid_dim: ((w as u32).div_ceil(32), (h as u32).div_ceil(8), 1), block_dim: (32, 8, 1), shared_mem_bytes: 0 }
 }
 
-<<<<<<< skylens (vendored)
 fn cfg1(n: usize) -> LaunchConfig {
     LaunchConfig { grid_dim: ((n as u32).div_ceil(256).max(1), 1, 1), block_dim: (256, 1, 1), shared_mem_bytes: 0 }
 }
 
 /// 입력 오류(그대로 돌려줌)와 장치 오류(CPU 로 대신 계산)를 나눈다.
-||||||| base b9f4a9bda
-/// 입력 오류(그대로 돌려줌)와 장치 오류(CPU 로 대신 계산)를 나눈다.
-=======
-/// Separates input errors (returned as is) from device errors (computed on the CPU instead).
->>>>>>> upstream v0.5.0
 enum Fail {
     Input(Error),
     Device(GpuError),
@@ -335,21 +254,9 @@ fn grid_cut(sizes: &[usize], k: usize) -> (usize, usize) {
 }
 
 impl CudaSift {
-<<<<<<< skylens (vendored)
     /// 장치 `dev` 에 SIFT 커널을 컴파일해 만든다.
-||||||| base b9f4a9bda
-    /// 장치 `dev` 에 스케일 공간 커널을 컴파일해 만든다.
-=======
-    /// Compiles the scale-space kernels on device `dev` and builds it.
->>>>>>> upstream v0.5.0
     pub fn new(dev: Arc<CudaDevice>) -> std::result::Result<Self, GpuError> {
-<<<<<<< skylens (vendored)
         // 곱셈-덧셈 융합을 끄고 IEEE 나눗셈: 피라미드는 CPU 와 비트 단위로 같게, 검출도 CPU 식과 같은 반올림으로.
-||||||| base b9f4a9bda
-        // 곱셈-덧셈 융합을 끄고 IEEE 나눗셈: CPU 피라미드와 비트 단위로 같게.
-=======
-        // Turn off fused multiply-add and use IEEE division: bit-identical to the CPU pyramid.
->>>>>>> upstream v0.5.0
         let m = dev.compile(SRC, false, &[])?;
         Ok(Self {
             f_norm: m.load_function("sift_normalize")?,
@@ -494,68 +401,11 @@ impl CudaSift {
         let ss = ScaleSpace::new(opts.octave_resolution);
         let mut state = self.lock.lock().unwrap_or_else(|e| e.into_inner());
         let st = self.dev.stream.clone();
-<<<<<<< skylens (vendored)
         let t0 = Instant::now();
-||||||| base b9f4a9bda
-        let t0 = std::time::Instant::now();
-        let dev_pyr = self.build(&st, image, w, h, opts, ss)?;
-        st.synchronize().map_err(GpuError::from)?;
-        let t_build = t0.elapsed();
-        let mut t_fetch = std::time::Duration::ZERO;
-        let mut off = 0usize;
-        let mut pyr: Vec<HostOctave> = dev_pyr
-            .iter()
-            .map(|d| {
-                let ranges = (0..d.gauss.len())
-                    .map(|_| {
-                        off += d.w * d.h;
-                        off - d.w * d.h..off
-                    })
-                    .collect();
-                HostOctave { o: d.o, w: d.w, h: d.h, ranges, fetched: false }
-            })
-            .collect();
-        let bufs = &mut *guard;
-        if bufs.pinned.as_ref().is_none_or(|b| b.len() < off) {
-            bufs.pinned = None;
-            // SAFETY: 장치가 채운 구간만 읽는다(fetched 표시된 옥타브).
-            bufs.pinned = Some(unsafe { self.dev.ctx.alloc_pinned_with_flags::<f32>(off, 0) }.map_err(GpuError::from)?);
-        }
-        let hbuf = bufs.pinned.as_mut().expect("채움");
-        let dog_pool = &mut bufs.dogs;
-=======
-        let t0 = std::time::Instant::now();
-        let dev_pyr = self.build(&st, image, w, h, opts, ss)?;
-        st.synchronize().map_err(GpuError::from)?;
-        let t_build = t0.elapsed();
-        let mut t_fetch = std::time::Duration::ZERO;
-        let mut off = 0usize;
-        let mut pyr: Vec<HostOctave> = dev_pyr
-            .iter()
-            .map(|d| {
-                let ranges = (0..d.gauss.len())
-                    .map(|_| {
-                        off += d.w * d.h;
-                        off - d.w * d.h..off
-                    })
-                    .collect();
-                HostOctave { o: d.o, w: d.w, h: d.h, ranges, fetched: false }
-            })
-            .collect();
-        let bufs = &mut *guard;
-        if bufs.pinned.as_ref().is_none_or(|b| b.len() < off) {
-            bufs.pinned = None;
-            // SAFETY: reads only the ranges the device filled (octaves marked fetched).
-            bufs.pinned = Some(unsafe { self.dev.ctx.alloc_pinned_with_flags::<f32>(off, 0) }.map_err(GpuError::from)?);
-        }
-        let hbuf = bufs.pinned.as_mut().expect("채움");
-        let dog_pool = &mut bufs.dogs;
->>>>>>> upstream v0.5.0
 
         // 1. 스케일 공간.
         let pyr = self.build(&st, image, w, h, opts, ss)?;
         let s = ss.s;
-<<<<<<< skylens (vendored)
         let n_oct = pyr.len();
         let nl = n_oct * s;
         // 레벨 표: 레벨 l = oi·S + j 의 가우시안(gauss[j + 1]) 장치 주소와 (w, h, 옥타브, j).
@@ -590,63 +440,6 @@ impl CudaSift {
                     l.arg(&oct.gauss[d + 1]).arg(&oct.gauss[d]).arg(&mut dog).arg(&di).arg(&ni);
                     // SAFETY: sift_dog(hi[n], lo[n], dog[(S+2)·n 이상], d < S+2, n).
                     unsafe { l.launch(cfg1(n)) }?;
-||||||| base b9f4a9bda
-        let k_max = if opts.max_num_features == 0 { usize::MAX } else { opts.max_num_features };
-        let dp = DetectParams {
-            peak_threshold: opts.peak_threshold,
-            edge_threshold: opts.edge_threshold,
-            refinement_iterations: opts.refinement_iterations,
-            reject_singular: opts.reject_singular_refinement,
-            sigma0: ss.sigma0,
-            k: ss.k,
-        };
-        let op = OrientParams { max_num_orientations: opts.max_num_orientations, bin_interpolation: opts.orientation_bin_interpolation };
-
-        // CpuSift::extract 와 같은 순서: 거친 옥타브·높은 레벨부터, 잘릴 레벨은 생략.
-        let mut levels: Vec<LevelFeats> = Vec::new();
-        let (mut cum_det, mut cum_or) = (0usize, 0usize);
-        'outer: for oi in (0..pyr.len()).rev() {
-            let (ow, oh) = (pyr[oi].w, pyr[oi].h);
-            let mut dogs: Vec<Vec<f32>> = Vec::new();
-            let give = |dogs: Vec<Vec<f32>>, pool: &mut Vec<Vec<f32>>| pool.extend(dogs);
-            for j in (0..s).rev() {
-                let stop = match opts.selection {
-                    FeatureSelection::CompatLevels => cum_det > k_max,
-                    FeatureSelection::TopK => cum_or >= k_max,
-                    FeatureSelection::SpatialGrid { .. } => false,
-                };
-                if stop {
-                    give(dogs, dog_pool);
-                    break 'outer;
-=======
-        let k_max = if opts.max_num_features == 0 { usize::MAX } else { opts.max_num_features };
-        let dp = DetectParams {
-            peak_threshold: opts.peak_threshold,
-            edge_threshold: opts.edge_threshold,
-            refinement_iterations: opts.refinement_iterations,
-            reject_singular: opts.reject_singular_refinement,
-            sigma0: ss.sigma0,
-            k: ss.k,
-        };
-        let op = OrientParams { max_num_orientations: opts.max_num_orientations, bin_interpolation: opts.orientation_bin_interpolation };
-
-        // Same order as CpuSift::extract: coarse octaves and high levels first, omit levels that get truncated.
-        let mut levels: Vec<LevelFeats> = Vec::new();
-        let (mut cum_det, mut cum_or) = (0usize, 0usize);
-        'outer: for oi in (0..pyr.len()).rev() {
-            let (ow, oh) = (pyr[oi].w, pyr[oi].h);
-            let mut dogs: Vec<Vec<f32>> = Vec::new();
-            let give = |dogs: Vec<Vec<f32>>, pool: &mut Vec<Vec<f32>>| pool.extend(dogs);
-            for j in (0..s).rev() {
-                let stop = match opts.selection {
-                    FeatureSelection::CompatLevels => cum_det > k_max,
-                    FeatureSelection::TopK => cum_or >= k_max,
-                    FeatureSelection::SpatialGrid { .. } => false,
-                };
-                if stop {
-                    give(dogs, dog_pool);
-                    break 'outer;
->>>>>>> upstream v0.5.0
                 }
                 if oct.w < 3 || oct.h < 3 {
                     continue;
@@ -860,23 +653,9 @@ impl CudaSift {
     }
 }
 
-<<<<<<< skylens (vendored)
 impl SiftEngine for CudaSift {
     fn name(&self) -> &str {
         "cuda"
-||||||| base b9f4a9bda
-/// 최대 특징 수 제한(CpuSift 와 같은 규칙). `levels` 는 거친 → 미세 순서.
-fn select(levels: &mut [LevelFeats], mode: FeatureSelection, k: usize, pyr: &[HostOctave]) {
-    let total: usize = levels.iter().map(|l| l.items.len()).sum();
-    if total <= k {
-        return;
-=======
-/// Maximum feature count limit (same rule as CpuSift). `levels` is in coarse → fine order.
-fn select(levels: &mut [LevelFeats], mode: FeatureSelection, k: usize, pyr: &[HostOctave]) {
-    let total: usize = levels.iter().map(|l| l.items.len()).sum();
-    if total <= k {
-        return;
->>>>>>> upstream v0.5.0
     }
     fn extract(&self, image: &GrayImage, options: &SiftOptions) -> Result<SiftOutput> {
         match self.extract_gpu(image, options) {

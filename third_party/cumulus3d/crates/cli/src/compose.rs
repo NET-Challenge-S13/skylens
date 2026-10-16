@@ -639,18 +639,14 @@ impl NodeBuilder {
         self.plan.matching.backend = name.to_string();
         self
     }
-    /// CUDA for features, matching, the sparse stages, densification and bundle adjustment.
+    /// CUDA for features, matching, the sparse stages, densification, undistortion and bundle adjustment.
     pub fn gpu(mut self) -> Self {
         self.plan.features.backend = "cuda".into();
         self.plan.matching.backend = "cuda".into();
         self.plan.sparse.backend = "cuda".into();
         self.plan.dense.backend = "cuda".into();
-<<<<<<< skylens (vendored)
         self.plan.sparse.ba_backend = "cuda".into();
-||||||| base b9f4a9bda
-=======
         self.plan.dense.undistort_backend = "cuda".into();
->>>>>>> upstream v0.5.0
         self
     }
     /// Triangulate only newly registered images.

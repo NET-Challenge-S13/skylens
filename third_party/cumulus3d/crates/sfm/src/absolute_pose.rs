@@ -530,26 +530,8 @@ pub struct AbsolutePoseResult {
     pub num_trials: usize,
 }
 
-<<<<<<< skylens (vendored)
 fn ransac_params(opts: &AbsolutePoseOptions) -> RansacParams {
     RansacParams {
-||||||| base b9f4a9bda
-/// P3P + EPnP LO-RANSAC (초점 고정 경로). 인라이어 < 3 이면 None.
-pub fn solve_abs_pose(camera: &Camera, points2d: &[Vec2], points3d: &[Vec3], opts: &AbsolutePoseOptions) -> Option<AbsolutePoseResult> {
-    if points2d.len() != points3d.len() || points2d.len() < 3 {
-        return None;
-    }
-    let corrs: Vec<Corr2D> = points2d.iter().map(|xy| Corr2D { xy: *xy, ray: camera.img_to_ray(xy).unwrap_or_else(Vec3::zeros) }).collect();
-    let ropts = RansacParams {
-=======
-/// P3P + EPnP LO-RANSAC (fixed-focal path). None if inliers < 3.
-pub fn solve_abs_pose(camera: &Camera, points2d: &[Vec2], points3d: &[Vec3], opts: &AbsolutePoseOptions) -> Option<AbsolutePoseResult> {
-    if points2d.len() != points3d.len() || points2d.len() < 3 {
-        return None;
-    }
-    let corrs: Vec<Corr2D> = points2d.iter().map(|xy| Corr2D { xy: *xy, ray: camera.img_to_ray(xy).unwrap_or_else(Vec3::zeros) }).collect();
-    let ropts = RansacParams {
->>>>>>> upstream v0.5.0
         max_error: opts.max_error,
         min_inlier_ratio: opts.min_inlier_ratio,
         confidence: opts.confidence,
@@ -575,7 +557,7 @@ fn pose_result(rep: RansacReport<Rigid3>) -> Option<AbsolutePoseResult> {
     Some(AbsolutePoseResult { world_to_cam: rep.model?, inlier_mask: rep.inlier_mask, num_inliers, num_trials: rep.num_trials })
 }
 
-/// P3P + EPnP LO-RANSAC (초점 고정 경로). 인라이어 < 3 이면 None.
+/// P3P + EPnP LO-RANSAC (fixed-focal path). None if inliers < 3.
 pub fn solve_abs_pose(camera: &Camera, points2d: &[Vec2], points3d: &[Vec3], opts: &AbsolutePoseOptions) -> Option<AbsolutePoseResult> {
     if points2d.len() != points3d.len() || points2d.len() < 3 {
         return None;
