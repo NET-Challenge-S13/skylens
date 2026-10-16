@@ -295,3 +295,27 @@
   text-align: center;
   color: var(--text-tertiary);
 }
+
+/* --- Ladder scroll area: fixed height, newest row at the bottom --- */
+.server-status__ladder {
+  max-height: min(152px, calc(100vh - 470px));
+  overflow-x: hidden;
+  overflow-y: auto;
+  pointer-events: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.28) transparent;
+  padding-right: 6px;
+}
+
+.segment-row__name {
+  flex: 0 0 56px;
+  width: 56px;
+  min-width: 56px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.segment-row {
+  flex: 0 0 auto;
+}

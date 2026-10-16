@@ -287,16 +287,30 @@ impl StatusApp {
             let mission = b.mission.as_ref().map(|m| (m.message.as_str(), m.drones_online));
             dom.set_text(*line, &panels::link_line(state, mission, status.badge_text()));
         }
-        // Ladder: one row per segment the core reports, plus one per timeline zone, so the ladder
-        // and the event timeline agree (`panels_live::zone_stats`).
+        // Ladder: in live slot mode one row per zone (the slot events name zones, and the core's
+        // video segments are more numerous than the zones, so rows past the last zone had no
+        // zone/kind to show); otherwise one row per segment the core reports.
         let zones = crate::panels_live::zone_stats(b.live.entries());
-        let mut segments: std::collections::BTreeMap<u32, u32> =
-            core.map(|c| c.segments.iter().map(|s| (s.index, panels::level_number(s.level()))).collect()).unwrap_or_default();
-        for z in zones.keys() {
-            segments.entry(*z).or_insert(0);
-        }
+        let mut segments: std::collections::BTreeMap<u32, u32> = if zones.is_empty() {
+            core.map(|c| c.segments.iter().map(|s| (s.index, panels::level_number(s.level()))).collect()).unwrap_or_default()
+        } else {
+            zones.keys().map(|z| (*z, 0)).collect()
+        };
         drop(b);
-        for (index, core_level) in segments {
+        if !zones.is_empty() && self.ladder.keys().any(|k| !zones.contains_key(k)) {
+            dom.replace_children(q(".server-status__ladder"), "");
+            self.ladder.clear();
+        }
+        // Stuck to the newest row unless the operator scrolled up (read before rows are added).
+        let list = dom.find(q(".server-status__ladder"));
+        let stuck = list.is_none_or(|n| {
+            dom.doc_ref().get_node(n).is_none_or(|node| {
+                let max = f64::from((node.scroll_height() - node.client_height()).max(0.0));
+                node.scroll_offset().y >= max - 4.0
+            })
+        });
+        let before = self.ladder.len();
+        for (index, core_level) in std::mem::take(&mut segments) {
             let zone = zones.get(&index);
             let level = crate::panels_live::ladder_level(core_level, zone);
             if !self.ladder.contains_key(&index) {
@@ -312,6 +326,10 @@ impl StatusApp {
             }
             dom.set_text(row.note, &crate::panels_live::ladder_note_zone(level, zone));
             dom.set_attr(row.note, "data-refining", panels::ladder_refining(level));
+        }
+        if stuck && self.ladder.len() != before && let Some(n) = list {
+            dom.doc().scroll_to(n, 0.0, 1.0e9, blitz_dom::ScrollBehavior::Instant);
+            dom.mark_changed();
         }
     }
 

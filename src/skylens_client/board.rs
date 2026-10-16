@@ -15,6 +15,7 @@ use crate::delta_log::{DeltaLog, LayerOp, SlotMeta};
 use crate::follow::{self, CorridorPath, DronePose, Framing, Interior};
 use crate::panels_live::LiveSettings;
 use crate::glam::DVec3;
+use crate::markers;
 use crate::points;
 use skylens_shared::proto::model::v1 as model;
 use skylens_shared::proto::payload::v1 as payload;
@@ -470,6 +471,20 @@ impl Board {
                 Some((d.id.clone(), self.detection_pos(d)?, person))
             })
             .collect()
+    }
+
+    /// Markers to draw: [`Self::markers`] with same-kind detections within 3 m merged.
+    pub fn marker_view(&self) -> Vec<(String, DVec3, bool)> {
+        let sightings: Vec<markers::Sighting> = self
+            .store
+            .detections()
+            .filter(|d| self.revealed.contains(&d.id) && self.segment_final(d.segment))
+            .filter_map(|d| {
+                let person = d.category() == payload::DetectionCategory::Person;
+                Some((d.id.clone(), self.detection_pos(d)?, person, d.confidence))
+            })
+            .collect();
+        markers::dedupe(&sightings)
     }
 
     /// The next detection for the camera: shown and not yet confirmed (legacy candidate rule).

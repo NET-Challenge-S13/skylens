@@ -75,6 +75,13 @@ pub struct StatusScene {
     /// Marker id -> mesh id base (pin, ring = base + 1).
     marker_ids: BTreeMap<String, u64>,
     next_marker: u64,
+    /// Pin size factor the meshes were built with.
+    pin_scale: f64,
+    /// The camera frames the whole cloud by itself until the operator touches it.
+    auto_fit: bool,
+    /// Point count at the last automatic fit, and when (ms).
+    auto_fit_points: u64,
+    auto_fit_at: f64,
 }
 
 impl StatusScene {
@@ -98,11 +105,20 @@ impl StatusScene {
             mesh_alpha: BTreeMap::new(),
             marker_ids: BTreeMap::new(),
             next_marker: 0,
+            pin_scale: 1.0,
+            auto_fit: true,
+            auto_fit_points: 0,
+            auto_fit_at: f64::NEG_INFINITY,
         }
     }
 
     fn sync_markers(&mut self, gpu: &mut Gpu3d, board: &Board) {
-        let markers = board.markers();
+        let markers = board.marker_view();
+        let scale = board.points_box().map_or(0.6, |(lo, hi)| markers::pin_scale((hi - lo).max_element()));
+        let rescale = (scale - self.pin_scale).abs() > self.pin_scale * 0.1;
+        if rescale {
+            self.pin_scale = scale;
+        }
         let live: Vec<&String> = markers.iter().map(|(id, _, _)| id).collect();
         let gone: Vec<String> = self.marker_ids.keys().filter(|id| !live.contains(id)).cloned().collect();
         for id in gone {
@@ -113,17 +129,21 @@ impl StatusScene {
         }
         for (id, feet, person) in markers {
             let base = match self.marker_ids.get(&id) {
-                Some(b) => *b,
+                Some(b) if !rescale => *b,
+                Some(b) => {
+                    gpu.meshes.upsert(&gpu.device, &gpu.queue, *b, &markers::pin_mesh(feet, self.pin_scale), None, markers::pin_material(person));
+                    *b
+                }
                 None => {
                     let b = MARKER_IDS + 2 * self.next_marker;
                     self.next_marker += 1;
                     debug_assert!(b + 1 < SEGMENT_CLOUDS);
                     self.marker_ids.insert(id.clone(), b);
-                    gpu.meshes.upsert(&gpu.device, &gpu.queue, b, &markers::pin_mesh(feet), None, markers::pin_material(person));
+                    gpu.meshes.upsert(&gpu.device, &gpu.queue, b, &markers::pin_mesh(feet, self.pin_scale), None, markers::pin_material(person));
                     b
                 }
             };
-            let ring = markers::ring_mesh(feet, markers::pulse(board.time, feet.x));
+            let ring = markers::ring_mesh(feet, markers::pulse(board.time, feet.x) * self.pin_scale.max(0.5));
             gpu.meshes.upsert(&gpu.device, &gpu.queue, base + 1, &ring, None, markers::ring_material(person));
         }
     }
@@ -135,7 +155,7 @@ impl StatusScene {
         if let Some(f) = inset::fit(&board.fit_samples(FIT_SAMPLES_PER_SEGMENT), lo, hi, FOV_DEG, aspect) {
             self.orbit.set_pose(f.pose);
             self.orbit.max_distance = self.orbit.max_distance.max(f.max_distance);
-            self.fit_hold_until = info.now_ms + 30_000.0;
+            self.fit_hold_until = info.now_ms + if self.auto_fit { 2_000.0 } else { 30_000.0 };
         }
     }
 
@@ -161,7 +181,7 @@ impl StatusScene {
                 &centers,
                 board.active().as_ref(),
             )),
-            None => board.active().map(|drone| {
+            None => board.active().filter(|_| board.store.slots().is_empty()).map(|drone| {
                 let chunk_centers: Vec<DVec3> = centers.iter().map(|(_, c)| *c).collect();
                 let input = FollowInput {
                     framing,
@@ -178,6 +198,7 @@ impl StatusScene {
         if let Some(d) = desired
             && !self.orbit.auto_paused(info.now_ms)
             && info.now_ms >= self.fit_hold_until
+            && !(self.auto_fit && board.total_points() > 0)
         {
             self.orbit.approach(&d, damp_factor(2.5, info.dt));
         }
@@ -211,7 +232,16 @@ impl ViewScreen for StatusScene {
         let paint = Paint::of(mode, board.height_range());
         self.layer.pump(gpu, &mut board, paint, BG_RGB, info.now_ms / 1000.0);
         if fit {
+            self.auto_fit = false;
             self.fit_view(&board, info);
+        } else if self.auto_fit {
+            // Live slot mode: frame the growing cloud like "전체 보기" until the operator moves the view.
+            let points = board.total_points();
+            if points > 0 && points != self.auto_fit_points && info.now_ms - self.auto_fit_at > 700.0 {
+                self.fit_view(&board, info);
+                self.auto_fit_points = points;
+                self.auto_fit_at = info.now_ms;
+            }
         }
         for (seg, level) in board.store.levels() {
             self.fade.note_arrival(*seg, *level);
@@ -256,6 +286,9 @@ impl ViewScreen for StatusScene {
 
     fn input(&mut self, input: &ViewInput) {
         let now = skylens_viewer::now_ms();
+        if matches!(input, ViewInput::PointerDown { .. } | ViewInput::Wheel { .. }) {
+            self.auto_fit = false;
+        }
         match *input {
             ViewInput::PointerDown { x, y, button, shift } => self.orbit.pointer_down(x, y, button == 2, button == 1, shift),
             ViewInput::PointerMove { x, y, pressed } => {
