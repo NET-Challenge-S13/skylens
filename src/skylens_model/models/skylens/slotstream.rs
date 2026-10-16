@@ -244,7 +244,7 @@ mod tests {
     fn an_enu_point_ten_metres_up_is_written_as_it_is() {
         // ENU: x east, y north, z up. The encoder writes positions as given, no axis change: 5 m east,
         // 7 m north, 10 m up stay x = 5, y = 7, z = 10 in the add record.
-        let d = delta(vec![PointAdd { id: 0, xyz: [5.0, 7.0, 10.0], rgb: [1, 2, 3], zone: 4 }], vec![], vec![], 1, 1);
+        let d = delta(vec![PointAdd { id: 0, xyz: [5.0, 7.0, 10.0], rgb: [1, 2, 3], zone: 4 }], vec![], vec![], 1);
         let frame = enu_frame(Some([ANCHOR.lat, ANCHOR.lon, ANCHOR.alt]));
         let d = align_delta(&d, &frame, ANCHOR).unwrap();
         let c = SlotEncoder::new(1).encode(&d, 4, DeltaKind::Refined, 0.0).unwrap();
@@ -254,7 +254,7 @@ mod tests {
         assert_eq!(r[12..16], 10.0f32.to_le_bytes());
         // An origin 10 m above the anchor moves the point 10 m further up, nothing else.
         let up = DisplayFrame { enu: true, origin_gps: Some([ANCHOR.lat, ANCHOR.lon, ANCHOR.alt + 10.0]) };
-        let d2 = align_delta(&delta(vec![PointAdd { id: 0, xyz: [5.0, 7.0, 10.0], rgb: [0; 3], zone: 0 }], vec![], vec![], 1, 1), &up, ANCHOR).unwrap();
+        let d2 = align_delta(&delta(vec![PointAdd { id: 0, xyz: [5.0, 7.0, 10.0], rgb: [0; 3], zone: 0 }], vec![], vec![], 1), &up, ANCHOR).unwrap();
         let p = d2.adds[0].xyz;
         assert!((p[0] - 5.0).abs() < 1e-3 && (p[1] - 7.0).abs() < 1e-3 && (p[2] - 20.0).abs() < 1e-3, "{p:?}");
     }
