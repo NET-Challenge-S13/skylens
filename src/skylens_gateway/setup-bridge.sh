@@ -28,6 +28,8 @@ fi
 HTTP_PORT=80
 PUBLISH_PASS=""
 SRT_PORT=10890
+HTTPS_PORT=443
+TLS_NAMES=
 DAEJEON_HOST=116.89.187.181
 DAEJEON_PORT=26022
 DAEJEON_USER=ubuntu
@@ -53,6 +55,9 @@ TUNNEL_PORT=20889
 PROXY_TUNNEL_PORT=20882
 TUNNEL_DIR=/etc/skylens
 TUNNEL_KEY="$TUNNEL_DIR/tunnel_key"
+TLS_DIR=/etc/skylens/tls
+TLS_CERT="$TLS_DIR/board.crt"
+TLS_KEY="$TLS_DIR/board.key"
 
 step() { printf '\n\033[1;36m== %s ==\033[0m\n' "$*"; }
 ok()   { printf '   \033[32m✓\033[0m %s\n' "$*"; }
@@ -118,8 +123,37 @@ else
   warn "현황판 파일 없음. 빌드 산출물(status.html 포함)을 $WEB_DIR 에 복사하세요"
 fi
 
-step "nginx (:$HTTP_PORT)"
-sed -e "s/__HTTP_PORT__/$HTTP_PORT/g" -e "s|__WEB_DIR__|$WEB_DIR|g" nginx-skylens.conf > /etc/nginx/sites-available/skylens
+step "board certificate (TLS on :$HTTPS_PORT)"
+# The browser only grants WebGPU to a secure context, and the board's renderer
+# panics without it, so the board is served over TLS even on the LAN. A
+# self-signed certificate is enough to make the context secure (the viewer
+# clicks through the warning once). To lose the warning, put a trusted pair
+# (mkcert, an internal CA) at the same two paths and run this again - an
+# existing certificate is never overwritten.
+install -d -m 0750 "$TLS_DIR"
+if [ -s "$TLS_CERT" ] && [ -s "$TLS_KEY" ]; then
+  ok "certificate exists: $TLS_CERT ($(openssl x509 -noout -enddate -in "$TLS_CERT" 2>/dev/null | cut -d= -f2))"
+else
+  # Name it after every address a viewer may type: this host's own addresses,
+  # its hostname, and loopback. TLS_NAMES in bridge.env overrides the list.
+  if [ -n "$TLS_NAMES" ]; then
+    SAN="$TLS_NAMES"
+  else
+    SAN="DNS:$(hostname),DNS:$(hostname).local,DNS:localhost,IP:127.0.0.1"
+    for ip in $(hostname -I 2>/dev/null); do
+      case "$ip" in *:*) continue ;; esac
+      SAN="$SAN,IP:$ip"
+    done
+  fi
+  openssl req -x509 -newkey rsa:2048 -sha256 -days 1825 -nodes     -keyout "$TLS_KEY" -out "$TLS_CERT"     -subj "/CN=skylens-board" -addext "subjectAltName=$SAN" >/dev/null 2>&1
+  chmod 0640 "$TLS_KEY"; chmod 0644 "$TLS_CERT"
+  ok "self-signed certificate written ($SAN)"
+fi
+
+step "nginx (:$HTTP_PORT, TLS :$HTTPS_PORT)"
+# A redirect to the default TLS port must not carry :443 in the URL.
+if [ "$HTTPS_PORT" = 443 ]; then HTTPS_SUFFIX=""; else HTTPS_SUFFIX=":$HTTPS_PORT"; fi
+sed -e "s/__HTTP_PORT__/$HTTP_PORT/g" -e "s|__WEB_DIR__|$WEB_DIR|g"     -e "s/__HTTPS_PORT__/$HTTPS_PORT/g" -e "s|__HTTPS_HOSTSUFFIX__|$HTTPS_SUFFIX|g"     -e "s|__TLS_CERT__|$TLS_CERT|g" -e "s|__TLS_KEY__|$TLS_KEY|g"     nginx-skylens.conf > /etc/nginx/sites-available/skylens
 ln -sf /etc/nginx/sites-available/skylens /etc/nginx/sites-enabled/skylens
 if [ -L /etc/nginx/sites-enabled/default ] && \
    grep -q "Default server configuration" /etc/nginx/sites-available/default 2>/dev/null && \
@@ -188,8 +222,9 @@ systemctl is-active --quiet mediamtx && ok "mediamtx 활성" || { journalctl -u 
 step "방화벽"
 if command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q '^Status: active'; then
   ufw allow "$HTTP_PORT/tcp" >/dev/null
+  ufw allow "$HTTPS_PORT/tcp" >/dev/null
   ufw allow "$SRT_PORT/udp" >/dev/null
-  ok "ufw: $HTTP_PORT/tcp, $SRT_PORT/udp 허용 (기존 규칙 유지)"
+  ok "ufw: $HTTP_PORT/tcp, $HTTPS_PORT/tcp, $SRT_PORT/udp 허용 (기존 규칙 유지)"
 else
   ok "ufw 비활성 — 변경 없음"
 fi
@@ -202,7 +237,10 @@ cat <<SUMMARY
  브리지 설치 완료
 ============================================================
  공인 IP           : $PUB_IP
- 현황판 주소       : http://$PUB_IP:$HTTP_PORT/   (파일은 $WEB_DIR)
+ 현황판 주소       : https://$(hostname -I | awk '{print $1}')$HTTPS_SUFFIX/   (파일은 $WEB_DIR)
+                     WebGPU 가 보안 컨텍스트에서만 열려서 HTTPS 로 띄웁니다.
+                     자체 서명 인증서라 브라우저 경고를 한 번 넘겨야 합니다.
+                     http:// 로 들어오면 이 주소로 넘깁니다.
  라이브 주소       : http://$PUB_IP:$HTTP_PORT/live/drone1/whep   (drone1~3)
  SRT 수신          : srt://$PUB_IP:$SRT_PORT?streamid=publish:drone1:drone:<PASS>
  SRT publish 비번  : $PUBLISH_PASS$([ "$GENERATED_PASS" = 1 ] && printf '   (자동 생성 — bridge.env 에 적어두세요)')

@@ -36,6 +36,8 @@ fi
 HTTP_PORT=80
 PUBLISH_PASS=""
 SRT_PORT=10890
+HTTPS_PORT=443
+TLS_NAMES=
 WEB_DIR=/opt/skylens/web
 DAEJEON_HOST=116.89.187.181
 DAEJEON_PORT=26022
@@ -63,6 +65,9 @@ TUNNEL_PORT=20889
 PROXY_TUNNEL_PORT=20882
 TUNNEL_KEY="$BASE/tunnel/tunnel_key"
 LOGS="$BASE/logs"
+TLS_DIR="$BASE/tls"
+TLS_CERT="$TLS_DIR/board.crt"
+TLS_KEY="$TLS_DIR/board.key"
 
 step() { printf '\n\033[1;36m== %s ==\033[0m\n' "$*"; }
 ok()   { printf '   \033[32m✓\033[0m %s\n' "$*"; }
@@ -140,12 +145,38 @@ else
   warn "  bash src/skylens_client/build-web.sh  →  sudo cp -R src/skylens_client/dist/. $WEB_DIR/"
 fi
 
-# ---------- 3. nginx ----------
-step "nginx (:$HTTP_PORT)"
+# ---------- 3. board certificate ----------
+step "board certificate (TLS on :$HTTPS_PORT)"
+# The browser only grants WebGPU to a secure context, and the board's renderer
+# panics without it, so the board is served over TLS even on the LAN. A
+# self-signed certificate makes the context secure (the viewer clicks through
+# the warning once). Drop a trusted pair at the same paths to lose the warning;
+# an existing certificate is never overwritten.
+mkdir -p "$TLS_DIR"; chmod 0750 "$TLS_DIR"
+if [ -s "$TLS_CERT" ] && [ -s "$TLS_KEY" ]; then
+  ok "certificate exists: $TLS_CERT"
+else
+  if [ -n "$TLS_NAMES" ]; then
+    SAN="$TLS_NAMES"
+  else
+    SAN="DNS:$(hostname),DNS:$(hostname).local,DNS:localhost,IP:127.0.0.1"
+    for ip in $(ifconfig 2>/dev/null | awk '/inet /{print $2}'); do
+      [ "$ip" = 127.0.0.1 ] && continue
+      SAN="$SAN,IP:$ip"
+    done
+  fi
+  openssl req -x509 -newkey rsa:2048 -sha256 -days 1825 -nodes     -keyout "$TLS_KEY" -out "$TLS_CERT"     -subj "/CN=skylens-board" -addext "subjectAltName=$SAN" >/dev/null 2>&1
+  chmod 0640 "$TLS_KEY"; chmod 0644 "$TLS_CERT"; chown -R "$RUN_USER" "$TLS_DIR"
+  ok "self-signed certificate written ($SAN)"
+fi
+
+# ---------- 4. nginx ----------
+step "nginx (:$HTTP_PORT, TLS :$HTTPS_PORT)"
 NGINX_ETC="$PREFIX/etc/nginx"
 mkdir -p "$NGINX_ETC/servers"
-sed -e "s/__HTTP_PORT__/$HTTP_PORT/g" -e "s|__WEB_DIR__|$WEB_DIR|g" \
-  nginx-skylens.conf > "$NGINX_ETC/servers/skylens.conf"
+# A redirect to the default TLS port must not carry :443 in the URL.
+if [ "$HTTPS_PORT" = 443 ]; then HTTPS_SUFFIX=""; else HTTPS_SUFFIX=":$HTTPS_PORT"; fi
+sed -e "s/__HTTP_PORT__/$HTTP_PORT/g" -e "s|__WEB_DIR__|$WEB_DIR|g"   -e "s/__HTTPS_PORT__/$HTTPS_PORT/g" -e "s|__HTTPS_HOSTSUFFIX__|$HTTPS_SUFFIX|g"   -e "s|__TLS_CERT__|$TLS_CERT|g" -e "s|__TLS_KEY__|$TLS_KEY|g"   nginx-skylens.conf > "$NGINX_ETC/servers/skylens.conf"
 grep -qE '^\s*include\s+servers/\*;' "$NGINX_ETC/nginx.conf" \
   || warn "nginx.conf 에 'include servers/*;' 가 없습니다 — http { } 블록 안에 추가해야 합니다"
 "$PREFIX/bin/nginx" -t -c "$NGINX_ETC/nginx.conf"
@@ -179,7 +210,7 @@ PLIST
   ok "nginx 를 LaunchDaemon(root) 으로 기동"
 fi
 
-# ---------- 4. MediaMTX (SRT ingest) ----------
+# ---------- 5. MediaMTX (SRT ingest) ----------
 step "MediaMTX $MEDIAMTX_VERSION (SRT :$SRT_PORT)"
 case "$(uname -m)" in arm64) MARCH=arm64 ;; x86_64) MARCH=amd64 ;; *) echo "지원하지 않는 CPU" >&2; exit 1 ;; esac
 if [ ! -x "$BASE/mediamtx/mediamtx" ] || [ "$(cat "$BASE/mediamtx/VERSION" 2>/dev/null)" != "$MEDIAMTX_VERSION" ]; then
@@ -225,7 +256,7 @@ else
   warn "mediamtx 상태 확인 실패 — 로그: $LOGS/mediamtx.log"; tail -n 15 "$LOGS/mediamtx.log" 2>/dev/null || true
 fi
 
-# ---------- 5. macOS firewall (only when it is already on) ----------
+# ---------- 6. macOS firewall (only when it is already on) ----------
 step "방화벽"
 SFW=/usr/libexec/ApplicationFirewall/socketfilterfw
 if "$SFW" --getglobalstate 2>/dev/null | grep -qi 'enabled'; then
@@ -238,7 +269,7 @@ else
   ok "macOS 방화벽 꺼짐 — 변경 없음"
 fi
 
-# ---------- 6. summary ----------
+# ---------- 7. summary ----------
 PUB_IP="$(curl -4 -s -m 5 ifconfig.me || echo '?')"
 cat <<SUMMARY
 
@@ -246,7 +277,9 @@ cat <<SUMMARY
  브리지 설치 완료 (macOS)
 ============================================================
  공인 IP           : $PUB_IP
- 현황판            : http://$PUB_IP:$HTTP_PORT/            ($WEB_DIR/status.html)
+ 현황판            : https://$(ipconfig getifaddr en0 2>/dev/null || hostname)$HTTPS_SUFFIX/   ($WEB_DIR/status.html)
+                     WebGPU 가 보안 컨텍스트에서만 열려서 HTTPS 로 띄웁니다.
+                     자체 서명 인증서라 브라우저 경고를 한 번 넘겨야 합니다.
  이 서버 생존      : http://$PUB_IP:$HTTP_PORT/health      (nginx 만 확인)
  터널 생존         : http://$PUB_IP:$HTTP_PORT/healthz     (대전까지 확인)
  라이브 영상       : http://$PUB_IP:$HTTP_PORT/live/drone1/whep  (drone1~3)
