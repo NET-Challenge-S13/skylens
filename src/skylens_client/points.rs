@@ -114,14 +114,6 @@ pub fn bounds_changed(old: (DVec3, DVec3), new: (DVec3, DVec3), frac: f64) -> bo
     d > frac * span
 }
 
-/// Largest point diameter in metres that stays within `max_px` physical pixels at view depth
-/// `depth` (vertical fov `fov_deg`, target height `height_px`).
-pub fn clamp_point_m(size_m: f32, depth: f64, height_px: u32, fov_deg: f64, max_px: f64) -> f32 {
-    let focal = f64::from(height_px.max(1)) / 2.0 / (fov_deg.to_radians() / 2.0).tan();
-    let cap = (max_px * depth.max(1e-3) / focal) as f32;
-    size_m.min(cap)
-}
-
 /// Point diameter in metres for a delivery: 1.5 x the typical spacing, the legacy `voxel * 1.5`
 /// rule with the spacing measured from the chunks (median over chunks of
 /// `sqrt(footprint / points)`), within 5 cm .. 1 m. 0.15 m (the legacy default) when unknown.
@@ -352,8 +344,5 @@ mod tests {
         assert!(robust_bounds(&[]).is_none());
         assert!(!bounds_changed((lo, hi), (lo, hi + DVec3::splat(0.1)), 0.15));
         assert!(bounds_changed((lo, hi), (lo, hi + DVec3::splat(50.0)), 0.15));
-        // 6 px cap at 1 m depth with a 1000 px tall view and 60 degree fov.
-        assert!(clamp_point_m(10.0, 1.0, 1000, 60.0, 6.0) < 0.02);
-        assert_eq!(clamp_point_m(0.1, 1000.0, 1000, 60.0, 6.0), 0.1);
     }
 }
