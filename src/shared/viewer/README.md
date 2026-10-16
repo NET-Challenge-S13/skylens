@@ -131,6 +131,10 @@ pointblitz 좌표는 ENU 미터 `[동, 북, 상]`(z가 위)다. `SiteFrame::enu(
 
 구간은 점이나 메시 청크가 처음 오거나, 점 슬롯에서 그 구간의 첫 점이 보이면(정제 수준) 도착한 것이다(`arrived()`, `levels()`는 구간별 최고 수준).
 
+## 애니메이션 점 레이어 (`live_slots`)
+
+pointblitz 0.3.0 `SlotScene`은 슬롯당 16바이트에 시간이 없어서 추가는 즉시 나타나고 이동은 점프한다. `LiveSlots`는 크레이트를 고치지 않고 슬롯 장면 둘로 보완한다. 정착한 점은 base 장면, 비행 중인 점(페이드·글라이드)은 컴팩트 id의 overlay 장면에 있고 프레임마다 보간한 위치·색을 슬롯 메시지로 쓴다(페이드 = 배경색으로 가는 색 보간, 불투명 레이어에서 불투명도와 같다). 끝나는 프레임에 base로 옮겨 한 표면만 남는다. `Batch`(removes → adds → moves, 각 레코드가 옛 값을 지님)를 먹고, 항목이 이미 비행 중이면 지금 모습에서 다시 시작한다. 한 번에 `ANIM_BUDGET`(20만) 점까지 움직이고 넘치면 즉시 반영한다.
+
 ## 3D 뷰
 
 화면은 `ViewScreen`을 구현해 `Rc<RefCell<_>>`로 갖고, 같은 것을 `View3d::boxed`로 이전 캔버스 id(`control-view` · `status-view`)에 붙인다. 위젯이 장치와 색·깊이 타깃을 갖고, 매 프레임 화면의 `frame`을 부른다.
@@ -141,6 +145,7 @@ impl ViewScreen for StatusScene {
         let store = self.store.borrow();
         let sync = gpu.sync_segments(&store, 0.0);           // 구간마다 pointblitz Scene 하나
         gpu.sync_slots(&store);                             // 점 슬롯 스트림: SlotScene 하나 (바뀐 메시지만, 못 따라가면 접은 상태로)
+        // 또는 애니메이션이 필요한 화면(현황판): gpu.live_step(bg, reset, &batches, now_s) 가 LiveSlots 를 먹이고 한 걸음 나아간다
         for s in sync.added { self.fade.start(s, info.now_ms); }
         for (seg, a) in self.fade.alphas(info.now_ms) {
             gpu.clouds.set_alpha(view3d::segment_cloud(seg), a); // 노출 페이드
