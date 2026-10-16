@@ -2,7 +2,7 @@
 
 이 폴더를 통째로 서버에 올리고 스크립트 하나 실행하면 끝난다. 기존 서비스(WireGuard 등)는 건드리지 않는다.
 
-**지금 이 호스트는 맥미니라 `*-macos.sh` 를 쓴다.** 아래 설명에서 `setup-bridge.sh` · `check-bridge.sh` 는 Ubuntu 판이고, macOS 에서는 `setup-bridge-macos.sh` · `check-bridge-macos.sh` 로 읽으면 된다. 두 판은 같은 일을 하고 같은 `bridge.env` 와 같은 `nginx-skylens.conf` 를 쓴다. 다른 것은 셋뿐이다 — 패키지(apt / Homebrew), 서비스(systemd / launchd), 터널 키 위치(`/etc/skylens` / `/opt/skylens/tunnel`).
+**지금 이 호스트는 라즈베리파이 5(Debian 13 trixie · arm64)다. 그래서 `setup-bridge.sh` · `check-bridge.sh`(리눅스 판)를 쓴다.** `*-macos.sh` 는 맥으로 옮길 때를 위해 남겨둔 것이다. 두 판은 같은 일을 하고 같은 `bridge.env` 와 같은 `nginx-skylens.conf` 를 쓴다. 다른 것은 셋뿐이다 — 패키지(apt / Homebrew), 서비스(systemd / launchd), 터널 키 위치(`/etc/skylens` / `/opt/skylens/tunnel`). MediaMTX 바이너리는 설치 스크립트가 `uname -m` 으로 골라 받는다(파이는 `linux_arm64`).
 
 ## 이 서버가 하는 일
 
@@ -50,7 +50,7 @@ sudo cp -R src/skylens_client/dist/. /opt/skylens/web/      # 브리지에서
 ./check-bridge.sh
 ```
 
-macOS(맥미니)에서는 3·5단계만 다르다. 준비물은 **Homebrew**(없으면 https://brew.sh )와 sudo 가능한 일반 계정이다.
+맥에 올릴 때는 3·5단계만 다르다. 준비물은 **Homebrew**(없으면 https://brew.sh )와 sudo 가능한 일반 계정이다.
 
 ```bash
 cd skylens/src/skylens_gateway

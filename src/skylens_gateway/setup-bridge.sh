@@ -129,16 +129,25 @@ ok "nginx 활성"
 # ---------- 3. MediaMTX (SRT 수신) ----------
 step "MediaMTX $MEDIAMTX_VERSION (SRT :$SRT_PORT)"
 mkdir -p /opt/mediamtx
+# 브리지 호스트는 라즈베리파이 5(arm64)다. amd64 를 고정으로 받으면 파일은 받아지고
+# 실행만 안 돼서 원인 찾기가 오래 걸린다. 자산 이름은 linux_arm64 다(arm64v8 이 아니다).
+case "$(uname -m)" in
+  x86_64)        MARCH=amd64 ;;
+  aarch64|arm64) MARCH=arm64 ;;
+  armv7l)        MARCH=armv7 ;;
+  armv6l)        MARCH=armv6 ;;
+  *) echo "지원하지 않는 CPU: $(uname -m)" >&2; exit 1 ;;
+esac
 if [ ! -x /opt/mediamtx/mediamtx ] || [ "$(cat /opt/mediamtx/VERSION 2>/dev/null)" != "$MEDIAMTX_VERSION" ]; then
-  TARBALL="mediamtx_${MEDIAMTX_VERSION}_linux_amd64.tar.gz"
+  TARBALL="mediamtx_${MEDIAMTX_VERSION}_linux_${MARCH}.tar.gz"
   curl -fsSL -o "/tmp/$TARBALL" \
     "https://github.com/bluenviron/mediamtx/releases/download/${MEDIAMTX_VERSION}/${TARBALL}"
   tar xzf "/tmp/$TARBALL" -C /opt/mediamtx mediamtx
   rm -f "/tmp/$TARBALL"
   echo "$MEDIAMTX_VERSION" > /opt/mediamtx/VERSION
-  ok "바이너리 설치"
+  ok "바이너리 설치 (linux_$MARCH)"
 else
-  ok "바이너리 있음"
+  ok "바이너리 있음 (linux_$MARCH)"
 fi
 sed -e "s/__PUBLISH_PASS__/$PUBLISH_PASS/g" -e "s/__SRT_PORT__/$SRT_PORT/g" \
   mediamtx-bridge.yml > /opt/mediamtx/mediamtx.yml

@@ -75,7 +75,7 @@ KOREN은 등록 IP 외 인바운드를 막고, 브리지 → 대전은 SSH 하�
 |---|---|
 | `nginx-skylens.conf` | `/` 현황판 웹(정적 파일, wasm MIME 지정), `/viewer`·`/uplink` WebSocket(터널 20882 → 대전 프록시), `/live/{path}/whep` WHEP(터널 20889), `/healthz`(터널 생존) · `/health`(자신) |
 | `mediamtx-bridge.yml` | 드론 SRT 수신 :10890. 경로는 코어가 정한 `drone1`~`drone3` |
-| `setup-bridge.sh` · `check-bridge.sh` · `bridge.env.example` | 설치·점검·설정. 지금 호스트는 맥미니라 `setup-bridge-macos.sh`·`check-bridge-macos.sh`를 쓴다(같은 설정 파일, launchd·Homebrew) |
+| `setup-bridge.sh` · `check-bridge.sh` · `bridge.env.example` | 설치·점검·설정. 호스트는 라즈베리파이 5(Debian 13 · arm64)이고, MediaMTX 바이너리는 `uname -m` 으로 고른다. 맥용 `*-macos.sh`(launchd·Homebrew)도 같이 있다 |
 
 ### 3.3 `skylens_proxy` (nginx · 대전)
 
