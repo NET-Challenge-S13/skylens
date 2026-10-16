@@ -7,6 +7,7 @@
 //! (per-segment samples, the framing, the interior and corridor analysis) is cached here and
 //! refreshed when a segment's chunks change.
 
+use crate::delta_log::DeltaLog;
 use crate::follow::{self, CorridorPath, DronePose, Framing, Interior};
 use crate::glam::DVec3;
 use crate::points;
@@ -53,6 +54,10 @@ struct MeshCenter {
 
 pub struct Board {
     pub store: ChunkStore,
+    /// The live point stream (delta chunks) with its timeline cursor; the point layer follows it.
+    pub live: DeltaLog,
+    live_pending: Vec<payload::PointsDelta>,
+    live_seen: u64,
     pub site: Option<SiteFrame>,
     pub drones: Vec<Drone>,
     pub active_drone: Option<u32>,
@@ -91,6 +96,9 @@ impl Board {
     pub fn new(point_layer_on: bool) -> Board {
         Board {
             store: ChunkStore::new(),
+            live: DeltaLog::new(),
+            live_pending: Vec::new(),
+            live_seen: u64::MAX,
             site: None,
             drones: Vec::new(),
             active_drone: None,
@@ -119,6 +127,10 @@ impl Board {
     /// The link reconnected: the core replays what it holds.
     pub fn reconnected(&mut self) {
         self.store.clear();
+        self.live = DeltaLog::new();
+        self.live_pending.clear();
+        self.live_seen = u64::MAX;
+        self.segments.clear();
         self.local_chunks = 0;
         self.local_detections = 0;
         self.geometry_failed = false;
@@ -163,7 +175,14 @@ impl Board {
         let applied = self.store.apply(chunk);
         use skylens_viewer::Change as C;
         match (&applied.change, chunk.kind()) {
-            (C::Invalid(_), model::ChunkKind::Points | model::ChunkKind::MeshBlock) => self.geometry_failed = true,
+            (C::Invalid(_), model::ChunkKind::Points | model::ChunkKind::PointsDelta | model::ChunkKind::MeshBlock) => self.geometry_failed = true,
+            (C::PointsDelta { .. }, _) => {
+                self.geometry_failed = false;
+                self.local_chunks += 1;
+                if let Some(d) = &applied.delta {
+                    self.live_pending.push((**d).clone());
+                }
+            }
             (C::PointsAppended { .. } | C::PointsReplaced { .. } | C::PointsPending { .. }, _)
             | (C::MeshUpserted { .. } | C::MeshRemoved { .. }, _) => {
                 self.geometry_failed = false;
@@ -183,6 +202,19 @@ impl Board {
     /// Re-reads the segments whose chunks changed, then the framing and the interior analysis.
     pub fn refresh(&mut self) {
         let mut changed = false;
+        // Deltas that arrived together (a late join replays the history) enter the log as one batch.
+        if !self.live_pending.is_empty() {
+            let batch = std::mem::take(&mut self.live_pending);
+            self.live.push_batch(batch);
+        }
+        if self.store.delta_mode() {
+            changed |= self.refresh_from_deltas();
+            if changed {
+                self.analyse();
+            }
+            self.refresh_meshes();
+            return;
+        }
         let live: BTreeSet<u32> = self.store.segments().map(|(s, _)| s).collect();
         let before = self.segments.len();
         self.segments.retain(|s, _| live.contains(s));
@@ -206,7 +238,13 @@ impl Board {
             self.segments.insert(seg, info);
             changed = true;
         }
-        // Mesh block centres, per stored version.
+        self.refresh_meshes();
+        if changed {
+            self.analyse();
+        }
+    }
+
+    fn refresh_meshes(&mut self) {
         let ids: BTreeSet<[i32; 3]> = self.store.mesh_blocks().map(|(id, _)| id).collect();
         self.mesh_centers.retain(|id, _| ids.contains(id));
         for (id, e) in self.store.mesh_blocks() {
@@ -217,9 +255,36 @@ impl Board {
                 self.mesh_centers.insert(id, MeshCenter { stamp: e.stamp, segment: e.segment, center });
             }
         }
-        if changed {
-            self.analyse();
+    }
+
+    /// Per-zone samples and extents of what the slot table holds, standing in for the legacy
+    /// per-segment chunks. Returns whether anything changed.
+    fn refresh_from_deltas(&mut self) -> bool {
+        let version = self.live.version();
+        if self.live_seen == version {
+            return false;
         }
+        self.live_seen = version;
+        let zones = self.live.table().zone_samples(SAMPLES_PER_SEGMENT);
+        self.segments.retain(|s, _| zones.contains_key(&(*s as u8)));
+        for (zone, (pts, n)) in zones {
+            let samples: Vec<DVec3> = pts.iter().map(|p| DVec3::new(f64::from(p[0]), f64::from(p[1]), f64::from(p[2]))).collect();
+            let core = points::core_box(&samples);
+            let center = core.map(|(a, b)| (a + b) / 2.0);
+            self.segments.insert(
+                u32::from(zone),
+                SegmentInfo {
+                    key: (version, 0),
+                    range: points::height_range(&samples),
+                    core,
+                    center,
+                    points: n,
+                    refined: true,
+                    samples,
+                },
+            );
+        }
+        true
     }
 
     fn analyse(&mut self) {
@@ -244,8 +309,31 @@ impl Board {
             // The strip grows; the centreline is re-measured on what has arrived.
             self.corridor = follow::build_corridor_path(&thin);
         }
-        let payloads: Vec<&[u8]> = self.store.segments().flat_map(|(_, p)| p.payloads().iter().map(|c| &c[..])).collect();
-        self.point_size_m = points::point_size_m(payloads);
+        if self.store.delta_mode() {
+            self.point_size_m = self.spacing_point_size();
+        } else {
+            let payloads: Vec<&[u8]> = self.store.segments().flat_map(|(_, p)| p.payloads().iter().map(|c| &c[..])).collect();
+            self.point_size_m = points::point_size_m(payloads);
+        }
+    }
+
+    /// The legacy `voxel * 1.5` size from the zones' footprint and point count (median spacing).
+    fn spacing_point_size(&self) -> f32 {
+        let mut sp: Vec<f64> = self
+            .segments
+            .values()
+            .filter(|i| i.points >= 16)
+            .filter_map(|i| {
+                let (a, b) = i.core?;
+                let area = (b.x - a.x) * (b.y - a.y);
+                (area > 0.0).then(|| (area / i.points as f64).sqrt())
+            })
+            .collect();
+        if sp.is_empty() {
+            return 0.15;
+        }
+        sp.sort_by(f64::total_cmp);
+        (sp[sp.len() / 2] * 1.5).clamp(0.05, 1.0) as f32
     }
 
     /// Centres of the arrived segments: their points, else their mesh blocks.
@@ -451,6 +539,57 @@ mod tests {
         assert_eq!(b.fit_samples(10).len(), 20);
         assert!(b.points_box().is_some());
         assert_eq!(b.local_chunks, 2);
+    }
+
+    fn delta_chunk(seq: u32, run: u32, zone: u32, kind: payload::DeltaKind, adds: &[(u32, f32)]) -> model::Chunk {
+        use skylens_shared::delta::{AddRec, pack_adds, to_chunk};
+        let recs: Vec<AddRec> = adds.iter().map(|(id, x)| AddRec { id: *id, xyz: [*x, (*id % 7) as f32, 1.0], rgb: [1, 2, 3], zone: zone as u8 }).collect();
+        let d = payload::PointsDelta {
+            seq,
+            kind: kind as i32,
+            zone,
+            run,
+            capacity: 1000,
+            total_points: recs.len() as u32,
+            adds: pack_adds(&recs),
+            ..Default::default()
+        };
+        to_chunk(u64::from(seq), &d, 0)
+    }
+
+    #[test]
+    fn deltas_feed_the_log_and_replace_the_legacy_point_chunks() {
+        let mut b = board();
+        b.chunk(&detections_chunk(1, 0, "p1", true));
+        // A legacy preview that arrives first is dropped once the delta stream starts.
+        b.chunk(&points_chunk(2, 0, model::Level::Preview, 0.0));
+        b.refresh();
+        assert_eq!(b.segments.len(), 1);
+        let ids: Vec<(u32, f32)> = (0..100).map(|i| (i, i as f32)).collect();
+        let a = b.chunk(&delta_chunk(1, 9, 0, payload::DeltaKind::Refined, &ids));
+        assert_eq!(a.newly_arrived, Some(0));
+        assert_eq!(a.revealed, vec!["p1".to_string()]);
+        // Old point chunks are ignored from now on.
+        assert_eq!(b.chunk(&points_chunk(3, 1, model::Level::Refined, 0.0)).change, skylens_viewer::Change::Stale);
+        // Same chunk again: stale.
+        assert_eq!(b.chunk(&delta_chunk(1, 9, 0, payload::DeltaKind::Refined, &ids)).change, skylens_viewer::Change::Stale);
+        let more: Vec<(u32, f32)> = (100..160).map(|i| (i, i as f32)).collect();
+        b.chunk(&delta_chunk(2, 9, 1, payload::DeltaKind::Refined, &more));
+        b.refresh();
+        assert_eq!((b.live.len(), b.live.applied()), (2, 2));
+        assert_eq!(b.segments.keys().copied().collect::<Vec<_>>(), vec![0, 1]);
+        assert_eq!(b.total_points(), 160);
+        assert!(b.framing.is_some() && b.has_geometry());
+        assert!(b.height_range().is_some());
+        // A new run empties everything.
+        b.chunk(&delta_chunk(1, 10, 2, payload::DeltaKind::Refined, &ids[..10]));
+        b.refresh();
+        assert_eq!(b.live.run_id(), Some(10));
+        assert_eq!(b.total_points(), 10);
+        assert_eq!(b.segments.keys().copied().collect::<Vec<_>>(), vec![2]);
+        // A reconnect clears the log; the replay comes back as one batch.
+        b.reconnected();
+        assert!(b.live.is_empty());
     }
 
     #[test]

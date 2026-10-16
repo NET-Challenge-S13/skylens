@@ -85,6 +85,27 @@ impl SlotTable {
         self.slots.clear();
     }
 
+    /// Per zone: up to `max` positions spread evenly over its live points, and the live count.
+    pub fn zone_samples(&self, max: usize) -> std::collections::BTreeMap<u8, (Vec<[f32; 3]>, u64)> {
+        let mut count = std::collections::BTreeMap::<u8, u64>::new();
+        for s in self.slots.iter().flatten() {
+            *count.entry(s.zone).or_default() += 1;
+        }
+        let mut out: std::collections::BTreeMap<u8, (Vec<[f32; 3]>, u64)> =
+            count.iter().map(|(z, n)| (*z, (Vec::with_capacity(max.min(*n as usize)), *n))).collect();
+        let mut seen = std::collections::BTreeMap::<u8, u64>::new();
+        for s in self.slots.iter().flatten() {
+            let i = seen.entry(s.zone).or_default();
+            let (v, n) = out.get_mut(&s.zone).expect("counted");
+            // Keep the points whose running index crosses a multiple of n / max.
+            if (*i * max as u64) / *n != ((*i + 1) * max as u64) / *n || *n <= max as u64 {
+                v.push(s.xyz);
+            }
+            *i += 1;
+        }
+        out
+    }
+
     /// Applies a batch; returns the batch that undoes it (animated as the argument says).
     pub fn apply(&mut self, b: &Batch, undo_animate: bool) -> Batch {
         if self.slots.len() < b.capacity as usize {
@@ -147,6 +168,7 @@ pub struct DeltaLog {
     live: bool,
     table: SlotTable,
     ops: Vec<LayerOp>,
+    version: u64,
 }
 
 /// What [`DeltaLog::push`] did.
@@ -213,6 +235,7 @@ impl DeltaLog {
         self.undo.clear();
         self.table.clear();
         self.applied = 0;
+        self.version += 1;
         self.live = true;
         self.ops.clear();
         self.ops.push(LayerOp::Reset);
@@ -233,6 +256,7 @@ impl DeltaLog {
         self.undo.push(inv);
         self.ops.push(LayerOp::Apply(b));
         self.applied += 1;
+        self.version += 1;
     }
 
     /// All stored deltas' rows, oldest first (index 0 is the run's first delta).
@@ -273,6 +297,11 @@ impl DeltaLog {
         self.live
     }
 
+    /// Counts every change of what is on screen (cache key for derived data).
+    pub fn version(&self) -> u64 {
+        self.version
+    }
+
     /// The slot table as it is on screen (tests, picking, bounds).
     pub fn table(&self) -> &SlotTable {
         &self.table
@@ -293,6 +322,7 @@ impl DeltaLog {
         self.table.clear();
         self.undo.clear();
         self.applied = 0;
+        self.version += 1;
         self.ops.clear();
         self.ops.push(LayerOp::Reset);
         while self.applied < target {
@@ -310,6 +340,7 @@ impl DeltaLog {
         self.table.apply(&inv, true);
         self.ops.push(LayerOp::Apply(inv));
         self.applied -= 1;
+        self.version += 1;
     }
 
     /// Applies the next stored delta with animation. Reaching the end resumes live following.
