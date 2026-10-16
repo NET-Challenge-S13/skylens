@@ -492,11 +492,11 @@ pub fn ladder_level(core_level: u32, zone: Option<&ZoneStat>) -> u32 {
     }
 }
 
-/// `수준 2 · 정제본 · Z0 REFINED ×3`: the ladder note with the zone and its latest kind.
+/// `수준 2 · Z0 REFINED ×3`: the ladder note with the zone and its latest kind.
 pub fn ladder_note_zone(level: u32, zone: Option<&ZoneStat>) -> String {
-    let base = crate::panels::ladder_note(level);
+    let base = if level == 0 { crate::panels::ladder_note(0) } else { format!("수준 {level}") };
     match zone {
-        None => base,
+        None => crate::panels::ladder_note(level),
         Some(z) if z.entries > 1 => format!("{base} · {} {} ×{}", zone_label(z.zone), kind_label(z.last), z.entries),
         Some(z) => format!("{base} · {} {}", zone_label(z.zone), kind_label(z.last)),
     }
@@ -778,10 +778,10 @@ mod tests {
         // A zone with deltas is at the top level whatever the core said.
         assert_eq!(ladder_level(1, z.get(&0)), 2);
         assert_eq!(ladder_level(1, None), 1);
-        assert_eq!(ladder_note_zone(2, z.get(&0)), "수준 2 · 정제본 · Z0 REPLACE ×2");
+        assert_eq!(ladder_note_zone(2, z.get(&0)), "수준 2 · Z0 REPLACE ×2");
         assert_eq!(ladder_note_zone(1, None), "수준 1 · 미리보기");
         let one = zone_stats(&l[..1]);
-        assert_eq!(ladder_note_zone(2, one.get(&0)), "수준 2 · 정제본 · Z0 REFINED");
+        assert_eq!(ladder_note_zone(2, one.get(&0)), "수준 2 · Z0 REFINED");
     }
 
     #[test]

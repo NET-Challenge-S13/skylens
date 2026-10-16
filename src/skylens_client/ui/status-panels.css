@@ -49,7 +49,8 @@
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  max-width: 340px;
+  max-width: none;
+  width: max-content;
   gap: 10px;
   padding: 8px 12px;
   pointer-events: none;
@@ -163,8 +164,7 @@
   color: var(--text-secondary);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  overflow: visible;
 }
 
 .segment-row__note[data-refining='1']::after {
@@ -299,13 +299,14 @@
 /* --- Ladder scroll area: fixed height, newest row at the bottom --- */
 .server-status__ladder {
   max-height: min(152px, calc(100vh - 470px));
-  overflow-x: hidden;
+  overflow-x: visible;
   overflow-y: auto;
   pointer-events: auto;
   overscroll-behavior: contain;
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.28) transparent;
-  padding-right: 6px;
+  padding-right: 14px;
+  min-width: max-content;
 }
 
 .segment-row__name {
