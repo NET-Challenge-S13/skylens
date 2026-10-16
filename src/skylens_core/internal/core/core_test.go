@@ -640,3 +640,38 @@ func TestServerStatusCarriesTheModelGPUError(t *testing.T) {
 		t.Fatalf("gpu error %q", e)
 	}
 }
+
+func TestPointSlotMessagesAreForwardedInOrderAndReplayed(t *testing.T) {
+	c := New(Options{Config: testConfig(t), Clock: &manualClock{}})
+	defer c.Close()
+	viewer := attach(c.Viewers, c.ViewerHandler())
+	drain(t, viewer)
+
+	msg := func(seq uint64, n uint32, tag string) *modelv1.Chunk {
+		return &modelv1.Chunk{Sequence: seq, Kind: modelv1.ChunkKind_CHUNK_KIND_POINT_SLOTS, Level: modelv1.Level_LEVEL_REFINED,
+			Version: n, Generation: 3, Payload: []byte(tag)}
+	}
+	c.PutChunk(msg(1, 1, "s1"))
+	c.PutChunk(msg(2, 3, "s3")) // ahead of a gap: held, not forwarded
+	if k := kinds(drain(t, viewer)); strings.Join(k, ",") != "chunk:s1" {
+		t.Fatalf("screen got %v", k)
+	}
+	c.PutChunk(msg(3, 2, "s2")) // fills the gap: s2 then the held s3
+	if k := kinds(drain(t, viewer)); strings.Join(k, ",") != "chunk:s2,chunk:s3" {
+		t.Fatalf("screen got %v", k)
+	}
+	// A screen that connects now gets all three in order.
+	late := attach(c.Viewers, c.ViewerHandler())
+	var replayed []string
+	for _, k := range kinds(drain(t, late)) {
+		if strings.HasPrefix(k, "chunk:") {
+			replayed = append(replayed, k)
+		}
+	}
+	if strings.Join(replayed, ",") != "chunk:s1,chunk:s2,chunk:s3" {
+		t.Fatalf("replay %v", replayed)
+	}
+	if st := c.ServerStatus(); st.GetChunks() != 3 || st.GetLastSeq() != 3 {
+		t.Fatalf("server status %+v", st)
+	}
+}

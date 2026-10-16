@@ -18,9 +18,15 @@
 //     core's terrain feed; one per (kind, block id). A refined cell replaces
 //     a preview (ring) cell and is never replaced by one; within a level the
 //     newest version wins. Status boards never get these (ModelChunks).
+//   - point slots: every message of the current slot stream, in message
+//     order (version = seq 1, 2, ...), never compacted: a viewer rebuilds the
+//     points by applying all of them. A message ahead of a gap is held until
+//     the gap fills; a repeated one is stale. A newer stream (higher
+//     generation, a new model run) drops the older stream's messages; an
+//     older stream's message is stale.
 //
-// Rejected chunks must not reach viewers either: Put reports whether the chunk
-// was accepted so the caller only broadcasts accepted ones.
+// Rejected chunks must not reach viewers either: PutAll returns the chunks to
+// forward (a slot message can release held ones), Put whether any was kept.
 package store
 
 import (
@@ -45,6 +51,14 @@ type segmentPoints struct {
 	refined    []*modelv1.Chunk
 	generation uint32
 	hasRefined bool
+}
+
+// slotStream holds one point slot stream: messages seq 1..len(msgs) in order,
+// and the messages that arrived ahead of a gap.
+type slotStream struct {
+	id   uint32
+	msgs []*modelv1.Chunk
+	held map[uint32]*modelv1.Chunk
 }
 
 // ordered keeps keyed chunks in first-insertion order so replay is stable.
@@ -93,6 +107,7 @@ type Store struct {
 	detections []*modelv1.Chunk
 	detPerSeg  map[uint32]int
 	terrain    *ordered // terrain and buildings
+	slots      *slotStream
 	segLevel   map[uint32]modelv1.Level
 	counters   Counters
 
@@ -127,7 +142,8 @@ func IsModelKind(k modelv1.ChunkKind) bool {
 	switch k {
 	case modelv1.ChunkKind_CHUNK_KIND_POINTS,
 		modelv1.ChunkKind_CHUNK_KIND_MESH_BLOCK,
-		modelv1.ChunkKind_CHUNK_KIND_DETECTIONS:
+		modelv1.ChunkKind_CHUNK_KIND_DETECTIONS,
+		modelv1.ChunkKind_CHUNK_KIND_POINT_SLOTS:
 		return true
 	}
 	return false
@@ -136,26 +152,40 @@ func IsModelKind(k modelv1.ChunkKind) bool {
 func blockKey(id []int32) string { return fmt.Sprint(id) }
 
 // Put applies the replacement rules. It returns true when the chunk was kept
-// and so should be forwarded to viewers.
+// and so should be forwarded to viewers (see PutAll for held slot messages).
 func (s *Store) Put(c *modelv1.Chunk) bool {
+	return len(s.PutAll(c)) > 0
+}
+
+// PutAll applies the replacement rules and returns the chunks to forward to
+// viewers, in order: the chunk itself when kept, plus for a point slot message
+// that fills a gap the held messages it releases. Nil when nothing was kept
+// (or the slot message is held).
+func (s *Store) PutAll(c *modelv1.Chunk) []*modelv1.Chunk {
 	if c == nil {
-		return false
+		return nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	var ok bool
+	var kept []*modelv1.Chunk
+	held := false
+	one := func(ok bool) {
+		if ok {
+			kept = []*modelv1.Chunk{c}
+		}
+	}
 	switch c.GetKind() {
 	case modelv1.ChunkKind_CHUNK_KIND_POINTS:
-		ok = s.putPointsLocked(c)
+		one(s.putPointsLocked(c))
 	case modelv1.ChunkKind_CHUNK_KIND_MESH_BLOCK:
-		ok = s.putMeshLocked(c)
+		one(s.putMeshLocked(c))
 	case modelv1.ChunkKind_CHUNK_KIND_DETECTIONS:
-		ok = s.putDetectionLocked(c)
+		one(s.putDetectionLocked(c))
 	case modelv1.ChunkKind_CHUNK_KIND_TERRAIN, modelv1.ChunkKind_CHUNK_KIND_BUILDINGS:
-		ok = s.putTerrainLocked(c)
-	default:
-		ok = false
+		one(s.putTerrainLocked(c))
+	case modelv1.ChunkKind_CHUNK_KIND_POINT_SLOTS:
+		kept, held = s.putSlotsLocked(c)
 	}
 
 	// The resume point advances even for a stale chunk: the model has sent it,
@@ -163,21 +193,78 @@ func (s *Store) Put(c *modelv1.Chunk) bool {
 	if IsModelKind(c.GetKind()) && c.GetSequence() > s.counters.LastModelSeq {
 		s.counters.LastModelSeq = c.GetSequence()
 	}
-	if !ok {
-		s.counters.Rejected++
-		return false
+	if len(kept) == 0 {
+		if !held {
+			s.counters.Rejected++
+		}
+		return nil
 	}
-	s.counters.Accepted++
-	if IsModelKind(c.GetKind()) {
-		s.counters.Model++
-	}
-	s.counters.LastChunkAt = time.Now()
-	if c.GetKind() == modelv1.ChunkKind_CHUNK_KIND_POINTS || c.GetKind() == modelv1.ChunkKind_CHUNK_KIND_MESH_BLOCK {
-		if cur, seen := s.segLevel[c.GetSegment()]; !seen || c.GetLevel() > cur {
-			s.segLevel[c.GetSegment()] = c.GetLevel()
+	for _, k := range kept {
+		s.counters.Accepted++
+		if IsModelKind(k.GetKind()) {
+			s.counters.Model++
+		}
+		switch k.GetKind() {
+		case modelv1.ChunkKind_CHUNK_KIND_POINTS, modelv1.ChunkKind_CHUNK_KIND_MESH_BLOCK,
+			modelv1.ChunkKind_CHUNK_KIND_POINT_SLOTS:
+			if cur, seen := s.segLevel[k.GetSegment()]; !seen || k.GetLevel() > cur {
+				s.segLevel[k.GetSegment()] = k.GetLevel()
+			}
 		}
 	}
-	return true
+	s.counters.LastChunkAt = time.Now()
+	return kept
+}
+
+// putSlotsLocked keeps a point slot message (version = seq, generation =
+// stream id). It returns the messages now in order (this one and any it
+// releases), and whether it was held for a missing seq.
+func (s *Store) putSlotsLocked(c *modelv1.Chunk) ([]*modelv1.Chunk, bool) {
+	id, seq := c.GetGeneration(), c.GetVersion()
+	if seq == 0 {
+		return nil, false
+	}
+	if s.slots == nil || id > s.slots.id {
+		// A new stream (a new model run) starts over at seq 1.
+		s.slots = &slotStream{id: id, held: map[uint32]*modelv1.Chunk{}}
+	}
+	st := s.slots
+	if id < st.id {
+		return nil, false
+	}
+	next := uint32(len(st.msgs)) + 1
+	switch {
+	case seq < next:
+		return nil, false
+	case seq > next:
+		if _, dup := st.held[seq]; dup {
+			return nil, false
+		}
+		st.held[seq] = c
+		return nil, true
+	}
+	out := []*modelv1.Chunk{c}
+	st.msgs = append(st.msgs, c)
+	for {
+		h, ok := st.held[uint32(len(st.msgs))+1]
+		if !ok {
+			break
+		}
+		delete(st.held, h.GetVersion())
+		st.msgs = append(st.msgs, h)
+		out = append(out, h)
+	}
+	return out, false
+}
+
+// SlotMessages is the number of point slot messages kept (in order) and held.
+func (s *Store) SlotMessages() (kept, held int) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.slots == nil {
+		return 0, 0
+	}
+	return len(s.slots.msgs), len(s.slots.held)
 }
 
 func (s *Store) putPointsLocked(c *modelv1.Chunk) bool {
@@ -265,8 +352,9 @@ func IsBaseMap(k modelv1.ChunkKind) bool {
 }
 
 // Chunks returns every kept chunk in replay order: terrain and buildings
-// first (the ground under everything), then points by segment, mesh blocks,
-// and detections last in arrival order. This is the control tower's replay.
+// first (the ground under everything), then points by segment, the point
+// slot messages in seq order, mesh blocks, and detections last in arrival
+// order. This is the control tower's replay.
 func (s *Store) Chunks() []*modelv1.Chunk { return s.chunks(true) }
 
 // ModelChunks is Chunks without the base map: the status boards' replay.
@@ -298,6 +386,9 @@ func (s *Store) chunks(baseMap bool) []*modelv1.Chunk {
 		p := s.points[k]
 		out = append(out, p.preview...)
 		out = append(out, p.refined...)
+	}
+	if s.slots != nil {
+		out = append(out, s.slots.msgs...)
 	}
 	s.mesh.each(func(c *modelv1.Chunk) { out = append(out, c) })
 	out = append(out, s.detections...)

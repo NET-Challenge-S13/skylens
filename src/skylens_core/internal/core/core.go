@@ -254,14 +254,17 @@ func (c *Core) broadcast(envs ...*viewerv1.Envelope) {
 // ---- chunks --------------------------------------------------------------------
 
 // PutChunk stores a chunk (from the model or the terrain feed) and forwards it
-// to the screens if the replacement rules kept it. Base map chunks go to the
-// control tower only.
+// to the screens if the replacement rules kept it (a point slot message that
+// fills a gap also forwards the held messages it releases, in order). Base map
+// chunks go to the control tower only.
 func (c *Core) PutChunk(ch *modelv1.Chunk) {
 	keep := func() []*viewerv1.Envelope {
-		if !c.Store.Put(ch) {
-			return nil
+		kept := c.Store.PutAll(ch)
+		envs := make([]*viewerv1.Envelope, 0, len(kept))
+		for _, k := range kept {
+			envs = append(envs, chunkEnv(k))
 		}
-		return []*viewerv1.Envelope{chunkEnv(ch)}
+		return envs
 	}
 	if store.IsBaseMap(ch.GetKind()) {
 		c.Controls.Publish(keep)
