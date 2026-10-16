@@ -1,0 +1,22 @@
+[package]
+name = "pointblitz-core"
+description = "PointBlitz render core: scene, chunk store, GPU buffers, point pipeline, headless capture"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+readme.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/pointblitz-core"
+keywords = ["point-cloud", "wgpu", "rendering", "webgpu", "3d"]
+categories = ["graphics", "rendering", "rendering::engine"]
+
+[dependencies]
+bytemuck = { version = "1.25", features = ["derive"] }
+glam = "0.34"
+pointblitz-io.workspace = true
+wgpu = "30.0.1"
+
+[lints]
+workspace = true
