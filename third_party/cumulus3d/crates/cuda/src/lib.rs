@@ -69,6 +69,8 @@
 //! }
 //! ```
 #![warn(missing_docs)]
+// SkyLens GPU patches (ba.rs, sparse.rs) index several parallel arrays and return nested tuples; keep them readable.
+#![allow(clippy::needless_range_loop, clippy::chunks_exact_to_as_chunks, clippy::type_complexity)]
 
 mod ba;
 mod device;

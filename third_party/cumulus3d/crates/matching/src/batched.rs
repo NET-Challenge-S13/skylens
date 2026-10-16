@@ -252,6 +252,7 @@ struct PairRun {
     e_err: f64,
 }
 
+#[allow(clippy::large_enum_variant)]
 enum Prep {
     /// RANSAC 없이 끝난 짝(자료 부족, 다중 모델 경로).
     Done(TwoViewGeometry),
@@ -456,6 +457,7 @@ pub fn synthetic_pairs(seed: u64, n_images: usize, n_points: usize, outlier_rati
         for b in a + 1..n_images {
             let n2 = store.num_keypoints(ids[b]) as u32;
             let mut m: Vec<FeatureMatch> = Vec::new();
+            #[allow(clippy::needless_range_loop)]
             for i in 0..n_points {
                 let (Some(ka), Some(kb)) = (index[a][i], index[b][i]) else { continue };
                 if r.random_range(0.0..1.0) < outlier_ratio {

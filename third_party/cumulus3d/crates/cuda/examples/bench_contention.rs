@@ -44,6 +44,8 @@
 //! 다른 스레드의 호출을 장치 대기열이 빌 때까지 세운다(450ms). 데모에서 같은 일을 한 것은 조밀화가 앞선 커널을
 //! 기다리며 일반 메모리로 내려 받는 `cuMemcpyDtoHAsync` 였다(`device::SyncedCopy` 참조).
 
+#![allow(forgetting_copy_types)]
+
 use cumulus3d_core::{Camera, CameraModelKind, Rigid3, Vec2, Vec3};
 use cumulus3d_cuda::CudaSparse;
 use cumulus3d_sfm::ObsQuery;

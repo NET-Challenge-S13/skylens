@@ -30,6 +30,8 @@
 //! 문제: OPENCV·RADIAL 카메라 두 대(초점·왜곡 정제), 일부 영상은 비기준 rig 센서, 자세 0 고정과
 //! 자세 1 의 이동 x 성분 고정(게이지), 일부 점 고정, 0.3px 잡음.
 
+#![allow(clippy::manual_is_multiple_of, clippy::assertions_on_constants)]
+
 use cumulus3d_ba::{BaBackend, BaSolution, CpuBaBackend, LinearSolverType, Loss, ProblemInput, Termination, TrOptions};
 use cumulus3d_core::{Camera, CameraModelKind, Quat, Rigid3, Vec2, Vec3};
 use cumulus3d_cuda::{is_available, CudaBundleAdjuster, CPU_CHOLESKY_N};
