@@ -49,20 +49,18 @@ pub struct JobOutput {
     pub cloud: Arc<PointCloud>,
 }
 
-/// Plan the live node and the jobs start from: cumulus3d's defaults with the stable-display settle
-/// parameters written out (`--settle-tol 0.01 --settle-max-zone 3`, the defaults), no densification
-/// until [`dense_for`] and no GPS file (the sets carry their GPS fixes).
+/// Plan the live node and the jobs start from: cumulus3d's defaults, no densification until
+/// [`dense_for`] and no GPS file (the sets carry their GPS fixes). The settle parameters
+/// (`--settle-tol 0.01 --settle-max-zone 3`) are set with `NodeBuilder::settle`.
 ///
 /// The intrinsics prior of the V100 runs (`--intrinsics-prior`, the demo camera.json: fx = fy =
-/// 1329 at 1920x1080) cannot be expressed here: in cumulus3d 0.7 `Plan.sparse.intrinsics_prior` is
+/// 1329 at 1920x1080) cannot be expressed here: in cumulus3d 0.8 `Plan.sparse.intrinsics_prior` is
 /// read only by the file driven `Recon` builder, while `NodeBuilder::build` (the `ReconNode` of the
 /// live node and the jobs) never passes it on to the session.
 pub fn live_plan() -> Plan {
     let mut plan = Plan::default();
     plan.dense.enabled = false;
     plan.gps = None;
-    plan.sparse.settle_tol = SETTLE_TOL;
-    plan.sparse.settle_max_zone = SETTLE_MAX_ZONE;
     plan
 }
 
@@ -109,6 +107,7 @@ pub fn run(
     let host = CompositionHost::new();
     let mut b = ReconNode::declare()
         .plan(live_plan())
+        .settle(SETTLE_TOL, SETTLE_MAX_ZONE)
         .id("job")
         .images(&images)
         .cameras(input.cameras.clone())

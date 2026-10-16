@@ -40,7 +40,7 @@ tokio-stream = "0.1"
 ctrlc = { version = "3", features = ["termination"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "tiff"] }
 # Types cumulus3d-cli exposes in its events (Reconstruction, PointCloud, Vec3); same release as cumulus3d-cli.
-cumulus3d-core = "0.7"
+cumulus3d-core = "0.8"
 
 [target.'cfg(windows)'.dependencies]
 # Loads libtorch's CUDA backend at startup (see app.rs load_torch_cuda).

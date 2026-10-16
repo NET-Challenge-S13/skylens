@@ -169,6 +169,7 @@ impl Engine {
         let mut b = ReconNode::declare()
             // The plan comes first (it replaces every setting); the builder calls below refine it.
             .plan(jobs::live_plan())
+            .settle(SETTLE_TOL, SETTLE_MAX_ZONE)
             .id(LIVE_NODE)
             .images(&live_dir)
             .cameras(cfg.cameras.clone())
