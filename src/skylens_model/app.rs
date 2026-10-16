@@ -455,6 +455,8 @@ pub fn build_engine(settings: &Settings) -> anyhow::Result<Engine> {
             zone_overlap: settings.zone_overlap,
             work_dir: settings.work_dir.clone(),
             gpu,
+            stable_display: settings.stable_display,
+            live_stride: settings.live_stride,
         },
         detector,
     )

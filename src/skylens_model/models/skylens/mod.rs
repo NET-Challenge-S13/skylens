@@ -13,6 +13,8 @@
 //! - [`fusion`]: projection of frame detections onto the zone points and the
 //!   confidence-weighted fusion across frames (pure math).
 //! - [`chunks`]: pointblitz/MeshBlock/DetectionBatch encoding and the replay log.
+//! - [`slotstream`]: the follower of the live diff stream (stable display): each event of
+//!   `<run>/live/stream/` becomes one point slot chunk.
 //! - [`jobs`] and [`sources`]: the REST/gRPC job API (`steps` -> level, `uri`
 //!   decoding).
 //!
@@ -20,6 +22,16 @@
 //! `EngineConfig::anchor` (x = East, y = North, z = Up; cumulus3d's ENU is the
 //! WGS84 tangent plane at the anchor). Detections carry GPS converted with
 //! `skylens_shared::geo::enu_to_gps`.
+//!
+//! Stable display (`EngineConfig::stable_display`, the default). The live node
+//! runs cumulus3d's stable display: no zone previews, and a zone keeps its place
+//! once shown (while the intrinsics settle, up to zone [`SETTLE_MAX_ZONE`], the
+//! earlier zones are placed again). The points leave as the live diff stream
+//! (point slot chunks, written by the node's file sinks under
+//! `<work_dir>/runs/<run>/` and followed by [`slotstream`]); mesh blocks and
+//! detections still come from the refined zone events. Without densification
+//! (no CUDA) the stream stays empty, so the refined zone points go out as point
+//! chunks as before.
 
 pub mod chunks;
 pub mod frames;
@@ -27,6 +39,7 @@ pub mod fusion;
 pub mod jobs;
 pub mod live;
 pub mod recon;
+pub mod slotstream;
 pub mod sources;
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -38,6 +51,7 @@ use cumulus3d_cli::compose::{
     CompositionHost, FrameKey as LiveKey, FrameState, Outcome, ReconNode, ReconcilePolicy,
 };
 use cumulus3d_cli::declare::AlignFrame;
+use cumulus3d_cli::sinks::SinkOptions;
 use prost::Message;
 use skylens_shared::proto::model::v1::{
     Align, Chunk, DetectJobRequest, DetectJobResult, FrameSet, Level, ReconJobRequest, ReconJobResult,
@@ -54,6 +68,18 @@ pub const LIVE_NODE: &str = "live";
 /// Folder under `work_dir` with job results; `ReconJobResult.url` is
 /// `/<RESULTS_DIR>/<file>`, so the HTTP server serves this folder at that path.
 pub const RESULTS_DIR: &str = "results";
+/// Folder under `work_dir` with one output folder per live run (stable display:
+/// run.log, zone PLYs, the live display and its diff stream `live/stream/`).
+pub const RUNS_DIR: &str = "runs";
+/// Stable display: the intrinsics count as settled once the focal length of two
+/// refined zones in a row differs by less than this (cumulus3d's default, 1 %).
+pub const SETTLE_TOL: f64 = 0.01;
+/// Stable display: the display settles at this zone at the latest (cumulus3d's
+/// default). Zones up to it may be placed again while the intrinsics settle.
+pub const SETTLE_MAX_ZONE: usize = 3;
+/// Live display thinning of the diff stream: 1 of this many points (cumulus3d's
+/// default; the decision 0052 measurements use it).
+pub const DEFAULT_LIVE_STRIDE: usize = 6;
 
 #[derive(Debug, Clone)]
 pub struct EngineConfig {
@@ -68,6 +94,11 @@ pub struct EngineConfig {
     pub work_dir: std::path::PathBuf,
     /// Use the GPU backends of cumulus3d and deltamesh.
     pub gpu: bool,
+    /// cumulus3d stable display with the live diff stream (point slot chunks).
+    /// Off: zone previews and refined zones as point chunks per segment.
+    pub stable_display: bool,
+    /// Live display thinning of the diff stream (1 = every point).
+    pub live_stride: usize,
 }
 
 /// Result of declaring one frame set to the reconstruction node.
@@ -102,6 +133,10 @@ pub struct Engine {
     frame_queue: Option<Arc<FrameQueue>>,
     stop: Arc<AtomicBool>,
     poller: Mutex<Option<JoinHandle<()>>>,
+    /// Follower of the live diff stream (stable display).
+    follower: Mutex<Option<JoinHandle<()>>>,
+    /// Output folder of this run (stable display).
+    run_dir: Option<std::path::PathBuf>,
     /// Jobs run one at a time.
     job_lock: Mutex<()>,
 }
@@ -118,6 +153,9 @@ impl Engine {
 
         let host = CompositionHost::new();
         let log = chunks::ChunkLog::new();
+        let started = std::time::SystemTime::now();
+        let stream = slotstream::stream_id(started);
+        let run_dir = cfg.stable_display.then(|| cfg.work_dir.join(RUNS_DIR).join(format!("live-{stream}-{}", std::process::id())));
         let mut b = ReconNode::declare()
             .id(LIVE_NODE)
             .images(&live_dir)
@@ -131,6 +169,17 @@ impl Engine {
             // Triangulate only the images registered at this position. The default re-triangulates
             // every registered image on each set, which grew to 7.5 s per set in a 5-minute run.
             .incremental_triangulation(true);
+        if let Some(dir) = &run_dir {
+            ensure!(cfg.live_stride >= 1, "live stride must be at least 1");
+            // The diff stream is written by the node's file sinks; its origin is the anchor
+            // (the first GPS record of every set, frames::ANCHOR_RECORD).
+            b = b
+                .stable_display(true)
+                .settle(SETTLE_TOL, SETTLE_MAX_ZONE)
+                .live_stride(cfg.live_stride)
+                .stream_origin(cfg.anchor.lat, cfg.anchor.lon, cfg.anchor.alt)
+                .output(dir, SinkOptions::default());
+        }
         if cfg.gpu {
             b = b.gpu();
         }
@@ -148,13 +197,30 @@ impl Engine {
         let events = node.subscribe().context("live node closed before start")?;
 
         let (tx, rx) = std::sync::mpsc::channel::<Msg>();
-        Consumer::new(Arc::clone(&log), cfg.anchor, cfg.gpu, detector.is_some()).spawn(rx)?;
+        let mut consumer = Consumer::new(Arc::clone(&log), cfg.anchor, cfg.gpu, detector.is_some());
+        if cfg.stable_display {
+            // With densification the points leave through the diff stream; without it the stream
+            // stays empty and the refined zone points go out as point chunks.
+            consumer = consumer.stable_display(SETTLE_MAX_ZONE, jobs::dense_for(cfg.gpu).is_some());
+        }
+        consumer.spawn(rx)?;
         if let (Some(q), Some(det)) = (&frame_queue, &detector) {
             live::spawn_detector(Arc::clone(q), Arc::clone(det), tx.clone())?;
         }
         live::spawn_forwarder(events, tx)?;
         let stop = Arc::new(AtomicBool::new(false));
         let poller = live::spawn_poller(node.clone(), Arc::clone(&stop))?;
+        let follower = match &run_dir {
+            Some(dir) => {
+                tracing::info!("live run output in {} (stream id {stream})", dir.display());
+                let log = Arc::clone(&log);
+                let publish = move |chunks: Vec<Chunk>| {
+                    log.publish(chunks);
+                };
+                Some(slotstream::spawn(slotstream::stream_dir(dir), stream, cfg.anchor, publish, Arc::clone(&stop))?)
+            }
+            None => None,
+        };
 
         Ok(Self {
             assembler: Mutex::new(Assembler::new(cfg.cameras.clone())),
@@ -166,8 +232,15 @@ impl Engine {
             frame_queue,
             stop,
             poller: Mutex::new(Some(poller)),
+            follower: Mutex::new(follower),
+            run_dir,
             job_lock: Mutex::new(()),
         })
+    }
+
+    /// Output folder of this live run (stable display), `<work_dir>/runs/live-<stream id>-<pid>`.
+    pub fn run_dir(&self) -> Option<&std::path::Path> {
+        self.run_dir.as_deref()
     }
 
     /// Declare one frame set (gRPC PushFrames).
@@ -289,6 +362,9 @@ impl Drop for Engine {
         if let Some(h) = lock(&self.poller).take() {
             let _ = h.join();
         }
+        if let Some(h) = lock(&self.follower).take() {
+            let _ = h.join();
+        }
     }
 }
 
@@ -315,6 +391,8 @@ mod tests {
             zone_overlap: 2,
             work_dir: std::env::temp_dir().join(format!("skylens-engine-{dir}-{}", std::process::id())),
             gpu: false,
+            stable_display: true,
+            live_stride: DEFAULT_LIVE_STRIDE,
         }
     }
 
@@ -338,6 +416,18 @@ mod tests {
         assert!(engine.push(bad).is_err());
         assert_eq!(engine.log.last_sequence(), 0);
         assert_eq!(engine.anchor_frame(), "enu-36.3685000-127.3475000-30.00");
+        // Stable display: the run has its own output folder under runs/.
+        let run = engine.run_dir().expect("stable display gives a run folder").to_path_buf();
+        assert!(run.starts_with(cfg.work_dir.join(RUNS_DIR)));
+        drop(engine);
+        let _ = std::fs::remove_dir_all(&cfg.work_dir);
+    }
+
+    #[test]
+    fn without_stable_display_there_is_no_run_folder() {
+        let cfg = EngineConfig { stable_display: false, ..engine_config("plain") };
+        let engine = Engine::new(cfg.clone(), None).unwrap();
+        assert!(engine.run_dir().is_none());
         drop(engine);
         let _ = std::fs::remove_dir_all(&cfg.work_dir);
     }

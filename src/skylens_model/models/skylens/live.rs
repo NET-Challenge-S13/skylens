@@ -6,12 +6,21 @@
 //!                                                                                                     v
 //!                                    consumer: points, deltamesh blocks, detection fusion ─> ChunkLog
 //! poller: collects finished background refinement (cumulus3d only hands it out on push/poll)
+//! slots follower (stable display): <run>/live/stream/ ─> point slot chunks ─> ChunkLog
 //! ```
+//!
+//! Stable display. Zones arrive refined only (no previews). Their points leave through the diff
+//! stream (see `slotstream`), so the consumer publishes point chunks only when there is no
+//! densification (the stream is then empty). A refined zone can be meshed once (deltamesh), but
+//! while the intrinsics settle cumulus3d places the zones up to `settle_max_zone` again and emits
+//! them again; those zones are meshed at the preview level (replaceable) until a zone past
+//! `settle_max_zone` arrives, which is the point after which no shown zone moves. Then their
+//! latest points are meshed at the refined level.
 //!
 //! Nothing on this side holds the node's lock, so reconstruction never waits on
 //! the UNet, the mesher or a subscriber.
 
-use std::collections::{BTreeSet, HashMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
@@ -27,7 +36,7 @@ use deltamesh::Mesher;
 use skylens_shared::geo::GeoAnchor;
 use skylens_shared::proto::model::v1::Level;
 
-use super::chunks::{ChunkLog, detections_chunk, mesh_chunk, points_delivery};
+use super::chunks::{ChunkLog, ZonePoint, detections_chunk, mesh_chunk, points_delivery};
 use super::fusion::{FrameObservation, Fuser};
 use super::recon::{positions_f64, zone_points, zone_views};
 use crate::detect::Detector;
@@ -184,6 +193,19 @@ fn new_mesher(gpu: bool) -> Box<dyn Mesher> {
     Box::new(deltamesh::sdf::SdfMesher::new(deltamesh::Config::default()))
 }
 
+/// Stable display state of the consumer.
+#[derive(Debug, Default)]
+struct Stable {
+    /// Zones up to this one may be placed again while the intrinsics settle.
+    settle_max_zone: u32,
+    /// The diff stream carries the points (densification on): no point chunks.
+    stream_points: bool,
+    /// Latest points of the zones meshed provisionally (preview level), until `committed`.
+    provisional: BTreeMap<u32, Vec<ZonePoint>>,
+    /// A zone past `settle_max_zone` arrived: no shown zone moves any more.
+    committed: bool,
+}
+
 /// State of the consumer thread.
 pub struct Consumer {
     log: Arc<ChunkLog>,
@@ -193,6 +215,7 @@ pub struct Consumer {
     refined_generation: HashMap<u32, u32>,
     detection_version: HashMap<u32, u32>,
     fuser: Fuser,
+    stable: Option<Stable>,
 }
 
 impl Consumer {
@@ -205,7 +228,16 @@ impl Consumer {
             refined_generation: HashMap::new(),
             detection_version: HashMap::new(),
             fuser: Fuser::new(anchor, MAX_OBSERVATIONS),
+            stable: None,
         }
+    }
+
+    /// cumulus3d stable display: zones up to `settle_max_zone` may come again while the
+    /// intrinsics settle; `stream_points` = the diff stream carries the points.
+    pub fn stable_display(mut self, settle_max_zone: usize, stream_points: bool) -> Self {
+        self.stable =
+            Some(Stable { settle_max_zone: settle_max_zone as u32, stream_points, provisional: BTreeMap::new(), committed: false });
+        self
     }
 
     /// Runs until every sender is gone. Batches what is already queued so a
@@ -275,15 +307,46 @@ impl Consumer {
             tracing::debug!("zone {seg} {level:?}: no points");
             return;
         }
-        let generation = if level == Level::Refined {
-            let g = self.refined_generation.entry(seg).or_insert(0);
-            *g += 1;
-            *g
-        } else {
-            0
-        };
-        self.log.publish(points_delivery(seg, level, generation, &points));
+        if self.stable.as_ref().is_none_or(|s| !s.stream_points) {
+            let generation = if level == Level::Refined {
+                let g = self.refined_generation.entry(seg).or_insert(0);
+                *g += 1;
+                *g
+            } else {
+                0
+            };
+            self.log.publish(points_delivery(seg, level, generation, &points));
+        }
 
+        match self.stable.as_mut() {
+            None => self.mesh_zone(seg, level, &points, mesher),
+            Some(st) if !st.committed && seg <= st.settle_max_zone => {
+                // May be placed again while the intrinsics settle: replaceable for now.
+                st.provisional.insert(seg, points.clone());
+                self.mesh_zone(seg, Level::Preview, &points, mesher);
+            }
+            Some(st) => {
+                let ready = if st.committed {
+                    Vec::new()
+                } else {
+                    st.committed = true;
+                    std::mem::take(&mut st.provisional).into_iter().collect()
+                };
+                for (z, pts) in ready {
+                    self.mesh_zone(z, Level::Refined, &pts, mesher);
+                }
+                self.mesh_zone(seg, Level::Refined, &points, mesher);
+            }
+        }
+
+        if self.detecting {
+            self.fuser.set_zone(seg, &positions_f64(&points), zone_views(model, range, &self.positions));
+            dirty.insert(seg);
+        }
+    }
+
+    /// Meshes one zone's points at `level` and publishes the blocks that changed.
+    fn mesh_zone(&mut self, seg: u32, level: Level, points: &[ZonePoint], mesher: &mut dyn Mesher) {
         let dm_level = if level == Level::Refined { deltamesh::Level::Refined } else { deltamesh::Level::Preview };
         let mpts: Vec<deltamesh::Point> =
             points.iter().map(|p| deltamesh::Point { pos: p.pos, rgb: p.rgb, normal: p.normal }).collect();
@@ -295,11 +358,6 @@ impl Consumer {
                 self.log.publish(blocks);
             }
             Err(e) => tracing::warn!("deltamesh zone {seg}: {e}"),
-        }
-
-        if self.detecting {
-            self.fuser.set_zone(seg, &positions_f64(&points), zone_views(model, range, &self.positions));
-            dirty.insert(seg);
         }
     }
 
@@ -365,8 +423,12 @@ mod tests {
     }
 
     fn zone_event(refined: bool, frame: &str) -> Msg {
+        zone_event_at(2, refined, frame)
+    }
+
+    fn zone_event_at(zone: usize, refined: bool, frame: &str) -> Msg {
         let meta = Meta { version: 1, at: SystemTime::now() };
-        let range = ZoneRange { zone: 2, lo: 20, hi: 34 };
+        let range = ZoneRange { zone, lo: 10 * zone, hi: 10 * zone + 14 };
         let model = Arc::new(Reconstruction::new());
         Msg::Event(if refined {
             Event::ZoneRefined { meta, range, cloud: patch(), model, dense: true }
@@ -398,5 +460,50 @@ mod tests {
             log.since(0).iter().filter(|x| x.kind == ChunkKind::Points as i32).map(|x| (x.level, x.generation)).collect();
         assert!(points.iter().all(|p| *p == (Level::Refined as i32, 1)), "{points:?}");
         assert!(dirty.is_empty(), "no detector, no detection batches");
+    }
+
+    /// (segment, level) of the mesh blocks published after `after`.
+    fn mesh_levels(log: &ChunkLog, after: u64) -> BTreeSet<(u32, i32)> {
+        log.since(after).iter().filter(|x| x.kind == ChunkKind::MeshBlock as i32).map(|x| (x.segment, x.level)).collect()
+    }
+
+    #[test]
+    fn stable_display_streams_points_and_meshes_settling_zones_provisionally() {
+        let log = ChunkLog::new();
+        let mut c = Consumer::new(log.clone(), ANCHOR, false, false).stable_display(1, true);
+        let mut mesher = new_mesher(false);
+        let mut dirty = BTreeSet::new();
+        let pre = Level::Preview as i32;
+        let fin = Level::Refined as i32;
+
+        // Zones 0 and 1 may still move: meshed at the preview level, no point chunks.
+        c.handle(zone_event_at(0, true, ""), mesher.as_mut(), &mut dirty);
+        c.handle(zone_event_at(1, true, ""), mesher.as_mut(), &mut dirty);
+        let s = log.last_sequence();
+        assert!(log.since(0).iter().all(|x| x.kind == ChunkKind::MeshBlock as i32), "points travel in the diff stream");
+        assert_eq!(mesh_levels(&log, 0), BTreeSet::from([(0, pre), (1, pre)]));
+        // Zone 0 placed again (settling): replaced, still provisional.
+        c.handle(zone_event_at(0, true, ""), mesher.as_mut(), &mut dirty);
+        assert!(mesh_levels(&log, s).iter().all(|(_, l)| *l == pre));
+
+        // Zone 2 is past the settle limit: zones 0 and 1 are meshed for good, then zone 2.
+        let s = log.last_sequence();
+        c.handle(zone_event_at(2, true, ""), mesher.as_mut(), &mut dirty);
+        assert_eq!(mesh_levels(&log, s), BTreeSet::from([(0, fin), (1, fin), (2, fin)]));
+        let s = log.last_sequence();
+        c.handle(zone_event_at(3, true, ""), mesher.as_mut(), &mut dirty);
+        assert_eq!(mesh_levels(&log, s), BTreeSet::from([(3, fin)]));
+    }
+
+    #[test]
+    fn stable_display_without_densification_sends_point_chunks() {
+        let log = ChunkLog::new();
+        let mut c = Consumer::new(log.clone(), ANCHOR, false, false).stable_display(3, false);
+        let mut mesher = new_mesher(false);
+        let mut dirty = BTreeSet::new();
+        c.handle(zone_event_at(0, true, ""), mesher.as_mut(), &mut dirty);
+        let points: Vec<_> = log.since(0).iter().filter(|x| x.kind == ChunkKind::Points as i32).map(|x| (x.segment, x.level)).collect();
+        assert!(!points.is_empty());
+        assert!(points.iter().all(|p| *p == (0, Level::Refined as i32)));
     }
 }
