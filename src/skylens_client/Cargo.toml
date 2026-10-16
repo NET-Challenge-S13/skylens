@@ -41,3 +41,38 @@ wasm-bindgen = "0.2"
 [build-dependencies]
 # Embeds res/icon/skylens.ico into the Windows executable.
 winresource = "0.1"
+
+# Android APK (cargo-apk, see build-android.sh). The cdylib above is the app: NativeActivity loads
+# libstatus_screen.so and calls `android_main` in lib.rs. HTML, CSS, fonts and icons are compiled
+# into the library, so the APK carries no assets. Hardware acceleration is the default for
+# these SDK levels; wgpu draws through Vulkan (GLES as wgpu's fallback).
+[package.metadata.android]
+package = "kr.skylens.board"
+apk_name = "skylens-board"
+build_targets = ["aarch64-linux-android", "x86_64-linux-android"]
+resources = "android/res"
+strip = "strip"
+
+[package.metadata.android.sdk]
+# Vulkan arrived in API 24; 26 keeps clear of early Vulkan drivers.
+min_sdk_version = 26
+target_sdk_version = 35
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.INTERNET"
+
+[package.metadata.android.application]
+label = "SkyLens 현황판"
+icon = "@mipmap/ic_launcher"
+theme = "@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen"
+# Plain ws:// to a core or gateway on the local network.
+uses_cleartext_traffic = true
+
+[package.metadata.android.application.activity]
+label = "SkyLens 현황판"
+orientation = "landscape"
+launch_mode = "singleTop"
+# Handled in place: winit sees a resize instead of the activity being recreated (a second
+# android_main in the same process cannot open a new winit event loop).
+config_changes = "orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density"
+exported = true

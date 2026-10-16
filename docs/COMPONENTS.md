@@ -21,7 +21,7 @@ links: "[[ARCHITECTURE]] · [[NETWORK_ARCHITECTURE]] · [[SPEC]]"
 | `skylens_proxy` | KOREN **내부망** (대전) | 코어로 가는 다중 경로. 선호 경로가 죽으면 대기 경로로 넘긴다 | nginx 설정 |
 | `skylens_core` | KOREN **내부망** (대전) | 코어 서버(데이터 전체 보관 + 작업 오케스트레이션 + 배포, Go)와 **관제탑 화면**(코어가 웹으로 제공, Rust + 이전 HTML/CSS). 라이브 영상 원점(MediaMTX WHEP)도 여기 | Go 서버 + Rust 관제탑 + MediaMTX |
 | `skylens_model` | KOREN **내부망** (판교) | 연산 서버. 라이브 프레임 입력으로 점군을 키우고(cumulus3d), UNet을 프레임 훅으로 붙이고, 메시로 보정해(deltamesh) 증분으로 내보낸다 | Rust 서버 + Python 학습 코드 |
-| `skylens_client` | KOREN **외부망** (지휘관 단말) | **현황판 화면**. 이전 HTML/CSS를 Blitz로 그대로 그리고 렌더링은 pointblitz. 웹·데스크톱 네이티브(이후 Android/iOS)가 같은 코드를 쓴다. 제어 경로가 없다 | Rust + 이전 HTML/CSS |
+| `skylens_client` | KOREN **외부망** (지휘관 단말) | **현황판 화면**. 이전 HTML/CSS를 Blitz로 그대로 그리고 렌더링은 pointblitz. 웹·데스크톱 네이티브·Android(이후 iOS)가 같은 코드를 쓴다. 제어 경로가 없다 | Rust + 이전 HTML/CSS |
 | `shared` | 해당 없음 | 공통 계약(proto · 좌표계, `skylens-shared`)과 두 화면 공용 층(`viewer/`, `skylens-viewer`: 공용 CSS · 위젯 · 코어 연결 · 청크 저장소 · pointblitz 3D 뷰). 배포 단위가 아닌 의존 라이브러리 | Rust 라이브러리 |
 | `test` | 해당 없음 | 컴포넌트를 가로지르는 테스트. 테스트를 먼저 쓰고 구현한다(TDD) | Rust (+ Python 학습 테스트) |
 | `demo` | 해당 없음 | 전 컴포넌트를 실제로 띄워 엔드 투 엔드로 돌리는 데모 런처 | Rust |
@@ -114,7 +114,7 @@ UNet 쪽 규칙:
 - 복원되어 도착한 것만 보인다. 바탕 지도(지형·건물)는 없다.
 - 코어의 `ws /viewer`(게이트웨이 → 프록시 경유)로 받기만 하고 제어 경로는 없다.
 - 이전 패널을 그대로 갖는다: 서버 패널과 구간별 수준 사다리, 미니맵, 점·고도색 토글과 인셋, 대기 배너, 카메라 상태 칩, 탐지 카드.
-- 웹(wasm)과 데스크톱 네이티브가 같은 코드이고, Android/iOS는 그 뒤다. 웹 빌드는 게이트웨이 nginx가 서빙한다.
+- 웹(wasm), 데스크톱 네이티브, Android가 같은 코드이고 iOS는 그 뒤다. 웹 빌드는 게이트웨이 nginx가 서빙한다. Android는 cargo-apk로 만든 NativeActivity APK이고(`build-android.sh`), 진입점과 설정 읽기는 `skylens-viewer`의 `shell::run_android` · `android` 모듈에 있어 관제탑도 같은 길을 쓸 수 있다.
 
 ### 3.7 `shared` (Rust)
 
@@ -296,7 +296,7 @@ pointblitz는 서버에서 헤드리스로 그려 영상으로 보내는 모드�
 | 3 | `skylens_drone`: Mission Bridge Rust 포팅 + 코어 업링크 | 코드 완료 (테스트 57개 통과, 실기체 미검증) |
 | 4 | `skylens_core`: Go 서버 + gRPC 클라이언트 + 지형·건물 pointblitz 청크 | 코드 완료 (go test 통과) |
 | 5 | `skylens_model`: REST·gRPC + cumulus3d 라이브 복원 + deltamesh + UNet(tch) 훅·보간 | 코드 완료 (테스트 179개 통과, 실데이터 미검증) |
-| 6 | 화면: 1차 이식은 이전 화면과 달라 다시 한다. 관제탑은 `skylens_core/control`, 현황판은 `skylens_client`, 공용 층은 `shared/viewer`로 나누고 이전 HTML/CSS·DOM을 그대로 쓴다(§3.10) | 재작업 중 |
+| 6 | 화면: 1차 이식은 이전 화면과 달라 다시 한다. 관제탑은 `skylens_core/control`, 현황판은 `skylens_client`, 공용 층은 `shared/viewer`로 나누고 이전 HTML/CSS·DOM을 그대로 쓴다(§3.10). 현황판 Android APK(cargo-apk, 한 손가락 회전·두 손가락 확대) 코드 추가 | 재작업 중 (Android는 기기 미검증) |
 | 6' | pointblitz 패치(`third_party/pointblitz`): 패스 안 그리기 · 메시 · 텍스처 · 선 · 안개 · 배경색 | 재작업 중 |
 | 7 | 게이트웨이 nginx 경로·터널 8082 | 완료 |
 | 8 | `demo`: 엔드 투 엔드 런처 | 대기 |
@@ -308,4 +308,4 @@ pointblitz는 서버에서 헤드리스로 그려 영상으로 보내는 모드�
 
 - DB 연결 (인메모리로 두고 세션 종료 시 소멸)
 - 클라이언트 간 P2P 재분배 (코어 직접 배포로 시작)
-- Android/iOS 클라이언트 (네이티브 데스크톱 이후)
+- iOS 클라이언트, Android 관제탑 (현황판 Android 이후)
