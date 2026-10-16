@@ -262,6 +262,26 @@ impl Engine {
         self.stream
     }
 
+    /// Warns once when pushed frames carry no GPS. With stable display the zone clouds are placed in
+    /// ENU only through the per-image GPS fixes (the anchor record alone pins the origin, not the
+    /// orientation), so without them the display delta frame is the reconstruction's own, not ENU,
+    /// although cumulus3d still labels it ENU about the anchor.
+    fn note_gps(&self, set: &FrameSet) {
+        use std::sync::atomic::AtomicU8;
+        // 0 = nothing seen, 1 = warned (no GPS), 2 = GPS seen.
+        static SEEN: AtomicU8 = AtomicU8::new(0);
+        let has = set.images.iter().any(|i| i.gps.is_some());
+        if has {
+            SEEN.store(2, Ordering::Relaxed);
+        } else if SEEN.compare_exchange(0, 1, Ordering::Relaxed, Ordering::Relaxed).is_ok() {
+            tracing::warn!(
+                "frame set {:?} carries no GPS: the reconstruction cannot be placed in ENU (the points will be \
+                 rotated and scaled arbitrarily on the board); check that the core sends the drone GPS with the frames",
+                set.key
+            );
+        }
+    }
+
     /// Hook for replay tools and tests: hands a cumulus3d event straight to the chunk consumer, as
     /// if the live node had emitted it (see [`replay`]). Fails once the engine is shutting down.
     pub fn inject_event(&self, ev: cumulus3d_cli::events::Event) -> anyhow::Result<()> {
@@ -277,6 +297,7 @@ impl Engine {
     /// blocking context. Cameras may arrive in separate pushes with the same key:
     /// the set is declared once all of them are there.
     pub fn push(&self, set: FrameSet) -> anyhow::Result<PushOutcome> {
+        self.note_gps(&set);
         let assembled = lock(&self.assembler).offer(set)?;
         let state = match assembled {
             Assembled::Repeat => return Ok(PushOutcome::Ignored),
