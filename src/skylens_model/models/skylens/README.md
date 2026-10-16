@@ -37,8 +37,8 @@ FrameSet(gRPC) → Assembler(카메라 모으기) → LiveFrameSet → ReconNode
 | 조정 정책 | append-only. 늦게 오거나 고쳐진 묶음은 무시한다. deltamesh 정제본은 구간당 한 번만 넣을 수 있고, 이미 내보낸 구간을 되감지 않기 위해서다 |
 | 카메라가 따로 오는 묶음 | 같은 키의 push를 모아 모든 카메라가 차면 선언한다. 대기 중인 묶음은 최대 64개 |
 | stable display | 기본(`SKYLENS_STABLE_DISPLAY=1`). 미리보기가 없고 구간 K의 정제는 K−1을 기다리며, GPS 위치 제약으로 한 번 보인 구간은 움직이지 않는다. 내부값이 안정되기 전(1 %, 늦어도 구간 3)에는 앞 구간을 다시 놓고 `ZoneRefined`를 다시 낸다 |
-| 점 슬롯 | 노드에 실행 폴더를 주어 cumulus3d가 live diff stream v4를 쓰게 하고, follower가 사건마다 청크 하나로 낸다(`segment` 사건 구간, `version` 순번, `generation` 스트림 id = 시작 시각 초). 화면용 점은 1/6(`SKYLENS_LIVE_STRIDE`) |
-| 메시와 재배치 | 구간 3까지는 다시 놓일 수 있어 deltamesh에 미리보기 수준으로 넣고(다시 오면 교체), 구간 4가 오면 그 구간들의 마지막 점을 정제 수준으로 넣는다 |
+| 점 슬롯 | 노드에 실행 폴더를 주어 cumulus3d가 live diff stream v4를 쓰게 하고, follower가 사건마다 청크 하나로 낸다(`segment` 사건 구간, `version` 순번, `generation` 스트림 id). 스트림 id는 `runs/` 아래 가장 큰 id + 1과 시작 시각 초 중 큰 값이고, 청크 시퀀스는 `스트림 id << 32`에서 시작한다(다시 뜬 모델 서버의 청크가 코어의 이어받기 시점보다 모두 크다). 실행 폴더에는 run.log, 타임라인, 차분 스트림만 쓰고(`stream_only`), 시작할 때 실행 폴더를 3개(`KEEP_RUNS`)만 남긴다. 화면용 점은 1/6(`SKYLENS_LIVE_STRIDE`). 조밀화가 실패한 구간(`dense: false`)은 스트림에 없으므로 그 구간만 점 청크로 보낸다 |
+| 메시와 재배치 | 구간 3까지는 다시 놓일 수 있어 deltamesh에 미리보기 수준으로 넣고(다시 오면 교체), 구간 4가 오면 그 구간들의 마지막 점을 정제 수준으로 넣는다. 점이 그대로면 메시가 바뀌지 않아 블록을 다시 보내지 않는다(그 블록 청크의 수준은 미리보기로 남는다). 구간이 4개 이하인 실행은 구간 0~3의 메시가 미리보기 수준으로 남는다 |
 | 미리보기 좌표계 | (stable display를 끈 경우) 구간 0과, 정제본이 채택된 뒤의 미리보기만 GPS 정렬이다. 정렬되지 않은 미리보기는 내보내지 않고 정제본을 기다린다 |
 | 조밀화 | CUDA가 필요하다. `gpu = false`면 구간 모델의 희소 점을 대신 쓴다 |
 | 메시 GPU | `gpu-mesh` 기능을 켜고 빌드하면 `GpuMesher`, 아니면 CPU `SdfMesher` |

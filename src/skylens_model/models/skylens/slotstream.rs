@@ -42,10 +42,67 @@ pub fn stream_dir(out: &Path) -> PathBuf {
     out.join("live").join("stream")
 }
 
-/// Stream id of a model run: whole seconds since the Unix epoch at engine start (wrapping in
-/// 2106). A later run gets a higher id, so the core and the screens drop the older stream.
+/// Whole seconds since the Unix epoch at `at` (wrapping in 2106), at least 1.
 pub fn stream_id(at: SystemTime) -> u32 {
     at.duration_since(UNIX_EPOCH).map(|d| d.as_secs() as u32).unwrap_or(1).max(1)
+}
+
+/// Prefix of a live run folder under `<work_dir>/runs/`: `live-<stream id>-<pid>`.
+const RUN_PREFIX: &str = "live-";
+
+/// Folder name of a live run.
+pub fn run_folder_name(stream: u32, pid: u32) -> String {
+    format!("{RUN_PREFIX}{stream}-{pid}")
+}
+
+/// Stream id of a live run folder name (`live-<id>-<pid>`).
+pub fn run_folder_stream(name: &str) -> Option<u32> {
+    let rest = name.strip_prefix(RUN_PREFIX)?;
+    let (id, pid) = rest.split_once('-')?;
+    pid.parse::<u32>().ok()?;
+    id.parse().ok()
+}
+
+/// Live run folders under `runs`, oldest stream first.
+fn run_folders(runs: &Path) -> Vec<(u32, PathBuf)> {
+    let Ok(rd) = std::fs::read_dir(runs) else { return Vec::new() };
+    let mut out: Vec<(u32, PathBuf)> = rd
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().is_dir())
+        .filter_map(|e| Some((run_folder_stream(e.file_name().to_str()?)?, e.path())))
+        .collect();
+    out.sort();
+    out
+}
+
+/// Stream id of a new model run: higher than every run folder under `runs` and at least the wall
+/// clock second, so a restart within the same second or after the clock went back still gets a
+/// higher id (the core and the screens drop a stream whose id is not higher than the current one).
+pub fn next_stream_id(runs: &Path, now: SystemTime) -> u32 {
+    let after = run_folders(runs).last().map_or(0, |(id, _)| id.saturating_add(1));
+    stream_id(now).max(after)
+}
+
+/// Removes the oldest live run folders under `runs` so that at most `keep` remain. Returns how
+/// many were removed; a folder that cannot be removed is logged and skipped.
+pub fn prune_runs(runs: &Path, keep: usize) -> usize {
+    let folders = run_folders(runs);
+    let excess = folders.len().saturating_sub(keep);
+    let mut removed = 0;
+    for (_, dir) in folders.into_iter().take(excess) {
+        match std::fs::remove_dir_all(&dir) {
+            Ok(()) => removed += 1,
+            Err(e) => tracing::warn!("old live run {}: {e}", dir.display()),
+        }
+    }
+    removed
+}
+
+/// First chunk sequence of a model run minus one: the stream id in the upper 32 bits. The core
+/// resumes `SubscribeChunks` after the last sequence it stored; with sequences unique per run a
+/// restarted model's chunks are all above that, so none of them is skipped.
+pub fn sequence_base(stream: u32) -> u64 {
+    u64::from(stream) << 32
 }
 
 /// One slot message as a chunk.
@@ -340,6 +397,49 @@ mod tests {
         let b = stream_id(UNIX_EPOCH + Duration::from_secs(1_800_000_001));
         assert!(b > a);
         assert_eq!(stream_id(UNIX_EPOCH), 1);
+    }
+
+    #[test]
+    fn next_stream_ids_pass_earlier_runs_even_with_the_clock_behind() {
+        let runs = temp("ids");
+        let now = UNIX_EPOCH + Duration::from_secs(1_800_000_000);
+        assert_eq!(next_stream_id(&runs, now), 1_800_000_000, "no runs yet: the clock");
+        std::fs::create_dir_all(runs.join(run_folder_name(1_800_000_000, 41))).unwrap();
+        // A restart within the same second, then one with the clock an hour behind.
+        assert_eq!(next_stream_id(&runs, now), 1_800_000_001);
+        std::fs::create_dir_all(runs.join(run_folder_name(1_800_000_001, 42))).unwrap();
+        assert_eq!(next_stream_id(&runs, now - Duration::from_secs(3600)), 1_800_000_002);
+        // Other folders do not count.
+        std::fs::create_dir_all(runs.join("live-notes")).unwrap();
+        std::fs::create_dir_all(runs.join("live-9999999999-1")).unwrap();
+        assert_eq!(next_stream_id(&runs, now), 1_800_000_002);
+        assert_eq!(run_folder_stream("live-7-12"), Some(7));
+        assert_eq!(run_folder_stream("live-7"), None);
+        let _ = std::fs::remove_dir_all(&runs);
+    }
+
+    #[test]
+    fn pruning_keeps_the_newest_runs_only() {
+        let runs = temp("prune");
+        for id in [5u32, 3, 9, 7] {
+            std::fs::create_dir_all(runs.join(run_folder_name(id, 1)).join("live")).unwrap();
+        }
+        std::fs::create_dir_all(runs.join("keep-me")).unwrap();
+        assert_eq!(prune_runs(&runs, 2), 2);
+        let mut left: Vec<String> =
+            std::fs::read_dir(&runs).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        left.sort();
+        assert_eq!(left, vec!["keep-me", "live-7-1", "live-9-1"]);
+        assert_eq!(prune_runs(&runs, 2), 0);
+        assert_eq!(prune_runs(&runs.join("missing"), 0), 0);
+        let _ = std::fs::remove_dir_all(&runs);
+    }
+
+    #[test]
+    fn sequences_of_a_later_run_are_above_every_sequence_of_an_earlier_one() {
+        let (a, b) = (1_800_000_000u32, 1_800_000_001u32);
+        assert!(sequence_base(b) > sequence_base(a) + u64::from(u32::MAX));
+        assert_eq!(sequence_base(a) >> 32, u64::from(a));
     }
 
     /// The real theater30 stable run (decision 0052: 14 events, 2,881,929 points at the end).

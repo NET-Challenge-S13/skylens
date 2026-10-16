@@ -71,6 +71,9 @@ pub const RESULTS_DIR: &str = "results";
 /// Folder under `work_dir` with one output folder per live run (stable display:
 /// run.log, zone PLYs, the live display and its diff stream `live/stream/`).
 pub const RUNS_DIR: &str = "runs";
+/// Live run folders kept under `RUNS_DIR`, the new one included; older ones are removed at
+/// engine start.
+pub const KEEP_RUNS: usize = 3;
 /// Stable display: the intrinsics count as settled once the focal length of two
 /// refined zones in a row differs by less than this (cumulus3d's default, 1 %).
 pub const SETTLE_TOL: f64 = 0.01;
@@ -152,10 +155,19 @@ impl Engine {
         std::fs::create_dir_all(&live_dir).with_context(|| format!("create {}", live_dir.display()))?;
 
         let host = CompositionHost::new();
-        let log = chunks::ChunkLog::new();
-        let started = std::time::SystemTime::now();
-        let stream = slotstream::stream_id(started);
-        let run_dir = cfg.stable_display.then(|| cfg.work_dir.join(RUNS_DIR).join(format!("live-{stream}-{}", std::process::id())));
+        // One id per model run, higher than any earlier run's: it names the run folder, is the slot
+        // stream id and sets the chunk sequence base, so a core that resumes after a restart of this
+        // server gets every chunk of the new run.
+        let runs = cfg.work_dir.join(RUNS_DIR);
+        let stream = slotstream::next_stream_id(&runs, std::time::SystemTime::now());
+        let log = chunks::ChunkLog::starting_after(slotstream::sequence_base(stream));
+        let run_dir = cfg.stable_display.then(|| runs.join(slotstream::run_folder_name(stream, std::process::id())));
+        if run_dir.is_some() {
+            let removed = slotstream::prune_runs(&runs, KEEP_RUNS - 1);
+            if removed > 0 {
+                tracing::info!("removed {removed} old live run folder(s) under {}", runs.display());
+            }
+        }
         let mut b = ReconNode::declare()
             .id(LIVE_NODE)
             .images(&live_dir)
@@ -178,7 +190,10 @@ impl Engine {
                 .settle(SETTLE_TOL, SETTLE_MAX_ZONE)
                 .live_stride(cfg.live_stride)
                 .stream_origin(cfg.anchor.lat, cfg.anchor.lon, cfg.anchor.alt)
-                .output(dir, SinkOptions::default());
+                .output(dir, SinkOptions::default())
+                // Only run.log, the timeline and the diff stream: no zone, display or model files
+                // (about 0.8 GB per run otherwise, written before each stream pack).
+                .stream_only(true);
         }
         if cfg.gpu {
             b = b.gpu();
@@ -414,12 +429,36 @@ mod tests {
         assert_eq!(engine.push(partial).unwrap(), PushOutcome::Pending);
         let bad = FrameSet { key: None, images: vec![], captured_at_ms: 0 };
         assert!(engine.push(bad).is_err());
-        assert_eq!(engine.log.last_sequence(), 0);
+        assert!(engine.log.since(0).is_empty());
         assert_eq!(engine.anchor_frame(), "enu-36.3685000-127.3475000-30.00");
         // Stable display: the run has its own output folder under runs/.
         let run = engine.run_dir().expect("stable display gives a run folder").to_path_buf();
         assert!(run.starts_with(cfg.work_dir.join(RUNS_DIR)));
+        // The run's stream id sets the chunk sequence base.
+        let id = slotstream::run_folder_stream(run.file_name().unwrap().to_str().unwrap()).unwrap();
+        assert_eq!(engine.log.last_sequence(), slotstream::sequence_base(id));
         drop(engine);
+        let _ = std::fs::remove_dir_all(&cfg.work_dir);
+    }
+
+    #[test]
+    fn a_restarted_engine_gets_a_higher_stream_and_sequences_and_keeps_few_runs() {
+        let cfg = engine_config("restart");
+        let _ = std::fs::remove_dir_all(&cfg.work_dir);
+        let mut last = (0u32, 0u64);
+        for _ in 0..KEEP_RUNS + 2 {
+            // Restarts within the same second: the id still grows.
+            let engine = Engine::new(cfg.clone(), None).unwrap();
+            let run = engine.run_dir().unwrap().to_path_buf();
+            let id = slotstream::run_folder_stream(run.file_name().unwrap().to_str().unwrap()).unwrap();
+            let base = engine.log.last_sequence();
+            assert!(id > last.0 && base > last.1 + u64::from(u32::MAX), "{id} {base} after {last:?}");
+            last = (id, base);
+            std::fs::create_dir_all(&run).unwrap();
+            drop(engine);
+        }
+        let runs = std::fs::read_dir(cfg.work_dir.join(RUNS_DIR)).unwrap().count();
+        assert_eq!(runs, KEEP_RUNS);
         let _ = std::fs::remove_dir_all(&cfg.work_dir);
     }
 

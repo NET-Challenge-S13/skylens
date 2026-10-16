@@ -10,12 +10,15 @@
 //! ```
 //!
 //! Stable display. Zones arrive refined only (no previews). Their points leave through the diff
-//! stream (see `slotstream`), so the consumer publishes point chunks only when there is no
-//! densification (the stream is then empty). A refined zone can be meshed once (deltamesh), but
-//! while the intrinsics settle cumulus3d places the zones up to `settle_max_zone` again and emits
-//! them again; those zones are meshed at the preview level (replaceable) until a zone past
-//! `settle_max_zone` arrives, which is the point after which no shown zone moves. Then their
-//! latest points are meshed at the refined level.
+//! stream (see `slotstream`), so the consumer publishes point chunks only for zones the stream
+//! does not carry: all of them when there is no densification, and a zone whose densification
+//! failed (`ZoneRefined { dense: false }`, cumulus3d writes stream events for dense zones only).
+//! A refined zone can be meshed once (deltamesh), but while the intrinsics settle cumulus3d places
+//! the zones up to `settle_max_zone` again and emits them again; those zones are meshed at the
+//! preview level (replaceable) until a zone past `settle_max_zone` arrives, which is the point
+//! after which no shown zone moves. Then their latest points are meshed at the refined level. A
+//! run that never gets past `settle_max_zone` (at most `settle_max_zone + 1` zones, 4 by default)
+//! keeps those meshes at the preview level.
 //!
 //! Nothing on this side holds the node's lock, so reconstruction never waits on
 //! the UNet, the mesher or a subscriber.
@@ -193,6 +196,16 @@ fn new_mesher(gpu: bool) -> Box<dyn Mesher> {
     Box::new(deltamesh::sdf::SdfMesher::new(deltamesh::Config::default()))
 }
 
+/// One zone result as the consumer handles it.
+struct ZoneIn<'a> {
+    range: ZoneRange,
+    cloud: &'a PointCloud,
+    model: &'a Reconstruction,
+    level: Level,
+    /// The zone's points are dense, so the diff stream carries them (stable display).
+    dense: bool,
+}
+
 /// Stable display state of the consumer.
 #[derive(Debug, Default)]
 struct Stable {
@@ -280,10 +293,12 @@ impl Consumer {
                         tracing::debug!("zone {} preview is not GPS-aligned yet; waiting for the refined zone", range.zone);
                         return;
                     }
-                    self.zone(range, &cloud, &model, Level::Preview, mesher, dirty);
+                    let z = ZoneIn { range, cloud: &cloud, model: &model, level: Level::Preview, dense: false };
+                    self.zone(z, mesher, dirty);
                 }
-                Event::ZoneRefined { range, cloud, model, .. } => {
-                    self.zone(range, &cloud, &model, Level::Refined, mesher, dirty);
+                Event::ZoneRefined { range, cloud, model, dense, .. } => {
+                    let z = ZoneIn { range, cloud: &cloud, model: &model, level: Level::Refined, dense };
+                    self.zone(z, mesher, dirty);
                 }
                 Event::Warning { message, .. } => tracing::warn!("recon: {message}"),
                 Event::Error { message, .. } => tracing::error!("recon: {message}"),
@@ -292,22 +307,19 @@ impl Consumer {
         }
     }
 
-    fn zone(
-        &mut self,
-        range: ZoneRange,
-        cloud: &PointCloud,
-        model: &Reconstruction,
-        level: Level,
-        mesher: &mut dyn Mesher,
-        dirty: &mut BTreeSet<u32>,
-    ) {
+    fn zone(&mut self, z: ZoneIn<'_>, mesher: &mut dyn Mesher, dirty: &mut BTreeSet<u32>) {
+        let ZoneIn { range, cloud, model, level, dense } = z;
         let seg = range.zone as u32;
         let points = zone_points(cloud, model, range, &self.positions);
         if points.is_empty() {
             tracing::debug!("zone {seg} {level:?}: no points");
             return;
         }
-        if self.stable.as_ref().is_none_or(|s| !s.stream_points) {
+        let streamed = dense && self.stable.as_ref().is_some_and(|s| s.stream_points);
+        if !streamed {
+            if self.stable.as_ref().is_some_and(|s| s.stream_points) {
+                tracing::warn!("zone {seg}: densification failed; its sparse points go out as point chunks");
+            }
             let generation = if level == Level::Refined {
                 let g = self.refined_generation.entry(seg).or_insert(0);
                 *g += 1;
@@ -410,12 +422,12 @@ mod tests {
         assert!(q.pop().is_none(), "closed queue accepts nothing");
     }
 
-    /// A flat 5 m x 5 m patch sampled every 5 cm (the deltamesh example).
-    fn patch() -> Arc<PointCloud> {
+    /// A flat 5 m x 5 m patch sampled every 5 cm (the deltamesh example), starting at x = `x0`.
+    fn patch_at(x0: f32) -> Arc<PointCloud> {
         let mut c = PointCloud::default();
         for i in 0..100 {
             for j in 0..100 {
-                c.positions.push([i as f32 * 0.05, j as f32 * 0.05, 0.0]);
+                c.positions.push([x0 + i as f32 * 0.05, j as f32 * 0.05, 0.0]);
                 c.colors.push([180, 180, 180]);
             }
         }
@@ -427,13 +439,19 @@ mod tests {
     }
 
     fn zone_event_at(zone: usize, refined: bool, frame: &str) -> Msg {
+        zone_event_with(zone, refined, frame, true)
+    }
+
+    /// A zone event; each zone has its own patch (100 m apart), so zones never share mesh blocks.
+    fn zone_event_with(zone: usize, refined: bool, frame: &str, dense: bool) -> Msg {
         let meta = Meta { version: 1, at: SystemTime::now() };
         let range = ZoneRange { zone, lo: 10 * zone, hi: 10 * zone + 14 };
         let model = Arc::new(Reconstruction::new());
+        let cloud = patch_at(100.0 * zone as f32);
         Msg::Event(if refined {
-            Event::ZoneRefined { meta, range, cloud: patch(), model, dense: true }
+            Event::ZoneRefined { meta, range, cloud, model, dense }
         } else {
-            Event::ZonePreview { meta, range, cloud: patch(), model, dense: true, frame: frame.into() }
+            Event::ZonePreview { meta, range, cloud, model, dense, frame: frame.into() }
         })
     }
 
@@ -482,14 +500,31 @@ mod tests {
         let s = log.last_sequence();
         assert!(log.since(0).iter().all(|x| x.kind == ChunkKind::MeshBlock as i32), "points travel in the diff stream");
         assert_eq!(mesh_levels(&log, 0), BTreeSet::from([(0, pre), (1, pre)]));
-        // Zone 0 placed again (settling): replaced, still provisional.
-        c.handle(zone_event_at(0, true, ""), mesher.as_mut(), &mut dirty);
-        assert!(mesh_levels(&log, s).iter().all(|(_, l)| *l == pre));
+        // Zone 0 placed again (settling, here 1 m east): replaced, still provisional.
+        let moved = Msg::Event(Event::ZoneRefined {
+            meta: Meta { version: 1, at: SystemTime::now() },
+            range: ZoneRange { zone: 0, lo: 0, hi: 14 },
+            cloud: patch_at(1.0),
+            model: Arc::new(Reconstruction::new()),
+            dense: true,
+        });
+        c.handle(moved, mesher.as_mut(), &mut dirty);
+        let replaced = mesh_levels(&log, s);
+        assert_eq!(replaced, BTreeSet::from([(0, pre)]), "the moved zone 0 is re-meshed provisionally");
 
-        // Zone 2 is past the settle limit: zones 0 and 1 are meshed for good, then zone 2.
+        // Zone 2 is past the settle limit: zones 0 and 1 are committed at the refined level (their
+        // latest points, so their mesh does not change and deltamesh publishes no new block), then
+        // zone 2 is meshed refined.
         let s = log.last_sequence();
         c.handle(zone_event_at(2, true, ""), mesher.as_mut(), &mut dirty);
-        assert_eq!(mesh_levels(&log, s), BTreeSet::from([(0, fin), (1, fin), (2, fin)]));
+        assert_eq!(mesh_levels(&log, s), BTreeSet::from([(2, fin)]));
+        let one = [deltamesh::Point { pos: [0.0; 3], rgb: [0; 3], normal: [0.0; 3] }];
+        for z in [0, 1, 2] {
+            assert!(
+                matches!(mesher.ingest(z, deltamesh::Level::Refined, &one), Err(deltamesh::IngestError::AlreadyRefined(_))),
+                "zone {z} is refined in deltamesh"
+            );
+        }
         let s = log.last_sequence();
         c.handle(zone_event_at(3, true, ""), mesher.as_mut(), &mut dirty);
         assert_eq!(mesh_levels(&log, s), BTreeSet::from([(3, fin)]));
@@ -505,5 +540,24 @@ mod tests {
         let points: Vec<_> = log.since(0).iter().filter(|x| x.kind == ChunkKind::Points as i32).map(|x| (x.segment, x.level)).collect();
         assert!(!points.is_empty());
         assert!(points.iter().all(|p| *p == (0, Level::Refined as i32)));
+    }
+
+    #[test]
+    fn stable_display_sends_point_chunks_for_a_zone_whose_densification_failed() {
+        let log = ChunkLog::new();
+        let mut c = Consumer::new(log.clone(), ANCHOR, false, false).stable_display(3, true);
+        let mut mesher = new_mesher(false);
+        let mut dirty = BTreeSet::new();
+        let points = |log: &ChunkLog| -> BTreeSet<u32> {
+            log.since(0).iter().filter(|x| x.kind == ChunkKind::Points as i32).map(|x| x.segment).collect()
+        };
+        c.handle(zone_event_with(0, true, "", true), mesher.as_mut(), &mut dirty);
+        assert!(points(&log).is_empty(), "a dense zone travels in the diff stream");
+        // Zone 1's densification failed: the stream has nothing of it, so its points go as chunks.
+        c.handle(zone_event_with(1, true, "", false), mesher.as_mut(), &mut dirty);
+        assert_eq!(points(&log), BTreeSet::from([1]));
+        assert!(log.since(0).iter().any(|x| x.kind == ChunkKind::MeshBlock as i32 && x.segment == 1), "and it is meshed");
+        c.handle(zone_event_with(2, true, "", true), mesher.as_mut(), &mut dirty);
+        assert_eq!(points(&log), BTreeSet::from([1]));
     }
 }

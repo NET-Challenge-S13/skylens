@@ -126,6 +126,14 @@ impl ChunkLog {
         Arc::new(Self::default())
     }
 
+    /// A log whose first chunk gets sequence `base + 1` (see `slotstream::sequence_base`: the
+    /// live engine starts each model run above every sequence of the runs before it).
+    pub fn starting_after(base: u64) -> Arc<Self> {
+        let log = Self::default();
+        log.lock().last = base;
+        Arc::new(log)
+    }
+
     fn lock(&self) -> MutexGuard<'_, LogState> {
         self.st.lock().unwrap_or_else(|p| p.into_inner())
     }
@@ -311,6 +319,20 @@ mod tests {
         assert!(points.contains(&(1, 0)), "segment 1 preview must stay: {points:?}");
         assert!(points.contains(&(0, 1)), "segment 0 refined must arrive: {points:?}");
         assert!(!points.contains(&(0, 0)), "segment 0 preview must be replaced: {points:?}");
+    }
+
+    #[test]
+    fn a_log_with_a_base_numbers_its_chunks_above_it() {
+        let base = 7u64 << 32;
+        let log = ChunkLog::starting_after(base);
+        assert_eq!(log.last_sequence(), base);
+        assert!(log.since(0).is_empty());
+        log.publish([detections_chunk(0, 1, &DetectionBatch::default())]);
+        log.publish([detections_chunk(1, 1, &DetectionBatch::default())]);
+        let seqs: Vec<u64> = log.since(0).iter().map(|c| c.sequence).collect();
+        assert_eq!(seqs, vec![base + 1, base + 2]);
+        // A core that stored a lower (earlier run's) sequence gets every chunk of this run.
+        assert_eq!(log.since((6u64 << 32) + 900).len(), 2);
     }
 
     #[test]
