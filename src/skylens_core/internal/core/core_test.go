@@ -640,3 +640,39 @@ func TestServerStatusCarriesTheModelGPUError(t *testing.T) {
 		t.Fatalf("gpu error %q", e)
 	}
 }
+
+func TestPointsDeltaReachesViewersAndReplaysToLateJoiners(t *testing.T) {
+	c := New(Options{Config: testConfig(t), Clock: &manualClock{}})
+	defer c.Close()
+	viewer := attach(c.Viewers, c.ViewerHandler())
+	drain(t, viewer)
+
+	d := func(seq uint64, gen uint32, tag string) *modelv1.Chunk {
+		return &modelv1.Chunk{Sequence: seq, Kind: modelv1.ChunkKind_CHUNK_KIND_POINTS_DELTA, Level: modelv1.Level_LEVEL_REFINED,
+			Version: uint32(seq), Generation: gen, Payload: []byte(tag)}
+	}
+	c.PutChunk(d(1, 0, "a"))
+	c.PutChunk(d(2, 0, "b"))
+	c.PutChunk(d(3, 0, "late-stale-after-snapshot"))
+	c.PutChunk(d(4, 1, "snap"))
+	c.PutChunk(d(5, 0, "stale")) // lower generation: not forwarded
+	if k := kinds(drain(t, viewer)); strings.Join(k, ",") != "chunk:a,chunk:b,chunk:late-stale-after-snapshot,chunk:snap" {
+		t.Fatalf("live viewer got %v", k)
+	}
+	for _, mk := range []func() *ws.Peer{
+		func() *ws.Peer { return attach(c.Viewers, c.ViewerHandler()) },
+		func() *ws.Peer { return attach(c.Controls, c.ControlHandler()) },
+	} {
+		got := drain(t, mk())
+		var chunks []*modelv1.Chunk
+		for _, e := range got {
+			if ch := e.GetChunk(); ch != nil {
+				chunks = append(chunks, ch)
+			}
+		}
+		if len(chunks) != 1 || string(chunks[0].GetPayload()) != "snap" || chunks[0].GetGeneration() != 1 ||
+			chunks[0].GetKind() != modelv1.ChunkKind_CHUNK_KIND_POINTS_DELTA {
+			t.Fatalf("late joiner replay %v", chunks)
+		}
+	}
+}

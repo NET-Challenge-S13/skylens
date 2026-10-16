@@ -205,6 +205,7 @@ impl ChunkStore {
             model::ChunkKind::Detections => self.apply_detections(chunk),
             model::ChunkKind::Terrain => self.apply_terrain(chunk),
             model::ChunkKind::Buildings => self.apply_buildings(chunk),
+            model::ChunkKind::PointsDelta => Applied::of(Change::Invalid("points delta not handled yet".into())),
             model::ChunkKind::Unspecified => Applied::of(Change::Invalid(format!("unknown chunk kind {}", chunk.kind))),
         };
         if matches!(out.change, Change::Invalid(_)) {

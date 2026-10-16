@@ -4,7 +4,9 @@
 //!   generates from). The `grpc` feature adds the `ModelService` client and server.
 //! - [`geo`]: GPS <-> local ENU conversion, numerically identical to
 //!   `src/skylens_model/utils/geo.py`.
+//! - [`delta`]: pack/unpack and chunk mapping of `CHUNK_KIND_POINTS_DELTA`.
 
+pub mod delta;
 pub mod geo;
 
 pub mod proto {

@@ -3,7 +3,8 @@
 // The core only routes these by Chunk metadata. Producers (skylens_model, the
 // core's terrain feed) encode them and screens decode them. CHUNK_KIND_POINTS
 // carries pointblitz chunk bytes (pointblitz-io chunk format v2) and has no
-// message here. Terrain and buildings are sent as raw source data; the control
+// message here; CHUNK_KIND_POINTS_DELTA carries a PointsDelta (live edits of the
+// point set). Terrain and buildings are sent as raw source data; the control
 // tower builds their look (grade, extrusion, edges, display modes) itself.
 syntax = "proto3";
 
@@ -75,4 +76,30 @@ message Building {
 message BuildingSet {
   repeated int32 cell = 1;
   repeated Building buildings = 2;
+}
+
+enum DeltaKind {
+  DELTA_KIND_UNSPECIFIED = 0;
+  DELTA_KIND_REFINED = 1;
+  DELTA_KIND_REPLACE = 2;
+  DELTA_KIND_FINAL = 3;
+}
+
+// CHUNK_KIND_POINTS_DELTA: one live edit of the point set. Per delta the viewer
+// applies removes, then adds, then moves. Ids are dense slot indices (< capacity).
+// Chunk metadata: segment = zone, level = REFINED, version = seq,
+// generation = snapshot epoch (0 until the first snapshot).
+message PointsDelta {
+  uint32 seq = 1;          // cumulus3d DisplayDelta.seq (>=1, +1 per delta; a snapshot carries the seq of the last delta it covers)
+  DeltaKind kind = 2;
+  uint32 zone = 3;         // zone that triggered it
+  uint32 capacity = 4;     // slot count: every id < capacity
+  uint32 total_points = 5; // live points after this delta
+  bool snapshot = 6;       // full state: viewer clears all slots, then applies adds; moves/removes empty
+  double t_s = 7;          // model clock: seconds since the first delta (replay timeline)
+  uint32 positions = 8;    // frame positions ingested so far (0 unknown)
+  uint32 positions_total = 9; // 0 unknown
+  bytes adds = 10;         // N x 20 B little-endian: id u32, x f32, y f32, z f32 (ENU metres about the anchor), r u8, g u8, b u8, zone u8
+  bytes moves = 11;        // N x 20 B: id u32, x,y,z f32, r u8, g u8, b u8, pad u8
+  bytes removes = 12;      // N x 4 B: id u32
 }

@@ -10,6 +10,11 @@
 //     chunks and every older generation. Chunks of the same generation
 //     accumulate (refined data is sent coarse first, in several chunks).
 //     Older generations are dropped.
+//   - points delta: kept in arrival order. A chunk with a higher generation
+//     (the snapshot that starts it) replaces every stored delta chunk; the
+//     same generation appends; a lower one is stale and rejected. Replaying
+//     the list from the start rebuilds the current point set. Boards get
+//     them too (they are not base map).
 //   - mesh blocks: one per block id; replaced only by a higher version. What an
 //     empty payload means is the model's business; the newest is kept as is.
 //   - detections: appended in arrival order (a viewer replays them in the same
@@ -91,6 +96,8 @@ type Store struct {
 	points     map[uint32]*segmentPoints
 	mesh       *ordered
 	detections []*modelv1.Chunk
+	deltas     []*modelv1.Chunk // points deltas, arrival order
+	deltaGen   uint32
 	detPerSeg  map[uint32]int
 	terrain    *ordered // terrain and buildings
 	segLevel   map[uint32]modelv1.Level
@@ -127,7 +134,8 @@ func IsModelKind(k modelv1.ChunkKind) bool {
 	switch k {
 	case modelv1.ChunkKind_CHUNK_KIND_POINTS,
 		modelv1.ChunkKind_CHUNK_KIND_MESH_BLOCK,
-		modelv1.ChunkKind_CHUNK_KIND_DETECTIONS:
+		modelv1.ChunkKind_CHUNK_KIND_DETECTIONS,
+		modelv1.ChunkKind_CHUNK_KIND_POINTS_DELTA:
 		return true
 	}
 	return false
@@ -148,6 +156,8 @@ func (s *Store) Put(c *modelv1.Chunk) bool {
 	switch c.GetKind() {
 	case modelv1.ChunkKind_CHUNK_KIND_POINTS:
 		ok = s.putPointsLocked(c)
+	case modelv1.ChunkKind_CHUNK_KIND_POINTS_DELTA:
+		ok = s.putDeltaLocked(c)
 	case modelv1.ChunkKind_CHUNK_KIND_MESH_BLOCK:
 		ok = s.putMeshLocked(c)
 	case modelv1.ChunkKind_CHUNK_KIND_DETECTIONS:
@@ -172,7 +182,8 @@ func (s *Store) Put(c *modelv1.Chunk) bool {
 		s.counters.Model++
 	}
 	s.counters.LastChunkAt = time.Now()
-	if c.GetKind() == modelv1.ChunkKind_CHUNK_KIND_POINTS || c.GetKind() == modelv1.ChunkKind_CHUNK_KIND_MESH_BLOCK {
+	if c.GetKind() == modelv1.ChunkKind_CHUNK_KIND_POINTS || c.GetKind() == modelv1.ChunkKind_CHUNK_KIND_MESH_BLOCK ||
+		c.GetKind() == modelv1.ChunkKind_CHUNK_KIND_POINTS_DELTA {
 		if cur, seen := s.segLevel[c.GetSegment()]; !seen || c.GetLevel() > cur {
 			s.segLevel[c.GetSegment()] = c.GetLevel()
 		}
@@ -207,6 +218,19 @@ func (s *Store) putPointsLocked(c *modelv1.Chunk) bool {
 	default:
 		return false
 	}
+}
+
+func (s *Store) putDeltaLocked(c *modelv1.Chunk) bool {
+	switch {
+	case len(s.deltas) == 0 || c.GetGeneration() > s.deltaGen:
+		s.deltas = []*modelv1.Chunk{c}
+		s.deltaGen = c.GetGeneration()
+	case c.GetGeneration() == s.deltaGen:
+		s.deltas = append(s.deltas, c)
+	default:
+		return false
+	}
+	return true
 }
 
 func (s *Store) putMeshLocked(c *modelv1.Chunk) bool {
@@ -265,7 +289,7 @@ func IsBaseMap(k modelv1.ChunkKind) bool {
 }
 
 // Chunks returns every kept chunk in replay order: terrain and buildings
-// first (the ground under everything), then points by segment, mesh blocks,
+// first (the ground under everything), then points by segment, points deltas in arrival order, mesh blocks,
 // and detections last in arrival order. This is the control tower's replay.
 func (s *Store) Chunks() []*modelv1.Chunk { return s.chunks(true) }
 
@@ -299,6 +323,7 @@ func (s *Store) chunks(baseMap bool) []*modelv1.Chunk {
 		out = append(out, p.preview...)
 		out = append(out, p.refined...)
 	}
+	out = append(out, s.deltas...)
 	s.mesh.each(func(c *modelv1.Chunk) { out = append(out, c) })
 	out = append(out, s.detections...)
 	return out

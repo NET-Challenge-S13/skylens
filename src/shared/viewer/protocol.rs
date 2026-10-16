@@ -27,6 +27,14 @@ pub fn decode_mesh_block(bytes: &[u8]) -> Result<payload::MeshBlock, prost::Deco
     payload::MeshBlock::decode(bytes)
 }
 
+/// Payload of a `CHUNK_KIND_POINTS_DELTA` chunk, validated (record lengths, ids below capacity).
+pub fn decode_points_delta(bytes: &[u8]) -> Result<payload::PointsDelta, skylens_shared::delta::DeltaError> {
+    let d = payload::PointsDelta::decode(bytes)
+        .map_err(|e| skylens_shared::delta::DeltaError::Decode(e.to_string()))?;
+    skylens_shared::delta::validate(&d)?;
+    Ok(d)
+}
+
 /// Payload of a `CHUNK_KIND_TERRAIN` chunk.
 pub fn decode_terrain_tile(bytes: &[u8]) -> Result<payload::TerrainTile, prost::DecodeError> {
     payload::TerrainTile::decode(bytes)

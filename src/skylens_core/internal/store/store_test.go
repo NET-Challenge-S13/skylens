@@ -236,3 +236,57 @@ func TestTelemetryRouteLinks(t *testing.T) {
 		t.Fatalf("links %v", l)
 	}
 }
+
+func delta(seq uint64, zone uint32, gen uint32, tag string) *modelv1.Chunk {
+	return &modelv1.Chunk{Sequence: seq, Kind: modelv1.ChunkKind_CHUNK_KIND_POINTS_DELTA, Segment: zone,
+		Level: refined, Version: uint32(seq), Generation: gen, Payload: []byte(tag)}
+}
+
+func TestPointsDeltaArrivalOrderAndSnapshotReplacement(t *testing.T) {
+	s := New(Options{})
+	for i, tag := range []string{"d1", "d2", "d3"} {
+		if !s.Put(delta(uint64(i+1), 1, 0, tag)) {
+			t.Fatalf("%s rejected", tag)
+		}
+	}
+	sameTags(t, s.Chunks(), "d1", "d2", "d3")
+	if !s.Put(delta(4, 2, 1, "snap1")) { // higher generation replaces everything
+		t.Fatal("snapshot rejected")
+	}
+	sameTags(t, s.Chunks(), "snap1")
+	s.Put(delta(5, 2, 1, "d5"))
+	sameTags(t, s.Chunks(), "snap1", "d5")
+	if s.Put(delta(6, 2, 0, "stale")) {
+		t.Fatal("lower generation accepted")
+	}
+	sameTags(t, s.Chunks(), "snap1", "d5")
+}
+
+func TestPointsDeltaCountersAndSegments(t *testing.T) {
+	s := New(Options{})
+	s.Put(delta(3, 4, 0, "a"))
+	s.Put(delta(7, 4, 1, "b"))
+	s.Put(delta(9, 4, 0, "stale"))
+	c := s.Counters()
+	if c.Accepted != 2 || c.Model != 2 || c.Rejected != 1 || s.LastModelSequence() != 9 {
+		t.Fatalf("counters %+v last %d", c, s.LastModelSequence())
+	}
+	seg := s.Segments()
+	if len(seg) != 1 || seg[0].GetIndex() != 4 || seg[0].GetLevel() != refined {
+		t.Fatalf("segments %v", seg)
+	}
+	if !IsModelKind(modelv1.ChunkKind_CHUNK_KIND_POINTS_DELTA) || IsBaseMap(modelv1.ChunkKind_CHUNK_KIND_POINTS_DELTA) {
+		t.Fatal("kind classification")
+	}
+}
+
+func TestPointsDeltaReplayOrderAndBoards(t *testing.T) {
+	s := New(Options{})
+	s.Put(delta(1, 0, 0, "delta"))
+	s.Put(&modelv1.Chunk{Sequence: 2, Kind: modelv1.ChunkKind_CHUNK_KIND_DETECTIONS, Payload: []byte("det")})
+	s.Put(meshBlock(3, []int32{0, 0, 0}, 1, "mesh"))
+	s.Put(pt(4, 0, refined, 1, "pts"))
+	s.Put(&modelv1.Chunk{Sequence: 5, Kind: terrain, BlockId: []int32{0, 0}, Level: refined, Payload: []byte("ter")})
+	sameTags(t, s.Chunks(), "ter", "pts", "delta", "mesh", "det")
+	sameTags(t, s.ModelChunks(), "pts", "delta", "mesh", "det")
+}

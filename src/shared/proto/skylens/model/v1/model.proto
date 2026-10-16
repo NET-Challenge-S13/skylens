@@ -191,6 +191,7 @@ enum ChunkKind {
   CHUNK_KIND_DETECTIONS = 3; // skylens.payload.v1.DetectionBatch
   CHUNK_KIND_TERRAIN = 4;    // skylens.payload.v1.TerrainTile, from the core terrain feed (control tower only)
   CHUNK_KIND_BUILDINGS = 5;  // skylens.payload.v1.BuildingSet, from the core terrain feed (control tower only)
+  CHUNK_KIND_POINTS_DELTA = 6; // skylens.payload.v1.PointsDelta: live edit of the point set; generation = snapshot epoch
 }
 
 // Routing metadata is all the core reads. payload goes to viewers unchanged.
