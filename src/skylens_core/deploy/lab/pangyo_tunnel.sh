@@ -1,7 +1,7 @@
 #!/bin/bash
-# 대전에서 판교로 가는 상시 터널. hirun 으로 프록시를 통과한 뒤 포트 하나를 로컬에 묶는다.
-# 이게 떠 있으면 대전에서 'ssh pangyo' 가 바로 된다. 매번 프록시 인증을 다시 하지 않으므로
-# 측정값이 인증 비용에 오염되지 않는다.
+# The standing tunnel from Daejeon to Pangyo: pass the proxy with hirun, then bind
+# one local port. With this up, `ssh pangyo` works straight from Daejeon, and no
+# measurement is polluted by repeating the proxy authentication.
 set -u
 . ~/.koren_portal
 LOCAL_PORT=${LOCAL_PORT:-19022}

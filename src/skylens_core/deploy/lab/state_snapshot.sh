@@ -1,6 +1,6 @@
 #!/bin/bash
-# 노드 상태를 한 시간마다 기록한다. 측정값만 남기면 나중에 "그때 무슨 설정이었나"를
-# 알 수 없다. 설정과 상태도 같이 남겨야 결과를 재현할 수 있다.
+# Record node state once an hour. Measurements alone never answer "what was the
+# setup at the time", and without the setup the results cannot be reproduced.
 OUT=~/lab/results/state-$(date +%Y%m%d).log
 {
   echo "===== $(date -Is) ====="

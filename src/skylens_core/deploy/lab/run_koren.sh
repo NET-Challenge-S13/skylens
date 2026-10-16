@@ -1,7 +1,7 @@
 #!/bin/bash
-# 대전 ↔ 판교(KOREN 내부) 10분 주기 프로브. 상시 터널 위에서 돈다.
-# 병렬 측정은 터널 4개에 나눠 보낸다. 한 터널에 스트림을 여러 개 주면
-# SSH 세션 하나 안에서 채널만 나뉘어 TCP 연결 하나를 공유하므로 병렬이 아니다.
+# The 10-minute Daejeon-to-Pangyo probe (inside KOREN), over the standing tunnels.
+# Parallel measurements are spread over four tunnels. Several streams inside one
+# tunnel share a single TCP connection as channels, so that is not parallel at all.
 cd "$(dirname "$0")"
 exec >> ~/lab/results/koren-$(date +%Y%m%d).jsonl 2>> ~/lab/results/koren-error.log
 ss -ltn | grep -q 19022 || { echo "{\"ts\": \"$(date -Is)\", \"label\": \"koren-internal\", \"error\": \"tunnel down\"}"; exit 0; }

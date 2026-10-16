@@ -1,6 +1,6 @@
 #!/bin/bash
-# hirun 이 만든 세션 자격증명을 파이에서 써 볼 수 있는지 한 번만 확인한다.
-# 디스크에 남기지 않고 환경변수로만 넘긴다.
+# One-off check: can the session credentials hirun minted be used from the pi?
+# Passed through the environment only, never written to disk.
 set -u
 . ~/.koren_portal
 ( ~/hirun -u "$ID" -p "$PW" -c "sleep 25" >/dev/null 2>&1 & )

@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# 대전 VM 설치 — MediaMTX (배포 노드)
+# Daejeon VM installer: MediaMTX, the distribution node.
 #
-# 사용:
-#   sudo ./setup-daejeon.sh local     # 1단계: 로컬 ffmpeg 테스트 소스를 받는다 (mediamtx.yml)
-#   sudo ./setup-daejeon.sh bridge    # 2단계: 브리지 SRT 에서 당겨온다     (mediamtx-pull.yml)
+# Usage:
+#   sudo ./setup-daejeon.sh local     # stage 1: take a local ffmpeg test source (mediamtx.yml)
+#   sudo ./setup-daejeon.sh bridge    # stage 2: pull from the bridge SRT (mediamtx-pull.yml)
 #
-# 브리지 → 대전 터널은 브리지 쪽(autossh)이 건다. 대전에서는 브리지 공개키만 등록한다:
-#   ./register-bridge-key.sh '<브리지 공개키>'
+# The bridge dials the tunnel itself (autossh); on this side we only register
+# the bridge public key:  ./register-bridge-key.sh '<bridge public key>'
 set -euo pipefail
 cd "$(dirname "$(readlink -f "$0")")"
 

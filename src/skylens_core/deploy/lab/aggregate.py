@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""측정 결과 집계. JSONL 을 읽어 지점별·항목별 분포를 표로 만든다.
+"""Aggregate the measurements: read the JSONL and table the distribution per node and metric.
 
-평균 하나로 뭉개지 않는다. 재난 대응에서 중요한 것은 평균이 아니라
-나쁜 쪽 꼬리(p95)와 흔들림(지터)이기 때문이다.
+No single average. What matters in disaster response is not the mean but the bad
+tail (p95) and the wobble (jitter).
 
-사용:
+Usage:
     python3 aggregate.py ~/lab/results/*.jsonl              # 전체
     python3 aggregate.py --since 2026-10-05 ~/lab/results/*.jsonl
     python3 aggregate.py --md ~/lab/results/*.jsonl         # 마크다운 표로
@@ -48,7 +48,7 @@ def main() -> None:
     ap.add_argument("--md", action="store_true", help="마크다운 표로 출력")
     args = ap.parse_args()
 
-    # (label, 항목) -> 값 목록
+    # (label, metric) -> list of values
     rtt: dict[tuple[str, str], list[float]] = defaultdict(list)
     jit: dict[tuple[str, str], list[float]] = defaultdict(list)
     burst: dict[tuple[str, str], list[float]] = defaultdict(list)

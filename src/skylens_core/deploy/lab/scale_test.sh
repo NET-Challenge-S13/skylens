@@ -1,7 +1,7 @@
 #!/bin/bash
-# 독립 터널 수를 늘리며 합계 처리량이 어디서 평평해지는지 본다.
-# 각 터널은 프록시를 통과하는 별개 연결이다. 한 터널에 여러 스트림을 태우면
-# 결국 한 연결 안에서 나눠 쓰는 것이라 의미가 다르다.
+# Raise the number of independent tunnels and watch where the summed throughput
+# flattens. Each tunnel is its own connection through the proxy; several streams
+# inside one tunnel would only share that one connection, which measures something else.
 set -u
 . ~/.koren_portal
 BASE=19030
@@ -37,5 +37,5 @@ for N in 1 2 4 8; do
   }'
 done
 
-# 측정이 끝나면 임시 터널을 내린다. 예약된 10분 프로브와 섞이지 않게 한다.
+# Take the temporary tunnels down so they do not mix with the scheduled 10-minute probe.
 for i in $(seq 0 $((MAXN-1))); do pkill -f "L $((BASE+i)):" 2>/dev/null; done

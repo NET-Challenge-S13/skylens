@@ -1,5 +1,5 @@
 #!/bin/bash
-# 대전에서 매일 도는 집계. 전날까지의 측정을 요약해 보고서 파일로 남긴다.
+# The daily roll-up on Daejeon: summarise everything up to yesterday into a report file.
 cd ~/lab || exit 1
 mkdir -p reports
 DAY=$(date +%Y-%m-%d)

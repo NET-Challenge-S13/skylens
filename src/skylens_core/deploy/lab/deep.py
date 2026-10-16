@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""심화 프로브 — 시간마다 한 번 도는 긴 실험.
+"""The deeper probe: the long experiment that runs once an hour.
 
-10분 주기 프로브(`probe.py`)가 추세를 보는 것이라면, 이쪽은 **곡선**을 그린다.
-하루 한 점이 아니라 며칠치 곡선이 쌓여야 아래 질문에 답할 수 있다.
+Where the 10-minute probe (`probe.py`) watches the trend, this one draws the
+curves. One point a day is not enough; several days of curves answer these:
 
-  Q1. 전송이 얼마나 커져야 회선 속도가 나오나 (TCP 시작 구간의 무릎이 어디인가)
-  Q2. 스트림을 늘리면 어디서 포화하나 (단일 스트림이 묶여 있는가)
-  Q3. 오래 보내면 유지되나, 아니면 중간에 무너지나
-  Q4. 재전송이 얼마나 나나 (손실이 성능을 깎고 있는가)
-
-사용:
+  Q1. How large does a transfer have to be before it reaches line speed (where is
+      the knee of TCP slow start)
+  Q2. Where does adding streams saturate (is a single stream bound)
+  Q3. Does a long send hold up, or does it collapse partway
+  Q4. How many retransmits appear (is loss eating the performance)
+Usage:
     python3 deep.py --label koren-internal --ssh-host pangyo
     python3 deep.py --label pi-175        --ssh-host mnd
 """
@@ -25,7 +25,7 @@ import probe
 
 
 def tcp_counters() -> dict[str, int]:
-    """커널의 TCP 누적 카운터. 전후 차이로 이번 전송의 재전송을 본다."""
+    """The kernel's cumulative TCP counters; the before/after difference gives this transfer's retransmits."""
     want = {"OutSegs", "RetransSegs", "InSegs"}
     out: dict[str, int] = {}
     try:
@@ -60,7 +60,7 @@ def retrans_delta(before: dict[str, int], after: dict[str, int]) -> dict:
 
 
 def measured(fn, *args, **kwargs) -> dict:
-    """전송 하나를 돌리면서 재전송 카운터를 함께 잡는다."""
+    """Run one transfer and capture the retransmit counters alongside it."""
     c0 = tcp_counters()
     res = fn(*args, **kwargs)
     c1 = tcp_counters()
@@ -70,9 +70,9 @@ def measured(fn, *args, **kwargs) -> dict:
 
 
 def sustained(ssh_host: str, seconds: int = 30) -> dict:
-    """오래 보내면서 유지되는지 본다. 완료 시간이 아니라 **지속 가능한 속도**를 잰다."""
-    # 넉넉한 양을 보내고 제한 시간에 끊는다. 끊긴 시점까지 보낸 양으로 계산한다.
-    blocks = 20 * 1024 * 16  # 20GB 상한. 시간으로 끊는다.
+    """Send for a long stretch and see whether it holds: this times the sustainable rate, not completion."""
+    # Offer plenty and cut it off on the clock, then compute from what went out by then.
+    blocks = 20 * 1024 * 16  # 20GB cap; the clock ends it
     cmd = (f"timeout {seconds} bash -c 'dd if=/dev/zero bs=65536 count={blocks} status=none "
            f"| ssh {probe.SSH_OPTS} {ssh_host} \"cat > /dev/null\"' ; true")
     c0 = tcp_counters()
@@ -81,8 +81,8 @@ def sustained(ssh_host: str, seconds: int = 30) -> dict:
     dt = time.perf_counter() - t0
     c1 = tcp_counters()
     d = retrans_delta(c0, c1)
-    # 보낸 양은 커널 카운터로 역산하지 않고, 세그먼트 수가 아니라 실제 전송량을 모르므로
-    # 지속 속도는 재전송 비율과 함께 보조 지표로만 쓴다.
+    # The volume is not back-computed from kernel counters: segment counts are not
+    # bytes, so the sustained rate is only a secondary figure next to the retransmit ratio.
     return {"ok": True, "seconds": round(dt, 1), "tcp": d}
 
 
@@ -94,8 +94,8 @@ def main() -> None:
                     help="단일 스트림으로 재는 전송 크기 MB 목록")
     ap.add_argument("--streams", default="1,2,4,8",
                     help="같은 총량을 몇 개로 나눠 보낼지 목록")
-    # 총량을 나누면 스트림이 늘수록 각 전송이 작아져 TCP 시작 구간에 걸린다.
-    # 그래서 스트림 1개가 보낼 양을 고정한다.
+    # Splitting a fixed total makes each transfer smaller as streams grow, which runs
+    # straight back into slow start, so what is fixed here is the volume per stream.
     ap.add_argument("--stream-each", type=int, default=50,
                     help="스트림 하나가 보낼 양 MB")
     ap.add_argument("--sustain-sec", type=int, default=30)
@@ -114,7 +114,7 @@ def main() -> None:
         "sustained": {},
     }
 
-    # Q1 — 크기를 키우며 처리량이 어디서 평평해지는지
+    # Q1 - grow the size and see where throughput flattens
     for mb in [int(x) for x in args.sizes.split(",") if x]:
         runs = [measured(probe.ssh_burst, args.ssh_host, mb, "up")
                 for _ in range(args.repeat)]
@@ -130,9 +130,9 @@ def main() -> None:
                 ),
             })
 
-    # Q2 — 스트림을 늘리면 어디서 포화하는지
-    # 호스트 목록이 주어지면 스트림을 거기에 나눠 보낸다. 터널 뒤의 판교를 잴 때
-    # 한 호스트에 몰아주면 SSH 세션 하나의 채널로 쪼개져 병렬이 성립하지 않는다.
+    # Q2 - add streams and see where it saturates
+    # With a host list the streams spread over it. When measuring Pangyo behind the
+    # tunnel, piling them on one host only splits one SSH session into channels.
     hosts = args.parallel_host or [args.ssh_host]
     for n in [int(x) for x in args.streams.split(",") if x]:
         runs = [measured(probe.ssh_burst_hosts, hosts, args.stream_each * n, "up", streams=n)
@@ -147,7 +147,7 @@ def main() -> None:
                 "runs": len(ok),
             })
 
-    # Q3·Q4 — 오래 보내면 유지되는가, 재전송은 얼마나 나는가
+    # Q3 and Q4 - does a long send hold up, and how many retransmits appear
     if args.sustain_sec > 0:
         rec["sustained"] = sustained(args.ssh_host, args.sustain_sec)
 

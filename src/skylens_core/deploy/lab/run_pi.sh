@@ -1,5 +1,5 @@
 #!/bin/bash
-# 파이(상용 회선 · KOREN 등록 IP)에서 도는 10분 주기 프로브.
+# The 10-minute probe that runs on the pi (consumer line, KOREN-registered IP).
 cd "$(dirname "$0")"
 OUT=~/lab/results/pi-$(date +%Y%m%d).jsonl
 exec >> "$OUT" 2>> ~/lab/results/pi-error.log

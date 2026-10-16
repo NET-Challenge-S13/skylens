@@ -1,9 +1,9 @@
 #!/bin/bash
-# 구간별 측정과 전체 경로 측정을 나란히 놓는다.
-#   A: 파이 → 대전        (상용 회선 구간)
-#   B: 대전 → 판교        (KOREN 내부 구간, 프록시 경유)
-#   A+B: 파이 → 대전 → 판교 (실제 파이프라인 경로)
-# 전체가 둘 중 약한 쪽과 같은지, 아니면 이어붙이며 더 깎이는지 본다.
+# Put the per-leg numbers next to the whole-path number.
+#   A: pi -> Daejeon         (the consumer-line leg)
+#   B: Daejeon -> Pangyo     (the KOREN internal leg, through the proxy)
+#   A+B: pi -> Daejeon -> Pangyo (the real pipeline path)
+# Is the whole as fast as the weaker leg, or does chaining cost more?
 set -u
 MB=${1:-50}
 CNT=$((MB*16))
