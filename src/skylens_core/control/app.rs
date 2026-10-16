@@ -29,6 +29,20 @@ pub const CONTROL_CSS: &str = include_str!("ui/control.css");
 pub const PANELS_CSS: &str = include_str!("ui/panels.css");
 
 pub const LOADING_TITLE: &str = "관제탑 · 실지형 장면 로딩";
+/// The loading overlay's title while the core is not reachable and the link keeps retrying.
+pub const WAITING_TITLE: &str = "코어 연결 대기 중";
+
+/// The overlay's detail line while waiting for the core: the address and the attempt the link is
+/// on (`attempts` as in [`LinkStatus::attempts`]).
+pub fn waiting_text(core_url: &str, attempts: u32) -> String {
+    if attempts == 0 { core_url.to_string() } else { format!("{core_url} · 시도 {attempts}회") }
+}
+
+/// Whether a link event keeps the loading overlay in its waiting state: only before the first
+/// `Site` and while the overlay has not finished. Later drops are reported by the mission panel.
+fn overlay_waits(site_seen: bool, finished: bool) -> bool {
+    !site_seen && !finished
+}
 /// Telemetry rows re-render at 5 Hz.
 const PANEL_INTERVAL_MS: f64 = 200.0;
 /// Safety net: if the core stops sending base map progress altogether, stop waiting after this
@@ -166,6 +180,12 @@ impl ControlApp {
             // The link's own status already folded the whole batch in; this one follows event by
             // event so no transition is skipped.
             self.shadow.observe(&ev, now);
+            let ev_kind = match &ev {
+                LinkEvent::Connecting => Some(true),
+                LinkEvent::Disconnected(_) => Some(true),
+                LinkEvent::Connected => Some(false),
+                _ => None,
+            };
             match ev {
                 LinkEvent::Connected => {
                     // The core replays what it holds from the start.
@@ -182,6 +202,7 @@ impl ControlApp {
                 LinkEvent::Invalid(e) => skylens_viewer::log(&format!("[control] dropped frame: {e}")),
                 LinkEvent::Connecting | LinkEvent::Disconnected(_) => {}
             }
+            self.update_waiting(dom, &ev_kind);
             let state = self.shadow.state;
             if self.last_state != Some(state) {
                 self.last_state = Some(state);
@@ -199,13 +220,25 @@ impl ControlApp {
                         v.set_feed(dom, None);
                         v.set_telemetry(None);
                     }
-                    if self.loading.site_ms.is_none() && !self.loading.finished {
-                        self.loading.finished = true;
-                        if let Some(l) = self.loading_screen.as_mut() {
-                            l.fail(dom, detail, now);
-                        }
-                    }
                 }
+            }
+        }
+    }
+
+    /// Before the first `Site` a down link is not a failure (the core may start after the tower):
+    /// the overlay shows the waiting state and the link keeps retrying; a connect puts the loading
+    /// bar back.
+    fn update_waiting(&mut self, dom: &mut Dom<'_>, ev: &Option<bool>) {
+        let Some(waiting) = *ev else { return };
+        if !overlay_waits(self.loading.site_ms.is_some(), self.loading.finished) {
+            return;
+        }
+        let text = waiting_text(self.link.url(), self.shadow.attempts);
+        if let Some(l) = self.loading_screen.as_mut() {
+            if waiting {
+                l.wait(dom, WAITING_TITLE, &text);
+            } else if l.is_waiting() {
+                l.progress(dom, 0.0, None);
             }
         }
     }
@@ -968,5 +1001,36 @@ impl ScreenApp for ControlApp {
             Some(Code::Enter | Code::Space) => input.closest_class("telemetry-row").is_some(),
             _ => false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn waiting_text_names_the_core_and_the_attempt() {
+        assert_eq!(waiting_text("ws://127.0.0.1:8080/control", 0), "ws://127.0.0.1:8080/control");
+        assert_eq!(waiting_text("ws://h:8080/control", 3), "ws://h:8080/control · 시도 3회");
+    }
+
+    #[test]
+    fn overlay_waits_only_before_the_first_site() {
+        assert!(overlay_waits(false, false));
+        assert!(!overlay_waits(true, false));
+        assert!(!overlay_waits(false, true));
+    }
+
+    #[test]
+    fn attempts_follow_retries_until_connected() {
+        let mut s = LinkStatus::default();
+        for n in 1..=3 {
+            s.observe(&LinkEvent::Connecting, 0.0);
+            s.observe(&LinkEvent::Disconnected("refused".into()), 0.0);
+            assert_eq!(waiting_text("u", s.attempts), format!("u · 시도 {n}회"));
+        }
+        s.observe(&LinkEvent::Connecting, 0.0);
+        s.observe(&LinkEvent::Connected, 0.0);
+        assert_eq!(waiting_text("u", s.attempts), "u");
     }
 }
