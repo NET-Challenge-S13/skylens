@@ -91,9 +91,9 @@ sudo ./setup-daejeon.sh bridge       # 2단계: 브리지 SRT 에서 당겨오�
 
 **검증** — 브라우저 없이 WHEP 종단을 확인한다.
 ```bash
-./scripts/test-source.sh 127.0.0.1 10890 drone &                          # 대전 로컬
-~/rtc/bin/python scripts/whep_probe.py http://127.0.0.1:10889/drone 5     # 대전 안에서
-~/rtc/bin/python scripts/whep_probe.py http://175.126.98.44/live/drone 5  # 밖에서, 브리지 경유
+./scripts/test-source.sh 127.0.0.1 10890 drone1 &                          # 대전 로컬
+~/rtc/bin/python scripts/whep_probe.py http://127.0.0.1:10889/drone1 5     # 대전 안에서
+~/rtc/bin/python scripts/whep_probe.py http://175.126.98.44/live/drone1 5  # 밖에서, 브리지 경유
 # [결과] video 110 frames … 첫 프레임까지 1427 ms   ← 2026-09-07 대전 로컬 실측
 ```
 

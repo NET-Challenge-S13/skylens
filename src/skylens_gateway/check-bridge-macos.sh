@@ -4,8 +4,10 @@ set -u
 cd "$(dirname "$0")"; cd "$(pwd -P)"
 
 HTTP_PORT=80; SRT_PORT=10890; DAEJEON_HOST=116.89.187.181; DAEJEON_PORT=26022
+WEB_DIR=/opt/skylens/web
 [ -f bridge.env ] && . ./bridge.env
 TUNNEL_PORT=20889
+PROXY_TUNNEL_PORT=20882
 BASE=/opt/skylens
 
 pass() { printf '  \033[32m✓\033[0m %s\n' "$*"; }
@@ -42,6 +44,36 @@ fi
 nc -z -w 3 "$DAEJEON_HOST" "$DAEJEON_PORT" 2>/dev/null \
   && pass "대전 SSH $DAEJEON_HOST:$DAEJEON_PORT 도달" \
   || fail "대전 SSH 도달 불가 — 이 맥의 공인 IP 가 KOREN 에 등록돼 있는지 확인 (175.126.98.44 여야 함)"
+
+echo "== 대전 프록시 터널 (/viewer · /uplink) =="
+if lsof -nP -iTCP:"$PROXY_TUNNEL_PORT" -sTCP:LISTEN 2>/dev/null | grep -q 127.0.0.1; then
+  if curl -s -m 3 "http://127.0.0.1:$PROXY_TUNNEL_PORT/health" | grep -q 'skylens_proxy'; then
+    pass "127.0.0.1:$PROXY_TUNNEL_PORT → 대전 프록시(:8082) /health 응답"
+  else
+    fail "터널은 열렸는데 대전 프록시 /health 응답 없음. 대전에서 프록시 nginx 가 떠 있는지 확인"
+  fi
+else
+  info "127.0.0.1:$PROXY_TUNNEL_PORT 없음. 대전 키의 permitopen 에 8082 가 있는지 확인 (register-bridge-key.sh)"
+  info "이 포워드가 거부되면 ExitOnForwardFailure 때문에 20889(WHEP)까지 같이 죽는다"
+fi
+
+echo "== 현황판 정적 파일 =="
+if [ -f "$WEB_DIR/status.html" ]; then
+  pass "$WEB_DIR/status.html 있음 ($(find "$WEB_DIR" -type f 2>/dev/null | wc -l | tr -d ' ') 개 파일)"
+  code=$(curl -s -o /dev/null -w '%{http_code}' -m 3 "http://127.0.0.1:$HTTP_PORT/" || echo 000)
+  [ "$code" = 200 ] && pass "nginx 가 / 를 200 으로 준다" || fail "/ 가 HTTP $code"
+  wasm=$(find "$WEB_DIR" -name '*.wasm' | head -1)
+  if [ -n "$wasm" ]; then
+    rel="${wasm#"$WEB_DIR"}"
+    ctype=$(curl -s -o /dev/null -w '%{content_type}' -m 5 "http://127.0.0.1:$HTTP_PORT$rel" || echo '')
+    case "$ctype" in
+      application/wasm*) pass "wasm MIME 정상 ($rel)";;
+      *)                 fail "wasm 이 $ctype 로 나간다 — 브라우저가 거부한다 (nginx 설정 확인)";;
+    esac
+  fi
+else
+  fail "$WEB_DIR/status.html 없음. 현황판 빌드 산출물을 복사하세요"
+fi
 
 echo "== 공인 IP =="
 info "$(curl -4 -s -m 5 ifconfig.me || echo '확인 실패')"

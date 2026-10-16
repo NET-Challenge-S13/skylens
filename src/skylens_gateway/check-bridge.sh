@@ -57,10 +57,23 @@ else
 fi
 
 echo "== 현황판 정적 파일 =="
-if [ -n "$(ls -A "$WEB_DIR" 2>/dev/null)" ]; then
-  pass "$WEB_DIR 에 파일 있음"
+if [ -f "$WEB_DIR/status.html" ]; then
+  pass "$WEB_DIR/status.html 있음"
+  code=$(curl -s -o /dev/null -w '%{http_code}' -m 3 "http://127.0.0.1:$HTTP_PORT/" || echo 000)
+  [ "$code" = 200 ] && pass "nginx 가 / 를 200 으로 준다" || fail "/ 가 HTTP $code"
+  # wasm 은 MIME 이 application/wasm 이 아니면 브라우저가 모듈을 거부한다.
+  # nginx 1.21.1 이전 mime.types 에는 wasm 이 없다 (22.04 는 1.18) — 설정에서 못박아 둔다.
+  wasm=$(find "$WEB_DIR" -name '*.wasm' | head -1)
+  if [ -n "$wasm" ]; then
+    rel="${wasm#"$WEB_DIR"}"
+    ctype=$(curl -s -o /dev/null -w '%{content_type}' -m 5 "http://127.0.0.1:$HTTP_PORT$rel" || echo '')
+    case "$ctype" in
+      application/wasm*) pass "wasm MIME 정상 ($rel)";;
+      *)                 fail "wasm 이 $ctype 로 나간다 — 브라우저가 거부한다 (nginx 설정 확인)";;
+    esac
+  fi
 else
-  fail "$WEB_DIR 비어 있음. 현황판 빌드 산출물을 복사하세요"
+  fail "$WEB_DIR/status.html 없음. 현황판 빌드 산출물을 복사하세요"
 fi
 
 echo "== 방화벽 =="

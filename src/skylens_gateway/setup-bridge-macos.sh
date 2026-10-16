@@ -2,9 +2,15 @@
 # SkyLens 브리지 설치 — macOS (맥미니 175.126.98.44)
 #
 # 이 서버가 맡는 일:
-#   1. nginx 가 브라우저 요청을 받는다          (:HTTP_PORT → / 는 client:8090, /live/ 는 대전 WHEP)
-#   2. 대전 VM 으로 SSH 터널을 건다             (로컬 :20889 → 대전 :10889, autossh 로 상시 유지)
+#   1. nginx 가 브라우저 요청을 받는다          (:HTTP_PORT → / 는 WEB_DIR 정적 현황판,
+#                                              /viewer · /uplink 는 터널 :20882 → 대전 프록시,
+#                                              /live/ 는 터널 :20889 → 대전 WHEP)
+#   2. 대전 VM 으로 SSH 터널을 건다             (로컬 :20889 → 대전 :10889, 로컬 :20882 → 대전 프록시 :8082,
+#                                              autossh 로 상시 유지)
 #   3. MediaMTX 가 드론 게이트웨이의 SRT 영상을 받아둔다 (:SRT_PORT/udp)
+#
+# 터널 하나에 포워드 둘을 싣고 ExitOnForwardFailure=yes 라, 대전 키에 permitopen 8082 가
+# 없으면 SSH 자체가 끊겨 WHEP(20889)까지 같이 죽는다. 그래서 순서가 있다 — README 를 본다.
 #
 # Ubuntu 판(setup-bridge.sh)과 같은 설계. 패키지는 Homebrew, 서비스는 launchd 로 올린다.
 # 서비스는 /opt/skylens 아래에 두고, 로그인 없이도 돌도록 LaunchDaemon 으로 등록한다.
@@ -26,6 +32,7 @@ fi
 HTTP_PORT=80
 PUBLISH_PASS=""
 SRT_PORT=10890
+WEB_DIR=/opt/skylens/web
 DAEJEON_HOST=116.89.187.181
 DAEJEON_PORT=26022
 DAEJEON_USER=ubuntu
@@ -46,6 +53,7 @@ fi
 
 BASE=/opt/skylens
 TUNNEL_PORT=20889
+PROXY_TUNNEL_PORT=20882
 TUNNEL_KEY="$BASE/tunnel/tunnel_key"
 LOGS="$BASE/logs"
 
@@ -66,7 +74,7 @@ mkdir -p "$BASE/mediamtx" "$BASE/tunnel" "$LOGS"
 chown "$RUN_USER" "$BASE/mediamtx" "$BASE/tunnel" "$LOGS"
 
 # ---------- 1. 대전으로 가는 터널 ----------
-step "대전 터널 (로컬 :$TUNNEL_PORT → $DAEJEON_HOST:10889)"
+step "대전 터널 (로컬 :$TUNNEL_PORT → $DAEJEON_HOST:10889, 로컬 :$PROXY_TUNNEL_PORT → :8082)"
 if [ ! -f "$TUNNEL_KEY" ]; then
   as_user ssh-keygen -q -t ed25519 -N '' -C 'bridge-tunnel@skylens' -f "$TUNNEL_KEY"
   ok "터널 키 생성: $TUNNEL_KEY"
@@ -94,6 +102,7 @@ cat > /Library/LaunchDaemons/com.skylens.daejeon-tunnel.plist <<PLIST
     <string>-o</string><string>ExitOnForwardFailure=yes</string>
     <string>-o</string><string>BatchMode=yes</string>
     <string>-L</string><string>127.0.0.1:$TUNNEL_PORT:127.0.0.1:10889</string>
+    <string>-L</string><string>127.0.0.1:$PROXY_TUNNEL_PORT:127.0.0.1:8082</string>
     <string>-p</string><string>$DAEJEON_PORT</string>
     <string>$DAEJEON_USER@$DAEJEON_HOST</string>
   </array>
@@ -113,11 +122,23 @@ launchctl bootout system/com.skylens.daejeon-tunnel 2>/dev/null || true
 launchctl bootstrap system /Library/LaunchDaemons/com.skylens.daejeon-tunnel.plist
 ok "daejeon-tunnel 등록 (대전에 키가 등록될 때까지 재시도 상태로 대기)"
 
-# ---------- 2. nginx ----------
+# ---------- 2. 현황판 정적 파일 ----------
+step "현황판 정적 파일 ($WEB_DIR)"
+mkdir -p "$WEB_DIR"
+chmod 0755 "$WEB_DIR"
+if [ -f "$WEB_DIR/status.html" ]; then
+  ok "현황판 있음 ($(find "$WEB_DIR" -type f | wc -l | tr -d ' ') 개 파일)"
+else
+  warn "현황판 파일 없음. 빌드 산출물(status.html 포함)을 $WEB_DIR 에 복사하세요"
+  warn "  bash src/skylens_client/build-web.sh  →  sudo cp -R src/skylens_client/dist/. $WEB_DIR/"
+fi
+
+# ---------- 3. nginx ----------
 step "nginx (:$HTTP_PORT)"
 NGINX_ETC="$PREFIX/etc/nginx"
 mkdir -p "$NGINX_ETC/servers"
-sed "s/__HTTP_PORT__/$HTTP_PORT/g" nginx-skylens.conf > "$NGINX_ETC/servers/skylens.conf"
+sed -e "s/__HTTP_PORT__/$HTTP_PORT/g" -e "s|__WEB_DIR__|$WEB_DIR|g" \
+  nginx-skylens.conf > "$NGINX_ETC/servers/skylens.conf"
 grep -qE '^\s*include\s+servers/\*;' "$NGINX_ETC/nginx.conf" \
   || warn "nginx.conf 에 'include servers/*;' 가 없습니다 — http { } 블록 안에 추가해야 합니다"
 "$PREFIX/bin/nginx" -t -c "$NGINX_ETC/nginx.conf"
@@ -151,7 +172,7 @@ PLIST
   ok "nginx 를 LaunchDaemon(root) 으로 기동"
 fi
 
-# ---------- 3. MediaMTX (SRT 수신) ----------
+# ---------- 4. MediaMTX (SRT 수신) ----------
 step "MediaMTX $MEDIAMTX_VERSION (SRT :$SRT_PORT)"
 case "$(uname -m)" in arm64) MARCH=arm64 ;; x86_64) MARCH=amd64 ;; *) echo "지원하지 않는 CPU" >&2; exit 1 ;; esac
 if [ ! -x "$BASE/mediamtx/mediamtx" ] || [ "$(cat "$BASE/mediamtx/VERSION" 2>/dev/null)" != "$MEDIAMTX_VERSION" ]; then
@@ -197,7 +218,7 @@ else
   warn "mediamtx 상태 확인 실패 — 로그: $LOGS/mediamtx.log"; tail -n 15 "$LOGS/mediamtx.log" 2>/dev/null || true
 fi
 
-# ---------- 4. macOS 방화벽 (켜져 있을 때만) ----------
+# ---------- 5. macOS 방화벽 (켜져 있을 때만) ----------
 step "방화벽"
 SFW=/usr/libexec/ApplicationFirewall/socketfilterfw
 if "$SFW" --getglobalstate 2>/dev/null | grep -qi 'enabled'; then
@@ -210,7 +231,7 @@ else
   ok "macOS 방화벽 꺼짐 — 변경 없음"
 fi
 
-# ---------- 5. 요약 ----------
+# ---------- 6. 요약 ----------
 PUB_IP="$(curl -4 -s -m 5 ifconfig.me || echo '?')"
 cat <<SUMMARY
 
@@ -218,15 +239,19 @@ cat <<SUMMARY
  브리지 설치 완료 (macOS)
 ============================================================
  공인 IP           : $PUB_IP
- 브라우저 주소     : http://$PUB_IP:$HTTP_PORT/live/drone
- SRT 수신          : srt://$PUB_IP:$SRT_PORT?streamid=publish:drone:drone:<PASS>
+ 현황판            : http://$PUB_IP:$HTTP_PORT/            ($WEB_DIR/status.html)
+ 이 서버 생존      : http://$PUB_IP:$HTTP_PORT/health      (nginx 만 확인)
+ 터널 생존         : http://$PUB_IP:$HTTP_PORT/healthz     (대전까지 확인)
+ 라이브 영상       : http://$PUB_IP:$HTTP_PORT/live/drone1/whep  (drone1~3)
+ SRT 수신          : srt://$PUB_IP:$SRT_PORT?streamid=publish:drone1:drone:<PASS>
  SRT publish 비번  : $PUBLISH_PASS$([ "$GENERATED_PASS" = 1 ] && printf '   (자동 생성 — bridge.env 에 적어두세요)')
 
  공유기 뒤라면 포트포워딩 (두 개):
    TCP $HTTP_PORT  → 이 맥      (브라우저)
-   UDP $SRT_PORT   → 이 맥      (드론 게이트웨이)
+   UDP $SRT_PORT   → 이 맥      (드론 게이트웨이, 그리고 대전이 당겨감)
 
- ★ 아래 공개키 한 줄을 정준모에게 보내세요. 대전에 등록되면 터널이 자동으로 붙습니다.
+ ★ 아래 공개키 한 줄을 정준모에게 보내세요. 대전에서 permitopen 10889·8082 로
+   등록되면 터널 두 포워드가 자동으로 붙습니다. 8082 가 빠지면 WHEP 까지 같이 죽습니다.
 ------------------------------------------------------------
 $(cat "$TUNNEL_KEY.pub")
 ------------------------------------------------------------
