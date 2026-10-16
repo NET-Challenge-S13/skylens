@@ -37,7 +37,7 @@
 //! - 여러 기준 뷰를 그리드 z 축으로 묶어 한 번에 발사한다(픽셀 예산 안에서).
 //! - 기하 실행의 원천 깊이 스냅숏은 스냅숏 번호가 바뀔 때만 다시 올린다.
 
-use crate::device::{CudaDevice, GpuError};
+use crate::device::{CudaDevice, GpuError, SyncedCopy};
 use cudarc::driver::sys;
 use cudarc::driver::{CudaFunction, CudaSlice, DevicePtr, DeviceRepr, LaunchConfig, PinnedHostSlice, PushKernelArg};
 use cumulus3d_core::{Error, Result};
@@ -725,10 +725,10 @@ impl<'a> Session<'a> {
     fn download_plane_cost(&mut self, items: &[BatchItem], npix: usize, states: &mut [ViewState], plane: bool) -> Result<()> {
         let s = self.be.dev.stream.clone();
         let mut c = vec![0f32; npix];
-        s.memcpy_dtoh(&self.cost.slice(0..npix), &mut c).map_err(gerr)?;
+        s.memcpy_dtoh_synced(&self.cost.slice(0..npix), &mut c).map_err(gerr)?;
         let mut pb = self.take_stage(2, if plane { 4 * npix } else { 1 })?;
         if plane {
-            s.memcpy_dtoh(&self.plane.slice(0..4 * npix), &mut pb.as_mut_slice().map_err(gerr)?[..4 * npix]).map_err(gerr)?;
+            s.memcpy_dtoh_synced(&self.plane.slice(0..4 * npix), &mut pb.as_mut_slice().map_err(gerr)?[..4 * npix]).map_err(gerr)?;
         }
         s.synchronize().map_err(gerr)?;
         let p = pb.as_slice().map_err(gerr)?;
@@ -855,7 +855,7 @@ impl PatchMatchSession for Session<'_> {
             // SAFETY: pm_filter(KParams).
             unsafe { l.launch(cfg) }.map_err(gerr)?;
             let mut c = vec![0u8; npix];
-            s.memcpy_dtoh(&self.count.slice(0..npix), &mut c).map_err(gerr)?;
+            s.memcpy_dtoh_synced(&self.count.slice(0..npix), &mut c).map_err(gerr)?;
             s.synchronize().map_err(gerr)?;
             for it in &items {
                 let o = it.off as usize;
@@ -893,7 +893,7 @@ impl Session<'_> {
     fn download_planes(&mut self, items: &[BatchItem], npix: usize) -> Result<Vec<ViewState>> {
         let s = self.be.dev.stream.clone();
         let mut pb = self.take_stage(2, 4 * npix)?;
-        s.memcpy_dtoh(&self.plane.slice(0..4 * npix), &mut pb.as_mut_slice().map_err(gerr)?[..4 * npix]).map_err(gerr)?;
+        s.memcpy_dtoh_synced(&self.plane.slice(0..4 * npix), &mut pb.as_mut_slice().map_err(gerr)?[..4 * npix]).map_err(gerr)?;
         s.synchronize().map_err(gerr)?;
         let p = pb.as_slice().map_err(gerr)?;
         let out = items

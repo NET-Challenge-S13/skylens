@@ -459,6 +459,8 @@ pub struct BatchedRansac<'a, E: Estimator, L, S> {
     counts: Vec<usize>,
     /// 이번 묶음의 모델(반복 순서대로 이어 붙임).
     models: Vec<E::Model>,
+    /// 다음 묶음 크기 상한. 처음엔 min_batch 에서 시작해 묶음마다 두 배로 는다.
+    ramp: usize,
 }
 
 impl<'a, E, L, S> BatchedRansac<'a, E, L, S>
@@ -499,6 +501,7 @@ where
             done: degenerate || max_trials == 0,
             counts: Vec::new(),
             models: Vec::new(),
+            ramp: 0,
         }
     }
 
@@ -523,7 +526,9 @@ where
     }
 
     /// 다음 반복 묶음의 가설을 만든다. 묶음 크기 = 멈출 때까지 남은 반복 수를
-    /// [min_batch, max_batch] 로 자른 값(반복 상한 이내). 표본은 순서대로 뽑고(난수 순서 보존)
+    /// [min_batch, 상한] 으로 자른 값(반복 상한 이내). 상한은 첫 묶음에 min_batch 이고 묶음마다
+    /// 두 배로 늘어 max_batch 까지 간다. 좋은 가설이 일찍 나오면 동적 반복 수가 작아지므로, 처음부터
+    /// 큰 묶음을 내면 CPU 경로가 하지 않을 반복까지 채점하게 된다. 표본은 순서대로 뽑고(난수 순서 보존)
     /// 최소 해법은 병렬로 푼다. 끝난 상태면 빈 목록.
     pub fn propose(&mut self, min_batch: usize, max_batch: usize) -> &[E::Model]
     where
@@ -541,7 +546,10 @@ where
         let left = self.max_trials - self.trials;
         let stop = self.dyn_max.max(self.min_trials);
         let need = stop.saturating_sub(self.trials).saturating_add(1);
-        let b = need.max(min_batch.max(1)).min(max_batch.max(1)).min(left);
+        let lo = min_batch.max(1);
+        let cap = self.ramp.max(lo).min(max_batch.max(lo));
+        self.ramp = cap.saturating_mul(2);
+        let b = need.max(lo).min(cap).min(left);
         let mut samples: Vec<Vec<usize>> = Vec::with_capacity(b);
         let mut idx = Vec::with_capacity(self.est.min_num_samples());
         for _ in 0..b {
@@ -752,6 +760,30 @@ mod tests {
         let lo2 = lo_ransac(&Line, &Line, &opts, &x, &y);
         assert_eq!(lo2.num_trials, lo.num_trials);
         assert_eq!(lo2.model, lo.model);
+    }
+
+    #[test]
+    fn batched_ramps_batch_size() {
+        // 첫 묶음은 min_batch, 이후 두 배씩(동적 반복 수가 아직 클 때).
+        let (x, y, _) = data(5);
+        let opts = RansacParams { max_error: 0.1, random_seed: Some(1), min_trials: 1000, max_trials: 1000, ..Default::default() };
+        let mut b = BatchedRansac::new(Line, Some(Line), RandomSubsetSampler::new(2), &opts, &x[..], &y[..]);
+        let mut sizes = Vec::new();
+        let mut res = Vec::new();
+        while !b.is_done() && sizes.len() < 4 {
+            b.propose(16, 512);
+            sizes.push(b.counts.len());
+            let s: Vec<Support> = b
+                .models()
+                .iter()
+                .map(|m| {
+                    Line.residuals(&x, &y, m, &mut res);
+                    Support::measure(&res, b.max_residual())
+                })
+                .collect();
+            b.consume(&s);
+        }
+        assert_eq!(sizes, vec![16, 32, 64, 128]);
     }
 
     #[test]

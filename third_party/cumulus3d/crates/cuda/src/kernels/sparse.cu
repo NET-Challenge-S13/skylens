@@ -30,8 +30,9 @@
  */
 
 // 희소 단계 커널: 두 뷰 기하·절대 자세 RANSAC 가설 채점, RANSAC 삼각측량, 관측 검사.
-// fmad 를 끄고(곱셈-덧셈 융합 금지) CPU 코드와 같은 순서로 계산해 반올림까지 맞춘다.
-// 지지도의 잔차 합은 블록의 0번 스레드가 자료 순서대로 더한다(CPU Support::measure 와 같은 합).
+// fmad 를 끄고(곱셈-덧셈 융합 금지) 잔차는 CPU 코드와 같은 순서로 계산한다.
+// 지지도는 스레드마다 모은 뒤 블록 끝에서 한 번 합친다. 인라이어 수는 CPU 와 같고,
+// 잔차 합은 더하는 순서가 달라 마지막 자리가 다를 수 있다(동점 판정에만 쓰임).
 
 #define BLOCK 128
 #define DBL_EPS 2.220446049250313e-16
@@ -112,12 +113,37 @@ __device__ double reproj_sq(const double* cam, const double* pose, double qx, do
     return dx * dx + dy * dy;
 }
 
-// 블록 하나 = 가설 하나. 스레드마다 잔차, 0번 스레드가 자료 순서대로 인라이어 수·합을 센다.
+// 블록 안 (수, 합) 합치기. 결과는 0번 스레드에만 맞다. BLOCK 은 32 의 배수.
+__device__ void block_support(u32 cnt, double sum, u32* out_n, double* out_s) {
+    __shared__ u32 wn[BLOCK / 32];
+    __shared__ double ws[BLOCK / 32];
+    for (int o = 16; o > 0; o >>= 1) {
+        cnt += __shfl_down_sync(0xffffffffu, cnt, o);
+        sum += __shfl_down_sync(0xffffffffu, sum, o);
+    }
+    int lane = threadIdx.x & 31, w = threadIdx.x >> 5;
+    if (lane == 0) {
+        wn[w] = cnt;
+        ws[w] = sum;
+    }
+    __syncthreads();
+    if (threadIdx.x == 0) {
+        u32 c = 0;
+        double t = 0.0;
+        for (int k = 0; k < BLOCK / 32; ++k) {
+            c += wn[k];
+            t += ws[k];
+        }
+        *out_n = c;
+        *out_s = t;
+    }
+}
+
+// 블록 하나 = 가설 하나. 스레드마다 자기 몫의 인라이어 수·합을 모으고 끝에서 합친다.
 // ent_i[3e..] = (자료 시작 오프셋(double 단위), 자료 수, 종류 0=E 1=F 2=H), ent_m[10e..] = (모델 9, 제곱 임계).
 // 자료: E = (a.xyz, b.xyz) 6개, F/H = (x1.xy, x2.xy) 4개.
 extern "C" __global__ void score_two_view(const double* __restrict__ data, const long long* __restrict__ ent_i,
                                           const double* __restrict__ ent_m, u32* out_n, double* out_s) {
-    __shared__ double res[BLOCK];
     __shared__ double hm[10];
     int e = blockIdx.x;
     long long off = ent_i[3 * (long long)e];
@@ -128,46 +154,30 @@ extern "C" __global__ void score_two_view(const double* __restrict__ data, const
     double thr = hm[9];
     u32 cnt = 0;
     double sum = 0.0;
-    for (int c0 = 0; c0 < n; c0 += BLOCK) {
-        int i = c0 + threadIdx.x;
-        double r = 0.0;
-        if (i < n) {
-            if (kind == 0) {
-                const double* d = data + off + 6 * (long long)i;
-                r = sampson(hm, d[0], d[1], d[2], d[3], d[4], d[5]);
-            } else if (kind == 1) {
-                const double* d = data + off + 4 * (long long)i;
-                r = sampson(hm, d[0], d[1], 1.0, d[2], d[3], 1.0);
-            } else {
-                const double* d = data + off + 4 * (long long)i;
-                r = transfer(hm, d[0], d[1], d[2], d[3]);
-            }
+    for (int i = threadIdx.x; i < n; i += BLOCK) {
+        double r;
+        if (kind == 0) {
+            const double* d = data + off + 6 * (long long)i;
+            r = sampson(hm, d[0], d[1], d[2], d[3], d[4], d[5]);
+        } else if (kind == 1) {
+            const double* d = data + off + 4 * (long long)i;
+            r = sampson(hm, d[0], d[1], 1.0, d[2], d[3], 1.0);
+        } else {
+            const double* d = data + off + 4 * (long long)i;
+            r = transfer(hm, d[0], d[1], d[2], d[3]);
         }
-        res[threadIdx.x] = r;
-        __syncthreads();
-        if (threadIdx.x == 0) {
-            int m = min(BLOCK, n - c0);
-            for (int k = 0; k < m; ++k) {
-                double v = res[k];
-                if (v <= thr) {
-                    cnt += 1;
-                    sum += v;
-                }
-            }
+        if (r <= thr) {
+            cnt += 1;
+            sum += r;
         }
-        __syncthreads();
     }
-    if (threadIdx.x == 0) {
-        out_n[e] = cnt;
-        out_s[e] = sum;
-    }
+    block_support(cnt, sum, out_n + e, out_s + e);
 }
 
 // 절대 자세 가설 채점. data = 대응마다 (x, y, X, Y, Z), cam = 카메라 9개,
 // poses = 가설마다 (R 9, t 3), 블록 하나 = 가설 하나.
 extern "C" __global__ void score_pose(const double* __restrict__ data, int n, const double* __restrict__ cam,
                                       const double* __restrict__ poses, double thr, u32* out_n, double* out_s) {
-    __shared__ double res[BLOCK];
     __shared__ double pm[12];
     __shared__ double cm[9];
     int e = blockIdx.x;
@@ -176,31 +186,15 @@ extern "C" __global__ void score_pose(const double* __restrict__ data, int n, co
     __syncthreads();
     u32 cnt = 0;
     double sum = 0.0;
-    for (int c0 = 0; c0 < n; c0 += BLOCK) {
-        int i = c0 + threadIdx.x;
-        double r = 0.0;
-        if (i < n) {
-            const double* d = data + 5 * (long long)i;
-            r = reproj_sq(cm, pm, d[0], d[1], d[2], d[3], d[4], 0);
+    for (int i = threadIdx.x; i < n; i += BLOCK) {
+        const double* d = data + 5 * (long long)i;
+        double r = reproj_sq(cm, pm, d[0], d[1], d[2], d[3], d[4], 0);
+        if (r <= thr) {
+            cnt += 1;
+            sum += r;
         }
-        res[threadIdx.x] = r;
-        __syncthreads();
-        if (threadIdx.x == 0) {
-            int m = min(BLOCK, n - c0);
-            for (int k = 0; k < m; ++k) {
-                double v = res[k];
-                if (v <= thr) {
-                    cnt += 1;
-                    sum += v;
-                }
-            }
-        }
-        __syncthreads();
     }
-    if (threadIdx.x == 0) {
-        out_n[e] = cnt;
-        out_s[e] = sum;
-    }
+    block_support(cnt, sum, out_n + e, out_s + e);
 }
 
 // 관측 검사. q_i = 관측마다 (카메라 번호, 자세 번호), q_d = (x, y, X, Y, Z),

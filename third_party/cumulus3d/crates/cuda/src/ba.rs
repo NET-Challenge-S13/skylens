@@ -41,7 +41,7 @@
 //! 초점·깊이 결합과 게이지 때문에 조건수가 커서 f32 누적이 LM 수락 판정을 흔든다.
 //! H·S·우변 누적은 원자적 덧셈이라 합산 순서가 실행마다 달라 마지막 자리 수준의 차이가 날 수 있다.
 
-use crate::device::{CudaDevice, GpuError};
+use crate::device::{CudaDevice, GpuError, SyncedCopy};
 use cudarc::driver::{CudaFunction, CudaSlice, CudaStream, DriverError, LaunchConfig, PushKernelArg};
 use cumulus3d_ba::{
     minimize, quat_plus, BaBackend, BaSolution, CpuBaBackend, LinearSolverType, Loss, ProblemInput, StepInfo, TrOptions, TrProblem,
@@ -216,20 +216,20 @@ fn zeros(s: &Arc<CudaStream>, n: usize) -> Result<CudaSlice<f64>, DriverError> {
 /// 부분합 앞 g 개를 내려받아 순서대로 더한다.
 fn sum_partial(s: &Arc<CudaStream>, p: &CudaSlice<f64>, g: usize) -> Result<f64, DriverError> {
     let mut h = vec![0.0f64; g];
-    s.memcpy_dtoh(&p.slice(0..g), &mut h)?;
+    s.memcpy_dtoh_synced(&p.slice(0..g), &mut h)?;
     s.synchronize()?;
     Ok(h.iter().sum())
 }
 
 fn max_partial(s: &Arc<CudaStream>, p: &CudaSlice<f64>, g: usize) -> Result<f64, DriverError> {
     let mut h = vec![0.0f64; g];
-    s.memcpy_dtoh(&p.slice(0..g), &mut h)?;
+    s.memcpy_dtoh_synced(&p.slice(0..g), &mut h)?;
     s.synchronize()?;
     Ok(h.iter().fold(0.0, |m, &x| m.max(x)))
 }
 
 fn read_flag(s: &Arc<CudaStream>, f: &CudaSlice<i32>) -> Result<bool, DriverError> {
-    let v = s.clone_dtoh(f)?;
+    let v = s.clone_dtoh_synced(f)?;
     s.synchronize()?;
     Ok(v[0] != 0)
 }
@@ -727,7 +727,7 @@ impl<'a> GpuProblem<'a> {
             unsafe { l.launch(launch_cfg(grid_for(self.nvp))) }?;
         }
         if self.n_e > 0 {
-            s.memcpy_dtoh(&d.g_e.slice(0..self.n_e), &mut self.g_e)?;
+            s.memcpy_dtoh_synced(&d.g_e.slice(0..self.n_e), &mut self.g_e)?;
             s.synchronize()?;
         }
         if self.nvp > 0 {
@@ -754,7 +754,7 @@ impl<'a> GpuProblem<'a> {
             unsafe { l.launch(launch_cfg(grid_for(total))) }?;
         }
         if self.n_e > 0 {
-            s.memcpy_dtoh(&d.scale_e.slice(0..self.n_e), &mut self.scale_e)?;
+            s.memcpy_dtoh_synced(&d.scale_e.slice(0..self.n_e), &mut self.scale_e)?;
         }
         s.synchronize()?;
         Ok(())
@@ -833,9 +833,9 @@ impl<'a> GpuProblem<'a> {
         }
         if self.dense_cpu {
             let (s, d) = (&self.s, &mut self.d);
-            let sv = s.clone_dtoh(&d.s)?;
+            let sv = s.clone_dtoh_synced(&d.s)?;
             let mut rhs = vec![0.0; n];
-            s.memcpy_dtoh(&d.rhs.slice(0..n), &mut rhs)?;
+            s.memcpy_dtoh_synced(&d.rhs.slice(0..n), &mut rhs)?;
             s.synchronize()?;
             let m = DMatrix::from_row_slice(n, n, &sv[..n * n]);
             let Some(ch) = m.cholesky() else { return Ok(false) };
@@ -851,7 +851,7 @@ impl<'a> GpuProblem<'a> {
             return Ok(false);
         }
         let (s, d) = (&self.s, &mut self.d);
-        s.memcpy_dtoh(&d.x.slice(0..n), &mut self.delta_e)?;
+        s.memcpy_dtoh_synced(&d.x.slice(0..n), &mut self.delta_e)?;
         s.synchronize()?;
         if !self.delta_e.iter().all(|v| v.is_finite()) {
             return Ok(false);
@@ -909,7 +909,7 @@ impl<'a> GpuProblem<'a> {
             // SAFETY: ba_diag_blocks(nb, n_e, blk_off, blk_dim, blk_poff, S, out[Σd²]).
             unsafe { l.launch(launch_cfg(grid_for(self.blocks.len()))) }?;
             let mut diag = vec![0.0; self.pinv_len];
-            s.memcpy_dtoh(&d.diag.slice(0..self.pinv_len), &mut diag)?;
+            s.memcpy_dtoh_synced(&d.diag.slice(0..self.pinv_len), &mut diag)?;
             s.synchronize()?;
             let mut pinv = vec![0.0; self.pinv_len];
             let mut po = 0;
@@ -1123,7 +1123,7 @@ impl<'a> GpuProblem<'a> {
             return Ok(Vec::new());
         }
         let mut h = vec![0.0; 3 * self.npt];
-        self.s.memcpy_dtoh(&self.d.pts.slice(0..3 * self.npt), &mut h)?;
+        self.s.memcpy_dtoh_synced(&self.d.pts.slice(0..3 * self.npt), &mut h)?;
         self.s.synchronize()?;
         Ok(h.chunks_exact(3).map(|c| Vec3::new(c[0], c[1], c[2])).collect())
     }

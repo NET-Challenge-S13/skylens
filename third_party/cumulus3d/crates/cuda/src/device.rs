@@ -27,9 +27,41 @@
 
 //! 장치·문맥·NVRTC 컴파일 공용부.
 
-use cudarc::driver::{CudaContext, CudaModule, CudaStream};
+use cudarc::driver::{CudaContext, CudaModule, CudaStream, DevicePtr, DeviceRepr, DriverError, HostSlice};
 use cudarc::nvrtc::{compile_ptx_with_opts, CompileOptions};
 use std::sync::Arc;
+
+/// 내려 받기 전에 스트림을 먼저 기다리는 복사.
+///
+/// 일반(페이지) 메모리로 내려 받는 `cuMemcpyDtoHAsync` 는 앞선 커널이 끝날 때까지 드라이버 전역 잠금을
+/// 쥐고 기다린다. 그동안 같은 프로세스의 다른 스레드(UNet, 희소 단계, SIFT)의 CUDA 호출이 모두 멈춘다
+/// (조밀화가 수백 ms 커널 뒤에서 내려 받으면 다른 단계가 그만큼 선다). `cuStreamSynchronize` 는 잠금 없이
+/// 기다리므로, 먼저 동기화하고 나서 복사하면 복사는 곧바로 끝난다.
+pub(crate) trait SyncedCopy {
+    /// [`CudaStream::memcpy_dtoh`] 와 같되 먼저 스트림을 기다린다.
+    fn memcpy_dtoh_synced<T: DeviceRepr, Src: DevicePtr<T>, Dst: HostSlice<T> + ?Sized>(
+        &self,
+        src: &Src,
+        dst: &mut Dst,
+    ) -> Result<(), DriverError>;
+    /// [`CudaStream::clone_dtoh`] 와 같되 먼저 스트림을 기다린다.
+    fn clone_dtoh_synced<T: DeviceRepr, Src: DevicePtr<T>>(&self, src: &Src) -> Result<Vec<T>, DriverError>;
+}
+
+impl SyncedCopy for Arc<CudaStream> {
+    fn memcpy_dtoh_synced<T: DeviceRepr, Src: DevicePtr<T>, Dst: HostSlice<T> + ?Sized>(
+        &self,
+        src: &Src,
+        dst: &mut Dst,
+    ) -> Result<(), DriverError> {
+        self.synchronize()?;
+        self.memcpy_dtoh(src, dst)
+    }
+    fn clone_dtoh_synced<T: DeviceRepr, Src: DevicePtr<T>>(&self, src: &Src) -> Result<Vec<T>, DriverError> {
+        self.synchronize()?;
+        self.clone_dtoh(src)
+    }
+}
 
 /// CUDA 백엔드 오류.
 #[derive(Debug, thiserror::Error)]
@@ -70,12 +102,30 @@ pub struct CudaDevice {
 impl CudaDevice {
     /// 장치 `ordinal` 을 연다.
     pub fn new(ordinal: usize) -> Result<Arc<Self>, GpuError> {
+        Self::open(ordinal, false)
+    }
+
+    /// 장치 `ordinal` 을 열고 스트림을 가장 높은 우선순위로 만든다. 작은 커널을 자주 내고 결과를 곧바로
+    /// 기다리는 희소 단계(`CudaSparse`)만 쓴다. 조밀화(PatchMatch)·번들 조정의 긴 커널 대기열 뒤에 줄 서지
+    /// 않게 하기 위해서다. SIFT·매칭까지 올리면 희소 단계와 서로 앞지르려 해 삼각측량이 1.2초에서
+    /// 2.3~3.2초로, 번들 조정까지 올려도 2.3초로 느려졌다(290초 데모, 위치당 평균).
+    pub fn new_high_priority(ordinal: usize) -> Result<Arc<Self>, GpuError> {
+        Self::open(ordinal, true)
+    }
+
+    fn open(ordinal: usize, high_priority: bool) -> Result<Arc<Self>, GpuError> {
         if !is_available() {
             return Err(GpuError::NotAvailable("드라이버/NVRTC 라이브러리 또는 장치 없음".into()));
         }
         let ctx =
             std::panic::catch_unwind(|| CudaContext::new(ordinal)).map_err(|_| GpuError::NotAvailable("문맥 생성 중 panic".into()))??;
-        let stream = ctx.new_stream()?;
+        let stream = if high_priority {
+            ctx.bind_to_thread()?;
+            let (_, greatest) = cudarc::driver::result::stream::get_priority_range()?;
+            ctx.new_stream_with_priority(greatest)?
+        } else {
+            ctx.new_stream()?
+        };
         let cc = ctx.compute_capability()?;
         let arch = match cc {
             (7, 0) => Some("compute_70"),

@@ -43,7 +43,7 @@
 //! 합산 순서와 초월함수(exp, atan2, sin/cos, pow) 구현이 달라 결과가 비트 단위로 같지는 않다. 위치·방향·기술자가
 //! 사실상 같고 특징 수도 거의 같다(시험 참고). 합산 순서는 고정이라 같은 입력이면 실행마다 결과가 같다.
 
-use crate::device::{CudaDevice, GpuError};
+use crate::device::{CudaDevice, GpuError, SyncedCopy};
 use cudarc::driver::{CudaFunction, CudaSlice, CudaStream, DevicePtr, DriverError, LaunchConfig, PushKernelArg};
 use cumulus3d_core::{Descriptors, Error, Result};
 use cumulus3d_features::sift::pyramid::{self, ScaleSpace};
@@ -469,7 +469,7 @@ impl CudaSift {
                 // 그리드 z = S 이고 레벨 번호 base + j < 레벨 수.
                 unsafe { l.launch(cfg) }?;
             }
-            let counts = st.clone_dtoh(&cnt)?;
+            let counts = st.clone_dtoh_synced(&cnt)?;
             st.synchronize()?;
             let total = counts[0].max(0) as usize;
             if total <= cap {
@@ -505,7 +505,7 @@ impl CudaSift {
             // items[3·icap], icap, counters[1 + 레벨 수]). 후보 하나가 내는 항목은 최대 per 개라 icap 을 넘지 않는다.
             unsafe { l.launch(cfg) }?;
         }
-        let icounts = st.clone_dtoh(&icnt)?;
+        let icounts = st.clone_dtoh_synced(&icnt)?;
         st.synchronize()?;
         let nitems = (icounts[0].max(0) as usize).min(icap);
         let lv_items: Vec<usize> = icounts[1..].iter().map(|&c| c.max(0) as usize).collect();
@@ -551,7 +551,7 @@ impl CudaSift {
                 unsafe { l.launch(cfg1(nitems)) }?;
             }
             if plan.mode == 2 {
-                let raw = st.clone_dtoh(&bcount)?;
+                let raw = st.clone_dtoh_synced(&bcount)?;
                 st.synchronize()?;
                 let sizes: Vec<usize> = raw.iter().map(|&c| c.max(0) as usize).collect();
                 let (r, b) = grid_cut(&sizes, k_max);
@@ -615,10 +615,10 @@ impl CudaSift {
             // fo[5·cap], io[4·cap], desc[128·cap]); 처리 개수 min(*kcount, cap), 공유 메모리는 정적(32 KiB).
             unsafe { l.launch(cfg) }?;
         }
-        let kc = st.clone_dtoh(&kcnt)?;
-        let fo_h = st.clone_dtoh(&fo)?;
-        let io_h = st.clone_dtoh(&io)?;
-        let dd_h = st.clone_dtoh(&dd)?;
+        let kc = st.clone_dtoh_synced(&kcnt)?;
+        let fo_h = st.clone_dtoh_synced(&fo)?;
+        let io_h = st.clone_dtoh_synced(&io)?;
+        let dd_h = st.clone_dtoh_synced(&dd)?;
         st.synchronize()?;
         // 레벨 표의 원시 주소가 가리키던 피라미드는 여기서 놓는다.
         drop(pyr);

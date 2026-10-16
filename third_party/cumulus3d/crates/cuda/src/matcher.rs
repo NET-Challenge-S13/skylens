@@ -31,7 +31,7 @@
 
 //! `MatcherBackend` 의 CUDA 구현: 정수 내적(__dp4a) + 순차 top-2. 결과는 CPU 백엔드와 비트 단위로 같다.
 
-use crate::device::{CudaDevice, GpuError};
+use crate::device::{CudaDevice, GpuError, SyncedCopy};
 use cudarc::driver::{CudaFunction, LaunchConfig, PushKernelArg};
 use cumulus3d_matching::{CpuMatcher, MatcherBackend, Top2};
 use std::sync::{Arc, Mutex};
@@ -82,8 +82,8 @@ impl CudaMatcher {
             // SAFETY: top2_rows(q[nq·32], nq, t[nt·32], nt, out[3·nq]) 와 같은 인자·크기.
             unsafe { l.launch(cfg) }?;
         }
-        let rh = s.clone_dtoh(&ro)?;
-        let ch = s.clone_dtoh(&co)?;
+        let rh = s.clone_dtoh_synced(&ro)?;
+        let ch = s.clone_dtoh_synced(&co)?;
         s.synchronize()?;
         let conv = |v: &[u32], n: usize| -> Vec<Top2> {
             (0..n).map(|k| Top2 { best: v[3 * k], idx: v[3 * k + 1], second: v[3 * k + 2] }).collect()
