@@ -16,9 +16,18 @@
 //! - [`jobs`] and [`sources`]: the REST/gRPC job API (`steps` -> level, `uri`
 //!   decoding).
 //!
+//! Live display. By default (`PointsMode::Delta`) the live point display leaves as
+//! `POINTS_DELTA` chunks: cumulus3d composes the display (thinning, overlap
+//! ownership, dense slot ids) and the consumer forwards each `Event::DisplayDelta`
+//! (see [`live`]). `Segment` keeps the old per-zone `POINTS` chunks, `Both` sends
+//! both. Meshing and detection fusion use the zone clouds in every mode.
+//!
 //! Coordinates. Every chunk and detection is in ENU metres about
 //! `EngineConfig::anchor` (x = East, y = North, z = Up; cumulus3d's ENU is the
-//! WGS84 tangent plane at the anchor). Detections carry GPS converted with
+//! WGS84 tangent plane at the anchor). Display deltas are in the same frame: the
+//! anchor record is the first GPS fix, so cumulus3d's `DisplayFrame::origin_gps`
+//! is the anchor, and a delta whose origin differs is translated (see
+//! [`live::align_delta`]). Detections carry GPS converted with
 //! `skylens_shared::geo::enu_to_gps`.
 
 pub mod chunks;
@@ -27,6 +36,7 @@ pub mod fusion;
 pub mod jobs;
 pub mod live;
 pub mod recon;
+pub mod replay;
 pub mod sources;
 
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -38,6 +48,7 @@ use cumulus3d_cli::compose::{
     CompositionHost, FrameKey as LiveKey, FrameState, Outcome, ReconNode, ReconcilePolicy,
 };
 use cumulus3d_cli::declare::AlignFrame;
+use cumulus3d_cli::post::LiveOptions;
 use prost::Message;
 use skylens_shared::proto::model::v1::{
     Align, Chunk, DetectJobRequest, DetectJobResult, FrameSet, Level, ReconJobRequest, ReconJobResult,
@@ -55,6 +66,48 @@ pub const LIVE_NODE: &str = "live";
 /// `/<RESULTS_DIR>/<file>`, so the HTTP server serves this folder at that path.
 pub const RESULTS_DIR: &str = "results";
 
+/// How the live point display is published.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum PointsMode {
+    /// `POINTS_DELTA` chunks from cumulus3d's display deltas only.
+    #[default]
+    Delta,
+    /// The old per-zone `POINTS` chunks only.
+    Segment,
+    /// Both.
+    Both,
+}
+
+impl PointsMode {
+    /// Whether per-zone `POINTS` chunks are published.
+    pub fn segment(self) -> bool {
+        matches!(self, PointsMode::Segment | PointsMode::Both)
+    }
+
+    /// Whether `POINTS_DELTA` chunks are published.
+    pub fn delta(self) -> bool {
+        matches!(self, PointsMode::Delta | PointsMode::Both)
+    }
+}
+
+impl std::str::FromStr for PointsMode {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, String> {
+        match s.trim().to_lowercase().as_str() {
+            "delta" => Ok(PointsMode::Delta),
+            "segment" => Ok(PointsMode::Segment),
+            "both" => Ok(PointsMode::Both),
+            other => Err(format!("unknown points mode {other:?} (delta | segment | both)")),
+        }
+    }
+}
+
+/// Default `EngineConfig::display_stride`.
+pub const DEFAULT_DISPLAY_STRIDE: usize = 2;
+/// Default `EngineConfig::snapshot_every`.
+pub const DEFAULT_SNAPSHOT_EVERY: usize = 128;
+
 #[derive(Debug, Clone)]
 pub struct EngineConfig {
     /// ENU origin; every zone and chunk is expressed about it.
@@ -68,6 +121,24 @@ pub struct EngineConfig {
     pub work_dir: std::path::PathBuf,
     /// Use the GPU backends of cumulus3d and deltamesh.
     pub gpu: bool,
+    /// How the live points leave the engine (`SKYLENS_POINTS_MODE`).
+    pub points_mode: PointsMode,
+    /// cumulus3d display thinning: every zone cloud is cut to 1/N by key hash
+    /// before the overlap dedupe (`LiveOptions::stride`, `SKYLENS_DISPLAY_STRIDE`).
+    /// Default [`DEFAULT_DISPLAY_STRIDE`] = 2. A per-zone `POINTS` chunk carried the
+    /// whole dense zone cloud (`recon::zone_points` does not thin), so stride 1 is
+    /// the old density; the overlap dedupe (voxel ownership, zone overlap 2 of 12)
+    /// already removes about a sixth of it. 2 keeps half of that: still dense enough
+    /// for the point view to read like the old one, while the diff, the slot ids and
+    /// the 20 B per point on the wire stay in budget (the composition runs on the
+    /// composing thread, so stride 1 would stall ingestion on large scenes;
+    /// cumulus3d's own default 6 is meant for a display-only viewer). 0 is
+    /// clamped to 1.
+    pub display_stride: usize,
+    /// A snapshot chunk (new generation) after every N display deltas so the
+    /// core's stored replay stays short; 0 = never (`SKYLENS_DELTA_SNAPSHOT_EVERY`,
+    /// default [`DEFAULT_SNAPSHOT_EVERY`]).
+    pub snapshot_every: usize,
 }
 
 /// Result of declaring one frame set to the reconstruction node.
@@ -104,6 +175,9 @@ pub struct Engine {
     poller: Mutex<Option<JoinHandle<()>>>,
     /// Jobs run one at a time.
     job_lock: Mutex<()>,
+    /// Sender into the consumer thread for [`Engine::inject_event`]; dropped in
+    /// `Drop` so the consumer ends with the engine.
+    inject: Mutex<Option<std::sync::mpsc::Sender<Msg>>>,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -125,6 +199,9 @@ impl Engine {
             .zones(cfg.zone_span, cfg.zone_overlap)
             .align(AlignFrame::Enu)
             .fixed_enu_origin(true)
+            // Settle-then-freeze display: shown zones are only refined, never jump.
+            .stable_display(true)
+            .display_deltas(LiveOptions { stride: cfg.display_stride.max(1), ..Default::default() })
             // A refined zone can be meshed only once (deltamesh), and late or corrected
             // sets would rewind zones already streamed; append only.
             .reconcile(ReconcilePolicy::AppendOnly)
@@ -148,11 +225,13 @@ impl Engine {
         let events = node.subscribe().context("live node closed before start")?;
 
         let (tx, rx) = std::sync::mpsc::channel::<Msg>();
-        Consumer::new(Arc::clone(&log), cfg.anchor, cfg.gpu, detector.is_some()).spawn(rx)?;
+        Consumer::new(Arc::clone(&log), cfg.anchor, cfg.gpu, detector.is_some())
+            .points(cfg.points_mode, cfg.snapshot_every)
+            .spawn(rx)?;
         if let (Some(q), Some(det)) = (&frame_queue, &detector) {
             live::spawn_detector(Arc::clone(q), Arc::clone(det), tx.clone())?;
         }
-        live::spawn_forwarder(events, tx)?;
+        live::spawn_forwarder(events, tx.clone())?;
         let stop = Arc::new(AtomicBool::new(false));
         let poller = live::spawn_poller(node.clone(), Arc::clone(&stop))?;
 
@@ -167,6 +246,7 @@ impl Engine {
             stop,
             poller: Mutex::new(Some(poller)),
             job_lock: Mutex::new(()),
+            inject: Mutex::new(Some(tx)),
         })
     }
 
@@ -187,6 +267,15 @@ impl Engine {
         };
         let outcome = self.node.compose(state).map_err(|e| anyhow!("compose: {e}"))?;
         Ok(PushOutcome::from_compose(&outcome))
+    }
+
+    /// Hook for replay tools and tests: hands a cumulus3d event straight to the
+    /// chunk consumer, as if the live node had emitted it (see [`replay`]).
+    /// Fails once the engine is shutting down.
+    pub fn inject_event(&self, ev: cumulus3d_cli::events::Event) -> anyhow::Result<()> {
+        let guard = lock(&self.inject);
+        let tx = guard.as_ref().context("engine is shut down")?;
+        tx.send(Msg::Event(ev)).map_err(|_| anyhow!("chunk consumer has stopped"))
     }
 
     /// Chunks with a sequence above `after_sequence`, then every new one as it is
@@ -282,6 +371,7 @@ impl Drop for Engine {
     /// closes.
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Relaxed);
+        lock(&self.inject).take();
         if let Some(q) = &self.frame_queue {
             q.close();
         }
@@ -315,7 +405,21 @@ mod tests {
             zone_overlap: 2,
             work_dir: std::env::temp_dir().join(format!("skylens-engine-{dir}-{}", std::process::id())),
             gpu: false,
+            points_mode: PointsMode::default(),
+            display_stride: DEFAULT_DISPLAY_STRIDE,
+            snapshot_every: DEFAULT_SNAPSHOT_EVERY,
         }
+    }
+
+    #[test]
+    fn points_mode_parses_and_selects_paths() {
+        assert_eq!("DELTA".parse(), Ok(PointsMode::Delta));
+        assert_eq!(" segment ".parse(), Ok(PointsMode::Segment));
+        assert_eq!("both".parse(), Ok(PointsMode::Both));
+        assert!("x".parse::<PointsMode>().is_err());
+        assert!(PointsMode::Delta.delta() && !PointsMode::Delta.segment());
+        assert!(!PointsMode::Segment.delta() && PointsMode::Segment.segment());
+        assert!(PointsMode::Both.delta() && PointsMode::Both.segment());
     }
 
     #[test]

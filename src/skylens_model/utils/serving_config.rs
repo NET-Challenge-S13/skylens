@@ -23,6 +23,9 @@
 //! | `SKYLENS_ZONE_OVERLAP`  | `2`            | cumulus3d zone overlap, in frame sets |
 //! | `SKYLENS_WORK_DIR`      | `<repo>/runs/model` | cumulus3d working directory |
 //! | `SKYLENS_GPU`           | unset (= CUDA available) | force the GPU backends on or off |
+//! | `SKYLENS_POINTS_MODE`   | `delta`        | live point display: `delta` (`POINTS_DELTA` chunks from cumulus3d display deltas), `segment` (old per-zone `POINTS` chunks), `both` |
+//! | `SKYLENS_DISPLAY_STRIDE` | `2`           | display thinning 1/N per zone before the overlap dedupe (1 = the old per-zone density; cumulus3d's own default is 6) |
+//! | `SKYLENS_DELTA_SNAPSHOT_EVERY` | `128`   | snapshot chunk (new generation) every N deltas; 0 = never |
 //! | `SKYLENS_PRECISION`     | `auto`         | SkyLensNet arithmetic on CUDA: `auto` (by compute capability: >= 8.0 bf16, 7.x fp16 autocast, else fp32), `fp32`, `fp16`, `bf16` |
 //! | `DELTAMESH_EXTRACT_BATCH` | `128` (set by `app::main`) | deltamesh GPU mesher blocks per extraction batch; deltamesh's own default 512 holds about 0.7 GB more GPU memory |
 
@@ -31,6 +34,7 @@ use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use super::geo::Gps;
+use crate::models::skylens::{DEFAULT_DISPLAY_STRIDE, DEFAULT_SNAPSHOT_EVERY, PointsMode};
 use crate::models::skylensnet::modeling_skylensnet::Precision;
 
 /// `src/skylens_model` -> `src` -> repo.
@@ -58,6 +62,9 @@ pub struct Settings {
     pub zone_span: usize,
     pub zone_overlap: usize,
     pub work_dir: PathBuf,
+    pub points_mode: PointsMode,
+    pub display_stride: usize,
+    pub snapshot_every: usize,
     /// `None` = decide from CUDA availability at engine build time.
     pub gpu: Option<bool>,
     /// `None` = `auto`; an unparsable value is also `auto`.
@@ -123,6 +130,17 @@ impl Settings {
             work_dir: get("SKYLENS_WORK_DIR")
                 .map(PathBuf::from)
                 .unwrap_or_else(|| repo_root().join("runs").join("model")),
+            points_mode: get("SKYLENS_POINTS_MODE")
+                .and_then(|raw| match raw.parse::<PointsMode>() {
+                    Ok(m) => Some(m),
+                    Err(err) => {
+                        tracing::warn!("SKYLENS_POINTS_MODE ignored: {err}");
+                        None
+                    }
+                })
+                .unwrap_or_default(),
+            display_stride: int("SKYLENS_DISPLAY_STRIDE", DEFAULT_DISPLAY_STRIDE).max(1),
+            snapshot_every: int("SKYLENS_DELTA_SNAPSHOT_EVERY", DEFAULT_SNAPSHOT_EVERY),
             gpu: flag("SKYLENS_GPU"),
             precision: get("SKYLENS_PRECISION").and_then(|raw| match raw.parse::<Precision>() {
                 Ok(Precision::Auto) => None,
@@ -188,6 +206,20 @@ mod tests {
         assert_eq!(s.cameras, vec!["left", "center", "right"]);
         assert_eq!(s.gpu, None);
         assert_eq!(s.precision, None);
+        assert_eq!(s.points_mode, PointsMode::Delta);
+        assert_eq!((s.display_stride, s.snapshot_every), (2, 128));
+    }
+
+    #[test]
+    fn points_settings_parse() {
+        let s = with(&[
+            ("SKYLENS_POINTS_MODE", "Both"),
+            ("SKYLENS_DISPLAY_STRIDE", "0"),
+            ("SKYLENS_DELTA_SNAPSHOT_EVERY", "0"),
+        ]);
+        assert_eq!((s.points_mode, s.display_stride, s.snapshot_every), (PointsMode::Both, 1, 0));
+        assert_eq!(with(&[("SKYLENS_POINTS_MODE", "nope")]).points_mode, PointsMode::Delta);
+        assert_eq!(with(&[("SKYLENS_POINTS_MODE", "segment")]).points_mode, PointsMode::Segment);
     }
 
     #[test]

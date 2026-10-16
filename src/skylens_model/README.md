@@ -290,3 +290,19 @@ TypeScript 클라이언트(`src/skylens_core/`)는 이 패키지를 직접 호�
 **ENU(East/North/Up) 규약**으로 공유한다 — GPS in, 로컬 미터 out.
 덕분에 이 패키지가 내놓는 탐지 결과와 스플랫 청크가 클라이언트가 렌더하는
 동일한 씬 프레임에 정렬된다.
+
+# 라이브 점 표시 (points delta)
+
+Rust 서버(`models/skylens/`)는 라이브 점군을 **`POINTS_DELTA` 청크**로 내보낸다. cumulus3d 0.6.0이 구간 결과마다 표시용 점군을 합성(키 해시 솎아내기, 겹침 voxel 소유, 낮은 구간 우선)하고 직전 표시와 비교해 `DisplayDelta`(점 추가·이동·삭제, 조밀한 슬롯 id)를 주면, 컨슈머가 이를 `PointsDelta` 페이로드로 인코딩해 `ChunkLog`에 싣는다. 구간마다 점 덩어리를 통째로 보내던 옛 방식(`POINTS`)은 `segment` 모드로 남아 있다. 메시(deltamesh)와 탐지 융합은 어느 모드에서나 구간 점군으로 그대로 돈다.
+
+| env | 기본값 | 뜻 |
+|---|---|---|
+| `SKYLENS_POINTS_MODE` | `delta` | `delta`(`POINTS_DELTA`만) · `segment`(옛 구간별 `POINTS`만) · `both` |
+| `SKYLENS_DISPLAY_STRIDE` | `2` | 구간 점군을 1/N로 솎는다(`LiveOptions::stride`). 0은 1로 본다 |
+| `SKYLENS_DELTA_SNAPSHOT_EVERY` | `128` | N개 델타마다 전체 상태 스냅샷 청크(세대 +1). 0이면 만들지 않는다 |
+
+**기본 stride를 2로 정한 이유.** 옛 구간 청크는 밀집 점군 전체를 솎지 않고 실었으므로(`recon::zone_points`) 옛 밀도는 stride 1이다. 겹침 구간(12 중 2)의 중복을 voxel 소유로 지우면 거기서 약 1/6이 빠진다. stride 2는 그 절반이라 점 뷰가 옛 모습과 비슷하게 읽히면서, 합성이 복원 스레드에서 돌고 점당 20 B가 와이어에 실리는 비용을 감당할 만하다. cumulus3d 기본값 6은 표시 전용 뷰어용이라 너무 성기다. 더 촘촘히 보려면 `SKYLENS_DISPLAY_STRIDE=1`.
+
+**좌표.** 델타 점은 옛 경로와 똑같이 앵커 기준 ENU 미터(x 동, y 북, z 위)다. 앵커 기록이 첫 GPS 픽스이므로 `DisplayFrame.origin_gps`는 앵커와 같다. 다르면(1 cm 초과) 컨슈머가 ENU 오프셋만큼 평행이동하고, ENU 프레임이 아니면 그 델타를 경고와 함께 건너뛴다(`live::align_delta`).
+
+**세대와 재생.** 모델 쪽 `DisplayMirror`가 모든 델타를 따라가고, 스냅샷 주기마다 거울 전체를 `snapshot=true`(마지막 델타와 같은 `seq`, 세대 +1) 청크로 낸다. `ChunkLog`는 코어 저장소와 같은 규칙으로, 더 높은 세대의 델타 청크가 오면 이전 세대 델타 청크를 모두 버린다. 그래서 `SubscribeChunks(after_sequence)`로 이어받아도 스냅샷부터 일관된 스트림이 오고, 로그 길이는 스냅샷 주기로 묶인다.

@@ -8,11 +8,17 @@
 //!   still needs, and feeds every subscriber from its own thread so a slow one
 //!   never blocks the producer.
 //!
+//! - [`points_delta_delivery`]: display deltas as `POINTS_DELTA` chunks.
+//!
 //! Compaction (what the log forgets): a mesh block is superseded by a newer
 //! version of the same block id, a detection batch by a newer batch of the same
 //! segment, and the points of a segment by a delivery of a newer generation.
 //! A subscriber resuming at `after_sequence` therefore receives the current
-//! state, not every intermediate one.
+//! state, not every intermediate one. `POINTS_DELTA` chunks follow the core
+//! store's rule: a chunk of a higher generation (the snapshot that starts it)
+//! replaces every retained delta chunk, the same generation appends. Replaying
+//! the retained list from the start therefore rebuilds the display, and its
+//! length stays bounded by the snapshot cadence.
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
@@ -23,7 +29,8 @@ use pointblitz_io::chunk::encode;
 use pointblitz_io::convert::{MAX_POINTS, piece_plan};
 use prost::Message;
 use skylens_shared::proto::model::v1::{Chunk, ChunkKind, Level};
-use skylens_shared::proto::payload::v1::{DetectionBatch, MeshBlock};
+use skylens_shared::delta::to_chunk;
+use skylens_shared::proto::payload::v1::{DetectionBatch, MeshBlock, PointsDelta};
 
 /// Channel depth of one subscriber.
 pub const SUBSCRIBER_BUFFER: usize = 256;
@@ -70,6 +77,12 @@ pub fn points_delivery(segment: u32, level: Level, generation: u32, points: &[Zo
             ..Default::default()
         })
         .collect()
+}
+
+/// One display delta (or snapshot) as a `POINTS_DELTA` chunk: segment = zone,
+/// level refined, version = `delta.seq`, generation = snapshot epoch.
+pub fn points_delta_delivery(delta: &PointsDelta, generation: u32) -> Vec<Chunk> {
+    vec![to_chunk(0, delta, generation)]
 }
 
 /// One mesh block. `None` (block emptied) becomes a zero-triangle removal.
@@ -214,6 +227,9 @@ fn compact(chunks: &mut BTreeMap<u64, Arc<Chunk>>, new: &Chunk) {
         chunks.retain(|_, c| !(c.kind == kind && c.segment == new.segment && c.version <= new.version));
     } else if kind == ChunkKind::Points as i32 {
         chunks.retain(|_, c| !(c.kind == kind && c.segment == new.segment && c.generation < new.generation));
+    } else if kind == ChunkKind::PointsDelta as i32 {
+        // One stream across zones: a higher generation is a snapshot that starts over.
+        chunks.retain(|_, c| !(c.kind == kind && c.generation < new.generation));
     }
 }
 
@@ -311,6 +327,28 @@ mod tests {
         assert!(points.contains(&(1, 0)), "segment 1 preview must stay: {points:?}");
         assert!(points.contains(&(0, 1)), "segment 0 refined must arrive: {points:?}");
         assert!(!points.contains(&(0, 0)), "segment 0 preview must be replaced: {points:?}");
+    }
+
+    #[test]
+    fn delta_generation_replaces_older_delta_chunks_only() {
+        let log = ChunkLog::new();
+        let d = |seq: u32, zone: u32| PointsDelta { seq, zone, ..Default::default() };
+        log.publish(points_delta_delivery(&d(1, 0), 0));
+        log.publish(points_delta_delivery(&d(2, 1), 0));
+        log.publish(points_delivery(0, Level::Preview, 0, &cloud(2)));
+        log.publish([mesh_chunk(0, Level::Preview, [0, 0, 0], 1, None)]);
+        assert_eq!(log.retained(), 4);
+        log.publish(points_delta_delivery(&d(3, 1), 0));
+        assert_eq!(log.retained(), 5, "same generation appends");
+        let mut snap = d(3, 1);
+        snap.snapshot = true;
+        log.publish(points_delta_delivery(&snap, 1));
+        let kept: Vec<_> = log.since(0).iter().map(|c| (c.kind, c.generation)).collect();
+        assert_eq!(
+            kept.iter().filter(|k| k.0 == ChunkKind::PointsDelta as i32).collect::<Vec<_>>(),
+            vec![&(ChunkKind::PointsDelta as i32, 1)]
+        );
+        assert_eq!(kept.len(), 3, "points and mesh untouched: {kept:?}");
     }
 
     #[test]
