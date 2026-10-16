@@ -12,7 +12,7 @@
 #[allow(dead_code)] // the model uses all of it; this test does not
 mod slotstream;
 
-use cumulus3d_cli::live::{DisplayDelta, DisplayMirror, KeyedDiff};
+use cumulus3d_cli::live::{DeltaKind, DisplayDelta, DisplayMirror, KeyedDiff};
 use cumulus3d_core::io::PointCloud;
 use pointblitz_io::slots::{self, Fold, HEADER_LEN};
 use skylens_shared::proto::model::v1 as model;
@@ -65,7 +65,7 @@ fn display_deltas_rebuild_the_same_points_on_a_screen_and_after_a_reconnect() {
     let mut chunks = Vec::new();
     for (i, (zone, d)) in deltas().into_iter().enumerate() {
         mirror.apply(&d).unwrap();
-        let mut c = enc.encode(&d, zone).unwrap();
+        let mut c = enc.encode(&d, zone, DeltaKind::Refined, 1.0).unwrap();
         fold.apply(&c.payload).unwrap();
         c.sequence = i as u64 + 1;
         let a = screen.apply(&c);
@@ -100,7 +100,7 @@ fn a_new_model_run_starts_the_screen_over() {
     for (stream, n) in [(11u32, 3usize), (12, 1)] {
         let mut enc = slotstream::SlotEncoder::new(stream);
         for (zone, d) in deltas().into_iter().take(n) {
-            screen.apply(&enc.encode(&d, zone).unwrap());
+            screen.apply(&enc.encode(&d, zone, DeltaKind::Refined, 1.0).unwrap());
         }
     }
     let sp = screen.slots();
