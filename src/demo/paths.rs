@@ -105,13 +105,16 @@ pub fn tcp_publish_url(base: &str, drone: &Drone) -> String {
 
 /// ffmpeg arguments that publish a file to MediaMTX at real time, without re-encoding;
 /// in a loop unless `looped` is false (then it plays once).
-pub fn publisher_args(file: &Path, url: &str, looped: bool) -> Vec<String> {
+/// `limit` stops the feed after that many seconds of the clip (`-t`, before the input).
+pub fn publisher_args(file: &Path, url: &str, looped: bool, limit: Option<f64>) -> Vec<String> {
     let loop_args: &[&str] = if looped { &["-stream_loop", "-1"] } else { &[] };
+    let limit_args: Vec<String> = limit.map(|d| vec!["-t".to_string(), format!("{d:.3}")]).unwrap_or_default();
     ["-hide_banner", "-nostats", "-loglevel", "warning", "-re"]
     .iter()
     .chain(loop_args)
-    .chain(["-i"].iter())
     .map(|s| s.to_string())
+    .chain(limit_args)
+    .chain(["-i".to_string()])
     .chain([file.display().to_string()])
     .chain(["-an", "-c:v", "copy", "-f", "mpegts"].iter().map(|s| s.to_string()))
     .chain([url.to_string()])
@@ -274,7 +277,7 @@ paths:
 
     #[test]
     fn publisher_copies_video_in_a_real_time_loop() {
-        let args = publisher_args(Path::new("demo_left.mp4"), &srt_publish_url("127.0.0.1:10890", &FORMATION[0]), true);
+        let args = publisher_args(Path::new("demo_left.mp4"), &srt_publish_url("127.0.0.1:10890", &FORMATION[0]), true, None);
         let joined = args.join(" ");
         assert!(joined.contains("-re -stream_loop -1 -i demo_left.mp4"));
         assert!(joined.contains("-an -c:v copy -f mpegts"));
@@ -283,10 +286,17 @@ paths:
 
     #[test]
     fn publisher_plays_once_without_looping() {
-        let args = publisher_args(Path::new("demo_left.mp4"), "tcp://127.0.0.1:19101", false);
+        let args = publisher_args(Path::new("demo_left.mp4"), "tcp://127.0.0.1:19101", false, None);
+        assert!(!args.contains(&"-t".to_string()));
         let joined = args.join(" ");
         assert!(joined.contains("-re -i demo_left.mp4"));
         assert!(!joined.contains("-stream_loop"));
+    }
+
+    #[test]
+    fn publisher_limit_stops_the_feed() {
+        let args = publisher_args(Path::new("left.mp4"), "tcp://127.0.0.1:19101", false, Some(52.3));
+        assert!(args.join(" ").contains("-re -t 52.300 -i left.mp4"));
     }
 
     #[test]

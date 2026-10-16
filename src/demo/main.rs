@@ -95,6 +95,13 @@ async fn scenario(o: &Options, repo: &Path) -> Result<Scenario, String> {
     for v in track.views() {
         log("footage", &v.summary());
     }
+    let track = if o.full_footage {
+        track
+    } else {
+        let t = track.first_pass_only();
+        log("footage", &format!("첫 비행 구간만 재생: {:.1}초 (전체는 --full-footage)", t.center.duration));
+        t
+    };
     if let Some(c) = footage::Camera::load(&paths::camera_file(repo)) {
         log("footage", &format!("카메라 {} (모델 서버는 내부 파라미터를 받지 않아 넘기지 않습니다)", c.describe(o.frame_width)));
     }
@@ -300,7 +307,7 @@ async fn start_all(
             Some(base) => paths::tcp_publish_url(base, drone),
             None => paths::srt_publish_url(&srt_addr, drone),
         };
-        let argv = paths::publisher_args(file, &url, !o.no_loop);
+        let argv = paths::publisher_args(file, &url, !o.no_loop, if o.full_footage { None } else { s.track.as_ref().map(|t| t.views()[i].duration) });
         let mut publisher = spec(plan, &name, &tag, &plan.ffmpeg, argv, vec![]);
         // A clip that plays once ends on its own; that is not a failure.
         publisher.critical = !o.no_loop;

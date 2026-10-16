@@ -45,6 +45,8 @@ pub struct Options {
     pub follow_route: bool,
     /// Play the footage once instead of looping it; the drones hold their last fix afterwards.
     pub no_loop: bool,
+    /// Play every pass of the footage (default: only the first pass).
+    pub full_footage: bool,
     /// Seconds to wait before the footage starts playing (the drones follow the clip, so they
     /// wait too); lets the drones come online before the first frame is published.
     pub publish_delay: f64,
@@ -89,6 +91,7 @@ impl Default for Options {
             auto: false,
             follow_route: false,
             no_loop: false,
+            full_footage: false,
             publish_delay: 0.0,
             checkpoint: None,
             core_bin: None,
@@ -125,6 +128,8 @@ pub const USAGE: &str = "usage: cargo run -p skylens-demo -- [options]
   --follow-route       drones fly the assigned waypoints instead of the footage track
   --no-loop            play the footage once instead of looping it (drones then hold
                        their last position)
+  --full-footage       play every pass of the footage (default: only the first, high
+                       pass, about 53 s; the second low pass adds no points)
   --publish-delay S    wait S seconds before the footage starts (e.g. until the drones
                        are online)
   --synthetic          old clips (res/static/video/demo_*.mp4) on a synthetic track
@@ -227,7 +232,7 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<Options, St
                 }
                 o.site = Some(v);
             }
-            "--no-model" | "--native" | "--auto" | "--follow-route" | "--no-loop" | "--synthetic" | "--no-fetch" | "-h" | "--help"
+            "--no-model" | "--native" | "--auto" | "--follow-route" | "--no-loop" | "--full-footage" | "--synthetic" | "--no-fetch" | "-h" | "--help"
                 if inline.is_some() =>
             {
                 return Err(format!("{flag} takes no value"));
@@ -237,6 +242,7 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<Options, St
             "--auto" => o.auto = true,
             "--follow-route" => o.follow_route = true,
             "--no-loop" => o.no_loop = true,
+            "--full-footage" => o.full_footage = true,
             "--synthetic" => o.synthetic = true,
             "--no-fetch" => o.no_fetch = true,
             "-h" | "--help" => o.help = true,

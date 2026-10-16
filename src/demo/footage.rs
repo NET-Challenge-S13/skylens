@@ -126,6 +126,24 @@ impl Track {
         Ok(Track { left: take("left")?, center: take("center")?, right: take("right")? })
     }
 
+    /// Only the first flight pass of every view: the clip ends at `segments[0].duration`, and rows
+    /// and segments after it are dropped (the later low pass adds no points).
+    pub fn first_pass_only(&self) -> Track {
+        let cut = |v: &View| {
+            let d = v.segments[0].duration.min(v.duration);
+            let mut out = v.clone();
+            out.duration = d;
+            out.segments.truncate(1);
+            out.rows.retain(|r| r.t <= d);
+            if out.rows.len() < 2 {
+                return v.clone();
+            }
+            out.speeds = out.pair_speeds();
+            out
+        };
+        Track { left: cut(&self.left), center: cut(&self.center), right: cut(&self.right) }
+    }
+
     /// Views in formation order (drone 1, 2, 3).
     pub fn views(&self) -> [&View; 3] {
         [&self.left, &self.center, &self.right]
@@ -475,6 +493,14 @@ mod tests {
 
     fn track() -> Track {
         Track::parse(RECORD).unwrap()
+    }
+
+    #[test]
+    fn first_pass_only_cuts_at_the_first_segment() {
+        let t = track().first_pass_only();
+        assert!(close(t.left.duration, 4.0, 1e-9));
+        assert_eq!(t.left.segments.len(), 1);
+        assert!(t.left.rows.iter().all(|r| r.t <= 4.0));
     }
 
     #[test]

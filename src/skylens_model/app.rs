@@ -512,7 +512,13 @@ pub async fn serve_with(settings: Settings, live: LiveEngine) -> anyhow::Result<
         settings.demo,
         if settings.demo { settings.manifest.display().to_string() } else { "-".into() }
     );
-    tracing::info!("live stride {} (SKYLENS_LIVE_STRIDE)", settings.live_stride);
+    tracing::info!(
+        "live stride {} (SKYLENS_LIVE_STRIDE), zone preview {} (SKYLENS_ZONE_PREVIEW), backlog batch {:?} (SKYLENS_BACKLOG_BATCH), camera prior {:?} (SKYLENS_CAMERA_JSON)",
+        settings.live_stride,
+        settings.zone_preview,
+        settings.backlog_batch,
+        settings.camera_json
+    );
     if !settings.demo {
         spawn_gpu_watch();
     }

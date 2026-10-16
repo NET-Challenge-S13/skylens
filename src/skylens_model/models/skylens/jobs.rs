@@ -59,7 +59,7 @@ pub fn live_plan() -> Plan {
     let mut plan = Plan::default();
     plan.dense.enabled = false;
     plan.gps = None;
-    // Live throughput of a node: feature lookahead 4, backlog batch from 3 waiting positions.
+    // Live throughput of a node: feature lookahead 4, backlog batching off by default (SKYLENS_BACKLOG_BATCH=1).
     plan.live = cumulus3d_cli::declare::Live::live_node();
     plan
 }
@@ -69,6 +69,13 @@ pub fn live_plan() -> Plan {
 /// focal is an estimate); see `SKYLENS_INTRINSICS_SIGMA`.
 pub const PRIOR_FOCAL_SIGMA: f64 = 0.005;
 pub const PRIOR_DIST_SIGMA: f64 = 0.01;
+
+/// Sentinel `camera_json` path meaning the built-in demo camera (`SKYLENS_CAMERA_JSON` unset).
+pub const BUILTIN_CAMERA: &str = "builtin:dji-fc9589";
+/// Built-in demo camera, DJI FC9589 1920x1080: theater30 self-calibration scaled to 1920 (the
+/// footage zip's camera.json estimate, 1329, is 12% low).
+pub const BUILTIN_CAMERA_JSON: &str =
+    r#"{"video_width":1920,"video_height":1080,"fx_estimate_px":1505,"fy_estimate_px":1510,"cx":960,"cy":540}"#;
 
 /// Intrinsics prior for every camera in `cameras` from the camera estimate in `path`
 /// (`data/demo/camera.json`: `fx_estimate_px`, `fy_estimate_px`, `cx`, `cy`, `video_width`; zero
@@ -81,7 +88,7 @@ pub fn intrinsics_prior(
     focal_sigma: f64,
     dist_sigma: f64,
 ) -> anyhow::Result<Option<IntrinsicsPrior>> {
-    let raw = match std::fs::read(path) {
+    let raw = match if path == Path::new(BUILTIN_CAMERA) { Ok(BUILTIN_CAMERA_JSON.as_bytes().to_vec()) } else { std::fs::read(path) } {
         Ok(r) => r,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(anyhow::Error::new(e).context("read camera json")),

@@ -27,10 +27,10 @@
 //! | `SKYLENS_WORK_DIR`      | `<repo>/runs/model` | cumulus3d working directory |
 //! | `SKYLENS_GPU`           | unset (= CUDA available) | force the GPU backends on or off |
 //! | `SKYLENS_STABLE_DISPLAY` | `1`           | cumulus3d stable display: points leave as the live diff stream (point slot chunks); `0` = zone previews and refined zones as point chunks |
-//! | `SKYLENS_LIVE_STRIDE`   | `6`            | stable display: keep 1 of this many points in the live display (1 = every point) |
-//! | `SKYLENS_ZONE_PREVIEW`  | `1`            | stable display: sparse zone previews as `Preview` deltas (slot_kind 4) before the refined zone |
-//! | `SKYLENS_BACKLOG_BATCH` | unset          | backlog batching threshold (cumulus3d default 3); positions waiting at least this many are processed as one batch |
-//! | `SKYLENS_CAMERA_JSON`  | `<repo>/data/demo/camera.json` | camera intrinsics estimate used as the live node's intrinsics prior; a missing file means no prior |
+//! | `SKYLENS_LIVE_STRIDE`   | `2`            | stable display: keep 1 of this many points in the live display (1 = every point) |
+//! | `SKYLENS_ZONE_PREVIEW`  | `0` (off)      | stable display: sparse zone previews as `Preview` deltas (slot_kind 4) before the refined zone |
+//! | `SKYLENS_BACKLOG_BATCH` | `1` (off)      | backlog batching threshold; positions waiting at least this many are processed as one batch. Default off: batching > 1 in cumulus3d 0.11.0 shrinks the display scale ~30x (upstream bug) |
+//! | `SKYLENS_CAMERA_JSON`  | built-in demo camera | camera intrinsics prior. Unset: built-in DJI FC9589 1920x1080 (fx 1505, fy 1510, cx 960, cy 540; theater30 self-calibration, the footage camera.json 1329 is 12% low). A set path overrides it; a missing file means no prior |
 //! | `SKYLENS_FRAME_WIDTH`   | unset (= the file's `video_width`) | width of the pushed frames; the prior's fx, fy, cx, cy are scaled by this / `video_width` |
 //! | `SKYLENS_PRECISION`     | `auto`         | SkyLensNet arithmetic on CUDA: `auto` (by compute capability: >= 8.0 bf16, 7.x fp16 autocast, else fp32), `fp32`, `fp16`, `bf16` |
 //! | `DELTAMESH_EXTRACT_BATCH` | `128` (set by `app::main`) | deltamesh GPU mesher blocks per extraction batch; deltamesh's own default 512 holds about 0.7 GB more GPU memory |
@@ -73,9 +73,9 @@ pub struct Settings {
     pub stable_display: bool,
     /// Stable display: live display thinning (1 of this many points, at least 1).
     pub live_stride: usize,
-    /// Stable display: sparse zone previews as `Preview` deltas (`SKYLENS_ZONE_PREVIEW`, default on).
+    /// Stable display: sparse zone previews as `Preview` deltas (`SKYLENS_ZONE_PREVIEW`, default off).
     pub zone_preview: bool,
-    /// Backlog batch threshold (`SKYLENS_BACKLOG_BATCH`; unset = cumulus3d default, 0/1 = off).
+    /// Backlog batch threshold (`SKYLENS_BACKLOG_BATCH`; default 1 = off).
     pub backlog_batch: Option<usize>,
     /// Camera intrinsics estimate for the intrinsics prior (`None` = no prior).
     pub camera_json: Option<PathBuf>,
@@ -153,13 +153,13 @@ impl Settings {
                 .unwrap_or_else(|| repo_root().join("runs").join("model")),
             gpu: flag("SKYLENS_GPU"),
             stable_display: flag("SKYLENS_STABLE_DISPLAY").unwrap_or(true),
-            zone_preview: flag("SKYLENS_ZONE_PREVIEW").unwrap_or(true),
-            backlog_batch: get("SKYLENS_BACKLOG_BATCH").and_then(|v| v.trim().parse().ok()),
+            zone_preview: flag("SKYLENS_ZONE_PREVIEW").unwrap_or(false),
+            backlog_batch: Some(get("SKYLENS_BACKLOG_BATCH").and_then(|v| v.trim().parse().ok()).unwrap_or(1)),
             live_stride: int("SKYLENS_LIVE_STRIDE", crate::models::skylens::DEFAULT_LIVE_STRIDE).max(1),
             camera_json: Some(
                 get("SKYLENS_CAMERA_JSON")
                     .map(PathBuf::from)
-                    .unwrap_or_else(|| repo_root().join("data").join("demo").join("camera.json")),
+                    .unwrap_or_else(|| PathBuf::from(crate::models::skylens::jobs::BUILTIN_CAMERA)),
             ),
             frame_width: get("SKYLENS_FRAME_WIDTH").and_then(|v| v.trim().parse().ok()).filter(|w| *w > 0),
             settle_tol: num("SKYLENS_SETTLE_TOL", 0.02),
