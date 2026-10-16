@@ -316,6 +316,8 @@ mod tests {
             gpu: false,
             stable_display: true,
             live_stride: DEFAULT_LIVE_STRIDE,
+            camera_json: None,
+            frame_width: None,
         };
         let engine = Engine::new(cfg, None).unwrap();
         for e in &events {

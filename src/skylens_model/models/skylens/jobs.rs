@@ -20,6 +20,7 @@ use anyhow::{Context, anyhow, bail};
 use cumulus3d_cli::compose::{CompositionHost, FrameKey, FrameState, LiveFrameSet, ReconNode, ReconcilePolicy};
 use cumulus3d_cli::declare::{AlignFrame, Dense, Plan};
 use cumulus3d_cli::events::{Event, ZoneRange};
+use cumulus3d_cli::intrinsics::IntrinsicsPrior;
 use cumulus3d_core::io::ply::PointCloud;
 use cumulus3d_core::Reconstruction;
 use skylens_shared::proto::model::v1::{Gps as ProtoGps, Level, Source};
@@ -53,15 +54,45 @@ pub struct JobOutput {
 /// [`dense_for`] and no GPS file (the sets carry their GPS fixes). The settle parameters
 /// (`--settle-tol 0.01 --settle-max-zone 3`) are set with `NodeBuilder::settle`.
 ///
-/// The intrinsics prior of the V100 runs (`--intrinsics-prior`, the demo camera.json: fx = fy =
-/// 1329 at 1920x1080) cannot be expressed here: in cumulus3d 0.8 `Plan.sparse.intrinsics_prior` is
-/// read only by the file driven `Recon` builder, while `NodeBuilder::build` (the `ReconNode` of the
-/// live node and the jobs) never passes it on to the session.
+/// The intrinsics prior (`--intrinsics-prior`) is added to the live node by [`intrinsics_prior`].
 pub fn live_plan() -> Plan {
     let mut plan = Plan::default();
     plan.dense.enabled = false;
     plan.gps = None;
     plan
+}
+
+/// Focal-length sigma (relative) and distortion sigma (absolute) of the intrinsics prior: the
+/// `--intrinsics-prior` defaults of the V100 runs.
+pub const PRIOR_FOCAL_SIGMA: f64 = 0.005;
+pub const PRIOR_DIST_SIGMA: f64 = 0.01;
+
+/// Intrinsics prior for every camera in `cameras` from the camera estimate in `path`
+/// (`data/demo/camera.json`: `fx_estimate_px`, `fy_estimate_px`, `cx`, `cy`, `video_width`; zero
+/// distortion). fx, fy, cx and cy are scaled by `frame_width / video_width` when the pushed frames
+/// have another width. `Ok(None)` when the file does not exist.
+pub fn intrinsics_prior(
+    path: &Path,
+    cameras: &[String],
+    frame_width: Option<u32>,
+) -> anyhow::Result<Option<IntrinsicsPrior>> {
+    let raw = match std::fs::read(path) {
+        Ok(r) => r,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(anyhow::Error::new(e).context("read camera json")),
+    };
+    let v: serde_json::Value = serde_json::from_slice(&raw).context("parse camera json")?;
+    let num = |k: &str| v.get(k).and_then(serde_json::Value::as_f64).with_context(|| format!("camera json has no number {k:?}"));
+    let (fx, fy, cx, cy) = (num("fx_estimate_px")?, num("fy_estimate_px")?, num("cx")?, num("cy")?);
+    let scale = match (frame_width, v.get("video_width").and_then(serde_json::Value::as_f64)) {
+        (Some(w), Some(vw)) if vw > 0.0 => f64::from(w) / vw,
+        _ => 1.0,
+    };
+    let mut prior = IntrinsicsPrior::new().sigmas(PRIOR_FOCAL_SIGMA, PRIOR_DIST_SIGMA);
+    for c in cameras {
+        prior = prior.opencv(c.clone(), [fx * scale, fy * scale, cx * scale, cy * scale, 0.0, 0.0, 0.0, 0.0]);
+    }
+    Ok(Some(prior))
 }
 
 /// Dense settings shared by the live node and jobs, equal to the V100 live runs: `fast` profile,
@@ -248,6 +279,34 @@ pub fn write_cloud(path: &Path, out: &JobOutput) -> anyhow::Result<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const CAMERA_JSON: &str = r#"{"video_width":1920,"video_height":1080,"fx_estimate_px":1329,"fy_estimate_px":1329,"cx":960,"cy":540}"#;
+
+    fn camera_file(tag: &str) -> PathBuf {
+        let p = std::env::temp_dir().join(format!("skylens-camera-{tag}-{}.json", std::process::id()));
+        std::fs::write(&p, CAMERA_JSON).unwrap();
+        p
+    }
+
+    #[test]
+    fn the_intrinsics_prior_covers_every_camera_and_scales_with_the_frame_width() {
+        let path = camera_file("prior");
+        let cams: Vec<String> = ["left", "center", "right"].map(String::from).to_vec();
+        let p = intrinsics_prior(&path, &cams, None).unwrap().unwrap();
+        assert_eq!(p.named.keys().collect::<Vec<_>>(), ["center", "left", "right"]);
+        assert_eq!(p.named["left"], vec![1329.0, 1329.0, 960.0, 540.0, 0.0, 0.0, 0.0, 0.0]);
+        assert_eq!((p.focal_sigma, p.dist_sigma), (0.005, 0.01));
+        p.validate().unwrap();
+        let half = intrinsics_prior(&path, &cams, Some(960)).unwrap().unwrap();
+        assert_eq!(half.named["center"][..4], [664.5, 664.5, 480.0, 270.0]);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn a_missing_camera_file_means_no_prior() {
+        let none = intrinsics_prior(Path::new("/nonexistent/camera.json"), &["left".into()], None);
+        assert!(none.unwrap().is_none());
+    }
 
     #[test]
     fn steps_map_to_levels_at_the_threshold() {

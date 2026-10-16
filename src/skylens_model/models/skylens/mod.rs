@@ -104,6 +104,11 @@ pub struct EngineConfig {
     pub stable_display: bool,
     /// Live display thinning (1 of this many points, 1 = every point).
     pub live_stride: usize,
+    /// Camera intrinsics estimate (`data/demo/camera.json`) for the intrinsics prior of the live
+    /// node; `None` or a missing file means no prior.
+    pub camera_json: Option<std::path::PathBuf>,
+    /// Width of the pushed frames; the prior is scaled to it (`None` = the file's `video_width`).
+    pub frame_width: Option<u32>,
 }
 
 /// Result of declaring one frame set to the reconstruction node.
@@ -188,6 +193,16 @@ impl Engine {
             ensure!(cfg.live_stride >= 1, "live stride must be at least 1");
             // Settle-then-freeze display: shown zones are only refined, never jump.
             b = b.stable_display(true);
+        }
+        if let Some(path) = &cfg.camera_json {
+            match jobs::intrinsics_prior(path, &cfg.cameras, cfg.frame_width) {
+                Ok(Some(p)) => {
+                    tracing::info!("intrinsics prior from {} for {:?}", path.display(), cfg.cameras);
+                    b = b.intrinsics_prior(p);
+                }
+                Ok(None) => tracing::info!("no {}: the live node runs without an intrinsics prior", path.display()),
+                Err(e) => tracing::warn!("{}: {e:#}; the live node runs without an intrinsics prior", path.display()),
+            }
         }
         if deltas {
             b = b.display_deltas(LiveOptions { stride: cfg.live_stride, ..Default::default() });
@@ -403,6 +418,8 @@ mod tests {
             gpu: false,
             stable_display: true,
             live_stride: DEFAULT_LIVE_STRIDE,
+            camera_json: None,
+            frame_width: None,
         }
     }
 

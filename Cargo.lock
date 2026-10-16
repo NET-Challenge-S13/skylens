@@ -1099,9 +1099,9 @@ dependencies = [
 
 [[package]]
 name = "cumulus3d-align"
-version = "0.8.0"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ca27571237ba62f8d74ba5d23885893fa63b06929d43412f41ac7f0df05ce1e3"
+checksum = "b7458bcb64efadbac17b8c20541c7b741b02bd48919dd6d127d9dc73f4cd77a3"
 dependencies = [
  "cumulus3d-core",
  "nalgebra",
@@ -1111,9 +1111,9 @@ dependencies = [
 
 [[package]]
 name = "cumulus3d-ba"
-version = "0.8.0"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2d160f0ccb30b63bfdb8d46fad20745678b752b07e043ceec236048b1e77260b"
+checksum = "0fe2a064f6ea14aaab97f1ae7cb5763796f551fa13d6f1c212531c5fa698a696"
 dependencies = [
  "cumulus3d-core",
  "faer",
@@ -1124,9 +1124,9 @@ dependencies = [
 
 [[package]]
 name = "cumulus3d-cli"
-version = "0.8.0"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d4be45192d6ef70da5ccc15f1136fc1ae405084645f02220e036b30e2bf36d2a"
+checksum = "5f0488c15c3693cabf0a12c0f5bcb4a22c956cac4bf245979a0ff7f6ca454d7f"
 dependencies = [
  "clap",
  "cumulus3d-align",
@@ -1146,9 +1146,9 @@ dependencies = [
 
 [[package]]
 name = "cumulus3d-core"
-version = "0.8.0"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f7971fb888c29635aea11b16f69f8219b379c3e2d3b12c9bdc1f09636690107"
+checksum = "4c765298646c0f27ce72255ba7500db407405304c0508c5705825a1f37e29def"
 dependencies = [
  "nalgebra",
  "rand 0.10.3",
@@ -1159,9 +1159,9 @@ dependencies = [
 
 [[package]]
 name = "cumulus3d-cuda"
-version = "0.8.0"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7cbd07e4f7453281bb0dde91131db29e64e9c23eeb5ab1f25488462e094c6f19"
+checksum = "287b39666c65a00735e09c8db4cfa62076de4baf79a4b4861cdc28346c14faca"
 dependencies = [
  "cudarc",
  "cumulus3d-ba",
@@ -1177,9 +1177,9 @@ dependencies = [
 
 [[package]]
 name = "cumulus3d-dense"
-version = "0.8.0"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "131d47349dbd061deb89558686c3b45aa1eaa7d0be712e810b4aef0e60c969c6"
+checksum = "e7f6af214ae088a953a0a82cb271c789dec8a1d5f6637f56b38168209ddc6db4"
 dependencies = [
  "cumulus3d-core",
  "image",
@@ -1190,9 +1190,9 @@ dependencies = [
 
 [[package]]
 name = "cumulus3d-features"
-version = "0.8.0"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2e0f28083f163879ca2535a56bffa173dc79db07ba9fbc25ec82591d01202ec1"
+checksum = "fc520d525629d254455eb89ff1202bbb7d6e697ad6e717f4e793948f38c7ea0e"
 dependencies = [
  "cumulus3d-core",
  "image",
@@ -1204,9 +1204,9 @@ dependencies = [
 
 [[package]]
 name = "cumulus3d-matching"
-version = "0.8.0"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d37cca3a0a7fc69513394adbee0b0178455246205dbc6905ca94addcdf7be53"
+checksum = "d0516ed9d4ddb559a824e580280eba192ca008e9cc4933866dc9748f41b9549b"
 dependencies = [
  "cumulus3d-core",
  "nalgebra",
@@ -1218,9 +1218,9 @@ dependencies = [
 
 [[package]]
 name = "cumulus3d-sfm"
-version = "0.8.0"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9286045a2620a7eb507ef8dd6139e6c261a855b172bb5cb312708b0cc0a4dcca"
+checksum = "bb43e2eea1d4843a347cb98fc0e515e55d5cd7daa2d99800635fe081813e80da"
 dependencies = [
  "cumulus3d-ba",
  "cumulus3d-core",
