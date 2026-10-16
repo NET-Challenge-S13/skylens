@@ -76,6 +76,9 @@ pub struct StatusScene {
     framed: bool,
     /// Live slot mode: the opening top-down pose was applied (once).
     slot_framed: bool,
+    /// The operator moved the camera: no more automatic reframing.
+    touched: bool,
+    framed_box: Option<(DVec3, DVec3)>,
     fog: (f64, f64),
     css_height: f64,
     point_size: Option<f32>,
@@ -106,6 +109,8 @@ impl StatusScene {
             follower: Follower::default(),
             framed: false,
             slot_framed: false,
+            touched: false,
+            framed_box: None,
             fog: framing.base_fog(),
             css_height: 1.0,
             point_size: None,
@@ -162,13 +167,23 @@ impl StatusScene {
         self.orbit.max_distance = self.orbit.max_distance.max(reach * 4.0);
         self.fit_hold_until = info.now_ms + 30_000.0;
         self.slot_framed = true;
+        self.framed_box = Some((lo, hi));
     }
 
     fn camera(&mut self, board: &Board, info: &FrameInfo) {
         if !board.store.slots().is_empty() {
             // Live slot mode: one opening pose above the cloud (the same bounds as the inset),
             // no drone follow; after that only the operator moves the camera.
-            if !self.slot_framed && let Some((lo, hi)) = board.points_box() {
+            // Reframes only while the operator has not touched the view and the cloud really grew.
+            let grew = |b: &(DVec3, DVec3)| match self.framed_box {
+                None => true,
+                Some((l, h)) => {
+                    let span = (h - l).max_element().max(1.0) * 0.25;
+                    b.0.cmplt(l - DVec3::splat(span)).any() || b.1.cmpgt(h + DVec3::splat(span)).any()
+                }
+            };
+            if !self.touched && let Some((lo, hi)) = board.points_box() && grew(&(lo, hi)) {
+                self.framed_box = Some((lo, hi));
                 let (pose, reach) = top_down_pose(lo, hi);
                 self.orbit.set_pose(pose);
                 self.orbit.max_distance = self.orbit.max_distance.max(reach * 4.0);
@@ -295,6 +310,9 @@ impl ViewScreen for StatusScene {
 
     fn input(&mut self, input: &ViewInput) {
         let now = skylens_viewer::now_ms();
+        if matches!(input, ViewInput::PointerDown { .. } | ViewInput::Wheel { .. }) {
+            self.touched = true;
+        }
         match *input {
             ViewInput::PointerDown { x, y, button, shift } => self.orbit.pointer_down(x, y, button == 2, button == 1, shift),
             ViewInput::PointerMove { x, y, pressed } => {
