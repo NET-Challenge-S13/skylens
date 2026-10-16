@@ -61,16 +61,28 @@ else
 fi
 
 echo "== 영상 (WHEP) =="
-if ss -tln 2>/dev/null | grep -qE "127\.0\.0\.1:$RTSP_TUNNEL_PORT"; then
-  pass "127.0.0.1:$RTSP_TUNNEL_PORT → 대전 RTSP(:8554) 터널 열림"
+if ss -tln 2>/dev/null | grep -qE "127\.0\.0\.1:$RTSP_TUNNEL_PORT\b"; then
+  # Listening is not enough. A -L forward only fails when a channel opens, so
+  # connect for real: a refusal means Daejeon has no rtsp on 8554, or the
+  # bridge key's permitopen does not name it.
+  if timeout 5 bash -c "exec 3<>/dev/tcp/127.0.0.1/$RTSP_TUNNEL_PORT" 2>/dev/null; then
+    pass "127.0.0.1:$RTSP_TUNNEL_PORT → 대전 RTSP(:8554) 연결됨"
+  else
+    fail "127.0.0.1:$RTSP_TUNNEL_PORT 는 열렸지만 대전 8554 로 못 간다 (대전 rtsp · 키의 permitopen 8554 확인)"
+  fi
 else
   info "127.0.0.1:$RTSP_TUNNEL_PORT 없음. relay 모드면 필요하다 — 대전에서 rtsp 를 켜고 키의 permitopen 에 8554 를 넣는다"
 fi
+
 # 400 means MediaMTX parsed the offer, which is as far as a fake SDP can get.
-code=$(curl -s -o /dev/null -m 6 -w '%{http_code}' -X POST -H 'Content-Type: application/sdp' --data 'v=0' "http://127.0.0.1:$HTTP_PORT/live/drone1/whep" || echo 000)
+# In relay mode the first request pulls the stream from Daejeon first, so give it
+# room before timing out.
+code=$(curl -s -o /dev/null -m 20 -w '%{http_code}' -X POST -H 'Content-Type: application/sdp' --data 'v=0' "http://127.0.0.1:$HTTP_PORT/live/drone1/whep")
+[ -n "$code" ] || code=000
 case "$code" in
-  400) pass "/live/drone1/whep → MediaMTX 가 받는다 (HTTP $code)";;
-  404) fail "/live/drone1/whep 404 — 그 경로에 영상이 없다 (VIDEO_MODE·WHEP_SOURCE 확인)";;
+  400) pass "/live/drone1/whep → MediaMTX 가 offer 를 받는다 (HTTP $code)";;
+  404) info "/live/drone1/whep 404 — 지금 그 경로에 영상이 없다 (송출 중이 아니면 정상)";;
+  000) fail "/live/drone1/whep 20초 안에 응답 없음";;
   *)   fail "/live/drone1/whep HTTP $code";;
 esac
 
