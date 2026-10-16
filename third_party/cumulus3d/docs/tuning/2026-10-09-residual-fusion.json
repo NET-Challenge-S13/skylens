@@ -1,0 +1,220 @@
+{
+ "date": "2026-10-09",
+ "input": {
+  "model": "240장 모델(드론 편대)",
+  "images": "240장",
+  "max_image_size": 960,
+  "gpu": "Tesla V100"
+ },
+ "common_flags": "--fusion-min-views 3 --fusion-normal-error 30 --fusion-reproj-error 100 --filter-min-views 1 --median-filter 0 --fill-holes 1",
+ "ground_z": -30.824871063232422,
+ "depth_once": {
+  "undistort_scene_s": 5.06,
+  "neighbors_s": 2.41,
+  "prepare_s": 1.74,
+  "depth_s": 46.97,
+  "levels_s": [
+   2.79,
+   9.45,
+   34.73
+  ],
+  "filter_s": 1.5,
+  "base_fusion_s": 5.58
+ },
+ "node_wall_s": 331.3,
+ "variants": [
+  {
+   "name": "none",
+   "flags": "--fusion-residual none",
+   "fusion_s": 5.862,
+   "pass1_s": 4.596,
+   "pass2_s": 0.0,
+   "write_s": 0.689,
+   "stats": {
+    "nn_spacing_m": 0.0155,
+    "gsd_m": 0.046,
+    "outlier_2px_pct": 0.34,
+    "plane_outlier_pct": 12.35,
+    "plane_dist_m": 0.018,
+    "duplicate_pct": 76.45
+   },
+   "metrics": {
+    "points": 23451891,
+    "vertical": 0.20811605341334735,
+    "normal_consistency": 0.9827948566139465,
+    "plane_residual_cm": 1.1065250351292422,
+    "vox10": 2079576,
+    "vox10_above": 891685,
+    "nn_spacing_cm": 1.5418747292405321,
+    "isolated": 0.00765,
+    "wall_thickness_cm": 0.7144208707225895
+   }
+  },
+  {
+   "name": "release",
+   "flags": "--fusion-residual release",
+   "fusion_s": 6.348,
+   "pass1_s": 5.025,
+   "pass2_s": 0.0,
+   "write_s": 0.699,
+   "stats": {
+    "nn_spacing_m": 0.0155,
+    "gsd_m": 0.046,
+    "outlier_2px_pct": 0.34,
+    "plane_outlier_pct": 12.35,
+    "plane_dist_m": 0.018,
+    "duplicate_pct": 76.45
+   },
+   "metrics": {
+    "points": 23451891,
+    "vertical": 0.20811605341334735,
+    "normal_consistency": 0.9827948566139465,
+    "plane_residual_cm": 1.1065250351292422,
+    "vox10": 2079576,
+    "vox10_above": 891685,
+    "nn_spacing_cm": 1.5418747292405321,
+    "isolated": 0.00765,
+    "wall_thickness_cm": 0.7144208707225895
+   }
+  },
+  {
+   "name": "second",
+   "flags": "--fusion-residual second-pass",
+   "fusion_s": 8.987,
+   "pass1_s": 5.148,
+   "pass2_s": 2.461,
+   "write_s": 0.763,
+   "residual_points": 255846,
+   "stats": {
+    "nn_spacing_m": 0.0156,
+    "gsd_m": 0.046,
+    "outlier_2px_pct": 0.35,
+    "plane_outlier_pct": 12.4,
+    "plane_dist_m": 0.0181,
+    "duplicate_pct": 75.61
+   },
+   "metrics": {
+    "points": 23707737,
+    "vertical": 0.21081493353836345,
+    "normal_consistency": 0.9826915422030662,
+    "plane_residual_cm": 1.1040880698562443,
+    "vox10": 2132108,
+    "vox10_above": 931159,
+    "nn_spacing_cm": 1.5672824237956369,
+    "isolated": 0.0087,
+    "wall_thickness_cm": 0.7075427390253907,
+    "residual": {
+     "points": 255846,
+     "vertical": 0.45820532664180796,
+     "normal_consistency": 0.6969905245269773,
+     "plane_residual_cm": 5.185023097721108,
+     "vox10": 192578,
+     "vox10_above": 141118,
+     "nn_spacing_cm": 7.008045079604525,
+     "isolated": 0.7441,
+     "wall_thickness_cm": 3.0459377081794767
+    }
+   }
+  },
+  {
+   "name": "score_t1.5",
+   "flags": "--fusion-mode score --score-tau 1.5",
+   "fusion_s": 45.061,
+   "write_s": 0.244,
+   "stats": {
+    "nn_spacing_m": 0.0279,
+    "gsd_m": 0.046,
+    "outlier_2px_pct": 0.95,
+    "plane_outlier_pct": 13.1,
+    "plane_dist_m": 0.0185,
+    "duplicate_pct": 35.57
+   },
+   "metrics": {
+    "points": 8052790,
+    "vertical": 0.23930414179433462,
+    "normal_consistency": 0.9544358218454085,
+    "plane_residual_cm": 1.6102078429485986,
+    "vox10": 1730472,
+    "vox10_above": 735976,
+    "nn_spacing_cm": 2.807846029435151,
+    "isolated": 0.0427,
+    "wall_thickness_cm": 0.9578186850837032
+   }
+  },
+  {
+   "name": "score_t2.0",
+   "flags": "--fusion-mode score --score-tau 2.0",
+   "fusion_s": 42.964,
+   "write_s": 0.212,
+   "stats": {
+    "nn_spacing_m": 0.0292,
+    "gsd_m": 0.046,
+    "outlier_2px_pct": 0.49,
+    "plane_outlier_pct": 12.47,
+    "plane_dist_m": 0.0179,
+    "duplicate_pct": 32.25
+   },
+   "metrics": {
+    "points": 7062645,
+    "vertical": 0.21805216034502656,
+    "normal_consistency": 0.973675130962788,
+    "plane_residual_cm": 1.6213048147406026,
+    "vox10": 1588491,
+    "vox10_above": 642081,
+    "nn_spacing_cm": 2.905743432015041,
+    "isolated": 0.0414,
+    "wall_thickness_cm": 1.010412150535151
+   }
+  },
+  {
+   "name": "score_t2.5",
+   "flags": "--fusion-mode score --score-tau 2.5",
+   "fusion_s": 40.503,
+   "write_s": 0.185,
+   "stats": {
+    "nn_spacing_m": 0.03,
+    "gsd_m": 0.046,
+    "outlier_2px_pct": 0.34,
+    "plane_outlier_pct": 12.29,
+    "plane_dist_m": 0.0175,
+    "duplicate_pct": 30.36
+   },
+   "metrics": {
+    "points": 6418797,
+    "vertical": 0.2011071545026272,
+    "normal_consistency": 0.980857898202327,
+    "plane_residual_cm": 1.6410511539286152,
+    "vox10": 1474727,
+    "vox10_above": 565058,
+    "nn_spacing_cm": 2.98303441889859,
+    "isolated": 0.0428,
+    "wall_thickness_cm": 0.9931459031349187
+   }
+  },
+  {
+   "name": "score_t3.0",
+   "flags": "--fusion-mode score --score-tau 3.0",
+   "fusion_s": 40.286,
+   "write_s": 0.182,
+   "stats": {
+    "nn_spacing_m": 0.0306,
+    "gsd_m": 0.046,
+    "outlier_2px_pct": 0.27,
+    "plane_outlier_pct": 11.88,
+    "plane_dist_m": 0.0172,
+    "duplicate_pct": 29.17
+   },
+   "metrics": {
+    "points": 5911134,
+    "vertical": 0.1863454626472687,
+    "normal_consistency": 0.985369141211378,
+    "plane_residual_cm": 1.6419322170297033,
+    "vox10": 1377001,
+    "vox10_above": 498899,
+    "nn_spacing_cm": 3.0390933596566443,
+    "isolated": 0.04475,
+    "wall_thickness_cm": 0.9912590507624136
+   }
+  }
+ ]
+}

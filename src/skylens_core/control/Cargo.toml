@@ -1,0 +1,75 @@
+[package]
+build = "build.rs"
+name = "skylens-control"
+description = "Control tower screen of skylens_core: legacy HTML/CSS on Blitz, pointblitz 3D view, web and native"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+# Not the package name: the bin `skylens-control` would otherwise write the same .pdb
+# on Windows (cargo warns about the collision, and it corrupted builds).
+name = "control_screen"
+path = "lib.rs"
+crate-type = ["rlib", "cdylib"]
+
+# Native window: `skylens-control --core ws://127.0.0.1:8080/control`.
+# On wasm32 this target compiles to an empty main; build the web bundle with build-web.sh.
+[[bin]]
+name = "skylens-control"
+path = "main.rs"
+
+[dependencies]
+skylens-shared.workspace = true
+skylens-viewer = { path = "../../shared/viewer" }
+anyhow.workspace = true
+prost.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+# Satellite JPEGs of the terrain tiles and of the route planner map.
+image = { version = "0.25", default-features = false, features = ["jpeg"] }
+# Glyph lookup for the text the planner map draws (scale bar, N, marker numbers).
+skrifa = "0.44"
+
+# Native: Blitz with its default features (same as skylens-viewer), blocking HTTP for the
+# mission bridge and the planner tiles.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+blitz-dom = { workspace = true, features = ["custom-widget"] }
+blitz-traits.workspace = true
+ureq = "2"
+
+# Web: the same Blitz revision without the desktop-only features, as in skylens-viewer.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+blitz-dom = { git = "https://github.com/DioxusLabs/blitz", rev = "45496d9288b063719ebeae4e0761273f7881b3d7", default-features = false, features = ["woff", "custom-widget"] }
+blitz-traits = { git = "https://github.com/DioxusLabs/blitz", rev = "45496d9288b063719ebeae4e0761273f7881b3d7", default-features = false }
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = [
+    "AbortSignal",
+    "Blob",
+    "BlobPropertyBag",
+    "CssStyleDeclaration",
+    "Document",
+    "Element",
+    "Headers",
+    "HtmlAnchorElement",
+    "HtmlElement",
+    "Location",
+    "Node",
+    "Request",
+    "RequestInit",
+    "RequestMode",
+    "Response",
+    "Storage",
+    "Url",
+    "UrlSearchParams",
+    "Window",
+    "console",
+] }
+
+[build-dependencies]
+# Embeds res/icon/skylens.ico into the Windows executable.
+winresource = "0.1"

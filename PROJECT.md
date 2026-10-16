@@ -7,7 +7,7 @@ tags:
   - three.js
   - gaussian-splatting
 parent: '[[넷 챌린지 캠프]]'
-related: '[[ARCHITECTURE.md]], [[IDEA.md]]'
+related: '[[ARCHITECTURE.md]], [[INTENT.md]]'
 ---
 
 # PROJECT.md — SkyLens 중간 평가 프로토타입
@@ -51,7 +51,7 @@ related: '[[ARCHITECTURE.md]], [[IDEA.md]]'
 1. **촬영**: 시연할 실내·모형 공간을 정하고, **카메라 3대(또는 스마트폰 3대)로 전체 공간을 여러 시점에서 촬영**한다. 실제 드론 대신 사람이 들고 걷거나 짐벌 리그를 써도 무방 — 목적은 충분한 시점 다양성으로 3D 복원 가능하게 하기.
 2. **가우시안 스플래팅 생성** — ✅ **완료**. 포즈 추정 → gsplat(Nerfstudio) 학습 → `.ply` export. 이 사전 작업 자체가 "우리 파이프라인이 실제로 동작함"의 증거이며, 정량 결과는 §7.1에 정리했다. 중간 평가에서는 전체 스플랫을 한 번에 로드하지만, 실제 서버 연결 시에는 이 스플랫을 **시간별 청크로 분할해 progressively 스트리밍**하는 변환만 추가하면 된다.
 
-   > ⚠️ **실제 구현은 GLOMAP이 아니라 COLMAP 4.1이다.** `ARCHITECTURE.md`·`IDEA.md` 등 상위 문서는 GLOMAP으로 적혀 있으나, 실제로는 **ALIKED + LightGlue 특징점이 내장된 COLMAP 4.1**을 썼다. 실내 저텍스처 장면에서 기본 SIFT로는 540장이 3개 모델로 쪼개졌고, ALIKED로 바꾸자 540장 전부가 하나로 붙었기 때문이다(§7.1 ①). 상위 문서의 GLOMAP 표기는 정정 대기 상태다.
+   > ⚠️ **실제 구현은 GLOMAP이 아니라 COLMAP 4.1이다.** `ARCHITECTURE.md`·`INTENT.md` 등 상위 문서는 GLOMAP으로 적혀 있으나, 실제로는 **ALIKED + LightGlue 특징점이 내장된 COLMAP 4.1**을 썼다. 실내 저텍스처 장면에서 기본 SIFT로는 540장이 3개 모델로 쪼개졌고, ALIKED로 바꾸자 540장 전부가 하나로 붙었기 때문이다(§7.1 ①). 상위 문서의 GLOMAP 표기는 정정 대기 상태다.
 3. **탐지 라벨링**: 최종 파이프라인의 UNet 추론은 이 단계에서는 스킵하고, 사람 인스턴스가 위치할 지점 2~3곳을 수동으로 3D GPS 좌표로 지정해 마커 데이터(JSON)를 만든다. 각 마커는 `{ latitude, longitude, altitude, confidence, type }` 형태로 서버 응답을 mock. (UNet이 이미 준비돼 있다면 실제 추론 결과를 써도 되지만, 필수는 아님 — §7의 확장 옵션 참조)
 4. **좌표계 정리**: 스플랫의 월드 좌표와 드론 경로 좌표를 **공통 GPS 프레임(GeoAnchor)**으로 맞춘다(geo.ts 참조). 각 스플랫 청크마다 explicit align transform(pos/rot/scale)을 지정해 정렬. 이게 안 맞으면 "드론이 지나가며 3D가 생긴다"는 서사가 어긋난다.
 

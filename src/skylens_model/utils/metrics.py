@@ -49,6 +49,8 @@ def decode_heatmap_peaks(
     k: int = 100,
     threshold: float = 0.3,
     stride: int = 4,
+    offset: torch.Tensor | None = None,
+    legacy_decode: bool = False,
 ) -> torch.Tensor:
     """CenterNet 스타일 피크 디코딩.
 
@@ -64,6 +66,12 @@ def decode_heatmap_peaks(
         k: 배치당 최대 검출 수.
         threshold: 이 값 미만인 피크는 score=0으로 무효화된다.
         stride: 히트맵 → 입력 이미지 해상도 배율.
+        offset: `(B, 2, h, w)` 서브픽셀 중심 오프셋(격자 단위, 모델이 `person_offset`을
+            내는 경우). 주어지면 중심 = `(x + offset) * stride`.
+        legacy_decode: True면 옛 동작(셀 좌상단 `x * stride`)을 재현한다. 비교용.
+
+    중심 규약: collator는 `int(c / stride)`로 셀을 고르므로 셀 `x`에 떨어진 GT의
+    기대 중심은 `(x + 0.5) * stride`다. 오프셋이 없으면 +0.5를 더한다.
 
     Returns:
         `(B, k, 5)` 텐서. 마지막 축은 `(x, y, w, h, score)`이고,
@@ -92,6 +100,14 @@ def decode_heatmap_peaks(
 
     ys = (idx // fw).float()
     xs = (idx % fw).float()
+    if offset is not None and not legacy_decode:
+        o_ = offset if offset.dim() == 4 else offset[None]
+        if o_.shape[-2:] != (fh, fw):
+            raise ValueError("offset의 공간 크기가 heatmap과 다르다")
+        po = o_.reshape(o_.size(0), 2, -1).float().gather(2, idx.unsqueeze(1).expand(-1, 2, -1))
+        xs, ys = xs + po[:, 0], ys + po[:, 1]
+    elif not legacy_decode:
+        xs, ys = xs + 0.5, ys + 0.5
 
     if wh is not None:
         w_ = wh
@@ -123,13 +139,26 @@ def decode_heatmap_peaks(
     return out
 
 
+def _add_offset(xs, ys, offset: torch.Tensor, idx: torch.Tensor, hw: tuple[int, int]):
+    """top-k 인덱스 위치의 오프셋 `(dx, dy)`를 격자 좌표에 더한다."""
+    o = offset[None] if offset.dim() == 3 else offset
+    if tuple(o.shape[-2:]) != tuple(hw):
+        raise ValueError("offset의 공간 크기가 heatmap과 다르다")
+    picked = o.reshape(o.size(0), 2, -1).float().gather(2, idx.unsqueeze(1).expand(-1, 2, -1))
+    return xs + picked[:, 0], ys + picked[:, 1]
+
+
 def decode_gt_boxes(
     reg_mask: torch.Tensor,
     wh: torch.Tensor,
     k: int = 100,
     stride: int = 4,
+    offset: torch.Tensor | None = None,
+    legacy_decode: bool = False,
 ) -> torch.Tensor:
     """collator의 CenterNet 타깃에서 GT 박스를 복원한다.
+
+    중심은 셀 중앙 `(x + 0.5) * stride` (`legacy_decode=True`면 옛 좌상단 규약).
 
     `reg_mask == 1`인 격자 위치가 객체 중심이고, 같은 위치의 `wh`가 격자 단위
     `(w, h)`다. 둘 다 stride를 곱해 입력 이미지 해상도로 되돌린다.
@@ -161,6 +190,10 @@ def decode_gt_boxes(
 
     ys = (idx // fw).float()
     xs = (idx % fw).float()
+    if offset is not None:  # collator `person_offset` → 연속(스냅되지 않은) GT 중심
+        xs, ys = _add_offset(xs, ys, offset, idx, tuple(m.shape[-2:]))
+    elif not legacy_decode:
+        xs, ys = xs + 0.5, ys + 0.5
 
     wh_flat = wh.reshape(b, 2, -1).float()
     picked = wh_flat.gather(2, idx.unsqueeze(1).expand(-1, 2, -1))  # (B, 2, k)
@@ -590,6 +623,7 @@ def build_compute_metrics(
     distance_threshold: float = 8.0,
     score_threshold: float = 0.3,
     map_iou_thresholds: Sequence[float] = COCO_IOU_THRESHOLDS,
+    ap_score_floor: float = 0.05,
 ) -> Callable[[object], dict[str, float]]:
     """`Trainer(compute_metrics=...)` 로 넘길 함수를 만든다.
 
@@ -603,6 +637,10 @@ def build_compute_metrics(
 
     한쪽만 존재하는 배치(README §6.3의 헤드별 분리 학습)를 위해, 무효 항목은
     seg는 전부 `ignore_index`, 점은 `valid == 0`으로 들어온다고 가정한다.
+
+    임계값 분리: 점 P/R/F1은 운영 임계값 `score_threshold`(0.3)에서, bbox mAP와
+    `point_ap`는 PR 곡선이 잘리지 않도록 `ap_score_floor`(0.05) 이상 검출 전체로 낸다.
+    (검출은 디코딩 단계에서 이미 `min(floor, threshold)`로 잘려 들어와야 한다.)
     """
     seg_thr_ignore = int(ignore_index)
 
@@ -634,7 +672,7 @@ def build_compute_metrics(
             bdm = BoxDetectionMetrics(map_iou_thresholds) if has_gt_boxes else None
 
             for b in range(det_a.shape[0]):
-                d_all = det_a[b][det_a[b][:, 4] > 0]
+                d_all = det_a[b][(det_a[b][:, 4] > 0) & (det_a[b][:, 4] >= ap_score_floor)]
                 g_all = gt_a[b][gt_a[b][:, valid_col] > 0]
                 d = d_all[d_all[:, 4] >= score_threshold][:, [0, 1, 4]]
                 g = g_all[:, :2]
@@ -666,3 +704,75 @@ def _unpack_pair(x: object) -> tuple[object | None, object | None]:
             return x[0], None
         return None, None
     return x, None
+
+
+def size_relative_radius(heights: np.ndarray, frac: float = 0.15, min_px: float = 8.0) -> np.ndarray:
+    """Per-GT match radius `max(min_px, frac * box height)` in the GT's own frame."""
+    h = np.asarray(heights, dtype=np.float64).reshape(-1)
+    return np.maximum(float(min_px), float(frac) * h)
+
+
+def point_match_flags(
+    preds: np.ndarray, gts: np.ndarray, distance_threshold: float | np.ndarray = 8.0
+) -> np.ndarray:
+    """TP flag per prediction under `PointDetectionMetrics`' greedy rule.
+
+    Predictions are visited in descending score (stable), so the matches of the
+    detections above any threshold equal those of matching only that prefix.
+    One call therefore serves a whole threshold sweep. Flags align with `preds`.
+
+    `distance_threshold` is a scalar or a per-GT radius array `(M,)`. The rule is
+    unchanged: each prediction takes the nearest unused GT, and it is a TP iff
+    that distance is within *that GT's* radius. A constant array equals the scalar.
+    """
+    p = _to_xy_score(preds)
+    g = _to_xy(gts)
+    flags = np.zeros(p.shape[0], dtype=bool)
+    if p.size == 0 or g.size == 0:
+        return flags
+    radius = np.broadcast_to(np.asarray(distance_threshold, dtype=np.float64), (g.shape[0],))
+    used = np.zeros(g.shape[0], dtype=bool)
+    for i in np.argsort(-p[:, 2], kind="stable"):
+        d = np.hypot(g[:, 0] - p[i, 0], g[:, 1] - p[i, 1])
+        d[used] = np.inf
+        j = int(np.argmin(d))
+        if np.isfinite(d[j]) and d[j] <= radius[j]:
+            used[j] = True
+            flags[i] = True
+    return flags
+
+
+def recall_sweep(
+    scores: np.ndarray,
+    is_tp: np.ndarray,
+    num_gt: int,
+    thresholds: Iterable[float] | None = None,
+    min_precision: float = 0.5,
+) -> dict[str, float]:
+    """Recall summaries of a point PR sweep.
+
+    - `recall_at_p50`: the highest recall over `thresholds` (default 0.05..0.95
+      step 0.01) whose precision is >= `min_precision`; 0 if none qualifies.
+    - `recall_max`: recall at the lowest threshold of the sweep.
+    """
+    if thresholds is None:
+        thresholds = np.round(np.arange(5, 96) / 100.0, 2)
+    thr = np.asarray(list(thresholds), dtype=np.float64)
+    s = np.asarray(scores, dtype=np.float64).reshape(-1)
+    t = np.asarray(is_tp, dtype=bool).reshape(-1)
+    best, best_thr = 0.0, float("nan")
+    recalls = []
+    for th in thr:
+        keep = s >= th - 1e-9
+        tp = int(t[keep].sum())
+        n = int(keep.sum())
+        r = tp / num_gt if num_gt > 0 else 0.0
+        prec = tp / n if n > 0 else 0.0
+        recalls.append(r)
+        if prec >= min_precision and r > best:
+            best, best_thr = r, float(th)
+    return {
+        "recall_at_p50": float(best),
+        "recall_at_p50_thr": best_thr,
+        "recall_max": float(recalls[int(np.argmin(thr))]) if len(thr) else 0.0,
+    }

@@ -1,194 +1,355 @@
-# skylens_drone — 드론 클라이언트
+# skylens_drone: Lito X1 Mission Bridge
 
-현장의 드론에서 도는 컴포넌트. 촬영 영상을 **일정 구간마다 잘라 H.265로 게이트웨이에 올리고**, 자기 위치·자세(텔레메트리)를 계속 흘려보내며, 관제탑이 내려보낸 **경로 지정(`AssignRoute`)과 수동 조종(`ManualControl`)을 받는다**.
+SkyLens 웹에서 만든 GPS 경로를 DJI Fly가 읽는 KMZ 임무로 바꾸는 로컬 서비스다.
+Lito X1은 공개 DJI SDK를 지원하지 않으므로 실시간 스틱 명령을 보내지 않는다.
+대신 기체가 공식 지원하는 **DJI Fly 웨이포인트 비행**을 사용한다.
 
-컴포넌트 경계와 책임의 단일 출처는 [`res/docs/COMPONENTS.md`](../../res/docs/COMPONENTS.md) §3.1이고, 메시지 계약은 [`src/shared/protocol.ts`](../shared/protocol.ts)다. 이 드론은 `DroneHello` · `DroneTelemetry` · `VideoSegment`의 **발신처(origin)** 이며 `AssignRoute` · `ManualControl`의 **수신처**다.
-
----
-
-## 1. 무엇을 하는가
-
-```
-1. 게이트웨이 접속 → DroneHello 로 자기를 알린다
-2. 경로가 올 때까지 대기 (idle)
-3. AssignRoute 수신 → 현장으로 이동 (transit, 기본 10초)
-4. 현장 도착 → 경로 비행 시작, 텔레메트리 연속 송신
-5. 경로의 한 구간(slice)을 지날 때마다 VideoSegment 송신
-6. loop=true 면 마지막 경유점에서 되돌아 왕복 반복
+```text
+관제 웹 경로 → localhost Mission Bridge → KMZ → DJI Fly → Lito X1 온보드 비행
 ```
 
-**세그먼트를 자르는 기준은 시계가 아니라 주행거리다.** `odometerM`이 `구간길이 × (n+1)`을 넘을 때 n번째 슬라이스를 낸다. COMPONENTS.md §5.2의 "딜레이 패턴의 트리거는 시간이 아니라 드론의 이동량"이 여기서 만들어진다. 코어는 도착한 `VideoSegment`를 그대로 구간으로 쓰면 된다.
+참고 자료:
 
-각 `VideoSegment`에는 **그 슬라이스를 덮는 포즈 배열**(`poses`)이 실린다. 복원 단계에서 카메라 위치를 처음부터 역산하지 않아도 되게 하는 값이다.
+- DJI Lito X1 공식 매뉴얼, 웨이포인트 비행 §4.5:
+  https://dl.djicdn.com/downloads/DJI_Lito_X1/UM/20260417/DJI_Lito_X1_User_Manual_ko.pdf
+- DJI SDK 호환성 표(Lito X1은 SDK 미지원):
+  https://repair.dji.com/help/content?customId=01700000763&lang=en&paperDocType=ARTICLE&re=US&spaceId=17
+- Litchi Hub의 Lito X1 → DJI Fly KMZ 전송 가이드(독립 검증용):
+  https://forum.flylitchi.com/t/guide-how-to-use-litchi-hub-with-dji-fly/24332
 
----
+## 1. 준비물
 
-## 2. 두 가지 접속 모드
+필수:
 
-`SKYLENS_LINK_MODE`로 고른다. 두 모드가 **같은 메시지**를 나르고 반송로만 다르다.
+- DJI Lito X1
+- DJI RC 2 또는 DJI RC-N3 + Android/iPhone
+- 최신 DJI Fly와 기체·조종기 펌웨어
+- SkyLens를 실행할 PC와 USB 데이터 케이블
+- 비행 가능한 개방 장소, 현장 조종사, 관찰자
+- 이 저장소의 Node.js/npm과 Rust 툴체인(`cargo`)
 
-| 모드 | 접속 경로 | 동작 |
-|---|---|---|
-| `relay` (기본) | `ws://게이트웨이:8081/uplink` | 모든 프레임이 게이트웨이 소켓을 타고 프록시로 릴레이된다. 협상 없음 |
-| `webrtc` | `ws://게이트웨이:8081/signal` | 게이트웨이는 **홀펀칭 시그널링만** 중계한다. `signal-hello` → `signal-offer` → `signal-answer`/`signal-ice` → `signal-ready{direct}` 를 거치고 나면 업링크가 `direct` 종단(프록시)으로 옮겨가고, 이후 게이트웨이는 미디어를 한 바이트도 보지 않는다 |
+선택:
 
-경로(`/uplink`·`/signal`)는 게이트웨이의 `dronePath()`와 맞춰져 있다. 게이트웨이는 다른 경로의 업그레이드를 거절하므로, `--gateway`에 **경로 없이 오리진만** 주면(`ws://10.0.0.4:8081`) 모드에 맞는 경로가 자동으로 붙는다.
+- Litchi Hub 및 Litchi Hub Bridge: KMZ 경로가 실제 DJI Fly에 들어가는지 먼저 검증할 때 사용
+- OpenMTP(오픈소스): macOS에서 Android/RC의 MTP 파일을 수동으로 다룰 때 사용
+  https://github.com/ganeshrvel/openmtp
+- Android Platform Tools: RC-N3에 연결할 Android 기기가 ADB 파일 전송을 허용할 때만 사용
+  https://developer.android.com/tools/releases/platform-tools
 
-**펀치가 실패하면** 드론은 시그널링 소켓으로 미디어를 흘려보내지 않는다(게이트웨이가 어차피 릴레이하지 않는다). 프레임을 버리고 `link.dropped`를 올리며 로그를 남긴다 — 조용히 사라지는 것보다 세어지는 편이 낫다.
+Litchi는 오픈소스가 아니며 SkyLens 실행에 필수도 아니다. 이 디렉터리의 Bridge는 Rust
+crate(`skylens-drone`)이고 오픈소스 의존성만 쓰며, 저장소의 MIT 라이선스를 따른다.
 
-### webrtc 모드에서 실제로 협상되는 것
+## 2. 최초 한 번: Lito X1 템플릿 KMZ 확보
 
-시그널링 교환은 **진짜**다(게이트웨이·프록시와 실제로 주고받는다). 다만 프록시가 Node에서 DataChannel을 종단하지 못해 `signal-ready`로 돌려주는 `direct`는 **협상된 채널을 대신하는 WebSocket**이다(프록시 쪽 문서화된 한계). 그래서 드론이 보내는 offer SDP도 ICE 에이전트가 없는, 형식상 올바른 자리표시자다. 진짜 `RTCPeerConnection`을 넣으면 `link.ts`의 `offerSdp()`와 `openDirect()` 두 메서드만 바뀐다.
+소비자용 DJI Fly KMZ의 기체·페이로드 enum은 DJI 공개 문서에 없다. 따라서 다른 기체의
+값을 추측하면 안 된다. Lito X1과 DJI Fly가 직접 만든 정상 임무를 템플릿으로 사용한다.
 
----
+1. 기체와 조종기를 켜고 DJI Fly에 연결한다.
+2. DJI Fly 카메라 화면에서 웨이포인트 모드로 들어간다.
+3. 실제 시험 장소 근처에 웨이포인트 2개를 둔다.
+4. 고도 30m, 속도 2m/s, 종료 동작 RTH, 신호 유실 시 호버로 설정한다.
+5. 이름을 `SKYLENS_TEMPLATE_DO_NOT_FLY`로 저장하고 DJI Fly를 완전히 종료한다.
+6. DJI Fly 장치를 PC에 파일 전송 모드로 연결한다.
+7. Android/RC 계열에서는 아래 경로의 가장 최근 임무 폴더를 찾는다.
 
-## 3. 인코딩 — 진짜와 대역(代役)의 경계
+   ```text
+   Android/data/dji.go.v5/files/waypoint/<mission-id>/<mission-file>.kmz
+   ```
 
-| | 무엇이 진짜인가 |
-|---|---|
-| `LiveCapture` (카메라) | **진짜 H.265.** WebCodecs `VideoEncoder`를 `hev1.1.6.L123.B0`로 설정하고 `isConfigSupported()`로 확인한 뒤 카메라 트랙을 인코딩한다. 2초마다 키프레임을 넣어 슬라이스가 앞 슬라이스 없이도 디코딩되게 한다. HEVC 인코더가 없는 런타임에서는 **시작을 거부한다** — 흉내내지 않는다 |
-| `DemoCapture` (데모) | 카메라가 없으므로 미리 촬영한 클립으로 대체한다(COMPONENTS.md §5.1). 파일은 **진짜 HEVC**다 — 아래 참조 |
+8. 그 KMZ를 저장소의 아래 위치로 **복사**한다. 원본을 이동하거나 삭제하지 않는다.
 
-### 데모 영상이 정말 H.265인 이유
+   ```text
+   config/lito-x1-template.kmz
+   ```
 
-촬영 원본 `res/static/video/*.mp4`는 **H.264 High 10**이다. 계약상 `VideoSegment.codec`은 `'h265'`뿐인데, H.264 파일에 h265 딱지를 붙이면 그 뒤로 측정되는 크기·지연 수치가 전부 **일어나지 않은 일에 대한 측정**이 된다. 그래서 라벨을 고치는 대신 **실제로 한 번 인코딩한다**:
+9. 템플릿은 실제 위치와 기체 식별정보를 포함할 수 있으므로 `.gitignore`에 등록되어 있다.
 
-```
-res/static/video/*.mp4        H.264 High 10   (촬영 원본, 커밋됨)
-res/static/video/h265/*.mp4   HEVC Main 10    (생성물, 실제로 전송되는 것)
-```
+RC 2는 USB-C로 PC에 직접 연결한다. RC-N3는 휴대폰의 USB-C가 조종기 연결에 필요하므로,
+임무 파일을 복사할 때는 휴대폰을 RC-N3에서 잠시 분리한다. iPhone/iPad는 DJI Fly의 파일
+접근 방식이 다르므로, 첫 실증에는 Litchi Hub Bridge의 Smart Export를 권장한다.
+
+## 3. Bridge 실행
+
+저장소 루트에서:
 
 ```bash
-npx tsx src/skylens_drone/tools/transcodeDemoFootage.ts
+cargo run -p skylens-drone
 ```
 
-`hevc_nvenc`가 있으면 그것을, 없으면 `libx265`를 쓴다. 3840×2160 / 59.94fps / 약 12 Mbps VBR / 2초 GOP — 4K 5G 업링크로 그럴듯한 예산이고, GOP 구조는 `LiveCapture`가 WebCodecs에 요구하는 것과 같다. 5개 클립에 NVENC 기준 약 45초.
+정상이면 다음과 비슷하게 표시된다.
 
-`DemoCapture`는 슬라이스마다 `wireCodecOf()`로 클립의 **측정된** 코덱을 확인하고, h265가 아니면 던진다. `VideoSegment.codec`은 `CaptureSource`가 미리 선언해 둔 값이 아니라 **그 바이트를 실제로 만든 쪽이 슬라이스 단위로 돌려준 값**(`SliceResult.codec`)을 복사한다.
+```text
+[mission-bridge] listening on http://127.0.0.1:8091
+[mission-bridge] Lito template: .../config/lito-x1-template.kmz (ready)
+[mission-bridge] output: .../output/missions
+[mission-bridge] install target: not configured (download-only mode)
+```
 
-**여전히 시뮬레이션인 것**: 인코딩이 촬영과 동시에 일어나지 않고 미리 끝나 있다. 슬라이스가 실제로 몇 초였든 클립 하나가 통째로 대응된다 — 그래서 `durationMs`는 진짜 비행 시간, `bytes`는 진짜 파일 크기지만 **둘의 비율은 실제 순간 비트레이트가 아니다**. 비행 역학·배터리 소모·10초 전개 시간도 모두 모형이다.
+상태 확인:
 
-> 결과적으로 `src/shared/protocol.ts`는 **바꿀 필요가 없다.** `codec: 'h265'`는 참이다.
+```bash
+curl http://127.0.0.1:8091/health
+```
 
----
+`templateReady`가 `true`여야 한다. 템플릿이 없으면 Bridge는 살아 있지만 KMZ 생성을
+거부한다. M30 같은 임의의 기본값으로 대신 생성하지 않는다.
 
-## 4. 데모 동작 (COMPONENTS.md §5.2)
+기본 경로(`config/lito-x1-template.kmz`, `output/missions`)는 저장소 루트 기준이다.
+`SKYLENS_DJI_TEMPLATE_KMZ`, `SKYLENS_MISSION_OUTPUT`, `SKYLENS_MISSION_HOST`,
+`SKYLENS_MISSION_PORT`로 바꿀 수 있다(`config/mission-bridge.env.example` 참조).
 
-`SKYLENS_DEMO=1`(또는 `--demo`, 브라우저에서는 `?demo`)일 때:
+예전 Windows 실행 스크립트(`scripts/run-mission-bridge.ps1`)가 해 주던 기본값은 Bridge가 직접
+적용한다. `SKYLENS_DJI_WK_KEY`가 없으면 `config/.dji_wk_key`에서 서명 키를 읽고,
+`SKYLENS_DJI_TOKEN_FILE`이 없으면 `output/.dji_token`을 토큰 파일로 쓴다. 두 파일 모두
+gitignore 대상이고, 키와 토큰 값은 로그에 남기지 않는다.
 
-- 경로가 지정되기 전에는 **정지**. 게이트웨이 소켓은 붙어 있고 `DroneHello`도 보내지만 움직이지 않는다.
-- `AssignRoute`를 받으면 기지에서 **현장으로 이동**(`transit`). 기지 위치는 경유점 0에서 `homeOffsetM`(기본 250 m)만큼 진입 반대 방향·25 m 아래로 잡아, 지도에서 실제 접근처럼 보이게 한다.
-- **약 10초 뒤 현장 도착** → "드론 연결됨" 로그와 함께 경로 비행 시작.
-- `loop: true`면 마지막 경유점에서 되돌아 **왕복 반복**(핑퐁). `foldOdometer()`가 누적 주행거리를 접어서 방향과 랩을 낸다.
-- 텔레메트리는 `telemetryHz`(기본 5 Hz)로 계속.
-- 구간을 지날 때마다 `VideoSegment`. 클립은 **경로상 위치(좌/중앙/우)와 진행 방향**으로 고른다 — 역방향 구간에는 역방향 촬영본이 나간다(중앙 패스는 역방향 촬영본이 없어 순방향을 재사용).
+테스트는 `cargo test -p skylens-drone`이다. Python 구현의 테스트(`legacy/tests/`)를 옮긴
+것과 편대 기하·SigV4 서명 벡터, HTTP 표면, 코어 업링크 테스트가 들어 있다.
 
-수동 조종은 `manualIdleReturn`초(기본 2초) 동안 입력이 없으면 자동으로 경로로 복귀한다. 수동 중 이동도 주행거리에 누적되므로 슬라이싱은 "어떤 모드로 날았는지"와 무관하게 "얼마나 날았는지"에만 걸린다.
+## 4. SkyLens 실행과 임무 생성
 
----
-
-## 5. 실행
-
-### 브라우저 (cargo 불필요)
+터미널을 각각 열어 실행한다.
 
 ```bash
 npm run dev
-# http://localhost:5173/src/skylens_drone/index.html?demo&drone=1
-# http://localhost:5173/src/skylens_drone/index.html?demo&mode=webrtc&gateway=ws://10.0.0.4:8081
+npm run core
+cargo run -p skylens-drone
 ```
 
-쿼리 플래그는 Node 러너가 읽는 `SKYLENS_*` 환경변수와 **같은 키로 매핑**된다(`core/config.ts`). 운용 패널은 연결 상태·모드·지정 경로·텔레메트리·촬영/전송 상태를 보여주고, `W/S`(전후) `A/D`(회전) `R/F`(상승)로 수동 조종을 넣을 수 있다.
+관제 화면을 열고 `경로 계획 · Route`에서:
 
-> ⚠️ 프로덕션 빌드에는 `vite.config.ts`의 `rollupOptions.input`에 `drone: 'src/skylens_drone/index.html'` 항목이 필요하다. 개발 서버(`npm run dev`)에서는 그대로 동작한다.
+1. 실제 시험 장소로 지도를 이동한다.
+2. 처음에는 웨이포인트 2개만 둔다.
+3. 지면 기준 고도를 30m로 둔다.
+4. 왕복은 첫 시험에서 끈다.
+5. `경로 전송`을 누른다.
 
-### 헤드리스 (데모 런처가 쓰는 경로)
+Bridge가 실행 중이면 KMZ가 `output/missions/`에 저장되고 브라우저에서도 다운로드된다.
+왕복을 켜면 무한 반복하지 않고 `출발 → 끝 → 출발` 1회 왕복으로 변환된다.
+
+Bridge 기본 안전 제한:
+
+| 항목 | 제한 |
+|---|---:|
+| 상대고도 | 5-120m |
+| 속도 | 0.5-10m/s |
+| 총 경로 | 5km 이하 |
+| 웨이포인트 | 200개 이하 |
+| 짐벌 피치 | -90-30° |
+| 종료 동작 | RTH 고정 |
+| 신호 유실 | 호버 고정 |
+
+SkyLens 경로의 고도는 해발고도이고 DJI Fly는 이륙점 기준 상대고도를 사용한다. 현재
+Bridge는 별도 이륙점 고도가 없으면 첫 웨이포인트의 지면고도를 이륙점으로 추정하고 경고를
+남긴다. DJI Fly에서 실제 이륙점과 모든 웨이포인트 상대고도를 반드시 다시 확인한다.
+
+## 5. DJI Fly로 전송
+
+### 안전한 첫 단계: 다운로드 모드
+
+1. DJI Fly에서 `SKYLENS_TARGET`이라는 임시 임무를 만들고 저장한다.
+2. 앱을 완전히 종료한다.
+3. PC에 장치를 연결하고 그 임무의 KMZ를 별도 폴더에 백업한다.
+4. SkyLens가 내려받은 KMZ의 이름을 기존 파일과 같게 바꾼다.
+5. 기존 `SKYLENS_TARGET` KMZ를 새 파일로 교체한다.
+6. 장치를 안전하게 분리하고 DJI Fly를 다시 연다.
+7. 임무를 열어 지도, 고도, 속도, 짐벌, 촬영, RTH를 하나씩 확인한다.
+
+### 선택: 명시적 자동 설치
+
+장치의 임무 폴더가 PC에 안정적으로 마운트되어 있고 정확한 KMZ 경로를 확인한 뒤에만 쓴다.
 
 ```bash
-npx tsx src/skylens_drone/node/run.ts --demo --gateway=ws://127.0.0.1:8081
+export SKYLENS_DJI_INSTALL_TARGET='/exact/path/to/SKYLENS_TARGET.kmz'
+cargo run -p skylens-drone
 ```
 
-브라우저와 **같은 `DroneApp`** 이고 `WebSocket`만 `ws`로, 패널만 stdout으로 바뀐다. 데모 영상이 없으면 전사 명령을 알려주고 즉시 종료한다.
+Bridge는 지정된 **그 한 파일만** 교체하며, 교체 전 파일은
+`output/missions/backups/`에 복사한다. 디렉터리나 자동 탐색 결과를 삭제하지 않는다.
+macOS의 MTP 장치는 일반 파일시스템처럼 마운트되지 않는 경우가 많아 자동 설치가 어려울 수
+있다. 그런 경우 다운로드 모드 또는 Litchi Hub Bridge를 사용한다.
 
-### Tauri
+### 선택: DJI 클라우드 원격 전달
+
+PC와 조종기가 USB로 붙어 있지 않아도, DJI Fly 계정 클라우드에 임무를 올려 원격의 RC 2가
+Wi-Fi로 받아가게 할 수 있다. 조종기에 임무가 내려오면 조종사가 열어 확인하고 비행한다.
+
+설정은 `config/mission-bridge.env.example`의 DJI 클라우드 항목 두 개를 로컬 환경에만 넣는다.
+둘 다 계정/앱 비밀값이라 **저장소에 커밋하지 않는다**. 둘 중 하나라도 없으면 이 경로는
+자동으로 꺼지고 다운로드/설치 모드만 동작한다.
+
+- `SKYLENS_DJI_MC_TOKEN`: 로그인된 DJI Fly 세션의 `x-mc-token` (만료되므로 업로드가 인증
+  오류를 내면 다시 추출한다)
+- `SKYLENS_DJI_WK_KEY`: `X-Wk-SecretId=uav` 요청 서명에 쓰는 HMAC 키
+  (없으면 `config/.dji_wk_key` 파일을 읽는다)
+
+설정한 뒤, 경로 전송 요청 본문에 `"deliver": "cloud"`를 넣으면 KMZ를 만든 다음 클라우드에
+올린다. 응답의 `cloud.missionUuid`로 조종기에 뜰 임무를 식별한다. 편대 3기도 각각 올라간다.
+
+관제탑 웹에서는 경로 계획 창의 **"클라우드 전송(원격 RC)"** 체크로 켜고, 툴바의
+**"클라우드 미션 · Cloud"** 버튼으로 현재 클라우드 임무를 **목록 조회·삭제**할 수 있다.
+
+클라우드 임무 파일은 raw KMZ가 아니라 **래퍼 zip**(`<uuid>.kmz` + `image/ShotSnap.json`)이어야
+DJI Fly가 연다. Bridge가 자동으로 감싸므로 여기서 신경 쓸 것은 없다.
+
+### 토큰 자동 갱신
+
+`x-mc-token`은 만료되므로 Bridge를 재시작하지 않고 갱신하는 길을 둔다.
+`SKYLENS_DJI_TOKEN_FILE`에 토큰 파일 경로를 지정하면 Bridge는 **매 요청마다 그 파일을
+다시 읽고**, 인증 오류가 나면 파일을 다시 읽어 **한 번 재시도**한다. 그 파일을 최신으로
+유지하는 것이 갱신기다.
 
 ```bash
-cd src/skylens_drone/src-tauri && cargo tauri dev
+# 로그인된 DJI Fly가 떠 있는 WSA(또는 루팅 안드로이드) + frida-server + pip install frida 필요
+python scripts/dji_token_refresh.py            # 실행 중인 앱에서 토큰을 읽어 파일에 기록
 ```
 
-셸은 **의도적으로 비어 있다**: `#[tauri::command]`도, 상태도, IPC도 없이 브라우저와 같은 페이지를 웹뷰로 연다. 모든 로직이 TypeScript에 있어서 데모 런처는 Rust 툴체인 없이 돈다.
+`scripts/dji_token_refresh.py`는 bridge의 일부가 아니라 추출 리그 도구다(frida 사용). 앱이
+스스로 갱신하는 살아있는 토큰을 메모리에서 읽어 파일에 쓴다. 한 번 실행하거나, 작업
+스케줄러/cron으로 주기 실행하면 Bridge가 자동으로 새 토큰을 집어쓴다. DJI Fly가 **로그인·활성
+상태**여야 토큰이 메모리에 올라온다(로그아웃 상태면 추출 실패).
 
-이 저장소에서 `cargo check` 통과를 확인했다(tauri 2.11.5, `x86_64-pc-windows-msvc`). 처음에는 실패했는데 원인은 **`icons/icon.ico` 누락**이었다 — `tauri-build`는 번들링을 꺼도(`bundle.active: false`) Windows 리소스 파일 생성을 위해 이 파일을 요구한다. `icons/`의 아이콘은 자리표시자로 생성한 것이니 실제 배포 전에 교체할 것.
+### WSA 없는 다른 PC에서 실행하기
 
----
+KMZ 생성·다운로드·로컬 전달, 그리고 **클라우드 업로드 자체는 WSA가 필요 없다.** 유효한 토큰만
+있으면 된다. WSA가 필요한 건 그 토큰을 뽑는 순간뿐이다. 그래서 현장 PC들을 WSA 없이 돌리려면
+토큰을 한 곳에서 공급한다.
 
-## 6. 환경변수
+```text
+[WSA 있는 리그 1대]  python scripts/dji_token_refresh.py --serve 8077
+        │  (주기적으로 토큰 추출 → HTTP 로 publish)
+        ▼
+[WSA 없는 현장 PC들]  SKYLENS_DJI_TOKEN_URL=http://<리그IP>:8077/  + SKYLENS_DJI_WK_KEY
+        → 요청마다 토큰을 받아오고, 인증 오류 시 자동 재조회. WSA·기기 불필요.
+```
 
-| 변수 | 기본값 | 설명 |
+토큰 소스 우선순위는 **URL → 파일 → 정적 토큰**이다. 신뢰할 수 있는 현장망에서만 쓴다(토큰은
+자격증명). 공유 폴더가 있으면 `--serve` 대신 리그가 `--out <공유경로>`로 쓰고 현장 PC는
+`SKYLENS_DJI_TOKEN_FILE`로 그 파일을 가리켜도 된다.
+
+> **WSA 의존을 완전히(리그까지) 없애려면** DJI 로그인/갱신 API를 코드로 재현해야 하는데,
+> 로그인은 캡차·기기인증(이메일/SMS)·비번 암호화로 막혀 있어 헤드리스로는 사실상 불가하고 계정
+> 위험도 크다. 그래서 현재 구조는 **현장 PC의 WSA 의존은 0으로 만들되, 토큰을 공급하는 리그
+> 1대는 유지**하는 방식이다.
+
+> 이 경로는 공개 SDK가 아니라 DJI Fly 클라우드 동기화를 관찰해 맞춘 것이다. DJI Fly/펌웨어
+> 업데이트 후에는 2점 지상 검증을 다시 한다.
+
+### 선택: 코어 업링크
+
+`SKYLENS_CORE_UPLINK`(예: `ws://127.0.0.1:8082/uplink`)를 지정하면 Bridge가 코어의
+`ws /uplink`에 WebSocket 클라이언트로 붙는다. 모든 프레임은 바이너리
+`skylens.viewer.v1.Envelope` 하나다(`src/shared/proto/skylens/viewer/v1/viewer.proto`).
+
+- 연결되면 편대 스테이션마다 `drone_hello`를 하나씩 보낸다. 코어는 이것만 드론 도착으로 센다.
+- `assign_route`를 받으면 `POST /formation`과 같은 코드로 편대 3기 KMZ를 만들고, 클라우드
+  전달이 설정돼 있으면 각각 올린다. 비행 파라미터는 Bridge 기본값(지면 기준 30m, 2m/s,
+  이륙점 고도는 첫 웨이포인트로 추정)이다.
+- 코어는 새 업링크마다 현재 경로를 다시 보낸다. 직전에 임무로 만든 경로와 같으면 다시
+  만들지 않는다. 생성에 실패한 경로는 다음 재전송 때 다시 시도한다.
+- 소켓이 끊기면 지수 백오프(0.5초에서 10초까지)로 다시 붙는다. 코어 앞의 프록시는 장애
+  전환 때 열린 소켓을 옮기지 않으므로, 끊김이 곧 장애 전환 신호다.
+- Lito X1은 SDK가 없어 실시간 텔레메트리를 보내지 않는다. `manual_control`은 무시한다.
+
+| 변수 | 기본값 | 뜻 |
 |---|---|---|
-| `SKYLENS_DRONE_ID` | `1` | 드론 번호 |
-| `SKYLENS_DRONE_MODEL` | `SkyLens D1 (H.265 / 5G)` | 패널에 뜨는 기체 문자열 |
-| `SKYLENS_LINK_MODE` | `relay` | `relay` \| `webrtc` |
-| `SKYLENS_GATEWAY_URL` | `ws://127.0.0.1:8081` | 오리진만 주면 모드별 경로가 붙는다 |
-| `SKYLENS_DEMO` | (없음) | 카메라를 데모 영상으로 대체하고 비행을 모의 |
-| `SKYLENS_DRONE_TELEMETRY_HZ` | `5` | 텔레메트리 송신 주기 |
-| `SKYLENS_DRONE_SPEED` | `12` | 경로 순항 속도 m/s |
-| `SKYLENS_DRONE_TRANSIT_SPEED` | `25` | 기지→현장 이동 속도 m/s |
-| `SKYLENS_DRONE_ARRIVAL_MS` | `10000` | 경로 지정 후 현장 도착까지 |
-| `SKYLENS_DRONE_SLICES` | `4` | 편도 1회당 슬라이스 수 = `VideoSegment` 수 |
-| `SKYLENS_DRONE_BATTERY_DRAIN` | `3.5` | 분당 배터리 소모 % |
-| `SKYLENS_DRONE_MANUAL_IDLE` | `2.0` | 스틱을 놓고 경로로 복귀하기까지 초 |
-| `SKYLENS_DRONE_HOME_OFFSET_M` | `250` | 경유점 0에서 기지까지 거리 |
-| `SKYLENS_DRONE_RECONNECT_MIN_MS` / `_MAX_MS` | `500` / `8000` | 재접속 백오프 |
-| `SKYLENS_DRONE_AUTOROUTE` | (없음) | 코어 없이 내장 경로를 스스로 지정 |
-| `SKYLENS_DRONE_HELLO_ON_ARRIVAL` | (없음) | `DroneHello`를 접속 시점이 아니라 **현장 도착 시점**에 보낸다 |
-| `SKYLENS_DRONE_UPLOAD_URL` | (없음) | 브라우저 실촬영 모드에서 슬라이스를 올릴 엔드포인트 |
+| `SKYLENS_CORE_UPLINK` | 없음(업링크 끔) | 코어 업링크 주소 |
+| `SKYLENS_UPLINK_STATIONS` | `left=1,center=2,right=3` | `스테이션=드론ID` 목록. ID를 빼면 순번 |
+| `SKYLENS_FORMATION_SPACING_M` | `10` | 코어 경로로 만드는 편대의 정삼각형 한 변(m) |
+| `SKYLENS_UPLINK_MODEL` | `DJI Lito X1 (DJI Fly waypoint mission)` | `drone_hello`의 기체 문자열 |
 
-CLI 별칭도 같다: `--demo --gateway=… --drone=2 --mode=webrtc --hz=10 --slices=6 --arrival=10000 --autoroute`.
+## 6. 첫 실비행 체크리스트
 
-> `SKYLENS_DRONE_UPLOAD_URL`이 없는 브라우저 실촬영 모드에서는 슬라이스 uri가 `blob:` 핸들이 되어 **그 페이지 안에서만** 유효하다. 코어는 가져갈 수 없다. 이 경우 로그로 경고한다.
+첫 실비행은 웹에서 이륙시키는 시험이 아니다. 조종사가 DJI Fly에서 최종 확인하고 실행한다.
 
----
+- 프로펠러·배터리·짐벌·GNSS·나침반 상태 정상
+- 지도상의 장소가 현재 시험장과 일치
+- 홈포인트가 실제 이륙점에 기록됨
+- 모든 고도가 **이륙점 기준**으로 안전함
+- 직선 구간 아래와 옆에 사람·차량·전선·수목·건물 없음
+- 속도 2m/s, 웨이포인트 2개, 왕복 끔
+- RTH 고도가 주변 장애물보다 높음
+- 신호 유실 시 호버 설정 확인
+- 조종사가 RC를 잡고 비행 일시 정지/RTH 버튼을 즉시 누를 수 있음
+- 관찰자가 기체를 계속 육안으로 확인
+- 첫 비행은 수동 이륙 → 안전고도 호버 → 임무 시작 → 중간 일시 정지 → 수동 착륙
 
-## 7. 검증
+DJI Fly가 임무를 읽지 못하거나 값이 다르면 비행하지 않는다. DJI Fly/기체 펌웨어 업데이트
+후에도 같은 2점 지상 검증을 반복한다.
 
-```bash
-npx tsx src/test/drone/scenario.ts --seconds=50            # relay
-npx tsx src/test/drone/scenario.ts --seconds=32 --mode=webrtc
+## 7. 현재 가능한 범위와 다음 단계
+
+가능:
+
+- SkyLens 웹에서 실제 GPS 경로 생성
+- Lito X1 식별값이 들어간 KMZ 생성
+- 속도·상대고도·짐벌·녹화 시작/종료·RTH 정의
+- 다운로드 또는 명시적 단일 파일 교체
+- **편대 3기 KMZ 자동 생성**: 관제 경로 계획에서 `편대 3기 KMZ`를 켜고 간격(m)을
+  넣으면, 계획한 경로를 편대 무게중심 트랙으로 보고 앞왼·앞오·뒤중 3개 미션을
+  한 번에 만든다(정삼각형, 기본 변 10m). 예전에 엑셀로 6좌표를 손계산해 3개 미션에
+  직접 입력하던 과정을 대체한다. 자세한 기하는 `formation.py` 참조
+- **DJI 클라우드 원격 전달**: `deliver:"cloud"`로 KMZ를 계정 클라우드에 올려 원격 RC 2가
+  Wi-Fi로 받게 한다. 목록(`GET /cloud/missions`)과 삭제(`POST /cloud/delete`)도 된다.
+  자세한 설정은 §5의 "DJI 클라우드 원격 전달" 참조
+
+아직 불가능:
+
+- 웹 W/A/S/D 실시간 스틱 제어
+- 웹에서 DJI Fly 임무 시작 버튼 누르기
+- 공식 API를 통한 실시간 Lito X1 텔레메트리·영상 수신
+- 실제 Lito 템플릿 없이 완전한 호환성 검증
+
+> **payload 블록 처리**: Lito X1처럼 통합 카메라 기체의 DJI Fly/Litchi KMZ에는
+> `<wpml:payloadInfo>`가 없다. Bridge는 템플릿에 payload enum이 있으면 그대로 싣고,
+> 없으면 블록을 생략한다(엔터프라이즈 기체 값을 짐작해 넣지 않는다).
+
+실기체 템플릿을 확보한 다음 해야 할 일은 `생성 KMZ를 DJI Fly에서 열기 → 값 비교 →
+프로펠러 없는 상태의 지상 검증 → 개방 장소 2점 저속 시험` 순서다.
+
+## 8. API
+
+`POST /formation`: 계획 경로 하나를 편대 3기 미션으로 팬아웃. 요청은 아래
+`POST /missions` 본문에 `"formation": {"spacingM": 10}`을 더한 형태다(단, `droneId`는
+무시). 응답은 `members` 배열로, 각 항목이 `station`(`left`|`right`|`center`)과
+그 기체의 KMZ `downloadUrl`을 담는다. 자동 설치는 하지 않는다(대상 파일 하나에
+3개를 설치할 수 없으므로 항상 다운로드 전용).
+
+### 클라우드 전달 API
+
+- `POST /missions` 또는 `POST /formation` 본문에 `"deliver": "cloud"`를 더하면 KMZ 생성
+  후 DJI 클라우드에 올리고, 응답에 `"cloud": {"missionUuid": ..., "verified": true}`를 넣는다.
+  클라우드 미설정 시 이 요청은 400으로 거부되며 다운로드/설치 요청은 영향받지 않는다.
+  DJI 클라우드가 거부하거나 닿지 않으면 502다.
+- `GET /cloud/missions` 계정 클라우드의 임무 목록(`uuid`, `name`, `waypointCount`, `distanceM`).
+  관제탑 툴바 "클라우드 미션 · Cloud" 버튼이 이 결과를 보여주고 각 항목을 삭제한다.
+- `POST /cloud/delete` 본문 `{"missionUuid": "..."}` 로 해당 임무를 삭제.
+- `GET /health`의 `cloudConfigured`로 클라우드 설정 여부를 확인한다.
+- 토큰 만료 대비: `SKYLENS_DJI_TOKEN_FILE`에 토큰 파일을 두면 매 요청 재로딩하고 인증
+  오류 시 1회 재시도한다. 파일은 `scripts/dji_token_refresh.py`가 갱신한다(위 §5 참조).
+
+`POST /missions`
+
+```json
+{
+  "name": "skylens-drone-1",
+  "droneId": 1,
+  "deliver": "cloud",
+  "loop": false,
+  "flight": {
+    "aglM": 30,
+    "takeoffAltMsl": 52,
+    "speedMps": 2,
+    "gimbalPitchDeg": -30,
+    "rthHeightM": 40
+  },
+  "waypoints": [
+    { "lat": 36.3685, "lon": 127.3475, "alt": 82 },
+    { "lat": 36.3687, "lon": 127.3477, "alt": 84 }
+  ]
+}
 ```
 
-`src/test/drone/fakeGateway.ts`는 게이트웨이(+뒤의 프록시) 역할을 대신하는 스크립트다. 실제와 같은 종단을 연다 — relay는 `/uplink`, webrtc는 `/signal`과 `/direct` — 그래서 드론 쪽에 특별 분기가 필요 없다. 코어 역할도 겸해서 hello를 받으면 `AssignRoute(loop: true)`를 내리고, 중간에 `ManualControl`을 넣어 인계 경로를 찔러 본다. webrtc 모드에서는 **시그널링 소켓에 미디어가 흘렀는지**를 세어 0인지 확인한다.
-
-`npm test`(Playwright)가 집어가지 않도록 `*.spec.ts`가 아닌 이름을 쓴다. 수십 초 동안 실시간 타이머를 도는 시나리오라 단위 테스트로 두기에 맞지 않는다.
-
----
-
-## 8. 파일
-
-```
-src/skylens_drone/
-├─ index.html                  진입 셸 (Tauri 웹뷰도 이 페이지를 연다)
-├─ main.ts                     브라우저 진입점 — 설정·캡처 선택·UI 배선
-├─ liveCamera.ts               getUserMedia → LiveCapture, 슬라이스 업로드 정책
-├─ core/                       런타임 비의존 (DOM 없음, node: 없음)
-│  ├─ config.ts                설정 해석 (env · 쿼리 · argv 한 형태로)
-│  ├─ drone.ts                 DroneApp — 상태기계·슬라이싱·텔레메트리
-│  ├─ flight.ts                경로 기하·왕복 접기·수동 적분 (순수 수학)
-│  ├─ link.ts                  GatewayLink — relay/webrtc 두 반송로
-│  ├─ capture.ts               CaptureSource — DemoCapture · LiveCapture
-│  └─ demoAssets.ts            촬영 대체 클립 목록 (ffprobe 실측값)
-├─ ui/                         패널 위젯
-│  ├─ panel.ts                 연결·모드·경로·텔레메트리·촬영 5블록
-│  ├─ log.ts                   이벤트 로그
-│  ├─ sticks.ts                수동 조종 입력
-│  ├─ preview.ts               현재 대체 클립 미리보기 (기본 비재생)
-│  └─ drone.css
-├─ node/
-│  └─ run.ts                   헤드리스 러너 (데모 런처 진입점)
-├─ tools/
-│  └─ transcodeDemoFootage.ts  H.264 원본 → H.265 전사 (1회)
-└─ src-tauri/                  얇은 셸 (Cargo.toml · build.rs · src/main.rs · icons/)
-
-src/test/drone/
-├─ fakeGateway.ts              게이트웨이+프록시 대역
-└─ scenario.ts                 두 모드 전체 시퀀스 검증
-```
+기본 바인딩은 `127.0.0.1`이며 CORS도 localhost의 5173/8080 포트만 허용한다. 다른
+관제 PC에서 접근할 때는 `SKYLENS_MISSION_HOST`와 `SKYLENS_MISSION_ALLOWED_ORIGINS`를
+명시적으로 설정하고, 신뢰할 수 있는 현장망 밖으로 노출하지 않는다.

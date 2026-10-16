@@ -1,0 +1,78 @@
+[package]
+build = "build.rs"
+name = "skylens-client"
+description = "Status board (현황판): the legacy board's HTML/CSS on Blitz with a pointblitz reconstruction view, web and native"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+# Not the package name: the bin `skylens-client` would otherwise write the same .pdb
+# on Windows (cargo warns about the collision, and it corrupted builds).
+name = "status_screen"
+path = "lib.rs"
+crate-type = ["rlib", "cdylib"]
+
+# Native window: `skylens-client --core ws://host:8080/viewer`.
+# On wasm32 this target compiles to an empty main; build the web bundle with build-web.sh.
+[[bin]]
+name = "skylens-client"
+path = "main.rs"
+
+[dependencies]
+skylens-shared.workspace = true
+skylens-viewer.workspace = true
+prost.workspace = true
+anyhow.workspace = true
+# Glyph lookup for the minimap's scale label (the same version vello and parley use).
+skrifa = "0.44"
+
+# The minimap is a Blitz custom widget, so the board needs the Widget trait itself.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+blitz-dom = { workspace = true, features = ["custom-widget"] }
+
+# Web: the same Blitz revision without the desktop-only features, as in skylens-viewer.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+blitz-dom = { git = "https://github.com/DioxusLabs/blitz", rev = "45496d9288b063719ebeae4e0761273f7881b3d7", default-features = false, features = ["woff", "custom-widget"] }
+wasm-bindgen = "0.2"
+
+[build-dependencies]
+# Embeds res/icon/skylens.ico into the Windows executable.
+winresource = "0.1"
+
+# Android APK (cargo-apk, see build-android.sh). The cdylib above is the app: NativeActivity loads
+# libstatus_screen.so and calls `android_main` in lib.rs. HTML, CSS, fonts and icons are compiled
+# into the library, so the APK carries no assets. Hardware acceleration is the default for
+# these SDK levels; wgpu draws through Vulkan (GLES as wgpu's fallback).
+[package.metadata.android]
+package = "kr.skylens.board"
+apk_name = "skylens-board"
+build_targets = ["aarch64-linux-android", "x86_64-linux-android"]
+resources = "android/res"
+strip = "strip"
+
+[package.metadata.android.sdk]
+# Vulkan arrived in API 24; 26 keeps clear of early Vulkan drivers.
+min_sdk_version = 26
+target_sdk_version = 35
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.INTERNET"
+
+[package.metadata.android.application]
+label = "SkyLens 현황판"
+icon = "@mipmap/ic_launcher"
+theme = "@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen"
+# Plain ws:// to a core or gateway on the local network.
+uses_cleartext_traffic = true
+
+[package.metadata.android.application.activity]
+label = "SkyLens 현황판"
+orientation = "landscape"
+launch_mode = "singleTop"
+# Handled in place: winit sees a resize instead of the activity being recreated (a second
+# android_main in the same process cannot open a new winit event loop).
+config_changes = "orientation|screenSize|screenLayout|smallestScreenSize|keyboard|keyboardHidden|navigation|uiMode|density"
+exported = true

@@ -1,0 +1,19 @@
+[package]
+name = "cumulus3d-matching"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Descriptor matching and two-view geometry (essential, fundamental, homography) for cumulus3d"
+repository.workspace = true
+keywords = ["computer-vision","matching","epipolar","ransac"]
+categories = ["computer-vision"]
+readme = "README.md"
+
+[dependencies]
+cumulus3d-core.workspace = true
+nalgebra.workspace = true
+rayon.workspace = true
+thiserror.workspace = true
+rand.workspace = true
+rand_pcg.workspace = true

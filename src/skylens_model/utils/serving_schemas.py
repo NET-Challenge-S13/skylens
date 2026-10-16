@@ -152,4 +152,6 @@ class Health(Strict):
     torch: bool
     cuda: bool
     device: str | None = None
+    # First CUDA failure after start; ``cuda`` is false from then on (Rust server only).
+    gpu_error: str | None = None
     jobs: dict[str, int] = Field(default_factory=dict)

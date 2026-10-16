@@ -1,0 +1,722 @@
+[
+ {
+  "name": "f2_m0/mv3_n25_mr0",
+  "m": {
+   "points": 22670730,
+   "vertical": 0.19847133285959473,
+   "normal_consistency": 0.9836779148345054,
+   "plane_residual_cm": 1.0993541628474084,
+   "vox10": 1952377,
+   "vox10_above": 829019,
+   "nn_spacing_cm": 1.5422423412445028,
+   "isolated": 0.0068,
+   "wall_thickness_cm": 0.733657254479351
+  },
+  "d": 1.5232706390387767
+ },
+ {
+  "name": "f2_m0/mv3_n30_mr0",
+  "m": {
+   "points": 23012818,
+   "vertical": 0.2044981192655328,
+   "normal_consistency": 0.9833887843726786,
+   "plane_residual_cm": 1.1001918884949424,
+   "vox10": 1999907,
+   "vox10_above": 841645,
+   "nn_spacing_cm": 1.5514219730104508,
+   "isolated": 0.0073,
+   "wall_thickness_cm": 0.7056446186238388
+  },
+  "d": 1.567008925336975
+ },
+ {
+  "name": "f1_m0/mv3_n20_mr0",
+  "m": {
+   "points": 22438645,
+   "vertical": 0.1910063196775028,
+   "normal_consistency": 0.9849053923427542,
+   "plane_residual_cm": 1.0878637927025079,
+   "vox10": 1944972,
+   "vox10_above": 856015,
+   "nn_spacing_cm": 1.5137166003923361,
+   "isolated": 0.0068,
+   "wall_thickness_cm": 0.7369153340605298
+  },
+  "d": 1.5722029871849539
+ },
+ {
+  "name": "f2_m0/mv3_n20_mr0",
+  "m": {
+   "points": 22134143,
+   "vertical": 0.18831648462739217,
+   "normal_consistency": 0.9851808404366551,
+   "plane_residual_cm": 1.0839389598548386,
+   "vox10": 1883453,
+   "vox10_above": 815619,
+   "nn_spacing_cm": 1.495434178834011,
+   "isolated": 0.00745,
+   "wall_thickness_cm": 0.7219130819197198
+  },
+  "d": 1.5981676663909417
+ },
+ {
+  "name": "f1_m0/mv3_n30_mr0",
+  "m": {
+   "points": 23451891,
+   "vertical": 0.20811605341334735,
+   "normal_consistency": 0.9827948566139465,
+   "plane_residual_cm": 1.1065250351292422,
+   "vox10": 2079576,
+   "vox10_above": 891685,
+   "nn_spacing_cm": 1.5418747292405321,
+   "isolated": 0.00765,
+   "wall_thickness_cm": 0.7144208707225895
+  },
+  "d": 1.619536359676244
+ },
+ {
+  "name": "f2_m0/mv4_n30_mr0",
+  "m": {
+   "points": 20986274,
+   "vertical": 0.18794655973709293,
+   "normal_consistency": 0.9873289396800472,
+   "plane_residual_cm": 1.1002748629297374,
+   "vox10": 1844380,
+   "vox10_above": 782291,
+   "nn_spacing_cm": 1.5564332749615317,
+   "isolated": 0.0063,
+   "wall_thickness_cm": 0.7347443556252019
+  },
+  "d": 1.6484429842224868
+ },
+ {
+  "name": "f2_m0/mv4_n20_mr0",
+  "m": {
+   "points": 19661726,
+   "vertical": 0.1696313945174498,
+   "normal_consistency": 0.9893867755215155,
+   "plane_residual_cm": 1.0941324182573604,
+   "vox10": 1704377,
+   "vox10_above": 770206,
+   "nn_spacing_cm": 1.5338854598058007,
+   "isolated": 0.0065,
+   "wall_thickness_cm": 0.7441886619614482
+  },
+  "d": 1.6640578164073863
+ },
+ {
+  "name": "f1_m0/mv3_n25_mr0",
+  "m": {
+   "points": 23046539,
+   "vertical": 0.20163960410715032,
+   "normal_consistency": 0.9838380616674115,
+   "plane_residual_cm": 1.0912332753378873,
+   "vox10": 2024049,
+   "vox10_above": 873879,
+   "nn_spacing_cm": 1.5284569365979555,
+   "isolated": 0.00815,
+   "wall_thickness_cm": 0.7210561410310073
+  },
+  "d": 1.6972803171733557
+ },
+ {
+  "name": "f2_m0/mv4_n25_mr0",
+  "m": {
+   "points": 20443505,
+   "vertical": 0.1808375325072682,
+   "normal_consistency": 0.9884810532527563,
+   "plane_residual_cm": 1.0912683623983663,
+   "vox10": 1786854,
+   "vox10_above": 776925,
+   "nn_spacing_cm": 1.541873182717082,
+   "isolated": 0.0067,
+   "wall_thickness_cm": 0.7415506889955309
+  },
+  "d": 1.7192403155098188
+ },
+ {
+  "name": "f1_m0/mv4_n25_mr0",
+  "m": {
+   "points": 20677513,
+   "vertical": 0.18281763382279098,
+   "normal_consistency": 0.9879282992426341,
+   "plane_residual_cm": 1.1078634595673342,
+   "vox10": 1832675,
+   "vox10_above": 797966,
+   "nn_spacing_cm": 1.5571727151738763,
+   "isolated": 0.00705,
+   "wall_thickness_cm": 0.7280366100653727
+  },
+  "d": 1.7244973411853788
+ },
+ {
+  "name": "f2_m1/mv3_n20_mr0",
+  "m": {
+   "points": 22353012,
+   "vertical": 0.18518980797755577,
+   "normal_consistency": 0.9890061994655288,
+   "plane_residual_cm": 1.0388124384224782,
+   "vox10": 1854646,
+   "vox10_above": 802905,
+   "nn_spacing_cm": 1.4977116278481517,
+   "isolated": 0.00685,
+   "wall_thickness_cm": 0.6816362628703545
+  },
+  "d": 1.8047219159581533
+ },
+ {
+  "name": "f1_m1/mv3_n20_mr0",
+  "m": {
+   "points": 22678414,
+   "vertical": 0.1880639889544304,
+   "normal_consistency": 0.9886440046990127,
+   "plane_residual_cm": 1.032349826294018,
+   "vox10": 1913905,
+   "vox10_above": 837185,
+   "nn_spacing_cm": 1.4994710991870335,
+   "isolated": 0.00755,
+   "wall_thickness_cm": 0.6579856538073885
+  },
+  "d": 1.8385210691903788
+ },
+ {
+  "name": "f1_m0/mv4_n20_mr0",
+  "m": {
+   "points": 19849373,
+   "vertical": 0.17133654549189034,
+   "normal_consistency": 0.9893465980995835,
+   "plane_residual_cm": 1.08810439342506,
+   "vox10": 1742195,
+   "vox10_above": 794217,
+   "nn_spacing_cm": 1.5477130517524298,
+   "isolated": 0.00795,
+   "wall_thickness_cm": 0.7540252102109816
+  },
+  "d": 1.8428351000082177
+ },
+ {
+  "name": "f1_m0/mv4_n30_mr0",
+  "m": {
+   "points": 21262475,
+   "vertical": 0.19021383916971096,
+   "normal_consistency": 0.9873325575872633,
+   "plane_residual_cm": 1.1096579202197665,
+   "vox10": 1896778,
+   "vox10_above": 809264,
+   "nn_spacing_cm": 1.566485690633833,
+   "isolated": 0.0078,
+   "wall_thickness_cm": 0.7467070977599891
+  },
+  "d": 1.8653525992098512
+ },
+ {
+  "name": "f2_m1/mv4_n20_mr0",
+  "m": {
+   "points": 19895979,
+   "vertical": 0.1661962952413651,
+   "normal_consistency": 0.9922841444457133,
+   "plane_residual_cm": 1.0421544952953283,
+   "vox10": 1688826,
+   "vox10_above": 765007,
+   "nn_spacing_cm": 1.5119043118443194,
+   "isolated": 0.0073,
+   "wall_thickness_cm": 0.6822439811196951
+  },
+  "d": 1.8782317671783049
+ },
+ {
+  "name": "f2_m1/mv3_n25_mr0",
+  "m": {
+   "points": 22756098,
+   "vertical": 0.1960856382320027,
+   "normal_consistency": 0.9889614402896114,
+   "plane_residual_cm": 1.0469223394438236,
+   "vox10": 1915782,
+   "vox10_above": 810954,
+   "nn_spacing_cm": 1.5250843920950174,
+   "isolated": 0.0068,
+   "wall_thickness_cm": 0.6688366701932777
+  },
+  "d": 1.886063102308329
+ },
+ {
+  "name": "f2_m1/mv4_n30_mr0",
+  "m": {
+   "points": 21011321,
+   "vertical": 0.18582858260077983,
+   "normal_consistency": 0.9914325095618957,
+   "plane_residual_cm": 1.062581852620751,
+   "vox10": 1813933,
+   "vox10_above": 763764,
+   "nn_spacing_cm": 1.5646900164895876,
+   "isolated": 0.0064,
+   "wall_thickness_cm": 0.6835399934753222
+  },
+  "d": 1.9372710884016202
+ },
+ {
+  "name": "f1_m1/mv4_n20_mr0",
+  "m": {
+   "points": 20097342,
+   "vertical": 0.16802754314476015,
+   "normal_consistency": 0.9922837728921511,
+   "plane_residual_cm": 1.050685892328699,
+   "vox10": 1725714,
+   "vox10_above": 788326,
+   "nn_spacing_cm": 1.5097439475752479,
+   "isolated": 0.0074,
+   "wall_thickness_cm": 0.7066333677882491
+  },
+  "d": 1.9626487924080516
+ },
+ {
+  "name": "f1_m1/mv4_n25_mr0",
+  "m": {
+   "points": 20802765,
+   "vertical": 0.18027670840871393,
+   "normal_consistency": 0.9919777791453845,
+   "plane_residual_cm": 1.0559906460780886,
+   "vox10": 1806591,
+   "vox10_above": 785743,
+   "nn_spacing_cm": 1.539664650636405,
+   "isolated": 0.00695,
+   "wall_thickness_cm": 0.6861839335857687
+  },
+  "d": 1.9927497960484284
+ },
+ {
+  "name": "f2_m1/mv4_n25_mr0",
+  "m": {
+   "points": 20553415,
+   "vertical": 0.17811877004381024,
+   "normal_consistency": 0.9919253316236792,
+   "plane_residual_cm": 1.054310970700548,
+   "vox10": 1763366,
+   "vox10_above": 759299,
+   "nn_spacing_cm": 1.5343225710628077,
+   "isolated": 0.0076,
+   "wall_thickness_cm": 0.6886209021478269
+  },
+  "d": 2.0236032105324506
+ },
+ {
+  "name": "f2_m1/mv3_n30_mr0",
+  "m": {
+   "points": 23010940,
+   "vertical": 0.2026416999913954,
+   "normal_consistency": 0.9888926278464633,
+   "plane_residual_cm": 1.0528646045142258,
+   "vox10": 1956051,
+   "vox10_above": 820175,
+   "nn_spacing_cm": 1.5388135490016386,
+   "isolated": 0.0075,
+   "wall_thickness_cm": 0.6785442767446412
+  },
+  "d": 2.035097481132292
+ },
+ {
+  "name": "f1_m1/mv3_n30_mr0",
+  "m": {
+   "points": 23475244,
+   "vertical": 0.20647039920011054,
+   "normal_consistency": 0.9882602170563584,
+   "plane_residual_cm": 1.0496729725463703,
+   "vox10": 2030671,
+   "vox10_above": 867530,
+   "nn_spacing_cm": 1.5446848719544586,
+   "isolated": 0.008,
+   "wall_thickness_cm": 0.672103209183701
+  },
+  "d": 2.068615271599877
+ },
+ {
+  "name": "f1_m1/mv3_n25_mr0",
+  "m": {
+   "points": 23154913,
+   "vertical": 0.1994919609501448,
+   "normal_consistency": 0.9888716190508178,
+   "plane_residual_cm": 1.0405605346773774,
+   "vox10": 1983669,
+   "vox10_above": 852857,
+   "nn_spacing_cm": 1.5333996028513273,
+   "isolated": 0.0082,
+   "wall_thickness_cm": 0.6713135153003402
+  },
+  "d": 2.069304563872045
+ },
+ {
+  "name": "f1_m1/mv4_n30_mr0",
+  "m": {
+   "points": 21304608,
+   "vertical": 0.18825828665798497,
+   "normal_consistency": 0.991495733223119,
+   "plane_residual_cm": 1.0619476742437224,
+   "vox10": 1862973,
+   "vox10_above": 792847,
+   "nn_spacing_cm": 1.5718841979047187,
+   "isolated": 0.00825,
+   "wall_thickness_cm": 0.6647581137140599
+  },
+  "d": 2.139140760127509
+ },
+ {
+  "name": "f2_m0/mv4_n30_mr1",
+  "m": {
+   "points": 13247232,
+   "vertical": 0.1574136393172551,
+   "normal_consistency": 0.9906603554416904,
+   "plane_residual_cm": 1.2024074343260496,
+   "vox10": 1621872,
+   "vox10_above": 760737,
+   "nn_spacing_cm": 1.7395411674526704,
+   "isolated": 0.0178,
+   "wall_thickness_cm": 0.8283854304633733
+  },
+  "d": 2.7732639697497197
+ },
+ {
+  "name": "f2_m1/mv3_n30_mr1",
+  "m": {
+   "points": 14714873,
+   "vertical": 0.16884202806235568,
+   "normal_consistency": 0.9929351889410212,
+   "plane_residual_cm": 1.152131899933166,
+   "vox10": 1736749,
+   "vox10_above": 790187,
+   "nn_spacing_cm": 1.7296720263499932,
+   "isolated": 0.0172,
+   "wall_thickness_cm": 0.742763278662043
+  },
+  "d": 2.8099466835606575
+ },
+ {
+  "name": "f2_m0/mv3_n30_mr1",
+  "m": {
+   "points": 14301480,
+   "vertical": 0.1733054900611685,
+   "normal_consistency": 0.988584022457832,
+   "plane_residual_cm": 1.2109191965188357,
+   "vox10": 1757431,
+   "vox10_above": 797052,
+   "nn_spacing_cm": 1.7471322456466658,
+   "isolated": 0.02015,
+   "wall_thickness_cm": 0.8155720375013574
+  },
+  "d": 2.8515152981429885
+ },
+ {
+  "name": "f1_m0/mv4_n30_mr1",
+  "m": {
+   "points": 13402623,
+   "vertical": 0.1593599999044963,
+   "normal_consistency": 0.9903216337302361,
+   "plane_residual_cm": 1.216069049490902,
+   "vox10": 1663093,
+   "vox10_above": 787383,
+   "nn_spacing_cm": 1.756910556516085,
+   "isolated": 0.0184,
+   "wall_thickness_cm": 0.8539025844025605
+  },
+  "d": 2.857256650569995
+ },
+ {
+  "name": "f1_m0/mv3_n30_mr1",
+  "m": {
+   "points": 14544539,
+   "vertical": 0.17680244110865254,
+   "normal_consistency": 0.9883540615158075,
+   "plane_residual_cm": 1.2118412115491308,
+   "vox10": 1820771,
+   "vox10_above": 831817,
+   "nn_spacing_cm": 1.7432093912267541,
+   "isolated": 0.0199,
+   "wall_thickness_cm": 0.8329216449803609
+  },
+  "d": 2.8729320245927075
+ },
+ {
+  "name": "f2_m1/mv4_n30_mr1",
+  "m": {
+   "points": 13654885,
+   "vertical": 0.15256906228064168,
+   "normal_consistency": 0.9942761276221866,
+   "plane_residual_cm": 1.159620580043635,
+   "vox10": 1609357,
+   "vox10_above": 757415,
+   "nn_spacing_cm": 1.7180755537239203,
+   "isolated": 0.01765,
+   "wall_thickness_cm": 0.7675600676294883
+  },
+  "d": 2.9180406111705537
+ },
+ {
+  "name": "f1_m1/mv4_n30_mr1",
+  "m": {
+   "points": 13826739,
+   "vertical": 0.15471370364335366,
+   "normal_consistency": 0.9941178625523777,
+   "plane_residual_cm": 1.1552563173126915,
+   "vox10": 1648923,
+   "vox10_above": 783151,
+   "nn_spacing_cm": 1.7162733670516752,
+   "isolated": 0.01835,
+   "wall_thickness_cm": 0.7617895433052418
+  },
+  "d": 2.962716620444574
+ },
+ {
+  "name": "f2_m0/mv3_n25_mr1",
+  "m": {
+   "points": 13540190,
+   "vertical": 0.16882931480282035,
+   "normal_consistency": 0.9892884795161034,
+   "plane_residual_cm": 1.2187192184563784,
+   "vox10": 1713483,
+   "vox10_above": 793723,
+   "nn_spacing_cm": 1.7666806092345149,
+   "isolated": 0.02035,
+   "wall_thickness_cm": 0.8342988150666929
+  },
+  "d": 2.979532891457209
+ },
+ {
+  "name": "f2_m1/mv3_n25_mr1",
+  "m": {
+   "points": 14010217,
+   "vertical": 0.1635841900236092,
+   "normal_consistency": 0.9931059993646008,
+   "plane_residual_cm": 1.1700730346417614,
+   "vox10": 1697395,
+   "vox10_above": 797671,
+   "nn_spacing_cm": 1.7475031077101841,
+   "isolated": 0.01845,
+   "wall_thickness_cm": 0.796283927951714
+  },
+  "d": 2.9895124085704414
+ },
+ {
+  "name": "f2_m1/mv4_n25_mr1",
+  "m": {
+   "points": 12891278,
+   "vertical": 0.14629488247790484,
+   "normal_consistency": 0.9944020855958698,
+   "plane_residual_cm": 1.1707543050766285,
+   "vox10": 1560949,
+   "vox10_above": 753015,
+   "nn_spacing_cm": 1.7278867927929444,
+   "isolated": 0.01755,
+   "wall_thickness_cm": 0.8163600206371184
+  },
+  "d": 3.02034128002589
+ },
+ {
+  "name": "f1_m0/mv3_n25_mr1",
+  "m": {
+   "points": 13744955,
+   "vertical": 0.1719149316967571,
+   "normal_consistency": 0.9888784490687323,
+   "plane_residual_cm": 1.2276860525423974,
+   "vox10": 1770625,
+   "vox10_above": 828479,
+   "nn_spacing_cm": 1.7656811704176725,
+   "isolated": 0.0211,
+   "wall_thickness_cm": 0.8737702260576072
+  },
+  "d": 3.093775696539231
+ },
+ {
+  "name": "f1_m1/mv3_n30_mr1",
+  "m": {
+   "points": 14978469,
+   "vertical": 0.172523974245966,
+   "normal_consistency": 0.9927621085918035,
+   "plane_residual_cm": 1.1589842356531952,
+   "vox10": 1797325,
+   "vox10_above": 822590,
+   "nn_spacing_cm": 1.725216181143302,
+   "isolated": 0.01965,
+   "wall_thickness_cm": 0.7713734246210938
+  },
+  "d": 3.139129302102497
+ },
+ {
+  "name": "f1_m1/mv3_n25_mr1",
+  "m": {
+   "points": 14233042,
+   "vertical": 0.166846623511685,
+   "normal_consistency": 0.9929938141381549,
+   "plane_residual_cm": 1.1737263534508848,
+   "vox10": 1752452,
+   "vox10_above": 825892,
+   "nn_spacing_cm": 1.7531336897807033,
+   "isolated": 0.02005,
+   "wall_thickness_cm": 0.7958384496531236
+  },
+  "d": 3.1649569652392624
+ },
+ {
+  "name": "f1_m1/mv4_n25_mr1",
+  "m": {
+   "points": 13035475,
+   "vertical": 0.1481494920591693,
+   "normal_consistency": 0.9943789352634426,
+   "plane_residual_cm": 1.170770362983214,
+   "vox10": 1596149,
+   "vox10_above": 774218,
+   "nn_spacing_cm": 1.736642238646798,
+   "isolated": 0.01945,
+   "wall_thickness_cm": 0.8011293783344565
+  },
+  "d": 3.1900927211099193
+ },
+ {
+  "name": "f2_m1/mv3_n20_mr1",
+  "m": {
+   "points": 13062643,
+   "vertical": 0.1569830852760808,
+   "normal_consistency": 0.993223988163302,
+   "plane_residual_cm": 1.1766587529892607,
+   "vox10": 1640750,
+   "vox10_above": 785223,
+   "nn_spacing_cm": 1.7510737888412244,
+   "isolated": 0.0201,
+   "wall_thickness_cm": 0.8106810731811859
+  },
+  "d": 3.2208220715205855
+ },
+ {
+  "name": "f2_m0/mv3_n20_mr1",
+  "m": {
+   "points": 12534977,
+   "vertical": 0.16331517800152326,
+   "normal_consistency": 0.9898607571889624,
+   "plane_residual_cm": 1.2359437554180266,
+   "vox10": 1651153,
+   "vox10_above": 784583,
+   "nn_spacing_cm": 1.780127261959337,
+   "isolated": 0.02095,
+   "wall_thickness_cm": 0.8889215603226525
+  },
+  "d": 3.235509203287941
+ },
+ {
+  "name": "f2_m0/mv4_n25_mr1",
+  "m": {
+   "points": 12422164,
+   "vertical": 0.1519342362570644,
+   "normal_consistency": 0.9914369198966992,
+   "plane_residual_cm": 1.2152657754867129,
+   "vox10": 1568382,
+   "vox10_above": 745119,
+   "nn_spacing_cm": 1.7484734563263244,
+   "isolated": 0.021,
+   "wall_thickness_cm": 0.8562993273947686
+  },
+  "d": 3.2554321148797576
+ },
+ {
+  "name": "f1_m0/mv4_n25_mr1",
+  "m": {
+   "points": 12552260,
+   "vertical": 0.153694314808648,
+   "normal_consistency": 0.9912674139656753,
+   "plane_residual_cm": 1.2245271753321667,
+   "vox10": 1604609,
+   "vox10_above": 768989,
+   "nn_spacing_cm": 1.7618980954820882,
+   "isolated": 0.0211,
+   "wall_thickness_cm": 0.8625408659703327
+  },
+  "d": 3.270662461561402
+ },
+ {
+  "name": "f1_m0/mv4_n20_mr1",
+  "m": {
+   "points": 11435725,
+   "vertical": 0.14699068052091144,
+   "normal_consistency": 0.9920952764844573,
+   "plane_residual_cm": 1.2295889795587853,
+   "vox10": 1523043,
+   "vox10_above": 746089,
+   "nn_spacing_cm": 1.7795685373265484,
+   "isolated": 0.02215,
+   "wall_thickness_cm": 0.8493078801287027
+  },
+  "d": 3.4772589138812
+ },
+ {
+  "name": "f2_m1/mv4_n20_mr1",
+  "m": {
+   "points": 11853638,
+   "vertical": 0.13885821382431285,
+   "normal_consistency": 0.9946804227893054,
+   "plane_residual_cm": 1.1956874165391203,
+   "vox10": 1489824,
+   "vox10_above": 732068,
+   "nn_spacing_cm": 1.755594925779436,
+   "isolated": 0.0203,
+   "wall_thickness_cm": 0.844813928751164
+  },
+  "d": 3.511037195051821
+ },
+ {
+  "name": "f2_m0/mv4_n20_mr1",
+  "m": {
+   "points": 11334390,
+   "vertical": 0.1454765540977503,
+   "normal_consistency": 0.9919676817234759,
+   "plane_residual_cm": 1.235889436737693,
+   "vox10": 1493074,
+   "vox10_above": 726762,
+   "nn_spacing_cm": 1.7937495472160205,
+   "isolated": 0.0223,
+   "wall_thickness_cm": 0.8744024175468424
+  },
+  "d": 3.5229115438202876
+ },
+ {
+  "name": "f1_m1/mv3_n20_mr1",
+  "m": {
+   "points": 13241721,
+   "vertical": 0.15975816134473758,
+   "normal_consistency": 0.9929141037443915,
+   "plane_residual_cm": 1.18799854759835,
+   "vox10": 1688980,
+   "vox10_above": 817791,
+   "nn_spacing_cm": 1.7613217073715028,
+   "isolated": 0.0233,
+   "wall_thickness_cm": 0.8079612058326604
+  },
+  "d": 3.5295500648102296
+ },
+ {
+  "name": "f1_m0/mv3_n20_mr1",
+  "m": {
+   "points": 12699684,
+   "vertical": 0.16597948421393793,
+   "normal_consistency": 0.9896577914127833,
+   "plane_residual_cm": 1.2365770105351948,
+   "vox10": 1701084,
+   "vox10_above": 816521,
+   "nn_spacing_cm": 1.7791666253195726,
+   "isolated": 0.0245,
+   "wall_thickness_cm": 0.8634445413993639
+  },
+  "d": 3.5439675212419894
+ },
+ {
+  "name": "f1_m1/mv4_n20_mr1",
+  "m": {
+   "points": 11964602,
+   "vertical": 0.14040233014019188,
+   "normal_consistency": 0.9946175301761029,
+   "plane_residual_cm": 1.1903783581693097,
+   "vox10": 1519369,
+   "vox10_above": 751509,
+   "nn_spacing_cm": 1.762876808666368,
+   "isolated": 0.02285,
+   "wall_thickness_cm": 0.8301223749768663
+  },
+  "d": 3.717756718342296
+ }
+]

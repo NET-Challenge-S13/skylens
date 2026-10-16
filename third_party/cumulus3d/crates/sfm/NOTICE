@@ -1,0 +1,8 @@
+cumulus3d
+Copyright (c) 2026 ParkSangWoo <dev.parksangwoo@gmail.com>
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Parts of its algorithms, default parameters and data formats follow other
+open-source projects. Their copyright notices and license terms are reproduced
+in THIRD_PARTY_NOTICES.md.

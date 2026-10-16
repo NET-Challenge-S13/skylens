@@ -252,6 +252,7 @@ class SkyLensTrainer(Trainer):
         stride = int(getattr(args, "person_head_stride", 4))
         k = int(getattr(args, "eval_max_detections", 100))
         thr = float(getattr(args, "eval_score_threshold", 0.3))
+        ap_floor = float(getattr(args, "eval_ap_score_floor", 0.05))
         ignore_index = int(getattr(args, "seg_ignore_index", 255))
 
         # --- 세그: 로짓 대신 argmax된 클래스 맵만 남긴다 (메모리) ---
@@ -279,14 +280,20 @@ class SkyLensTrainer(Trainer):
                 pred_hm,
                 getattr(outputs, "person_wh", None),
                 k=k,
-                threshold=thr,
+                # mAP/point_ap용 floor까지 남기고 F1 임계값은 compute_metrics가 적용한다.
+                threshold=min(thr, ap_floor),
                 stride=stride,
+                offset=getattr(outputs, "person_offset", None),
             ).to(torch.float32)
             # GT 박스는 collator의 회귀 타깃(person_reg_mask/person_wh)에서 복원한다.
             gt_reg = inputs.get("person_reg_mask")
             gt_wh = inputs.get("person_wh")
             if gt_reg is not None and gt_wh is not None:
-                gt_boxes = decode_gt_boxes(gt_reg, gt_wh, k=k, stride=stride).to(torch.float32)
+                # GT는 collator의 person_offset으로 항상 연속 좌표로 복원한다 (격자 스냅 X).
+                # 예측 오프셋과 무관한 GT 자체의 값이므로 모델 헤드 유무와 상관없다.
+                gt_boxes = decode_gt_boxes(
+                    gt_reg, gt_wh, k=k, stride=stride, offset=inputs.get("person_offset")
+                ).to(torch.float32)
             else:
                 # 회귀 타깃이 없으면 GT 히트맵 정점(가우시안 peak == 1.0)에서
                 # 중심만 복원하고 w=h=0으로 둔다.

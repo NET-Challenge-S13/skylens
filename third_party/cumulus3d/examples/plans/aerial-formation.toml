@@ -1,0 +1,66 @@
+# cumulus3d 재구성 계획(aerial-formation 프리셋, `cumulus3d stream` 기본값과 같다).
+# 실행: cumulus3d run examples/plans/aerial-formation.toml
+# 상대 경로는 실행 위치 기준. 빠진 항목은 기본값, 모르는 항목은 오류.
+
+seed = 7                         # RANSAC 시드(지우면 실행마다 다름)
+threads = 0                      # 0 = 코어 수
+gps = "data/gps_ref.txt"         # `이름 위도 경도 고도` 줄
+pairing = "formation"            # 편대 짝 규칙
+
+[input]
+images = "data/images"           # <images>/<camera>/<camera>_NNNN.jpg
+cameras = ["camF", "camR", "camL"]
+stride = 3                       # 파일 번호 % stride == 0 만
+# positions = 26                 # 앞 N 위치만
+
+[zones]
+span = 12
+overlap = 2
+
+[align]
+frame = "enu"                    # enu | none
+fixed_origin = false
+
+[features]
+backend = "cpu"                  # cpu | cuda
+max_num_features = 8192
+max_image_size = 3200
+
+[matching]
+backend = "cpu"                  # cpu | cuda
+
+[sparse]
+incremental_triangulation = false
+
+[dense]
+enabled = true                   # false = 조밀화 생략
+backend = "cuda"
+profile = "fast"                 # fast | quality
+max_image_size = 960
+views = 10
+serialize = false
+depth_cache = false
+
+[dense.fusion]                   # 비우면 프로파일 기본값
+# mode = "consistency"           # consistency | traversal
+# min_views = 3
+# depth_error = 0.01
+# normal_error = 10.0
+# reproj_error = 2.0
+# residual = "none"              # none | release | second-pass
+
+[dense.filter]
+# min_views = 2
+# geom_error = 1.0
+# min_ncc = 0.1
+# median = false
+
+[sinks]
+out = "out"
+clean = true                     # 시작 때 출력 폴더를 지우고 새로 만듦
+echo = true
+timeline = true
+run_log = true
+zone_ply = true
+snapshots = true
+models = false

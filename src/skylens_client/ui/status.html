@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="ko"><head>
+    <meta charset="UTF-8">
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SkyLens · 현황판 - 실시간 3D 복원</title>
+    <link rel="stylesheet" href="../../shared/viewer/ui/fonts.css" />
+    <link rel="stylesheet" href="../../shared/viewer/ui/style.css" />
+    <link rel="stylesheet" href="status-panels.css" />
+  </head>
+<body>
+    <section class="pane pane--status pane--full">
+      <canvas id="status-view"></canvas>
+      <div id="overlay-status" class="overlay"><div class="detect-card"><div class="detect-card__kicker"></div><div class="detect-card__label"></div><div class="detect-card__conf"></div><div class="detect-card__bar"><span></span></div><button class="detect-card__btn" type="button">탐지 확인</button></div><div class="cam-state">CAM · SYNCED</div><div class="splat-loading is-visible" id="board-waiting">코어 연결됨 · 첫 구간 복원 대기 중</div></div>
+      <div id="net-status" class="net-badge"><span class="net-badge__dot" style="background: rgb(57, 217, 138);"></span><span>코어 연결됨 · 데이터 대기</span></div>
+      <div id="server-status" class="sl-surface sl-surface--panel server-status"><span class="server-status__dot" data-state="connected"></span><div class="server-status__body"><span class="server-status__text">서버 · 연결됨</span><span class="server-status__detail">청크 0 · 탐지 0 · 0ms</span><span class="server-status__detail">코어 연결됨 · 데이터 대기</span></div><div class="server-status__ladder"></div></div>
+      <div id="minimap" class="sl-surface sl-surface--frame"><canvas class="minimap__canvas" width="198" height="198" style="width: 198px; height: 198px;"></canvas></div>
+    <div class="sl-surface sl-surface--chip pane-label pane-label--status"><span class="sl-dot"></span><span class="sl-surface__label">현황판 · 실시간 3D 복원</span></div><button type="button" id="point-toggle" class="point-toggle is-on" aria-pressed="true"><span class="point-toggle__label">점 · 고도색</span><span class="point-toggle__meta">수신 대기</span></button></section>
+    <div id="toast-root"></div>
+  
+
+</body></html>
