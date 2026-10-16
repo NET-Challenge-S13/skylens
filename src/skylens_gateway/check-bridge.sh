@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# 브리지 상태 점검 — 설치 후, 그리고 문제가 있을 때 실행한다. root 불필요.
+# Bridge health check: run it after installing and whenever something looks
+# wrong. No root needed.
 set -u
 cd "$(dirname "$(readlink -f "$0")")"
 
@@ -61,8 +62,9 @@ if [ -f "$WEB_DIR/status.html" ]; then
   pass "$WEB_DIR/status.html 있음"
   code=$(curl -s -o /dev/null -w '%{http_code}' -m 3 "http://127.0.0.1:$HTTP_PORT/" || echo 000)
   [ "$code" = 200 ] && pass "nginx 가 / 를 200 으로 준다" || fail "/ 가 HTTP $code"
-  # wasm 은 MIME 이 application/wasm 이 아니면 브라우저가 모듈을 거부한다.
-  # nginx 1.21.1 이전 mime.types 에는 wasm 이 없다 (22.04 는 1.18) — 설정에서 못박아 둔다.
+  # The browser refuses the module unless the MIME type is application/wasm.
+  # nginx only carries wasm in mime.types since 1.21.1 (22.04 ships 1.18), so
+  # the site config pins it. Check what the server actually sends.
   wasm=$(find "$WEB_DIR" -name '*.wasm' | head -1)
   if [ -n "$wasm" ]; then
     rel="${wasm#"$WEB_DIR"}"

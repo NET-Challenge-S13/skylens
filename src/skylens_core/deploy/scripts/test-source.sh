@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
-# 테스트 영상을 SRT 로 MediaMTX 에 밀어넣는다 (실제 드론 대신 파이프라인 검증용).
+# Push a test video into MediaMTX over SRT, to exercise the pipeline without a
+# real drone.
 #
-# 사용: ./test-source.sh [host] [port] [path] [publish_pass]
-#   대전 로컬 (인증 없음):  ./test-source.sh 127.0.0.1 10890 drone1
-#   브리지 (인증 있음):     ./test-source.sh 175.126.98.44 10890 drone1 <PUBLISH_PASS>
+# Usage: ./test-source.sh [host] [port] [path] [publish_pass]
+#   Daejeon, no auth  : ./test-source.sh 127.0.0.1 10890 drone1
+#   bridge, with auth : ./test-source.sh 175.126.98.44 10890 drone1 <PUBLISH_PASS>
 set -euo pipefail
 
 HOST="${1:-127.0.0.1}"
 PORT="${2:-10890}"
-PATHNAME="${3:-drone1}"   # 경로 이름은 코어 기준 drone1~drone3
+PATHNAME="${3:-drone1}"   # the core names them drone1..drone3
 PASS="${4:-}"
 
 STREAMID="publish:${PATHNAME}"
