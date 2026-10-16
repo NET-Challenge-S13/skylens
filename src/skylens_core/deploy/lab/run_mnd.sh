@@ -1,5 +1,5 @@
 #!/bin/bash
-# 대전(KOREN 내부)에서 도는 10분 주기 프로브.
+# The 10-minute probe that runs on Daejeon (inside KOREN).
 cd "$(dirname "$0")"
 OUT=~/lab/results/mnd-$(date +%Y%m%d).jsonl
 exec >> "$OUT" 2>> ~/lab/results/mnd-error.log

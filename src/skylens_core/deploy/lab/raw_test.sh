@@ -1,5 +1,5 @@
 #!/bin/bash
-# hirun 으로 암호화 없는 TCP 전송을 재서, SSH 측정에 섞인 암호화 비용을 분리한다.
+# Time an unencrypted TCP transfer through hirun, to separate the encryption cost mixed into the SSH numbers.
 set -u
 . ~/.koren_portal
 MB=${1:-200}

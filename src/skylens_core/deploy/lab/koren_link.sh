@@ -1,22 +1,22 @@
 #!/bin/bash
-# 대전 ↔ 판교 구간 측정. 대전에서 실행한다.
+# Measure the Daejeon to Pangyo leg. Run it on Daejeon.
 #
-# 이 구간이 KOREN 정당성의 본체다. 드론 영상에서 뽑은 프레임이 판교로 가고
-# 복원 결과(.spz)와 마커가 대전으로 돌아온다. 그 왕복 시간이 지휘관이
-# 새 3D 를 보기까지의 시간을 정한다.
+# This leg is the heart of the KOREN case. Frames pulled from the drone video go
+# to Pangyo and the reconstruction (.spz) plus the markers come back. That round
+# trip decides how long a commander waits for new 3D.
 #
-# 전제 두 가지(각각 한 번만 사람이 해 주면 그 뒤로는 무인 실행)
-#   1) ~/.koren_portal 에 포털 계정이 있다. 두 줄, 권한 600.
-#        ID=<포털 아이디>
-#        PW=<포털 비밀번호>
-#   2) 판교의 authorized_keys 에 대전의 공개키가 들어 있다.
-#        대전에서:  cat ~/.ssh/id_ed25519.pub
-#        판교에서:  그 줄을 ~/.ssh/authorized_keys 에 추가
+# Two prerequisites, each a one-time human step; unattended afterwards:
+#   1) ~/.koren_portal holds the portal account, two lines, mode 600:
+#        ID=<portal id>
+#        PW=<portal password>
+#   2) Pangyo's authorized_keys holds the Daejeon public key:
+#        on Daejeon:  cat ~/.ssh/id_ed25519.pub
+#        on Pangyo :  append that line to ~/.ssh/authorized_keys
 #
-# 주의: 현재 이 경로는 KOREN 백본을 직접 타지 않고 SOCKS 프록시
-# (116.89.174.24:1080)를 거친다. 따라서 여기서 나온 수치는 백본의 상한이
-# 아니라 "오늘 우리가 실제로 쓸 수 있는 KOREN 내부 경로"의 값이다.
-# 대전↔판교 직결 포트가 열리면 같은 스크립트로 다시 재서 비교한다.
+# Careful: today this path does not ride the KOREN backbone directly, it goes
+# through a SOCKS proxy (116.89.174.24:1080). So these figures are not the
+# backbone ceiling; they are the KOREN internal path we can actually use today.
+# Once a direct Daejeon-Pangyo port opens, re-measure with the same script.
 
 set -u
 cd "$(dirname "$0")"
@@ -34,20 +34,20 @@ fi
 # shellcheck disable=SC1090
 . ~/.koren_portal
 
-# 판교 로그인 계정은 포털 계정과 같다. 저장소에 계정명을 남기지 않기 위해
-# 여기서 받아온다(공개 저장소다). 다르면 PANGYO_USER 를 환경변수로 넘긴다.
+# The Pangyo login is the same account as the portal. Read it from the file so
+# the repository carries no account name (it is public). Override with PANGYO_USER.
 PANGYO_USER=${PANGYO_USER:-$ID}
 
 ts() { date -Is; }
 
-# 판교에서 명령 하나를 돌리고 표준출력을 돌려준다.
+# Run one command on Pangyo and hand back its stdout.
 pangyo() {
   "$HIRUN" -u "$ID" -p "$PW" -c \
     "ssh -p $PANGYO_PORT -o BatchMode=yes -o StrictHostKeyChecking=no \
          -o UserKnownHostsFile=/dev/null $PANGYO_USER@$PANGYO_HOST '$1'" 2>/dev/null
 }
 
-# --- 1) 왕복시간: 명령 하나를 왕복시키는 데 걸리는 시간 -------------------
+# --- 1) round trip: how long one command takes to go and come back ---------
 rtt_samples=()
 for _ in $(seq 1 5); do
   t0=$(date +%s%N)
@@ -56,8 +56,8 @@ for _ in $(seq 1 5); do
   [ "${out:-}" = "ok" ] && rtt_samples+=("$(( (t1 - t0) / 1000000 ))")
 done
 
-# --- 2) 처리량: 판교 → 대전, 대전 → 판교 --------------------------------
-# .spz 한 덩어리에 해당하는 양을 실제로 옮겨 완료 시간을 잰다.
+# --- 2) throughput: Pangyo -> Daejeon, Daejeon -> Pangyo ------------------
+# Move as much as one .spz chunk and time it to completion.
 down_mb=${1:-30}
 t0=$(date +%s%N)
 pangyo "dd if=/dev/zero bs=65536 count=$((down_mb * 16)) status=none" > /dev/null
@@ -73,7 +73,7 @@ dd if=/dev/zero bs=65536 count=$((down_mb * 16)) status=none \
 t1=$(date +%s%N)
 up_s=$(awk "BEGIN{printf \"%.3f\", ($t1 - $t0)/1000000000}")
 
-# --- 3) 기록 -------------------------------------------------------------
+# --- 3) record ------------------------------------------------------------
 python3 - "$(ts)" "${rtt_samples[*]:-}" "$down_mb" "$down_s" "$up_s" <<'PY' >> "$OUT"
 import json, statistics, sys
 ts, rtts, mb, down_s, up_s = sys.argv[1:6]

@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
-"""KOREN 접속 프록시(SOCKS5, 계정 인증)를 통과시키는 최소 클라이언트.
+"""A minimal client for getting through the KOREN access proxy (SOCKS5 with an account).
 
-왜 만들었나
-  - `hirun` 은 x86-64 전용이라 라즈베리파이(ARM)에서 안 돈다.
-  - `proxychains4` 는 이 환경의 `nc` 와 맞물리지 않는다(연결이 거부된다).
-  - 그래서 구간별 측정을 하려면 의존성 없는 클라이언트가 하나 필요했다.
+Why it exists
+  - `hirun` is x86-64 only, so it does not run on the Raspberry Pi (ARM).
+  - `proxychains4` does not mesh with the `nc` in this environment (connection refused).
+  - So per-leg measurement needed one client with no dependencies.
 
-쓰임 둘
-  1) SSH 의 ProxyCommand:
+Two uses
+  1) as SSH's ProxyCommand:
          ssh -o ProxyCommand="python3 socks5.py %h %p" -p 11000 user@10.246.246.9
-  2) 암호화 없는 순수 TCP 측정(표준입력을 그대로 흘려보낸다):
+  2) for a plain unencrypted TCP measurement (stdin is passed straight through):
          dd if=/dev/zero bs=65536 count=1600 | python3 socks5.py 10.246.246.9 15201
 
-계정은 `~/.koren_portal`(권한 600)에서 읽는다. 명령줄에 비밀번호를 쓰지 않는다.
-그래야 `ps` 와 셸 기록에 남지 않는다.
+The account comes from `~/.koren_portal` (mode 600). The password never appears on
+the command line, so it stays out of `ps` and the shell history.
 """
 
 from __future__ import annotations
@@ -57,13 +57,13 @@ def socks5_connect(host: str, port: int) -> socket.socket:
     sock = socket.create_connection((PROXY_HOST, PROXY_PORT), timeout=20)
     sock.settimeout(30)
 
-    # 1) 사용 가능한 인증 방식 제시: 0x02 = 아이디/비밀번호
+    # 1) offer the auth methods we support: 0x02 = username/password
     sock.sendall(b"\x05\x01\x02")
     ver, method = recv_exact(sock, 2)
     if ver != 5 or method != 2:
         raise SystemExit(f"프록시가 계정 인증을 받지 않는다 (ver={ver}, method={method})")
 
-    # 2) 계정 인증 (RFC 1929)
+    # 2) account authentication (RFC 1929)
     u = user.encode()
     p = password.encode()
     sock.sendall(bytes([1, len(u)]) + u + bytes([len(p)]) + p)
@@ -71,7 +71,7 @@ def socks5_connect(host: str, port: int) -> socket.socket:
     if status != 0:
         raise SystemExit("프록시 계정 인증 실패")
 
-    # 3) 목적지 연결 요청. 주소는 도메인 그대로 보내 프록시가 풀게 한다.
+    # 3) ask for the destination. Send the address as a domain and let the proxy resolve it.
     target = host.encode()
     sock.sendall(b"\x05\x01\x00\x03" + bytes([len(target)]) + target
                  + port.to_bytes(2, "big"))
@@ -85,13 +85,13 @@ def socks5_connect(host: str, port: int) -> socket.socket:
         recv_exact(sock, recv_exact(sock, 1)[0])
     elif atyp == 4:
         recv_exact(sock, 16)
-    recv_exact(sock, 2)  # 포트
+    recv_exact(sock, 2)  # port
     sock.settimeout(None)
     return sock
 
 
 def pump(sock: socket.socket) -> None:
-    """표준입출력과 소켓 사이를 양방향으로 흘린다."""
+    """Pump both directions between stdio and the socket."""
     stdin = sys.stdin.buffer
     stdout = sys.stdout.buffer
     fds = [stdin.fileno(), sock.fileno()]

@@ -1,14 +1,15 @@
 #!/bin/bash
-# 포화점 탐색. 독립 연결 수를 1~N 까지 늘리며 합계 처리량이 어디서 꺾이는지 본다.
-#
-# 왜 필요한가
-#   6시간 주기 시험은 8연결까지만 본다. 그런데 KOREN 경로는 8에서도 꺾이지 않고
-#   선형으로 늘어난다. 지금 쓰는 "2.6배"가 하한인지 아닌지 알려면 더 밀어봐야 한다.
-#
-# 주의
-#   터널 하나당 hirun 이 HTTP 인증을 한 번 한다. 한꺼번에 띄우면 포털에 부담이 되므로
-#   간격을 두고 올린다. 측정이 끝나면 전부 내린다(상시 터널 19022~19025 는 건드리지 않는다).
-#   CPU 점유율을 함께 기록한다. CPU 가 포화면 그 숫자는 회선이 아니라 VM 의 한계다.
+# Find the saturation point: raise the number of independent connections from 1
+# to N and watch where the summed throughput bends.
+# Why this exists
+#   The six-hourly run only goes to 8 connections, and the KOREN path has not
+#   bent by then - it is still climbing nearly linearly. To know whether the
+#   "2.6x" we quote is a floor, we have to push further.
+# Careful
+#   Each tunnel makes hirun authenticate over HTTP once, so bringing them all up
+#   at once leans on the portal; space them out. Everything temporary comes down
+#   at the end (the standing tunnels 19022-19025 are left alone). CPU usage is
+#   recorded too: if the CPU is saturated the number is the VM, not the line.
 
 set -u
 cd "$(dirname "$0")" || exit 1
@@ -16,12 +17,12 @@ cd "$(dirname "$0")" || exit 1
 
 BASE=19100
 MAXN=${1:-16}
-MB=${2:-50}          # 연결 하나가 보낼 양. 총량이 아니라 연결당으로 고정한다.
+MB=${2:-50}          # per connection, not the total
 STEPS=${3:-"1 2 4 8 16"}
 
 echo "===== $(date -Is) · 포화점 탐색 (최대 ${MAXN}연결, 연결당 ${MB}MB) ====="
 
-# --- 터널 올리기 (간격을 두고) -------------------------------------------
+# --- bring the tunnels up (spaced out) -----------------------------------
 started=0
 for i in $(seq 0 $((MAXN-1))); do
   p=$((BASE+i))
@@ -49,7 +50,7 @@ for N in $STEPS; do
               -o UserKnownHostsFile=/dev/null -p $p "${PANGYO_USER:-$ID}@127.0.0.1" "cat > /dev/null" 2>/dev/null ) &
     pids="$pids $!"
   done
-  # 터널도 이 셸의 자식이라 인자 없는 wait 는 영원히 멈춘다. 전송 PID 만 기다린다.
+  # The tunnels are children of this shell too, so a bare wait never returns; wait on the transfer PIDs only.
   for q in $pids; do wait "$q"; done
   E=$(date +%s%N); C1=$(cpu)
   awk -v s="$S" -v e="$E" -v t=$((MB*N)) -v n="$N" -v c0="$C0" -v c1="$C1" 'BEGIN{
@@ -60,7 +61,7 @@ for N in $STEPS; do
   sleep 3
 done
 
-# --- 터널 내리기 ---------------------------------------------------------
+# --- take the tunnels down -----------------------------------------------
 for i in $(seq 0 $((MAXN-1))); do pkill -f "L $((BASE+i)):" 2>/dev/null; done
 sleep 2
 echo "임시 터널 정리 완료 (상시 터널 $(ss -ltn | grep -cE "127.0.0.1:1902[2-5]")/4 유지)"

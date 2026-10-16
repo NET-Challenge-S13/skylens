@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
-"""KOREN 대조 측정 프로브 v2.
+"""The KOREN comparison probe, v2.
 
-한 번 실행하면 JSON 한 줄을 표준출력에 찍는다. cron 이 10 분마다 돌리고,
-결과는 JSONL 로 쌓여 나중에 집계한다.
+One run prints one JSON line on stdout. cron runs it every 10 minutes and the
+results pile up as JSONL for aggregation later.
 
-측정 항목
-  1) TCP 연결 왕복시간  — ICMP 가 막혀 있어 TCP 핸드셰이크로 잰다.
-  2) 버스트 완료 시간    — .spz 한 덩어리가 도착하는 데 걸리는 시간. 이 프로젝트의 실제 KPI.
-  3) 병렬 처리량        — 같은 양을 N 개 스트림으로 나눠 보낸다. 단일 스트림이
-                          TCP 시작 구간(slow start)과 대역폭·지연 곱에 묶이는지 가른다.
-  4) CPU 점유           — 전송 중 CPU 가 포화면 그 수치는 회선이 아니라 암호화 한계다.
-  5) 공개 기준선        — 두 노드가 같은 원격 파일을 받아 출구 성능을 비교한다.
-
-의존성 없음(표준 라이브러리만).
+What it measures
+  1) TCP connect round trip - ICMP is blocked, so the handshake stands in for it.
+  2) Burst completion time  - how long one .spz chunk takes to arrive. The real KPI here.
+  3) Parallel throughput    - the same volume split across N streams, which tells
+                              whether a single stream is bound by TCP slow start
+                              and the bandwidth-delay product.
+  4) CPU usage              - if the CPU saturates mid-transfer, the number is the
+                              encryption limit, not the line. (5) A public baseline:
+both nodes fetch the same remote file to compare egress. No dependencies, stdlib only.
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ def now_iso() -> str:
 
 
 def cpu_snapshot() -> tuple[int, int]:
-    """(idle, total) 지터 없는 누적 틱."""
+    """(idle, total) cumulative ticks, jitter-free."""
     with open("/proc/stat", encoding="ascii") as fh:
         parts = [int(x) for x in fh.readline().split()[1:]]
     idle = parts[3] + (parts[4] if len(parts) > 4 else 0)
@@ -48,7 +48,7 @@ def cpu_busy_pct(before: tuple[int, int], after: tuple[int, int]) -> float:
 
 
 def tcp_rtt(host: str, port: int, n: int = 20, timeout: float = 5.0) -> dict:
-    """TCP 핸드셰이크 왕복시간. ICMP 가 막힌 망에서 쓰는 대체 측정."""
+    """TCP handshake round trip, the stand-in where ICMP is blocked."""
     samples: list[float] = []
     fails = 0
     for _ in range(n):
@@ -74,7 +74,7 @@ def tcp_rtt(host: str, port: int, n: int = 20, timeout: float = 5.0) -> dict:
         "med_ms": round(statistics.median(ordered), 3),
         "p95_ms": round(ordered[min(len(ordered) - 1, int(len(ordered) * 0.95))], 3),
         "max_ms": round(ordered[-1], 3),
-        # 지터는 도착 순서대로 본 연속 표본 차이의 평균절대값.
+        # Jitter is the mean absolute difference between consecutive samples in arrival order.
         "jitter_ms": round(
             statistics.fmean(abs(b - a) for a, b in zip(samples, samples[1:])), 3
         )
@@ -84,10 +84,10 @@ def tcp_rtt(host: str, port: int, n: int = 20, timeout: float = 5.0) -> dict:
 
 
 def banner_rtt(host: str, port: int, n: int = 10, timeout: float = 15.0) -> dict:
-    """연결해서 상대 sshd 의 첫 응답(배너)이 올 때까지의 시간.
+    """Time until the far sshd answers with its banner.
 
-    TCP 핸드셰이크만 재는 tcp_rtt 와 달리 **상대 서버까지 실제로 왕복**한다.
-    로컬 포워딩 포트처럼 핸드셰이크가 로컬에서 끝나는 경로에서도 올바른 값이 나온다.
+    Unlike tcp_rtt, which times the handshake only, this really goes to the far
+    server and back, so it stays correct on a locally forwarded port.
     """
     samples: list[float] = []
     fails = 0
@@ -144,11 +144,11 @@ def _stream_cmd(ssh_host: str, blocks: int, direction: str) -> str:
 
 def ssh_burst(ssh_host: str, size_mb: int, direction: str, streams: int = 1,
               timeout: int = 240) -> dict:
-    """SSH 위로 size_mb 를 보내거나 받아 완료 시간을 잰다.
+    """Send or receive size_mb over SSH and time it to completion.
 
-    우리 배치에서 .spz 와 마커는 실제로 SSH 터널을 지난다. 그래서 이 숫자가
-    합성 벤치마크가 아니라 운영 경로의 값이다. 압축은 끈다(Compression=no):
-    0 으로 채운 페이로드가 압축되면 대역이 부풀려진다.
+    In our deployment the .spz chunks and markers really do cross an SSH tunnel, so
+    this is the operational path rather than a synthetic benchmark. Compression is
+    off (Compression=no): a zero-filled payload would compress and inflate the rate.
     """
     per = max(1, (size_mb * 16) // streams)
     cmds = [_stream_cmd(ssh_host, per, direction) for _ in range(streams)]
@@ -182,11 +182,11 @@ def ssh_burst(ssh_host: str, size_mb: int, direction: str, streams: int = 1,
 
 def ssh_burst_hosts(hosts: list[str], size_mb: int, direction: str,
                     streams: int = 4, timeout: int = 240) -> dict:
-    """스트림을 여러 호스트(= 여러 독립 연결)에 나눠 보낸다.
+    """Spread the streams over several hosts, meaning several independent connections.
 
-    한 호스트에 스트림을 여러 개 주면 SSH 세션 하나 안에서 채널만 나뉘어
-    결국 TCP 연결 하나를 공유한다. 그러면 병렬의 의미가 없다.
-    터널 뒤에 있는 판교를 잴 때 특히 중요하다.
+    Several streams to one host only split one SSH session into channels, which still
+    share a single TCP connection, so the parallelism is not real. This matters most
+    when measuring Pangyo behind the tunnel.
     """
     per = max(1, (size_mb * 16) // streams)
     cmds = [_stream_cmd(hosts[i % len(hosts)], per, direction) for i in range(streams)]
@@ -213,9 +213,9 @@ def ssh_burst_hosts(hosts: list[str], size_mb: int, direction: str,
 
 
 def http_download(name: str, url: str, mb: int = 50, timeout: int = 120) -> dict:
-    """공개 기준선. 두 노드가 같은 원격 파일의 같은 구간을 받아 출구 성능을 비교한다.
-
-    Range 요청으로 받는 양을 고정하므로 파일 크기가 달라도 비교가 성립한다.
+    """The public baseline: both nodes fetch the same byte range of the same remote
+    file, so egress performance can be compared.
+    A Range request pins the volume, so the comparison holds even if the file changes size.
     """
     c0 = cpu_snapshot()
     last_byte = mb * 1024 * 1024 - 1

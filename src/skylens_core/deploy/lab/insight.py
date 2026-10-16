@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""11일치 측정에서 집계표가 보여주지 않는 것을 뽑는다."""
+"""Pull out what the aggregate tables do not show, from eleven days of measurements."""
 import json, glob, statistics as st
 from collections import defaultdict
 
