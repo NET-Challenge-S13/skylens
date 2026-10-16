@@ -359,7 +359,18 @@ async fn start_all(
     };
     tasks.push(task("drone", events, sim::run_drones(core.clone(), o.follow_route, flight)));
     let auto = o.auto.then(|| s.planned.clone());
-    tasks.push(task("tower-watch", events, sim::run_control_watch(core.clone(), auto)));
+    // On a slow tunnel the core drops this socket (its send queue overflows on the base map). The
+    // drones are what the demo needs, so with a remote core a lost watcher is only a warning.
+    let watch = sim::run_control_watch(core.clone(), auto);
+    tasks.push(task("tower-watch", events, async move {
+        match watch.await {
+            Err(e) if remote => {
+                log("tower", &format!("관제탑 감시가 끊겼습니다 (원격 코어라 계속 진행): {e:#}"));
+                Ok(())
+            }
+            other => other,
+        }
+    }));
 
     // ---- native screens ----
     if let Some((control, client)) = &plan.native {
