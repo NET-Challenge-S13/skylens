@@ -544,6 +544,9 @@ fn load_torch_cuda() {
     }
 }
 
+/// Blocks per deltamesh GPU extraction batch unless `DELTAMESH_EXTRACT_BATCH` is set.
+const DELTAMESH_EXTRACT_BATCH: &str = "128";
+
 pub fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -553,6 +556,12 @@ pub fn main() -> anyhow::Result<()> {
         .init();
     #[cfg(windows)]
     load_torch_cuda();
+    if std::env::var_os("DELTAMESH_EXTRACT_BATCH").is_none() {
+        // deltamesh's GPU mesher preallocates its extraction buffers for 512 blocks; 128 keeps
+        // about 0.7 GB less GPU memory (and system commit on Windows) through a demo run.
+        // SAFETY: no other thread exists yet.
+        unsafe { std::env::set_var("DELTAMESH_EXTRACT_BATCH", DELTAMESH_EXTRACT_BATCH) };
+    }
     let runtime = tokio::runtime::Builder::new_multi_thread().enable_all().build()?;
     runtime.block_on(serve(settings().clone()))
 }
