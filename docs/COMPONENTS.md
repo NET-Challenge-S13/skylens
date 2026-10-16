@@ -245,6 +245,7 @@ pointblitz는 서버에서 헤드리스로 그려 영상으로 보내는 모드�
 - UNet 추론은 `tch` 0.24(libtorch 2.11)이다. libtorch는 빌드할 때 `download-libtorch`로 받아 오며 Python venv와 무관하다. CUDA 판은 `.cargo/config.toml`의 `TORCH_CUDA_VERSION`(cu126)이 정한다.
 - 공용 의존성 버전은 루트 `Cargo.toml`의 `[workspace.dependencies]` 한 곳에서 정한다.
 - cumulus3d의 `CompositionHost`는 crates.io 0.3.1 릴리스에 아직 없어 GitHub 리비전을 고정해 쓴다.
+- cumulus3d 새 릴리스는 `.github/workflows/cumulus3d-sync.yml`과 `scripts/cumulus3d-sync.sh`가 따라간다. 벤더링 사본을 다시 가져오고 패치를 옮긴 PR을 연다. 기반 리비전은 `third_party/cumulus3d/UPSTREAM`에 기록한다. 흐름과 필요한 시크릿은 `docs/CUMULUS3D_SYNC.md`.
 - gRPC 코드 생성: Rust는 빌드 스크립트에서 protox로 컴파일하므로 protoc가 없어도 된다. Go는 `protoc-gen-go`·`protoc-gen-go-grpc`로 `src/skylens_core/gen/`에 생성한다.
 
 ---

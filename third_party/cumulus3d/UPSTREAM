@@ -1,0 +1,9 @@
+# Machine-readable record of the upstream revision third_party/cumulus3d is based on.
+# Read and rewritten by scripts/cumulus3d-sync.sh. Keep KEY=VALUE, no spaces around "=".
+repository=https://github.com/AH100-1/cumulus3d
+# Commit the vendored tree was copied from (the base of the SkyLens patches in PATCHES.md).
+rev=b9f4a9bda714fa31fc0fd395f821114b64fd2c1f
+# Workspace version at that commit (the git head after the 0.3.1 release).
+version=0.3.1
+# Release tag, empty when rev is not a release.
+tag=

@@ -11,4 +11,4 @@ GitHub `AH100-1/cumulus3d` 리비전 `b9f4a9bda714fa31fc0fd395f821114b64fd2c1f`(
 | 희소 단계 GPU 대기 줄이기. `CudaSparse` 스트림을 가장 높은 우선순위로 만들고(`CudaDevice::new_high_priority`), 업로드·내려받기를 고정 메모리 스테이징과 늘기만 하는 장치 버퍼로 한다. `BatchedRansac::propose` 의 묶음 크기를 min_batch 에서 시작해 두 배씩 늘린다(처음부터 512개를 내면 CPU가 수십 번에 멈출 RANSAC 을 수백 번 채점한다). 채점 커널은 스레드마다 모아 블록 끝에서 한 번 합친다. 삼각측량 문제는 관측 수 순으로 정렬해 올린다 | 같은 입력의 CPU 시간과 견주면(`CUMULUS3D_CUDA_COMPARE=1`) 삼각측량·관측 검사·기하 검증이 GPU에서 3~7배 느렸다 |
 | 장치에서 내려받는 모든 복사(`memcpy_dtoh`, `clone_dtoh`)를 스트림을 먼저 기다린 뒤 하도록(`device::SyncedCopy`) | 일반 메모리로 내려받는 `cuMemcpyDtoHAsync` 는 앞선 커널을 기다리는 동안 드라이버 전역 잠금을 쥔다. 조밀화가 수백 ms 커널 뒤에서 내려받으면 같은 프로세스의 UNet·희소 단계 CUDA 호출이 모두 그만큼 멈췄다(Nsight Systems 로 확인, 재현은 `examples/bench_contention.rs`) |
 
-cumulus3d를 새 리비전으로 올릴 때는 원본에 같은 기능이 들어갔는지 확인하고, 들어갔으면 패치를 지운다.
+cumulus3d를 새 리비전으로 올릴 때는 원본에 같은 기능이 들어갔는지 확인하고, 들어갔으면 패치를 지운다. 리비전은 `UPSTREAM` 파일에도 기록하며, `scripts/cumulus3d-sync.sh`(docs/CUMULUS3D_SYNC.md)가 이 표의 패치를 새 리비전으로 옮긴다.
