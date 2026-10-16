@@ -14,9 +14,16 @@ pub mod camera {
 
 /// Core link (legacy `CONFIG.control`).
 pub mod link {
-    /// Reconnect backoff bounds (ms).
-    pub const RECONNECT_MIN_MS: u64 = 800;
-    pub const RECONNECT_MAX_MS: u64 = 8_000;
+    /// Reconnect backoff bounds (ms). Short enough that a screen started before the core
+    /// picks it up within a few seconds of the core coming up.
+    pub const RECONNECT_MIN_MS: u64 = 500;
+    pub const RECONNECT_MAX_MS: u64 = 5_000;
+    /// A connect attempt that has not finished the handshake by then counts as failed (native;
+    /// the browser applies its own).
+    pub const CONNECT_TIMEOUT_MS: u64 = 5_000;
+    /// Nothing at all (not even the core's 20 s ping) for this long means the connection is
+    /// dead even though no close arrived; it is dropped and reconnected (native).
+    pub const IDLE_TIMEOUT_MS: u64 = 45_000;
     /// Manual-control send rate (Hz) while keys are held.
     pub const MANUAL_SEND_HZ: f64 = 10.0;
 }

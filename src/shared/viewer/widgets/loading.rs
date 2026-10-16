@@ -11,7 +11,9 @@
 //! ```
 //!
 //! `done` adds `is-hidden` and removes the element 400 ms later; `fail` shows the message with
-//! `is-error` and does the same after 2.5 s.
+//! `is-error` and does the same after 2.5 s. `wait` is the non-terminal case (the core is not
+//! up yet and the link keeps retrying): it swaps the title and text and keeps the overlay until
+//! the next `progress` puts the original title back.
 
 use crate::dom::{Dom, q};
 use blitz_dom::NodeId;
@@ -23,6 +25,9 @@ const FAIL_TO_HIDE_MS: f64 = 2500.0;
 pub struct LoadingScreen {
     root: NodeId,
     title: NodeId,
+    /// The title given to `mount`, restored when a wait ends.
+    base_title: String,
+    waiting: bool,
     fill: NodeId,
     text: NodeId,
     hide_at: Option<f64>,
@@ -49,16 +54,31 @@ impl LoadingScreen {
     pub fn mount(dom: &mut Dom<'_>, title: &str) -> Option<LoadingScreen> {
         let root = dom.create(q("body"), "div", &[("class", "loading-screen")], None)?;
         let bx = dom.create(root, "div", &[("class", "loading-screen__box")], None)?;
+        let base_title = title.to_string();
         let title = dom.create(bx, "div", &[("class", "loading-screen__title")], Some(title))?;
         let bar = dom.create(bx, "div", &[("class", "loading-screen__bar")], None)?;
         let fill = dom.create(bar, "span", &[], None)?;
         let text = dom.create(bx, "div", &[("class", "loading-screen__text")], None)?;
-        Some(LoadingScreen { root, title, fill, text, hide_at: None, remove_at: None, removed: false })
+        Some(LoadingScreen {
+            root,
+            title,
+            base_title,
+            waiting: false,
+            fill,
+            text,
+            hide_at: None,
+            remove_at: None,
+            removed: false,
+        })
     }
 
     pub fn progress(&mut self, dom: &mut Dom<'_>, percent: f64, label: Option<&str>) {
         if self.removed {
             return;
+        }
+        if self.waiting {
+            self.waiting = false;
+            dom.set_text(self.title, &self.base_title);
         }
         let (width, text) = progress_view(percent, label);
         dom.set_style(self.fill, "width", &width);
@@ -83,6 +103,21 @@ impl LoadingScreen {
         dom.set_text(self.text, message);
         dom.add_class(self.root, "is-error");
         self.hide_at = Some(now_ms + FAIL_TO_HIDE_MS);
+    }
+
+    /// Shows a waiting state (title and a detail line) that stays until the next `progress`.
+    /// Ignored once the overlay is on its way out.
+    pub fn wait(&mut self, dom: &mut Dom<'_>, title: &str, message: &str) {
+        if self.is_finishing() {
+            return;
+        }
+        self.waiting = true;
+        dom.set_text(self.title, title);
+        dom.set_text(self.text, message);
+    }
+
+    pub fn is_waiting(&self) -> bool {
+        self.waiting && !self.is_finishing()
     }
 
     /// Runs the pending hide/remove steps. Returns true when the DOM changed.

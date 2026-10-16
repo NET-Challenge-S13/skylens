@@ -85,7 +85,8 @@ pub fn manual_control(drone_id: u32, forward: f64, yaw: f64, climb: f64) -> Body
 }
 
 /// Reconnect delays like the legacy `coreLink.ts`: start at the minimum, double after every
-/// failed attempt up to the maximum, back to the minimum after a successful connect.
+/// failed attempt up to the maximum, back to the minimum after a successful connect. The bounds
+/// are [`crate::config::link`]'s (0.5 s to 5 s).
 #[derive(Debug, Clone)]
 pub struct Backoff {
     next_ms: u64,
@@ -222,12 +223,15 @@ mod tests {
     }
 
     #[test]
-    fn backoff_follows_the_legacy_bounds() {
+    fn backoff_doubles_up_to_the_bound_and_resets() {
         let mut b = Backoff::default();
         let delays: Vec<u64> = (0..6).map(|_| b.next_delay_ms()).collect();
-        assert_eq!(delays, vec![800, 1600, 3200, 6400, 8000, 8000]);
+        assert_eq!(delays, vec![500, 1000, 2000, 4000, 5000, 5000]);
         b.reset();
-        assert_eq!(b.next_delay_ms(), 800);
+        assert_eq!(b.next_delay_ms(), 500);
+        // Degenerate bounds still wait and never shrink below the minimum.
+        let mut z = Backoff::new(0, 0);
+        assert_eq!((z.next_delay_ms(), z.next_delay_ms()), (1, 1));
     }
 
     #[test]

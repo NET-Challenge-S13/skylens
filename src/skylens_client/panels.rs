@@ -166,6 +166,27 @@ pub fn inset_markup(open: bool) -> String {
     )
 }
 
+/// Viewports at most this tall (CSS px) get the side placement of [`inset_placement`].
+pub const SHORT_VIEWPORT_PX: f64 = 600.0;
+
+/// Where the point panel goes on a short viewport, as inline `left`/`top`/`width`/`height` (px).
+///
+/// `status-panels.css` stacks the server panel down from the top-left (`top: 54px`) and the
+/// point panel up from the bottom-left (`bottom: 58px`, 250 px tall). On a phone on its side
+/// (about 410 px tall) the server panel's ladder ran into the point panel. There the panel moves
+/// beside the server panel's column (16 px + 340 px max-width + 16 px gap) and stays clear of the
+/// bottom-right minimap (16 px + 200 px + 16 px). None keeps the stylesheet's placement.
+pub fn inset_placement(viewport_w: f64, viewport_h: f64) -> Option<[f64; 4]> {
+    if !(viewport_h > 0.0 && viewport_h <= SHORT_VIEWPORT_PX) {
+        return None;
+    }
+    const LEFT: f64 = 372.0;
+    const TOP: f64 = 54.0;
+    let width = (viewport_w - LEFT - 232.0).clamp(180.0, 380.0);
+    let height = (viewport_h - TOP - 16.0).clamp(120.0, 250.0);
+    Some([LEFT, TOP, width.round(), height.round()])
+}
+
 /// The legend's high and low ticks for a height range (empty without one).
 pub fn legend_ticks(range: Option<(f64, f64)>) -> (String, String) {
     match range {
@@ -232,5 +253,18 @@ mod tests {
         assert!(m.starts_with("<div class=\"point-inset is-open\" id=\"point-inset\">"));
         assert!(m.contains("하위 1% 높이 기준"));
         assert!(inset_markup(false).starts_with("<div class=\"point-inset\" id=\"point-inset\">"));
+    }
+
+    #[test]
+    fn point_panel_moves_beside_the_server_panel_only_on_short_viewports() {
+        // Desktop and portrait keep the stylesheet's bottom-left placement.
+        assert_eq!(inset_placement(1920.0, 1080.0), None);
+        assert_eq!(inset_placement(411.0, 914.0), None);
+        assert_eq!(inset_placement(0.0, 0.0), None);
+        // Pixel 7 landscape (2400 x 1080 at 2.625): beside the server column, above the minimap.
+        assert_eq!(inset_placement(914.0, 411.0), Some([372.0, 54.0, 310.0, 250.0]));
+        // Shorter still: the panel shrinks to fit under the top row.
+        assert_eq!(inset_placement(1200.0, 300.0), Some([372.0, 54.0, 380.0, 230.0]));
+        assert_eq!(inset_placement(600.0, 160.0), Some([372.0, 54.0, 180.0, 120.0]));
     }
 }
