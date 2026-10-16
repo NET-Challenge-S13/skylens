@@ -3,11 +3,12 @@
 //!
 //! - Standby: the legacy synthetic pattern (slow hue gradient, scanlines, crosshair) drawn by
 //!   [`StandbyWidget`] on `canvas.video-panel__canvas` (320 x 200 buffer, `object-fit: cover`).
-//! - Live (native only): the feed the core announces in `camera_feed` is read by an `ffmpeg`
+//! - Live (native): the feed the core announces in `camera_feed` is read by an `ffmpeg`
 //!   subprocess (input URL from a template, by default SRT from the MediaMTX next to the core)
 //!   and its frames are drawn by [`FrameWidget`] on the `<video>` element, toggled with the same
-//!   `is-hidden` classes as the legacy `<video>`. The web build has no decoder for the WHEP feed
-//!   and stays on standby.
+//!   `is-hidden` classes as the legacy `<video>`.
+//! - Live (web): the browser's WebRTC plays the WHEP feed in a real `<video>` over the canvas,
+//!   placed on this panel's rect (see [`crate::whep`]); the standby pattern shows until it plays.
 
 use crate::labels::{self, Station};
 use blitz_dom::Widget;
@@ -344,6 +345,16 @@ pub struct VideoPanel {
     playing_seen: bool,
     /// A failed live source is tried again from here (a drone says hello before its stream is up).
     retry_at: Option<f64>,
+    /// The `.video-panel` box the web `<video>` is laid over.
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    panel: Option<NodeId>,
+    /// A dialog or the loading screen is over the panel (web: the `<video>` must not cover it).
+    covered: bool,
+    #[cfg(target_arch = "wasm32")]
+    web: Option<crate::whep::WebPlayer>,
+    /// The feed's absolute WHEP URL (web).
+    #[cfg(target_arch = "wasm32")]
+    web_url: Option<String>,
 }
 
 /// Wait before reading a failed live source again (ms).
@@ -357,6 +368,7 @@ impl VideoPanel {
         let video = dom.find(skylens_viewer::q(".video-panel__video"));
         let label = dom.find(skylens_viewer::q(".video-panel__label"));
         let overlay = dom.find(skylens_viewer::q(".video-panel__overlay"));
+        let panel = dom.find(skylens_viewer::q(".video-panel"));
         let slot: FrameSlot = Arc::new(Mutex::new(None));
         if let Some(c) = canvas {
             dom.mount_widget(c, StandbyWidget::boxed());
@@ -386,7 +398,20 @@ impl VideoPanel {
             player: None,
             playing_seen: false,
             retry_at: None,
+            panel,
+            covered: false,
+            #[cfg(target_arch = "wasm32")]
+            web: crate::whep::WebPlayer::new(
+                skylens_viewer::shell::query_param("ice").map(|v| v.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect()).unwrap_or_default(),
+            ),
+            #[cfg(target_arch = "wasm32")]
+            web_url: None,
         }
+    }
+
+    /// Whether something is drawn over the panel (a dialog, the loading screen).
+    pub fn set_covered(&mut self, covered: bool) {
+        self.covered = covered;
     }
 
     pub fn selected(&self) -> Option<u32> {
@@ -433,6 +458,12 @@ impl VideoPanel {
 
     fn show(&mut self, dom: &mut Dom<'_>, next: Feed) {
         self.feed = Some(next.clone());
+        #[cfg(target_arch = "wasm32")]
+        {
+            let base = skylens_viewer::shell::query_param("whepBase").unwrap_or_else(crate::whep::page_origin);
+            self.web_url = crate::whep::resolve_whep_url(&base, &next.whep_url);
+            self.playback_error.clear();
+        }
         let Some(cfg) = self.config.clone() else { return };
         let url = feed_url(&cfg, &next);
         if self.src.as_deref() != Some(url.as_str()) {
@@ -445,6 +476,10 @@ impl VideoPanel {
         #[cfg(not(target_arch = "wasm32"))]
         {
             self.player = None;
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.web_url = None;
         }
         if let Ok(mut s) = self.slot.lock() {
             *s = None;
@@ -496,6 +531,40 @@ impl VideoPanel {
         }
     }
 
+    /// The web player for this poll: place the `<video>` on the panel's layout rect, keep the
+    /// feed connected. Returns where the feed is (None: no web player or no feed to read).
+    #[cfg(target_arch = "wasm32")]
+    fn tick_web(&mut self, dom: &mut Dom<'_>, now_ms: f64) -> Option<labels::FeedLink> {
+        use crate::whep::{Rect, Status};
+        let web = self.web.as_mut()?;
+        let rect = self.panel.and_then(|p| {
+            let doc = dom.doc_ref();
+            let node = doc.get_node(p)?;
+            // Blitz lays out in CSS pixels, the same units as the page's fixed positioning.
+            let pos = node.absolute_position(0.0, 0.0);
+            let size = node.final_layout().size;
+            Some(Rect { x: f64::from(pos.x), y: f64::from(pos.y), w: f64::from(size.width), h: f64::from(size.height) })
+        });
+        let visible = web_sys::window().and_then(|w| w.document()).is_some_and(|d| !d.hidden());
+        let on_screen = rect.is_some_and(|r| r.shown()) && visible;
+        let target = if on_screen { self.web_url.clone() } else { None };
+        web.tick(now_ms, target, rect, self.covered);
+        let status = web.status();
+        let live = status == Status::Live;
+        if live != self.playing_seen {
+            self.playing_seen = live;
+            if let Some(c) = self.canvas {
+                dom.toggle_class(c, "is-hidden", live);
+            }
+        }
+        self.feed.as_ref()?;
+        Some(match status {
+            Status::Live => labels::FeedLink::Live,
+            Status::NoSignal => labels::FeedLink::NoSignal,
+            Status::Idle | Status::Connecting => labels::FeedLink::Connecting,
+        })
+    }
+
     /// Player state and the overlay line, once per poll (the legacy did it every frame).
     pub fn tick(&mut self, dom: &mut Dom<'_>, now_ms: f64) {
         #[cfg(not(target_arch = "wasm32"))]
@@ -530,8 +599,15 @@ impl VideoPanel {
                 _ => {}
             }
         }
+        #[cfg(target_arch = "wasm32")]
+        let web_link = self.tick_web(dom, now_ms);
+        #[cfg(not(target_arch = "wasm32"))]
+        let web_link: Option<labels::FeedLink> = None;
         let text = if !self.playback_error.is_empty() {
             self.playback_error.clone()
+        } else if let Some(link) = web_link {
+            let fix = self.telemetry.filter(|t| self.selected.is_none_or(|s| s == t.drone_id)).map(|t| (t.lat, t.lon, t.alt));
+            labels::overlay_text_link(self.station.label(), fix, link)
         } else {
             let who = self.station.label();
             let fix = self.telemetry.filter(|t| self.selected.is_none_or(|s| s == t.drone_id)).map(|t| (t.lat, t.lon, t.alt));
@@ -542,6 +618,10 @@ impl VideoPanel {
         };
         if let Some(o) = self.overlay {
             dom.set_text(o, &text);
+        }
+        #[cfg(target_arch = "wasm32")]
+        if let Some(w) = self.web.as_mut() {
+            w.set_texts(self.station.cam_label(), &text);
         }
     }
 }

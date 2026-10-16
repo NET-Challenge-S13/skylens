@@ -930,7 +930,9 @@ impl ScreenApp for ControlApp {
         if let Some(active) = changed {
             dom.toggle_class(q("body"), "is-manual", active);
         }
+        let covered = !self.loading.finished || dom.find_all(".route-modal-overlay").into_iter().any(|o| !dom.has_class(o, "is-hidden"));
         if let Some(v) = self.video.as_mut() {
+            v.set_covered(covered);
             v.tick(dom, now);
         }
         self.handle_http(dom);

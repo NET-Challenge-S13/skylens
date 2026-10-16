@@ -1,8 +1,9 @@
 //! Web entry (`wasm32-unknown-unknown`): the tower document drawn into `<canvas id="skylens">` of
 //! `web/index.html` (see `build-web.sh`). The core serves this build, so the socket is the page's
 //! own origin with `/control` unless `?core=` says otherwise. `?display=` picks the building
-//! display for one load, `?missionBridge=` the bridge. Live video does not play on the web (no
-//! decoder for the WHEP feed); the camera panel shows its standby pattern.
+//! display for one load, `?missionBridge=` the bridge. Live video is played by the browser's own
+//! WebRTC (see [`crate::whep`]); `?whepBase=` replaces the page origin as the base of the feed's
+//! WHEP URL and `?ice=` adds STUN/TURN servers (comma separated, none by default).
 
 use crate::app::{ControlApp, Options, page};
 use crate::bridge::{DEFAULT_BRIDGE, normalize_base};
