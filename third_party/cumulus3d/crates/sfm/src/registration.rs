@@ -29,7 +29,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 기존 모델에 새 영상 등록(image_registrator).
+//! Registers new images to an existing model (image_registrator).
 
 use crate::absolute_pose::{AbsPoseBackend, AbsolutePoseOptions, CpuAbsPose};
 use cumulus3d_ba::Loss;
@@ -39,38 +39,38 @@ use cumulus3d_core::{
 use rayon::prelude::*;
 use std::collections::BTreeMap;
 
-/// 등록 순서.
+/// Registration order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum RegistrationOrder {
-    /// 영상 id 오름차순(결정적 순서).
-    /// id 는 도착(위치→카메라) 순으로 발급되므로 도착 순서와도 같다.
+    /// Ascending image id (deterministic order).
+    /// Ids are issued in arrival order (position, then camera), so this also equals the arrival order.
     ImageId,
-    /// 개선: 가시성 피라미드 점수 내림차순으로 매번 다시 골라 등록.
+    /// Improved: re-pick every time in descending order of the visibility pyramid score and register.
     VisibilityScore,
 }
 
-/// image_registrator 옵션.
+/// image_registrator options.
 #[derive(Clone, Debug)]
 pub struct RegistrationOptions {
-    /// 등록에 필요한 최소 가시 점·대응·인라이어 수.
+    /// Minimum number of visible points / correspondences / inliers needed for registration.
     pub abs_pose_min_num_inliers: usize,
-    /// 절대 자세 RANSAC 옵션.
+    /// Absolute pose RANSAC options.
     pub ransac: AbsolutePoseOptions,
-    /// 비정상 카메라 판정: 초점 비율 하한.
+    /// Abnormal camera test: lower bound of the focal ratio.
     pub min_focal_length_ratio: f64,
-    /// 비정상 카메라 판정: 초점 비율 상한.
+    /// Abnormal camera test: upper bound of the focal ratio.
     pub max_focal_length_ratio: f64,
-    /// 비정상 카메라 판정: 추가 파라미터 절대값 상한.
+    /// Abnormal camera test: upper bound of the absolute value of the extra parameters.
     pub max_extra_param: f64,
-    /// RANSAC 뒤 비선형 자세 정제(cumulus3d-ba `refine_abs_pose`) 실행 여부.
+    /// Whether to run the nonlinear pose refinement after RANSAC (`refine_abs_pose` of cumulus3d-ba).
     pub refine_pose: bool,
-    /// 자세 정제 손실 함수.
+    /// Loss function of the pose refinement.
     pub refine_loss: Loss,
-    /// 자세 정제 최대 반복.
+    /// Maximum iterations of the pose refinement.
     pub refine_max_num_iterations: usize,
-    /// 등록 순서.
+    /// Registration order.
     pub order: RegistrationOrder,
-    /// 끝나고 등록 실패 영상(프레임·쓰이지 않는 카메라)을 모델에서 삭제.
+    /// After finishing, delete images that failed registration (frames and unused cameras) from the model.
     pub remove_unregistered: bool,
 }
 
@@ -91,61 +91,61 @@ impl Default for RegistrationOptions {
     }
 }
 
-/// 영상 하나 등록 결과.
+/// Result of registering one image.
 #[derive(Clone, Debug, PartialEq)]
 pub enum RegisterOutcome {
-    /// 등록 성공.
+    /// Registration succeeded.
     Registered {
-        /// 2D–3D 대응 수.
+        /// Number of 2D–3D correspondences.
         num_correspondences: usize,
-        /// RANSAC 인라이어 수.
+        /// Number of RANSAC inliers.
         num_inliers: usize,
     },
-    /// 가시 3D 점이 부족(가시 점 수).
+    /// Too few visible 3D points (number of visible points).
     TooFewVisiblePoints(usize),
-    /// 2D–3D 대응이 부족(대응 수).
+    /// Too few 2D–3D correspondences (number of correspondences).
     TooFewCorrespondences(usize),
-    /// 절대 자세 RANSAC 실패.
+    /// Absolute pose RANSAC failed.
     RansacFailed,
-    /// 인라이어 부족(인라이어 수).
+    /// Too few inliers (number of inliers).
     TooFewInliers(usize),
-    /// 자세 정제 실패.
+    /// Pose refinement failed.
     RefinementFailed,
-    /// 이미 등록된 영상.
+    /// Image already registered.
     AlreadyRegistered,
 }
 
 impl RegisterOutcome {
-    /// 등록에 성공했는지.
+    /// Whether registration succeeded.
     pub fn is_registered(&self) -> bool {
         matches!(self, RegisterOutcome::Registered { .. })
     }
 }
 
-/// 전체 결과.
+/// Overall result.
 #[derive(Clone, Debug, Default)]
 pub struct RegistrationReport {
-    /// 시도 순서대로 (영상, 결과).
+    /// (image, result) in attempt order.
     pub attempts: Vec<(ImageId, RegisterOutcome)>,
-    /// 모델에 새로 추가한 영상 수.
+    /// Number of images newly added to the model.
     pub num_added_images: usize,
 }
 
 impl RegistrationReport {
-    /// 등록에 성공한 영상 id(시도 순서).
+    /// Ids of successfully registered images (in attempt order).
     pub fn registered(&self) -> Vec<ImageId> {
         self.attempts.iter().filter(|(_, o)| o.is_registered()).map(|(i, _)| *i).collect()
     }
 }
 
-/// 저장소의 카메라·영상 중 대응 그래프에 있고 모델에 없는 것을 자세 없이 추가.
+/// Adds, without poses, the cameras and images of the store that are in the correspondence graph but not in the model.
 pub fn add_missing_images(rec: &mut Reconstruction, store: &FeatureStore, graph: &MatchGraph) -> Result<Vec<ImageId>> {
     let mut ids = graph.image_ids();
     ids.sort();
     let mut added = Vec::new();
     for id in ids {
         if let Some(im) = rec.image(id) {
-            // 이름·특징 수 일치 검사.
+            // Check that name and feature count match.
             let ok = store.image(id).is_some_and(|s| s.name == im.name) && store.num_keypoints(id) == im.num_points2d();
             if !ok {
                 return Err(cumulus3d_core::Error::Invariant(format!("영상 {id}: 모델과 저장소의 이름/특징 수 불일치")));
@@ -168,7 +168,7 @@ fn is_bogus(cam: &Camera, o: &RegistrationOptions) -> bool {
     cam.has_implausible_params(o.min_focal_length_ratio, o.max_focal_length_ratio, o.max_extra_param)
 }
 
-/// "보이는 3D 점 수": 대응 이웃 중 하나라도 3D 점을 가진 2D 점 수.
+/// "Number of visible 3D points": number of 2D points where at least one correspondence neighbor has a 3D point.
 pub fn num_visible_points3d(rec: &Reconstruction, graph: &MatchGraph, image_id: ImageId) -> usize {
     let Some(im) = rec.image(image_id) else { return 0 };
     (0..im.num_points2d() as Point2DIdx)
@@ -181,7 +181,7 @@ pub fn num_visible_points3d(rec: &Reconstruction, graph: &MatchGraph, image_id: 
         .count()
 }
 
-/// 가시성 피라미드 점수(6단계).
+/// Visibility pyramid score (6 levels).
 pub fn visibility_score(rec: &Reconstruction, graph: &MatchGraph, image_id: ImageId) -> usize {
     let Some(im) = rec.image(image_id) else { return 0 };
     let Some(cam) = rec.camera(im.camera_id) else { return 0 };
@@ -206,7 +206,7 @@ pub fn visibility_score(rec: &Reconstruction, graph: &MatchGraph, image_id: Imag
     cells.iter().enumerate().map(|(l, s)| s.len() * (1usize << (2 * (l + 1)))).sum()
 }
 
-/// 2D-3D 대응: (2D 점, 픽셀, 3D 점 id, 좌표).
+/// 2D-3D correspondences: (2D point, pixel, 3D point id, coordinates).
 pub fn collect_2d3d_correspondences(
     rec: &Reconstruction,
     graph: &MatchGraph,
@@ -240,7 +240,7 @@ pub fn collect_2d3d_correspondences(
     per_point.into_iter().flatten().collect()
 }
 
-/// 영상 하나 등록(중심 카메라·초점 고정 경로).
+/// Registers one image (central camera, fixed-focal path).
 pub fn register_image(
     rec: &mut Reconstruction,
     graph: &MatchGraph,
@@ -250,7 +250,7 @@ pub fn register_image(
     register_image_with(rec, graph, image_id, opts, &CpuAbsPose)
 }
 
-/// [`register_image`] 와 같되 절대 자세 RANSAC 을 `backend` 로 한다.
+/// Like [`register_image`], but absolute pose RANSAC is done by `backend`.
 pub fn register_image_with(
     rec: &mut Reconstruction,
     graph: &MatchGraph,
@@ -270,13 +270,13 @@ pub fn register_image_with(
         return Ok(RegisterOutcome::TooFewCorrespondences(corrs.len()));
     }
     let im = rec.image(image_id).expect("존재");
-    // 설계 결정: 등록 영상 0 인 카메라·엉터리 카메라의 초점 추정(P4Pf)·내부 정제 경로는 구현하지 않고
-    // 항상 초점 고정 경로를 쓴다(이 파이프라인의 정상 경우).
+    // Design decision: the focal estimation (P4Pf) and intrinsics refinement paths for cameras with 0 registered images or bogus cameras
+    // are not implemented; the fixed-focal path is always used (the normal case for this pipeline).
     let camera = rec.camera(im.camera_id).expect("존재").clone();
     let p2: Vec<Vec2> = corrs.iter().map(|c| c.1).collect();
     let p3: Vec<Vec3> = corrs.iter().map(|c| c.3).collect();
     let mut ransac = opts.ransac.clone();
-    // 영상마다 다른 결정적 시드.
+    // Deterministic seed that differs per image.
     ransac.random_seed = ransac.random_seed.map(|s| s ^ (image_id as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15));
     let Some(res) = backend.solve(&camera, &p2, &p3, &ransac) else {
         return Ok(RegisterOutcome::RansacFailed);
@@ -295,7 +295,7 @@ pub fn register_image_with(
     }
     rec.set_world_to_cam(image_id, pose)?;
     rec.register_image(image_id)?;
-    // 트랙 연장: 첫 번째로 적용된 인라이어만(이미 3D 점이 있으면 무시).
+    // Track extension: only the first applied inlier (ignored if it already has a 3D point).
     for (k, c) in corrs.iter().enumerate() {
         if !res.inlier_mask[k] {
             continue;
@@ -308,7 +308,7 @@ pub fn register_image_with(
     Ok(RegisterOutcome::Registered { num_correspondences: corrs.len(), num_inliers: res.num_inliers })
 }
 
-/// image_registrator 전체: 누락 영상 추가 → 자세 없는 영상마다 한 번 시도 → 실패 영상 삭제.
+/// image_registrator as a whole: add missing images, try once per pose-less image, delete failed images.
 pub fn register_images(
     rec: &mut Reconstruction,
     store: &FeatureStore,
@@ -318,7 +318,7 @@ pub fn register_images(
     register_images_with(rec, store, graph, opts, &CpuAbsPose)
 }
 
-/// [`register_images`] 와 같되 절대 자세 RANSAC 을 `backend` 로 한다.
+/// Like [`register_images`], but absolute pose RANSAC is done by `backend`.
 pub fn register_images_with(
     rec: &mut Reconstruction,
     store: &FeatureStore,
@@ -365,7 +365,7 @@ mod tests {
     use cumulus3d_core::{FeatureMatch, Rigid3, TwoViewGeometry, TwoViewGeometryConfig};
     use rand::{RngExt, SeedableRng};
 
-    /// 등록 영상 1, 2 와 3D 점 n 개, 새 영상 3 이 그 점들을 무잡음으로 본다.
+    /// Registered images 1, 2 and n 3D points; new image 3 sees those points without noise.
     fn setup(n: usize) -> (Reconstruction, MatchGraph, Rigid3) {
         let mut rng = rand_pcg::Pcg64::seed_from_u64(5);
         let cam = crate::synthetic::opencv_camera(1);
@@ -412,14 +412,14 @@ mod tests {
         assert!(o.is_registered(), "{o:?}");
         let est = rec.world_to_cam(3).unwrap();
         assert!(est.rotation.angular_distance(&truth.rotation) < 1e-6);
-        // 트랙 연장: 모든 점이 영상 3 관측을 얻음.
+        // Track extension: every point gets an image-3 observation.
         assert_eq!(rec.image(3).unwrap().num_points3d(), 30);
         rec.check_invariants().unwrap();
     }
 
     #[test]
     fn min_inlier_boundary() {
-        // 30개 대응 중 2개를 크게 틀어 인라이어 28 → 실패.
+        // Corrupt 2 of the 30 correspondences heavily: inliers 28, so failure.
         let opts = RegistrationOptions { refine_pose: false, ..Default::default() };
         let (rec0, g, _) = setup(30);
         let mut rec = Reconstruction::new();

@@ -25,7 +25,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 테스트 공용 합성 데이터: 레이 캐스팅으로 그린 무늬 바닥 + 건물 상자, 드론 3대 × NPOS 위치, gps_ref.txt.
+//! Shared synthetic data for tests: patterned floor drawn by ray casting + building boxes, 3 drones x NPOS positions, gps_ref.txt.
 #![allow(dead_code)]
 
 use cumulus3d_align::EnuFrame;
@@ -83,7 +83,7 @@ struct Boxo {
     max: V3,
 }
 
-/// 바닥 위 건물 모양 상자들(높이 다양): 평면 장면의 초점-거리 모호성을 없앤다.
+/// Building-shaped boxes on the floor (varied heights): removes the focal-length ambiguity of a planar scene.
 fn boxes() -> Vec<Boxo> {
     let mut v = Vec::new();
     for i in 0..8 {
@@ -101,7 +101,7 @@ fn boxes() -> Vec<Boxo> {
     v
 }
 
-/// 반직선 교차 → 색.
+/// Ray intersection -> color.
 fn shade(o: V3, d: V3, bx: &[Boxo]) -> [f64; 3] {
     let mut best = (f64::MAX, 0usize, 2usize);
     if d[2].abs() > 1e-12 {
@@ -150,10 +150,10 @@ fn shade(o: V3, d: V3, bx: &[Boxo]) -> [f64; 3] {
 
 const W: u32 = 320;
 const H: u32 = 240;
-// 기본 초점 추정(1.2 × 최대 변)과 같게 해 EXIF 없이도 내부값이 맞게 한다.
-const F: f64 = 1.2 * 320.0;
+// Make it equal to the default focal estimate (1.2 x longest side) so the intrinsics are right even without EXIF.
+pub const F: f64 = 1.2 * 320.0;
 
-/// 카메라 중심 c 에서 target 을 보는 영상.
+/// Image looking at target from camera center c.
 fn render(c: V3, target: V3, bx: &[Boxo]) -> RgbImage {
     let z = norm(sub(target, c));
     let x = norm(cross(z, [0.0, 0.0, 1.0]));
@@ -180,7 +180,7 @@ fn render(c: V3, target: V3, bx: &[Boxo]) -> RgbImage {
 pub const NPOS: usize = 8;
 const STEP: f64 = 1.5;
 
-/// images/camF|camR|camL/camX_NNNN.jpg (프레임 번호 = 위치 × 3, 실제 촬영 데이터와 같은 배치) + gps_ref.txt.
+/// images/camF|camR|camL/camX_NNNN.jpg (frame number = position x 3, same layout as real captured data) + gps_ref.txt.
 pub fn make_dataset(root: &Path) {
     let bx = boxes();
     let enu = EnuFrame::new(36.0, 127.0, 30.0);
@@ -205,7 +205,7 @@ pub fn make_dataset(root: &Path) {
             gps.push_str(&format!("{name} {lat:.10} {lon:.10} {alt:.4}\n"));
         }
     }
-    // 실제 촬영 데이터처럼 camF, camR, camL 순서로 정렬된 파일.
+    // Files sorted in the order camF, camR, camL like real captured data.
     let mut lines: Vec<&str> = gps.lines().collect();
     lines.sort_by_key(|l| {
         let n = l.split_whitespace().next().unwrap();

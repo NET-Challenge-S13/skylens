@@ -23,6 +23,8 @@
 //! | `SKYLENS_ZONE_OVERLAP`  | `2`            | cumulus3d zone overlap, in frame sets |
 //! | `SKYLENS_WORK_DIR`      | `<repo>/runs/model` | cumulus3d working directory |
 //! | `SKYLENS_GPU`           | unset (= CUDA available) | force the GPU backends on or off |
+//! | `SKYLENS_STABLE_DISPLAY` | `1`           | cumulus3d stable display: points leave as the live diff stream (point slot chunks); `0` = zone previews and refined zones as point chunks |
+//! | `SKYLENS_LIVE_STRIDE`   | `6`            | stable display: keep 1 of this many points in the live display (1 = every point) |
 //! | `SKYLENS_PRECISION`     | `auto`         | SkyLensNet arithmetic on CUDA: `auto` (by compute capability: >= 8.0 bf16, 7.x fp16 autocast, else fp32), `fp32`, `fp16`, `bf16` |
 //! | `DELTAMESH_EXTRACT_BATCH` | `128` (set by `app::main`) | deltamesh GPU mesher blocks per extraction batch; deltamesh's own default 512 holds about 0.7 GB more GPU memory |
 
@@ -60,6 +62,10 @@ pub struct Settings {
     pub work_dir: PathBuf,
     /// `None` = decide from CUDA availability at engine build time.
     pub gpu: Option<bool>,
+    /// cumulus3d stable display with the live diff stream.
+    pub stable_display: bool,
+    /// Stable display: live display thinning (1 of this many points, at least 1).
+    pub live_stride: usize,
     /// `None` = `auto`; an unparsable value is also `auto`.
     pub precision: Option<Precision>,
 }
@@ -124,6 +130,8 @@ impl Settings {
                 .map(PathBuf::from)
                 .unwrap_or_else(|| repo_root().join("runs").join("model")),
             gpu: flag("SKYLENS_GPU"),
+            stable_display: flag("SKYLENS_STABLE_DISPLAY").unwrap_or(true),
+            live_stride: int("SKYLENS_LIVE_STRIDE", crate::models::skylens::DEFAULT_LIVE_STRIDE).max(1),
             precision: get("SKYLENS_PRECISION").and_then(|raw| match raw.parse::<Precision>() {
                 Ok(Precision::Auto) => None,
                 Ok(p) => Some(p),
@@ -188,6 +196,16 @@ mod tests {
         assert_eq!(s.cameras, vec!["left", "center", "right"]);
         assert_eq!(s.gpu, None);
         assert_eq!(s.precision, None);
+        assert!(s.stable_display);
+        assert_eq!(s.live_stride, 6);
+    }
+
+    #[test]
+    fn stable_display_and_live_stride_overrides() {
+        let s = with(&[("SKYLENS_STABLE_DISPLAY", "0"), ("SKYLENS_LIVE_STRIDE", "1")]);
+        assert!(!s.stable_display);
+        assert_eq!(s.live_stride, 1);
+        assert_eq!(with(&[("SKYLENS_LIVE_STRIDE", "0")]).live_stride, 1, "at least 1");
     }
 
     #[test]

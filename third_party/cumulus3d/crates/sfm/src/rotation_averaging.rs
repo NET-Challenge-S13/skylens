@@ -29,46 +29,46 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 뷰 그래프와 회전 평균: 최대 신장 트리 초기화 → L1(ADMM) → IRLS(Geman-McClure).
+//! View graph and rotation averaging: maximum spanning tree initialization, then L1 (ADMM), then IRLS (Geman-McClure).
 
 use crate::math::{so3_exp, so3_log, CsrMatrix};
 use cumulus3d_core::{Error, ImageId, Mat3, Result, Rigid3};
 use nalgebra::{Cholesky, DMatrix, DVector, Dyn};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-/// 뷰 그래프 간선(상대 자세가 있는 영상 짝). `image_id1 < image_id2`.
+/// View graph edge (an image pair with a relative pose). `image_id1 < image_id2`.
 #[derive(Clone, Debug)]
 pub struct ViewGraphEdge {
-    /// 작은 쪽 영상 id.
+    /// Id of the smaller image.
     pub image_id1: ImageId,
-    /// 큰 쪽 영상 id.
+    /// Id of the larger image.
     pub image_id2: ImageId,
-    /// 영상2 ← 영상1 상대 자세(평행이동은 단위 길이 또는 0, 이후 단계에서 쓰지 않음).
+    /// Relative pose image2 ← image1 (translation is unit length or 0, unused in later stages).
     pub cam1_to_cam2: Rigid3,
-    /// 대응 그래프의 (중복 제거 후) 매칭 수.
+    /// Match count in the correspondence graph (after removing duplicates).
     pub num_matches: usize,
-    /// 회전 평균·필터에 쓰이는 유효 간선인지.
+    /// Whether it is a valid edge used by rotation averaging and filtering.
     pub valid: bool,
 }
 
-/// 뷰 그래프. 간선은 (id1, id2) 오름차순으로 유지한다(결정적 순회).
+/// View graph. Edges are kept in ascending (id1, id2) order (deterministic traversal).
 #[derive(Clone, Debug, Default)]
 pub struct ViewGraph {
-    /// 간선 목록((id1, id2) 오름차순).
+    /// Edge list (ascending (id1, id2)).
     pub edges: Vec<ViewGraphEdge>,
 }
 
 impl ViewGraph {
-    /// 간선을 정렬해 뷰 그래프를 만든다.
+    /// Sorts the edges and builds the view graph.
     pub fn new(mut edges: Vec<ViewGraphEdge>) -> Self {
         edges.sort_by_key(|e| (e.image_id1, e.image_id2));
         Self { edges }
     }
-    /// 유효 간선 수.
+    /// Number of valid edges.
     pub fn num_valid_edges(&self) -> usize {
         self.edges.iter().filter(|e| e.valid).count()
     }
-    /// 유효 간선 양 끝 영상.
+    /// Images at both ends of the valid edges.
     pub fn valid_nodes(&self) -> BTreeSet<ImageId> {
         let mut s = BTreeSet::new();
         for e in self.edges.iter().filter(|e| e.valid) {
@@ -77,8 +77,8 @@ impl ViewGraph {
         }
         s
     }
-    /// `node_ok` 를 만족하는 노드끼리의 유효 간선으로 최대 연결 성분.
-    /// 설계 결정: 동률(노드 수 같음)이면 최소 영상 id 가 더 작은 성분.
+    /// Largest connected component using valid edges between nodes that satisfy `node_ok`.
+    /// Design decision: on a tie (same node count), the component with the smaller minimum image id.
     pub fn largest_connected_component(&self, node_ok: impl Fn(ImageId) -> bool) -> BTreeSet<ImageId> {
         let mut adj: BTreeMap<ImageId, Vec<ImageId>> = BTreeMap::new();
         for e in self.edges.iter().filter(|e| e.valid && node_ok(e.image_id1) && node_ok(e.image_id2)) {
@@ -108,7 +108,7 @@ impl ViewGraph {
         }
         best
     }
-    /// 끝점 하나라도 `keep` 밖이면 무효화. 반환: 무효화된 간선 수.
+    /// Invalidates the edge if either endpoint is outside `keep`. Returns: number of invalidated edges.
     pub fn invalidate_outside(&mut self, keep: &BTreeSet<ImageId>) -> usize {
         let mut n = 0;
         for e in self.edges.iter_mut().filter(|e| e.valid) {
@@ -119,7 +119,8 @@ impl ViewGraph {
         }
         n
     }
-    /// 추정 회전(world_to_cam)과 간선 상대 회전의 각거리가 `max_deg` 초과인 간선 무효화.
+    /// Invalidates edges whose angular distance between the estimated rotation (world_to_cam)
+    /// and the edge relative rotation exceeds `max_deg`.
     pub fn filter_by_relative_rotation(&mut self, rotations: &BTreeMap<ImageId, Mat3>, max_deg: f64) -> usize {
         let max_rad = max_deg.to_radians();
         let mut n = 0;
@@ -136,7 +137,7 @@ impl ViewGraph {
     }
 }
 
-/// IRLS 가중 함수.
+/// IRLS weight function.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum IrlsWeight {
     /// w = σ² / (e² + σ²)².
@@ -145,26 +146,26 @@ pub enum IrlsWeight {
     HalfNorm,
 }
 
-/// 회전 평균 옵션(내부 고정값).
+/// Rotation averaging options (internal fixed values).
 #[derive(Clone, Debug)]
 pub struct RotationAveragingOptions {
-    /// 최대 신장 트리로 초기 회전을 정할지.
+    /// Whether to set the initial rotations from the maximum spanning tree.
     pub use_mst_init: bool,
-    /// L1 단계 최대 외부 반복.
+    /// Maximum outer iterations of the L1 stage.
     pub l1_max_iterations: usize,
-    /// L1 단계 수렴 임계(라디안).
+    /// Convergence threshold of the L1 stage (radians).
     pub l1_convergence_rad: f64,
-    /// IRLS 단계 최대 반복.
+    /// Maximum iterations of the IRLS stage.
     pub irls_max_iterations: usize,
-    /// IRLS 단계 수렴 임계(라디안).
+    /// Convergence threshold of the IRLS stage (radians).
     pub irls_convergence_rad: f64,
-    /// IRLS 가중치 척도 σ(도).
+    /// IRLS weight scale σ (degrees).
     pub irls_sigma_deg: f64,
-    /// IRLS 가중치 함수.
+    /// IRLS weight function.
     pub irls_weight: IrlsWeight,
-    /// 정규 행렬 대각 정칙화 값.
+    /// Diagonal regularization value of the normal matrix.
     pub ridge: f64,
-    /// L1 ADMM 옵션.
+    /// L1 ADMM options.
     pub admm: AdmmOptions,
 }
 
@@ -184,20 +185,20 @@ impl Default for RotationAveragingOptions {
     }
 }
 
-/// ADMM 최소 절대 편차 옵션.
+/// ADMM least absolute deviations options.
 #[derive(Clone, Debug)]
 pub struct AdmmOptions {
-    /// ADMM 벌점 계수 ρ.
+    /// ADMM penalty parameter ρ.
     pub rho: f64,
-    /// 과완화 계수 α.
+    /// Over-relaxation parameter α.
     pub alpha: f64,
-    /// 절대 수렴 허용오차.
+    /// Absolute convergence tolerance.
     pub abs_tol: f64,
-    /// 상대 수렴 허용오차.
+    /// Relative convergence tolerance.
     pub rel_tol: f64,
-    /// 첫 외부 반복의 내부 최대 반복(이후 2배씩, 상한 `max_inner_iterations`).
+    /// Maximum inner iterations of the first outer iteration (doubles afterwards, capped at `max_inner_iterations`).
     pub initial_inner_iterations: usize,
-    /// 내부 반복 상한.
+    /// Inner iteration limit.
     pub max_inner_iterations: usize,
 }
 
@@ -207,7 +208,7 @@ impl Default for AdmmOptions {
     }
 }
 
-/// min_x ‖A x − b‖₁ 를 ADMM 으로. `chol` = (AᵀA + λI) 분해.
+/// min_x ‖A x − b‖₁ via ADMM. `chol` = factorization of (AᵀA + λI).
 pub fn admm_l1(a: &CsrMatrix, b: &DVector<f64>, chol: &Cholesky<f64, Dyn>, max_iter: usize, o: &AdmmOptions) -> DVector<f64> {
     let (m, n) = (a.nrows, a.ncols);
     let mut z = DVector::zeros(m);
@@ -233,18 +234,18 @@ pub fn admm_l1(a: &CsrMatrix, b: &DVector<f64>, chol: &Cholesky<f64, Dyn>, max_i
     x
 }
 
-/// 일반 L1 회귀(검증용): ridge λ 를 더한 정규 행렬로 ADMM 실행.
+/// General L1 regression (for verification): runs ADMM with the normal matrix plus ridge λ.
 pub fn l1_regression(a: &CsrMatrix, b: &DVector<f64>, ridge: f64, max_iter: usize, o: &AdmmOptions) -> Option<DVector<f64>> {
     let chol = a.weighted_normal(None, ridge).cholesky()?;
     let x = admm_l1(a, b, &chol, max_iter, o);
     x.iter().all(|v| v.is_finite()).then_some(x)
 }
 
-/// 최대 신장 트리 초기화. 루트 = 최소 id, 회전 = 항등.
+/// Maximum spanning tree initialization. Root = smallest id, rotation = identity.
 pub fn mst_initialization(nodes: &BTreeSet<ImageId>, edges: &[&ViewGraphEdge]) -> BTreeMap<ImageId, Mat3> {
     let idx: BTreeMap<ImageId, usize> = nodes.iter().enumerate().map(|(i, id)| (*id, i)).collect();
     let mut order: Vec<&&ViewGraphEdge> = edges.iter().collect();
-    // 설계 결정: 동률 순서 → (id1, id2) 오름차순.
+    // Design decision: tie order is ascending (id1, id2).
     order.sort_by(|a, b| b.num_matches.cmp(&a.num_matches).then((a.image_id1, a.image_id2).cmp(&(b.image_id1, b.image_id2))));
     let mut parent: Vec<usize> = (0..nodes.len()).collect();
     fn find(p: &mut [usize], mut x: usize) -> usize {
@@ -263,7 +264,7 @@ pub fn mst_initialization(nodes: &BTreeSet<ImageId>, edges: &[&ViewGraphEdge]) -
         }
         parent[ri] = rj;
         let r21 = e.cam1_to_cam2.rotation_matrix();
-        // c ← p 상대 회전.
+        // c ← relative rotation to p.
         adj.entry(e.image_id1).or_default().push((e.image_id2, r21));
         adj.entry(e.image_id2).or_default().push((e.image_id1, r21.transpose()));
     }
@@ -284,24 +285,24 @@ pub fn mst_initialization(nodes: &BTreeSet<ImageId>, edges: &[&ViewGraphEdge]) -
             }
         }
     }
-    // 트리에 닿지 않은 노드(연결 성분이 아니면 생길 수 있음)는 항등.
+    // Nodes not reached by the tree (possible if the graph is not a single connected component) get identity.
     for n in nodes {
         rot.entry(*n).or_insert_with(Mat3::identity);
     }
     rot
 }
 
-/// 회전 평균 결과 통계.
+/// Rotation averaging result statistics.
 #[derive(Clone, Debug, Default)]
 pub struct RotationAveragingSummary {
-    /// L1 단계 반복 횟수.
+    /// Number of L1 stage iterations.
     pub num_l1_iterations: usize,
-    /// IRLS 단계 반복 횟수.
+    /// Number of IRLS stage iterations.
     pub num_irls_iterations: usize,
 }
 
-/// 활성 노드와 그 사이 유효 간선으로 전역 회전(world_to_cam)을 푼다.
-/// `initial` 이 있고 `use_mst_init` 가 거짓이면 그 값에서 시작.
+/// Solves the global rotations (world_to_cam) from the active nodes and the valid edges between them.
+/// If `initial` is given and `use_mst_init` is false, starts from that value.
 pub fn solve_rotation_averaging(
     nodes: &BTreeSet<ImageId>,
     graph: &ViewGraph,
@@ -320,7 +321,7 @@ pub fn solve_rotation_averaging(
     let ids: Vec<ImageId> = nodes.iter().copied().collect();
     let col: BTreeMap<ImageId, usize> = ids.iter().enumerate().map(|(i, id)| (*id, 3 * i)).collect();
     let n = 3 * ids.len();
-    // 계수 행렬 A (고정).
+    // Coefficient matrix A (fixed).
     let mut a = CsrMatrix::new(n);
     for e in &edges {
         let (c1, c2) = (col[&e.image_id1], col[&e.image_id2]);
@@ -362,7 +363,7 @@ pub fn solve_rotation_averaging(
     };
     let mut summary = RotationAveragingSummary::default();
 
-    // L1 단계.
+    // L1 stage.
     if opts.l1_max_iterations > 0 && !edges.is_empty() {
         let chol = a
             .weighted_normal(None, opts.ridge)
@@ -387,7 +388,7 @@ pub fn solve_rotation_averaging(
         }
     }
 
-    // IRLS 단계.
+    // IRLS stage.
     let sigma = opts.irls_sigma_deg.to_radians();
     let mut w = vec![1.0; a.nrows];
     for _ in 0..opts.irls_max_iterations {
@@ -422,7 +423,7 @@ pub fn solve_rotation_averaging(
             break;
         }
     }
-    // 수치 누적 오차 정리.
+    // Clean up accumulated numerical error.
     for r in rot.values_mut() {
         *r = crate::math::nearest_rotation(r);
     }
@@ -440,9 +441,10 @@ mod tests {
         so3_exp(&(Vec3::new(gaussian(rng), gaussian(rng), gaussian(rng)) * scale))
     }
 
-    /// 전역 회전 하나로 정렬 후 각 오차(도) 목록.
+    /// List of angular errors (degrees) after aligning with a single global rotation.
     fn aligned_errors(est: &BTreeMap<ImageId, Mat3>, truth: &BTreeMap<ImageId, Mat3>) -> Vec<f64> {
-        // R_est ≈ R_true · G → G 추정: 첫 영상 기준 대신 평균(사원수 평균 근사: 행렬 합의 최근접 회전).
+        // R_est ≈ R_true · G, then estimate G: instead of using the first image as reference, use the mean
+        // (quaternion mean approximation: nearest rotation to the matrix sum).
         let mut sum = Mat3::zeros();
         for (id, r) in est {
             sum += truth[id].transpose() * r;
@@ -513,7 +515,8 @@ mod tests {
 
     #[test]
     fn admm_matches_lp_solution() {
-        // 30×6 과결정, 20% 외란. LP 해 = 꼭짓점 전수 탐색(L1 최적해는 n 개 잔차가 0 인 꼭짓점).
+        // 30×6 overdetermined, 20% outliers. LP solution = exhaustive vertex search
+        // (the L1 optimum is a vertex where n residuals are zero).
         let mut rng = rand_pcg::Pcg64::seed_from_u64(3);
         let (m, n) = (30usize, 6usize);
         let a = DMatrix::from_fn(m, n, |_, _| gaussian(&mut rng));

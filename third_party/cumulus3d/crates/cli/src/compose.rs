@@ -88,12 +88,13 @@
 //! behind a bounded queue with an explicit [`Backpressure`] policy, and the producer only calls
 //! [`ComposeHandle::send`] / [`ComposeHandle::try_send`] (both usable from async code; `try_send` never blocks).
 
+use crate::blocks::LiveStream;
 use crate::declare::{AlignFrame, Dense, Features, Plan};
 use crate::densewrap::{make_ba_backend, make_match_backend, make_sift_backend, make_sparse_backend, parse_profile};
 use crate::events::{Command, Event, EventKind, Frame, ZoneRange};
 use crate::pipeline::{Pipeline, QueuePolicy, Summary};
 use crate::session::{FrameSet, Input, Session, SessionConfig};
-use crate::sinks::{self, SinkOptions};
+use crate::sinks::{self, DefaultSinks, SinkOptions, SinkSet};
 use cumulus3d_core::io::ply::PointCloud;
 use cumulus3d_core::io::GpsRecord;
 use std::collections::{BTreeMap, HashMap, VecDeque};
@@ -561,6 +562,10 @@ pub struct NodeBuilder {
     source: Option<String>,
     spool: PathBuf,
     output: Option<(PathBuf, SinkOptions)>,
+    /// Geodetic origin written to the live diff stream manifest (`origin_gps`).
+    stream_origin: Option<[f64; 3]>,
+    /// Stable display output: only run.log, the timeline and the live diff stream.
+    stream_only: bool,
     attach: Vec<Attach>,
     frames: bool,
 }
@@ -585,6 +590,8 @@ impl ReconNode {
             source: None,
             spool: PathBuf::from(".live"),
             output: None,
+            stream_origin: None,
+            stream_only: false,
             attach: Vec::new(),
             frames: false,
         }
@@ -688,7 +695,40 @@ impl NodeBuilder {
         self.spool = rel.into();
         self
     }
-    /// Writes the standard output files (timeline, run.log, zone PLYs, snapshots) to `dir`.
+    /// Stable display (see [`SessionConfig::stable_display`]): no previews, the refinement of a zone waits for the one
+    /// before it and a zone keeps its place once shown (except while the intrinsics settle, when earlier zones are placed
+    /// again). With [`NodeBuilder::output`] the live diff stream v4 is written to `<dir>/live/stream/`.
+    pub fn stable_display(mut self, on: bool) -> Self {
+        self.plan.sparse.stable_display = on;
+        self
+    }
+    /// Stable display: settle tolerance and the last zone that may still settle (see [`SessionConfig::settle_tol`],
+    /// [`SessionConfig::settle_max_zone`]).
+    pub fn settle(mut self, tol: f64, max_zone: usize) -> Self {
+        self.plan.sparse.settle_tol = tol;
+        self.plan.sparse.settle_max_zone = max_zone;
+        self
+    }
+    /// Live display thinning of the live diff stream: keep 1 of `stride` points by key hash (1 = keep all, default 6).
+    pub fn live_stride(mut self, stride: usize) -> Self {
+        self.plan.sinks.live_stride = stride;
+        self
+    }
+    /// Geodetic origin `[lat, lon, alt]` written to the live diff stream manifest. Give the first GPS fix the node will
+    /// see (with [`NodeBuilder::fixed_enu_origin`] it is the origin of every zone); without it the manifest frame is
+    /// `display`.
+    pub fn stream_origin(mut self, lat: f64, lon: f64, alt: f64) -> Self {
+        self.stream_origin = Some([lat, lon, alt]);
+        self
+    }
+    /// Stable display with [`NodeBuilder::output`]: write only run.log, the timeline and the live diff stream, not the
+    /// zone PLYs, the display PLYs, the per-zone models or the post-processing snapshots.
+    pub fn stream_only(mut self, on: bool) -> Self {
+        self.stream_only = on;
+        self
+    }
+    /// Writes the standard output files (timeline, run.log, zone PLYs, snapshots) to `dir`. With
+    /// [`NodeBuilder::stable_display`] also the live diff stream (`live/stream/`).
     pub fn output(mut self, dir: impl Into<PathBuf>, opts: SinkOptions) -> Self {
         self.output = Some((dir.into(), opts));
         self
@@ -753,7 +793,7 @@ impl NodeBuilder {
     /// Checks the configuration, creates the session and pipeline, and registers the node on `host`.
     /// Creates the image folder's spool folder; nothing else is written until frames are declared.
     pub fn build(self, host: &CompositionHost) -> Result<ReconNode, ComposeError> {
-        let NodeBuilder { id, plan, policy, backpressure, source, spool, output, attach, frames } = self;
+        let NodeBuilder { id, plan, policy, backpressure, source, spool, output, stream_origin, stream_only, attach, frames } = self;
         let mut pr = Vec::new();
         let cams = &plan.input.cameras;
         if cams.is_empty() {
@@ -778,6 +818,12 @@ impl NodeBuilder {
         }
         if spool.is_absolute() || spool.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
             pr.push(format!("spool: must be a relative path inside the image folder, got {}", spool.display()));
+        }
+        if plan.sinks.live_stride == 0 {
+            pr.push("live_stride: must be at least 1 (1 = keep all)".into());
+        }
+        if !(plan.sparse.settle_tol >= 0.0) {
+            pr.push(format!("settle tolerance: must be >= 0, got {}", plan.sparse.settle_tol));
         }
         if let ReconcilePolicy::ReplayWindow { positions: 0 } = policy {
             pr.push("reconcile: replay window must be at least 1 position".into());
@@ -810,6 +856,9 @@ impl NodeBuilder {
         sc.overlap = z.overlap;
         sc.total_positions = None;
         sc.incremental_triangulation = plan.sparse.incremental_triangulation;
+        sc.stable_display = plan.sparse.stable_display;
+        sc.settle_tol = plan.sparse.settle_tol;
+        sc.settle_max_zone = plan.sparse.settle_max_zone;
         sc.fixed_enu_origin = plan.align.fixed_origin;
         sc.seed = plan.seed;
         sc.extraction.sift.max_num_features = plan.features.max_num_features;
@@ -827,7 +876,21 @@ impl NodeBuilder {
 
         let mut pl = Pipeline::new(Session::new(sc));
         if let Some((dir, opts)) = &output {
-            pl = sinks::attach(pl, dir, opts).map_err(|e| ComposeError::Io(format!("{}: {e}", dir.display())))?;
+            let io = |e: std::io::Error| ComposeError::Io(format!("{}: {e}", dir.display()));
+            pl = if plan.sparse.stable_display {
+                // Same files as `sinks::attach`, plus the live diff stream (stable display only, as in `Recon::run`).
+                let set = SinkSet {
+                    models: opts.save_models && !stream_only,
+                    zone_ply: !stream_only,
+                    live_files: !stream_only,
+                    live_stride: plan.sinks.live_stride,
+                    live_stream: Some(LiveStream { enu: stream_origin.is_some(), origin_gps: stream_origin }),
+                    ..SinkSet::all()
+                };
+                pl.on_any(DefaultSinks::with_set(dir, opts.echo, set).map_err(io)?.into_hook())
+            } else {
+                sinks::attach(pl, dir, opts).map_err(io)?
+            };
         }
         for a in attach {
             pl = a(pl);

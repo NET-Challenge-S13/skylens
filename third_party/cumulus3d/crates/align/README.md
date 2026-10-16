@@ -6,7 +6,6 @@ Coordinate alignment and point cloud post-processing: GPS (WGS84) ↔ ENU conver
 alignment of two reconstructions via shared 3D points, zone coordinate-frame chaining (re-anchoring), and point cloud masking, decimation, and snapshot composition.
 Every Sim3 follows the core convention `new_from_old` (`X' = sRX + t`).
 
-API doc comments are currently in Korean; English translation is planned.
 
 **Pipeline stage**: after SfM. Aligns each zone's refined model to the GPS-referenced ENU frame (the refined map) (`align_to_gps`),
 moves the preview into the refined model's frame (`align_reconstructions`), chains the frames of successive zones (`AnchorChain`),

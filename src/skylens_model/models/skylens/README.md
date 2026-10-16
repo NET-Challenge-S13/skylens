@@ -22,8 +22,10 @@ cumulus3d의 구간(zone)과 GPS ENU 정렬이 대신한다.
 ```
 FrameSet(gRPC) → Assembler(카메라 모으기) → LiveFrameSet → ReconNode.compose
   ├─ on_frame 훅 → 큐(최대 24장) → UNet → 관측(축소 확률 격자 + 사람 점)
-  └─ 이벤트 ZonePreview / ZoneRefined
-       ├─ 점: pointblitz 청크 v2 (정제본은 성긴 점부터)
+  ├─ 파일 싱크(stable display) → <work_dir>/runs/live-<스트림 id>-<pid>/live/stream/
+  │    └─ follower(slotstream.rs, 200 ms): 새 사건 → PBSD 머리 + 팩 → CHUNK_KIND_POINT_SLOTS
+  └─ 이벤트 ZoneRefined (stable display에는 ZonePreview가 없다)
+       ├─ 점: 조밀화가 없을 때만 pointblitz 청크 v2 (stable display를 끄면 미리보기·정제본 모두)
        ├─ 메시: deltamesh ingest(구간, Preview|Refined) → extract → 바뀐 블록만 MeshBlock
        └─ 탐지 융합: 등록 포즈로 투영 → 프레임 간 confidence 가중 → DetectionBatch
   → ChunkLog(sequence 부여, 재생 기록) → SubscribeChunks
@@ -34,11 +36,14 @@ FrameSet(gRPC) → Assembler(카메라 모으기) → LiveFrameSet → ReconNode
 | ENU 원점 | 모든 프레임 묶음 맨 앞에 `.skylens-anchor` GPS 기록(앵커 좌표)을 넣는다. cumulus3d는 첫 GPS 기록을 원점으로 고정하므로 모든 구간이 앵커 기준 ENU 미터(x 동, y 북, z 위)로 나온다 |
 | 조정 정책 | append-only. 늦게 오거나 고쳐진 묶음은 무시한다. deltamesh 정제본은 구간당 한 번만 넣을 수 있고, 이미 내보낸 구간을 되감지 않기 위해서다 |
 | 카메라가 따로 오는 묶음 | 같은 키의 push를 모아 모든 카메라가 차면 선언한다. 대기 중인 묶음은 최대 64개 |
-| 미리보기 좌표계 | 구간 0과, 정제본이 채택된 뒤의 미리보기만 GPS 정렬이다. 정렬되지 않은 미리보기는 내보내지 않고 정제본을 기다린다 |
+| stable display | 기본(`SKYLENS_STABLE_DISPLAY=1`). 미리보기가 없고 구간 K의 정제는 K−1을 기다리며, GPS 위치 제약으로 한 번 보인 구간은 움직이지 않는다. 내부값이 안정되기 전(1 %, 늦어도 구간 3)에는 앞 구간을 다시 놓고 `ZoneRefined`를 다시 낸다 |
+| 점 슬롯 | 노드에 실행 폴더를 주어 cumulus3d가 live diff stream v4를 쓰게 하고, follower가 사건마다 청크 하나로 낸다(`segment` 사건 구간, `version` 순번, `generation` 스트림 id). 스트림 id는 `runs/` 아래 가장 큰 id + 1과 시작 시각 초 중 큰 값이고, 청크 시퀀스는 `스트림 id << 32`에서 시작한다(다시 뜬 모델 서버의 청크가 코어의 이어받기 시점보다 모두 크다). 실행 폴더에는 run.log, 타임라인, 차분 스트림만 쓰고(`stream_only`), 시작할 때 실행 폴더를 3개(`KEEP_RUNS`)만 남긴다. 화면용 점은 1/6(`SKYLENS_LIVE_STRIDE`). 조밀화가 실패한 구간(`dense: false`)은 스트림에 없으므로 그 구간만 점 청크로 보낸다 |
+| 메시와 재배치 | 구간 3까지는 다시 놓일 수 있어 deltamesh에 미리보기 수준으로 넣고(다시 오면 교체), 구간 4가 오면 그 구간들의 마지막 점을 정제 수준으로 넣는다. 점이 그대로면 메시가 바뀌지 않아 블록을 다시 보내지 않는다(그 블록 청크의 수준은 미리보기로 남는다). 구간이 4개 이하인 실행은 구간 0~3의 메시가 미리보기 수준으로 남는다 |
+| 미리보기 좌표계 | (stable display를 끈 경우) 구간 0과, 정제본이 채택된 뒤의 미리보기만 GPS 정렬이다. 정렬되지 않은 미리보기는 내보내지 않고 정제본을 기다린다 |
 | 조밀화 | CUDA가 필요하다. `gpu = false`면 구간 모델의 희소 점을 대신 쓴다 |
 | 메시 GPU | `gpu-mesh` 기능을 켜고 빌드하면 `GpuMesher`, 아니면 CPU `SdfMesher` |
 | `push` | 위치 하나를 처리하는 동안 막힌다. 비동기 서버에서는 blocking 스레드에서 부른다 |
-| 청크 재생 | 블록은 최신 버전, 탐지는 구간별 최신 묶음, 점은 구간별 최신 세대만 남긴다 |
+| 청크 재생 | 블록은 최신 버전, 탐지는 구간별 최신 묶음, 점은 구간별 최신 세대만 남긴다. 점 슬롯은 합치지 않고 모두 남긴다 |
 
 ### 0.1 탐지 융합 (`fusion.rs`)
 
@@ -127,6 +132,7 @@ src/skylens_model/models/skylens/
 ├─ recon.rs      # cumulus3d 결과 → 점·카메라 뷰
 ├─ fusion.rs     # 탐지 투영과 프레임 간 융합 (순수 계산, 단위 테스트)
 ├─ chunks.rs     # 청크 인코딩, sequence, 재생 기록
+├─ slotstream.rs # live diff stream follower → 점 슬롯 청크 (시험은 src/test/tests/slots.rs에서도 돈다)
 ├─ jobs.rs       # 잡 실행, steps → 수준
 └─ sources.rs    # uri → 프레임 (폴더·이미지·ffmpeg)
 ```

@@ -1,12 +1,13 @@
 //! What the board reads off the point chunks it holds (pointblitz chunk v2): sampled positions,
 //! height percentiles, a point-size estimate, and the height-ramp recolouring of the point panel
-//! (legacy `pointLayer.ts`).
+//! (legacy `pointLayer.ts`). The same recolouring for point slot messages (decision 0052).
 //!
 //! Positions are quantised to each chunk's box (`origin + bbox_min + q / 65535 * extent`), so they
 //! are read without touching anything but the 6 position bytes of each record.
 
 use crate::glam::DVec3;
 use crate::pointblitz::io::chunk::{ChunkHeader, HEADER_LEN, decode_header, rgb565};
+use crate::pointblitz::io::slots;
 
 /// Absolute ENU position of record `i` of a chunk.
 fn position(h: &ChunkHeader, body: &[u8], i: usize) -> DVec3 {
@@ -87,17 +88,31 @@ pub fn core_box(samples: &[DVec3]) -> Option<(DVec3, DVec3)> {
 /// rule with the spacing measured from the chunks (median over chunks of
 /// `sqrt(footprint / points)`), within 5 cm .. 1 m. 0.15 m (the legacy default) when unknown.
 pub fn point_size_m<'a>(chunks: impl IntoIterator<Item = &'a [u8]>) -> f32 {
-    let mut spacing: Vec<f64> = chunks
+    point_size_from_spacings(chunk_spacings(chunks))
+}
+
+/// `sqrt(footprint / points)` of every chunk with 16 points or more.
+pub fn chunk_spacings<'a>(chunks: impl IntoIterator<Item = &'a [u8]>) -> Vec<f64> {
+    chunks
         .into_iter()
         .filter_map(|c| decode_header(c).ok())
-        .filter(|h| h.point_count >= 16)
         .filter_map(|h| {
-            let ex = f64::from(h.bbox_max[0] - h.bbox_min[0]);
-            let ey = f64::from(h.bbox_max[1] - h.bbox_min[1]);
-            let area = ex * ey;
-            (area > 0.0).then(|| (area / f64::from(h.point_count)).sqrt())
+            let lo = DVec3::new(f64::from(h.bbox_min[0]), f64::from(h.bbox_min[1]), 0.0);
+            let hi = DVec3::new(f64::from(h.bbox_max[0]), f64::from(h.bbox_max[1]), 0.0);
+            spacing((lo, hi), u64::from(h.point_count))
         })
-        .collect();
+        .collect()
+}
+
+/// Typical spacing of `points` points over a box's footprint (x, y): `sqrt(area / points)`, for
+/// 16 points or more over a non-empty footprint.
+pub fn spacing((lo, hi): (DVec3, DVec3), points: u64) -> Option<f64> {
+    let area = (hi.x - lo.x) * (hi.y - lo.y);
+    (points >= 16 && area > 0.0).then(|| (area / points as f64).sqrt())
+}
+
+/// The point diameter from per-delivery spacings (see [`point_size_m`]).
+pub fn point_size_from_spacings(mut spacing: Vec<f64>) -> f32 {
     if spacing.is_empty() {
         return 0.15;
     }
@@ -138,6 +153,21 @@ pub fn legend_gradient() -> String {
 /// A number as JavaScript prints it in a template string (no trailing `.0`).
 pub fn js_number(v: f64) -> String {
     if v.fract() == 0.0 && v.abs() < 1e15 { format!("{}", v as i64) } else { format!("{v}") }
+}
+
+/// A copy of a point slot message with every add and move coloured by height (the slot positions
+/// are ENU metres about the anchor, so `z` is the height). Header, ids, positions and removes are
+/// unchanged; an invalid message comes back as it is.
+pub fn recolor_slots_by_height(msg: &[u8], low: f64, high: f64) -> Vec<u8> {
+    let mut out = msg.to_vec();
+    let Ok(h) = slots::validate(msg) else { return out };
+    let records = (h.n_add + h.n_move) as usize;
+    for k in 0..records {
+        let at = slots::HEADER_LEN + k * slots::ADD_BYTES;
+        let z = f32::from_le_bytes(msg[at + 12..at + 16].try_into().expect("4 bytes"));
+        out[at + 16..at + 19].copy_from_slice(&height_color(f64::from(z), low, high));
+    }
+    out
 }
 
 /// A copy of a chunk with every point coloured by height. Header and positions are unchanged.
@@ -226,6 +256,36 @@ mod tests {
                 assert!(low[2] > low[0] && high[0] > high[2]);
             }
         }
+    }
+
+    #[test]
+    fn slot_messages_are_recoloured_by_height_only() {
+        let mut pack = Vec::new();
+        slots::Record { id: 0, position: [1.0, 2.0, 0.0], color: [9, 9, 9], zone: 4 }.write(&mut pack);
+        slots::Record { id: 1, position: [1.0, 2.0, 10.0], color: [9, 9, 9], zone: 0 }.write(&mut pack);
+        pack.extend(7u32.to_le_bytes());
+        let header = slots::SlotHeader { seq: 3, n_add: 1, n_move: 1, n_remove: 1, capacity: 8 };
+        let msg = slots::encode(&header, &pack).unwrap();
+        let out = recolor_slots_by_height(&msg, 0.0, 10.0);
+        let d = slots::Diff::parse(&out).unwrap();
+        assert_eq!(d.header, header);
+        let add = d.add_records().next().unwrap();
+        let mv = d.move_records().next().unwrap();
+        assert_eq!((add.id, add.position, add.zone), (0, [1.0, 2.0, 0.0], 4));
+        assert_eq!(add.color, height_color(0.0, 0.0, 10.0));
+        assert_eq!(mv.color, height_color(10.0, 0.0, 10.0));
+        assert_eq!(d.remove_ids().collect::<Vec<_>>(), vec![7]);
+        assert_eq!(recolor_slots_by_height(b"nope", 0.0, 1.0), b"nope".to_vec());
+    }
+
+    #[test]
+    fn spacing_needs_points_and_a_footprint() {
+        let b = (DVec3::ZERO, DVec3::new(10.0, 10.0, 3.0));
+        assert_eq!(spacing(b, 100), Some(1.0));
+        assert_eq!(spacing(b, 15), None);
+        assert_eq!(spacing((DVec3::ZERO, DVec3::new(0.0, 10.0, 0.0)), 100), None);
+        assert_eq!(point_size_from_spacings(vec![0.1, 0.2, 0.3]), 0.3);
+        assert_eq!(point_size_from_spacings(Vec::new()), 0.15);
     }
 
     #[test]

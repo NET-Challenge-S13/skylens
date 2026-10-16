@@ -21,6 +21,10 @@ pub mod link {
     /// A connect attempt that has not finished the handshake by then counts as failed (native;
     /// the browser applies its own).
     pub const CONNECT_TIMEOUT_MS: u64 = 5_000;
+    /// Largest WebSocket message and frame from the core (native). A point slot message carries
+    /// one live diff stream event (tens of MB); tungstenite's defaults (64 MiB, 16 MiB) are too
+    /// small. Same as the demo board relay.
+    pub const MAX_MESSAGE_BYTES: usize = 512 << 20;
     /// Nothing at all (not even the core's 20 s ping) for this long means the connection is
     /// dead even though no close arrived; it is dropped and reconnected (native).
     pub const IDLE_TIMEOUT_MS: u64 = 45_000;

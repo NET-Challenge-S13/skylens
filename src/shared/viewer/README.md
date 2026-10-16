@@ -127,8 +127,9 @@ pointblitz 좌표는 ENU 미터 `[동, 북, 상]`(z가 위)다. `SiteFrame::enu(
 | 메시 블록 | 블록 id별로 `version`이 더 클 때만. 삼각형 0개면 지운다(지운 버전보다 옛 것은 되살아나지 않는다) | `mesh_blocks()` |
 | 탐지 | id별로 갱신. 구간이 도착해야 보이고, 새로 보이게 된 id가 `revealed`로 한 번씩 온다(토스트·카메라 초점) | `visible_detections()` |
 | 지형 타일 · 건물 묶음 | 셀별로 최신. 0이 아닌 더 옛 `version`은 버린다 | `terrain_tiles()`, `building_sets()` |
+| 점 슬롯 (`POINT_SLOTS`) | 스트림 하나(`generation` = 스트림 id). 메시지(`version` = 순번)를 순번대로 한 슬롯 상태에 적용하고, 빠진 순번 뒤의 것은 들고 있다가 이어서 적용한다(64개까지. 넘으면 버린다). 같은 순번은 버린다. 더 새 스트림 id는 처음부터(새 `epoch`). 추가 레코드의 구간 바이트로 구간별 점 수·상자·표본을 센다(255는 구간 255 이상: 사건 구간으로 읽는다). 최근 메시지 8개를 두어 3D 뷰가 바뀐 것만 올리고, 더 뒤처지면 접은 상태(`state_message`)로 다시 만든다 | `slots()` |
 
-구간은 점이나 메시 청크가 처음 오면 도착한 것이다(`arrived()`, `levels()`는 구간별 최고 수준).
+구간은 점이나 메시 청크가 처음 오거나, 점 슬롯에서 그 구간의 첫 점이 보이면(정제 수준) 도착한 것이다(`arrived()`, `levels()`는 구간별 최고 수준).
 
 ## 3D 뷰
 
@@ -139,6 +140,7 @@ impl ViewScreen for StatusScene {
     fn frame(&mut self, gpu: &mut Gpu3d, info: &FrameInfo) -> FrameSpec {
         let store = self.store.borrow();
         let sync = gpu.sync_segments(&store, 0.0);           // 구간마다 pointblitz Scene 하나
+        gpu.sync_slots(&store);                             // 점 슬롯 스트림: SlotScene 하나 (바뀐 메시지만, 못 따라가면 접은 상태로)
         for s in sync.added { self.fade.start(s, info.now_ms); }
         for (seg, a) in self.fade.alphas(info.now_ms) {
             gpu.clouds.set_alpha(view3d::segment_cloud(seg), a); // 노출 페이드

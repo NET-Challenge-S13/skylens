@@ -29,23 +29,23 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 트랙 구성·선별: 합집합-찾기 → 영상 내 일관성 검사 → 최소 뷰 수 → 길이순 선별.
+//! Track construction and selection: union-find, then per-image consistency check, minimum view count, selection by length.
 
 use crate::rotation_averaging::ViewGraph;
 use cumulus3d_core::graph::Correspondence;
 use cumulus3d_core::{ImageId, MatchGraph, Point3D, Reconstruction, Result, TrackEntry, Vec2, Vec3};
 use std::collections::{BTreeMap, HashSet};
 
-/// 트랙 옵션.
+/// Track options.
 #[derive(Clone, Debug)]
 pub struct TrackOptions {
-    /// 같은 영상 두 관측 사이 허용 픽셀 거리.
+    /// Maximum pixel distance allowed between two observations in the same image.
     pub intra_image_consistency_threshold: f64,
-    /// 영상별 필요 트랙 수(기본 2^31−1 = 사실상 무제한).
+    /// Required number of tracks per image (default 2^31−1, effectively unlimited).
     pub required_tracks_per_view: usize,
-    /// 트랙의 서로 다른 영상 최소 수.
+    /// Minimum number of distinct images in a track.
     pub min_num_views_per_track: usize,
-    /// 채택할 최대 트랙 수.
+    /// Maximum number of tracks to accept.
     pub max_num_tracks: usize,
 }
 
@@ -60,22 +60,22 @@ impl Default for TrackOptions {
     }
 }
 
-/// 트랙 구성 통계.
+/// Track construction statistics.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct TrackSummary {
-    /// 후보 트랙 수.
+    /// Number of candidate tracks.
     pub num_candidates: usize,
-    /// 영상 내 일관성 검사로 버린 트랙 수.
+    /// Number of tracks dropped by the within-image consistency check.
     pub num_inconsistent: usize,
-    /// 뷰 수 부족으로 버린 트랙 수.
+    /// Number of tracks dropped for having too few views.
     pub num_too_few_views: usize,
-    /// 검사를 통과한 트랙 수.
+    /// Number of tracks that passed the checks.
     pub num_valid: usize,
-    /// 최종 선별한 트랙 수.
+    /// Number of tracks finally selected.
     pub num_selected: usize,
 }
 
-/// 후보 트랙 → 일관성·최소 뷰 검사를 통과한 트랙(순서 유지, 인덱스 = 트랙 id).
+/// Candidate tracks to tracks that pass the consistency and minimum-view checks (order kept, index = track id).
 pub fn filter_candidate_tracks(
     candidates: Vec<Vec<Correspondence>>,
     position: impl Fn(&Correspondence) -> Option<Vec2>,
@@ -109,7 +109,7 @@ pub fn filter_candidate_tracks(
     out
 }
 
-/// 선별: (길이, id) 내림차순으로 상한까지. 반환: 채택된 트랙 id(채택 순).
+/// Selection: by (length, id) in descending order up to the limit. Returns the accepted track ids (in acceptance order).
 pub fn select_tracks(tracks: &[Vec<Correspondence>], opts: &TrackOptions) -> Vec<usize> {
     let mut order: Vec<usize> = (0..tracks.len()).collect();
     order.sort_by(|&a, &b| (tracks[b].len(), b).cmp(&(tracks[a].len(), a)));
@@ -141,8 +141,8 @@ pub fn select_tracks(tracks: &[Vec<Correspondence>], opts: &TrackOptions) -> Vec
     out
 }
 
-/// 등록 영상의 유효 간선으로 트랙을 만들어 재구성에 3D 점(좌표 0, error −1)으로 추가.
-/// 점 id = 통과 트랙의 순번(0부터).
+/// Builds tracks from the valid edges of registered images and adds them to the reconstruction as 3D points (coordinates 0, error −1).
+/// Point id = ordinal of the passing track (from 0).
 pub fn establish_tracks(rec: &mut Reconstruction, graph: &MatchGraph, view_graph: &ViewGraph, opts: &TrackOptions) -> Result<TrackSummary> {
     let valid: HashSet<(ImageId, ImageId)> = view_graph.edges.iter().filter(|e| e.valid).map(|e| (e.image_id1, e.image_id2)).collect();
     let registered: HashSet<ImageId> = rec.registered_images().into_iter().collect();
@@ -173,7 +173,7 @@ mod tests {
 
     #[test]
     fn consistency_and_min_views() {
-        // 영상 A=1, B=2, C=3. A1–B1, B1–C1, C1–A2 (A 에 두 관측).
+        // Images A=1, B=2, C=3. A1–B1, B1–C1, C1–A2 (two observations in A).
         let positions = |dist: f64| {
             move |c: &Correspondence| -> Option<Vec2> {
                 Some(match (c.image_id, c.point2d_idx) {
@@ -204,7 +204,7 @@ mod tests {
             vec![c(1, 3), c(2, 3), c(3, 3), c(4, 3)],
         ];
         let o = TrackOptions { max_num_tracks: 2, ..Default::default() };
-        // 길이 5 → 길이 4 중 id 큰 것(3) 먼저.
+        // Length 5, then among length 4 the larger id (3) first.
         assert_eq!(select_tracks(&tracks, &o), vec![1, 3]);
         assert_eq!(select_tracks(&tracks, &TrackOptions::default()), vec![1, 3, 2, 0]);
     }

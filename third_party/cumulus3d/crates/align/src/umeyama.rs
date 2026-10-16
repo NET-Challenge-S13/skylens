@@ -29,22 +29,22 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! Umeyama Sim3 와 견고 추정.
+//! Umeyama Sim3 and robust estimation.
 
 use cumulus3d_core::ransac::{lo_ransac, Estimator, RansacParams, RansacReport};
 use cumulus3d_core::{Mat3, Mat3x4, Sim3, Vec3};
 use nalgebra::Matrix3xX;
 
-/// 퇴화 검사 방식.
+/// Degeneracy test method.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum RankCheck {
-    /// 기본 동작: 중심화하지 않은 3×n 좌표 행렬의 계수 < 3 이면 거부
-    /// (원점을 지나는 평면 위 점들도 거부될 수 있음).
+    /// Default behavior: reject if the rank of the uncentered 3×n coordinate matrix is < 3
+    /// (points on a plane through the origin may also be rejected).
     #[default]
     Uncentered,
-    /// 개선: 중심화한 좌표의 계수 < 2 이면 거부(공선·한 점 배치만 거부).
+    /// Improved: reject if the rank of the centered coordinates is < 2 (rejects only collinear or single-point configurations).
     Centered,
-    /// 검사 안 함(SVD 해만 확인).
+    /// No test (only checks the SVD solution).
     None,
 }
 
@@ -58,7 +58,7 @@ fn numerical_rank(m: &Matrix3xX<f64>) -> usize {
     if max <= 0.0 {
         return 0;
     }
-    // 설계 결정: 계수 판정 임계. 표준 수치 계수 기준 σ > σ_max·ε·max(3, n) 을 쓴다.
+    // Design decision: rank decision threshold. Uses the standard numerical rank criterion σ > σ_max·ε·max(3, n).
     let tol = max * f64::EPSILON * (n.max(3) as f64);
     sv.iter().filter(|s| **s > tol).count()
 }
@@ -75,8 +75,8 @@ fn passes_rank(pts: &[Vec3], check: RankCheck) -> bool {
     }
 }
 
-/// Umeyama 해법(가중치 없음). `dst ≈ s R src + t` 인 Sim3(new_from_old = src_to_dst).
-/// `estimate_scale = false` 면 s = 1. 점이 3개 미만이거나 해가 NaN/퇴화면 None.
+/// Umeyama solver (unweighted). Sim3 with `dst ≈ s R src + t` (new_from_old = src_to_dst).
+/// s = 1 if `estimate_scale = false`. None if there are fewer than 3 points or the solution is NaN/degenerate.
 pub fn umeyama(src: &[Vec3], dst: &[Vec3], estimate_scale: bool) -> Option<Sim3> {
     let n = src.len();
     if n < 3 || n != dst.len() {
@@ -94,7 +94,7 @@ pub fn umeyama(src: &[Vec3], dst: &[Vec3], estimate_scale: bool) -> Option<Sim3>
     }
     var_x *= inv_n;
     cov *= inv_n;
-    // nalgebra 3×3 SVD 는 겹친 특이값에서 틀릴 수 있어 core 의 단측 야코비 SVD 를 쓴다.
+    // The nalgebra 3×3 SVD can be wrong for repeated singular values, so the one-sided Jacobi SVD from core is used.
     let (u, d, v) = cumulus3d_core::linalg::svd3(&cov)?;
     let vt = v.transpose();
     let mut s_diag = Vec3::new(1.0, 1.0, 1.0);
@@ -117,14 +117,14 @@ pub fn umeyama(src: &[Vec3], dst: &[Vec3], estimate_scale: bool) -> Option<Sim3>
     if m.iter().any(|v| !v.is_finite()) || scale <= 0.0 {
         return None;
     }
-    // [sR|t] 행렬에서 Sim3 로 변환(s = 첫 열 노름, 쿼터니언 정규화).
+    // Convert the [sR|t] matrix to a Sim3 (s = norm of the first column, normalize the quaternion).
     Some(Sim3::from_matrix(&m))
 }
 
-/// RANSAC 용 Sim3 추정기(최소 3쌍, 잔차 = ‖y − T x‖²).
+/// Sim3 estimator for RANSAC (at least 3 pairs, residual = ‖y − T x‖²).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Sim3Estimator {
-    /// 최소 표본 퇴화 판정 방식.
+    /// Minimal-sample degeneracy test method.
     pub rank_check: RankCheck,
 }
 
@@ -150,22 +150,22 @@ impl Estimator for Sim3Estimator {
     }
 }
 
-/// LO-RANSAC 견고 Sim3 (src → dst). `opts.max_error` 는 거리 임계(제곱 전).
+/// LO-RANSAC robust Sim3 (src → dst). `opts.max_error` is the distance threshold (before squaring).
 pub fn estimate_sim3_ransac(src: &[Vec3], dst: &[Vec3], opts: &RansacParams, rank_check: RankCheck) -> RansacReport<Sim3> {
     let est = Sim3Estimator { rank_check };
     lo_ransac(&est, &est, opts, src, dst)
 }
 
-/// 견고 Umeyama(사용자 후처리) 옵션.
+/// Robust Umeyama (user post-processing) options.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RobustUmeyamaOptions {
-    /// 재적합 반복 수.
+    /// Number of refit iterations.
     pub iterations: usize,
-    /// 임계 = `max(factor · median(r[keep]), min_threshold)`.
+    /// Threshold = `max(factor · median(r[keep]), min_threshold)`.
     pub factor: f64,
-    /// 인라이어 임계의 하한(거리).
+    /// Lower bound of the inlier threshold (distance).
     pub min_threshold: f64,
-    /// 스케일 추정 여부(거짓이면 강체 변환).
+    /// Whether to estimate scale (if false, a rigid transform).
     pub estimate_scale: bool,
 }
 
@@ -175,22 +175,22 @@ impl Default for RobustUmeyamaOptions {
     }
 }
 
-/// 견고 Umeyama 결과.
+/// Robust Umeyama result.
 #[derive(Clone, Debug)]
 pub struct RobustUmeyamaResult {
     /// src_to_dst.
     pub sim3: Sim3,
-    /// 최종 인라이어의 잔차(거리) 중앙값.
+    /// Median of the residuals (distances) of the final inliers.
     pub median_residual: f64,
-    /// 최종 인라이어 수.
+    /// Number of final inliers.
     pub num_inliers: usize,
-    /// 쌍별 인라이어 여부.
+    /// Per-pair inlier flags.
     pub inlier_mask: Vec<bool>,
-    /// 모든 쌍의 최종 잔차(거리).
+    /// Final residuals (distances) of all pairs.
     pub residuals: Vec<f64>,
 }
 
-/// 중앙값(짝수 개면 가운데 둘의 평균). 빈 입력은 NaN.
+/// Median (mean of the middle two for an even count). NaN for empty input.
 pub(crate) fn median(v: &mut [f64]) -> f64 {
     let n = v.len();
     if n == 0 {
@@ -204,8 +204,8 @@ pub(crate) fn median(v: &mut [f64]) -> f64 {
     }
 }
 
-/// 반복 재적합: 매 회 keep 으로 Umeyama → 전체 잔차 r → `keep = r < max(factor·median(r[keep]), min_threshold)`.
-/// 반환 Sim3 는 마지막 적합, 인라이어·중앙값은 마지막 갱신된 keep 기준.
+/// Iterative refit: each round Umeyama on keep, then all residuals r, then `keep = r < max(factor·median(r[keep]), min_threshold)`.
+/// The returned Sim3 is the last fit; inliers and median are based on the last updated keep.
 pub fn robust_umeyama(src: &[Vec3], dst: &[Vec3], opts: &RobustUmeyamaOptions) -> Option<RobustUmeyamaResult> {
     let n = src.len();
     if n < 3 || n != dst.len() {
@@ -224,7 +224,7 @@ pub fn robust_umeyama(src: &[Vec3], dst: &[Vec3], opts: &RobustUmeyamaOptions) -
                 ys.push(dst[i]);
             }
         }
-        // 설계 결정: 인라이어가 3개 미만으로 줄면 직전 적합을 유지하고 멈춘다.
+        // Design decision: if inliers drop below 3, keep the previous fit and stop.
         let Some(sim) = umeyama(&xs, &ys, opts.estimate_scale) else { break };
         let r: Vec<f64> = src.iter().zip(dst).map(|(a, b)| (b - sim.transform_point(a)).norm()).collect();
         let mut rk: Vec<f64> = r.iter().zip(&keep).filter(|(_, k)| **k).map(|(v, _)| *v).collect();
@@ -294,7 +294,7 @@ pub(crate) mod tests {
 
     #[test]
     fn umeyama_isotropic_points() {
-        // 정팔면체 꼭짓점: 공분산 특이값이 셋 다 같다(nalgebra 3×3 SVD 가 틀리던 경우).
+        // Octahedron vertices: all three covariance singular values are equal (the case where the nalgebra 3×3 SVD was wrong).
         let mut rng = cumulus3d_core::ransac::make_rng(Some(7));
         let src: Vec<Vec3> = [Vec3::x(), -Vec3::x(), Vec3::y(), -Vec3::y(), Vec3::z(), -Vec3::z()].into();
         for _ in 0..50 {
@@ -306,7 +306,7 @@ pub(crate) mod tests {
 
     #[test]
     fn umeyama_reflection_gives_rotation() {
-        // 타깃이 거울상: 최적 해는 반사가 아닌 회전이어야 한다.
+        // Target is a mirror image: the optimal solution must be a rotation, not a reflection.
         let mut rng = cumulus3d_core::ransac::make_rng(Some(2));
         let src: Vec<Vec3> = (0..10).map(|_| rand_vec(&mut rng, 10.0)).collect();
         let dst: Vec<Vec3> = src.iter().map(|p| Vec3::new(p.x, p.y, -p.z)).collect();
@@ -317,7 +317,7 @@ pub(crate) mod tests {
 
     #[test]
     fn rank_checks() {
-        // 원점을 지나는 평면(z=0) 위 점: 비중심화 판정은 거부, 중심화 판정은 통과.
+        // Points on a plane through the origin (z=0): the uncentered test rejects, the centered test passes.
         let p = vec![Vec3::new(1.0, 0.0, 0.0), Vec3::new(0.0, 1.0, 0.0), Vec3::new(1.0, 1.0, 0.0)];
         assert!(!passes_rank(&p, RankCheck::Uncentered));
         assert!(passes_rank(&p, RankCheck::Centered));
@@ -327,7 +327,7 @@ pub(crate) mod tests {
         assert!(!passes_rank(&line, RankCheck::Centered));
     }
 
-    /// 이상치 30% 합성: LO-RANSAC 과 견고 Umeyama 모두 원래 Sim3 를 복원.
+    /// 30% synthetic outliers: both LO-RANSAC and robust Umeyama recover the original Sim3.
     #[test]
     fn sim3_recovery_with_outliers() {
         let mut rng = cumulus3d_core::ransac::make_rng(Some(3));

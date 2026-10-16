@@ -44,10 +44,10 @@
 //! 다른 스레드의 호출을 장치 대기열이 빌 때까지 세운다(450ms). 데모에서 같은 일을 한 것은 조밀화가 앞선 커널을
 //! 기다리며 일반 메모리로 내려 받는 `cuMemcpyDtoHAsync` 였다(`device::SyncedCopy` 참조).
 
+use cudarc::driver::{CudaContext, LaunchConfig, PushKernelArg};
 use cumulus3d_core::{Camera, CameraModelKind, Rigid3, Vec2, Vec3};
 use cumulus3d_cuda::CudaSparse;
 use cumulus3d_sfm::ObsQuery;
-use cudarc::driver::{CudaContext, LaunchConfig, PushKernelArg};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -62,7 +62,8 @@ extern "C" __global__ void busy(float* out, long long spins) {
 
 fn probe(sp: &CudaSparse, label: &str, rounds: usize) {
     let cams = vec![Camera::new(0, CameraModelKind::Pinhole, 1920, 1080, vec![1500.0, 1500.0, 960.0, 540.0]).expect("카메라")];
-    let poses: Vec<Rigid3> = (0..30).map(|k| Rigid3::from_rotation_matrix(&cumulus3d_core::Mat3::identity(), Vec3::new(k as f64 * 0.1, 0.0, 10.0))).collect();
+    let poses: Vec<Rigid3> =
+        (0..30).map(|k| Rigid3::from_rotation_matrix(&cumulus3d_core::Mat3::identity(), Vec3::new(k as f64 * 0.1, 0.0, 10.0))).collect();
     let queries: Vec<ObsQuery> = (0..200_000u32)
         .map(|i| ObsQuery {
             camera: 0,

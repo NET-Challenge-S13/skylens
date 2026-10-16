@@ -44,9 +44,11 @@ use crate::utils::serving_schemas::{
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// gRPC frame sets carry encoded camera images; the tonic default (4 MiB) is
-/// smaller than one set from three cameras.
-const MAX_GRPC_MESSAGE: usize = 64 * 1024 * 1024;
+/// gRPC frame sets carry encoded camera images (the tonic default, 4 MiB, is
+/// smaller than one set from three cameras), and a point slot chunk carries one
+/// live diff stream event (about 15 MB at the default live stride, about 90 MB
+/// with every point). The same limit as the core's receive limit.
+const MAX_GRPC_MESSAGE: usize = 256 * 1024 * 1024;
 
 // ---------------------------------------------------------------------------
 // Shared state and job submission (used by REST and gRPC alike)
@@ -455,6 +457,8 @@ pub fn build_engine(settings: &Settings) -> anyhow::Result<Engine> {
             zone_overlap: settings.zone_overlap,
             work_dir: settings.work_dir.clone(),
             gpu,
+            stable_display: settings.stable_display,
+            live_stride: settings.live_stride,
         },
         detector,
     )

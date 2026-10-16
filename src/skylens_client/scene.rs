@@ -1,9 +1,11 @@
 //! The main 3D view (legacy `StatusViewer`), mounted on the legacy `canvas#status-view`.
 //!
 //! Draws only what has arrived: one pointblitz scene per reconstruction segment with its arrival
-//! fade, the deltamesh blocks under the legacy scene's warm ambient and key light, and the
-//! detection markers once their segment's final level is in. Background `#0d0f14` with distance
-//! fog in the same colour, re-derived from the follow distance as the reconstruction grows.
+//! fade (or, for the point slot stream of stable display, one slot scene drawn opaque: its points
+//! appear as each event lands, without a per-segment fade), the deltamesh blocks under the legacy
+//! scene's warm ambient and key light, and the detection markers once their segment's final
+//! level is in. Background `#0d0f14` with distance fog in the same colour, re-derived from the
+//! follow distance as the reconstruction grows.
 //!
 //! Camera: the operator orbits with damping; while they drag and for 3.5 s after, the automatic
 //! camera waits. Otherwise the camera eases (`1 - exp(-2.5 dt)`) toward the focused detection
@@ -168,8 +170,9 @@ impl ViewScreen for StatusScene {
         let mut board = board_rc.borrow_mut();
         board.time += info.dt;
 
-        // Points: one scene per segment, faded in on arrival.
+        // Points: one scene per segment, faded in on arrival; the slot stream as one slot scene.
         gpu.sync_segments(&board.store, 0.0);
+        gpu.sync_slots(&board.store);
         for (seg, level) in board.store.levels() {
             self.fade.note_arrival(*seg, *level);
         }

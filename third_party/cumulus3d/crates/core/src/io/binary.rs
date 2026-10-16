@@ -25,7 +25,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 리틀 엔디언 이진 읽기/쓰기 도우미.
+//! Little-endian binary read/write helpers.
 
 use crate::error::{Error, Result};
 use std::io::{Read, Write};
@@ -95,7 +95,7 @@ pub(crate) trait ReadLe: Read {
         }
         Ok(a)
     }
-    /// 0 바이트로 끝나는 문자열.
+    /// String terminated by a 0 byte.
     fn get_cstring(&mut self) -> Result<String> {
         let mut v = Vec::new();
         loop {
@@ -107,7 +107,7 @@ pub(crate) trait ReadLe: Read {
         }
         String::from_utf8(v).map_err(|_| Error::Format("UTF-8 이 아닌 이름".into()))
     }
-    /// 길이 접두(u64) 바이트열.
+    /// Length-prefixed (u64) byte sequence.
     fn get_vec_u8(&mut self, n: usize) -> Result<Vec<u8>> {
         let mut v = vec![0u8; n];
         self.read_exact(&mut v)?;
@@ -116,7 +116,7 @@ pub(crate) trait ReadLe: Read {
 }
 impl<R: Read + ?Sized> ReadLe for R {}
 
-/// 손상 파일에서 거대한 할당을 막기 위한 상한 검사.
+/// Upper-bound check to prevent huge allocations from corrupted files.
 pub(crate) fn check_count(n: u64, what: &str) -> Result<usize> {
     if n > (1u64 << 40) {
         return Err(Error::Format(format!("{what} 개수가 비정상적으로 큼: {n}")));

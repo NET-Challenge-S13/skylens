@@ -29,40 +29,40 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 모델 통계(model_analyzer 하위 명령 출력).
+//! Model statistics (output of the model_analyzer subcommand).
 
 use crate::io::fmt::format_g;
 use crate::reconstruction::Reconstruction;
 
-/// model_analyzer 의 모든 항목.
+/// All items of model_analyzer.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ModelStats {
-    /// rig 수.
+    /// Number of rigs.
     pub num_rigs: usize,
-    /// 카메라 수.
+    /// Number of cameras.
     pub num_cameras: usize,
-    /// 프레임 수.
+    /// Number of frames.
     pub num_frames: usize,
-    /// 등록된 프레임 수.
+    /// Number of registered frames.
     pub registered_frame_count: usize,
-    /// 영상 수.
+    /// Number of images.
     pub num_images: usize,
-    /// 등록된 영상 수.
+    /// Number of registered images.
     pub registered_image_count: usize,
-    /// 3D 점 수.
+    /// Number of 3D points.
     pub num_points3d: usize,
-    /// 등록 영상들의 "3D 점이 연결된 2D 점 수" 합.
+    /// Sum over registered images of "number of 2D points linked to a 3D point".
     pub num_observations: usize,
-    /// 평균 트랙 길이.
+    /// Mean track length.
     pub mean_track_length: f64,
-    /// 등록 영상당 평균 관측 수.
+    /// Mean number of observations per registered image.
     pub mean_observations_per_image: f64,
-    /// 저장된 점 error(−1 제외) 평균. 재계산하지 않음.
+    /// Mean of the stored point errors (excluding -1). Not recomputed.
     pub mean_reprojection_error: f64,
 }
 
 impl ModelStats {
-    /// 재구성에서 통계를 계산한다.
+    /// Computes the statistics from a reconstruction.
     pub fn compute(rec: &Reconstruction) -> Self {
         Self {
             num_rigs: rec.num_rigs(),
@@ -79,7 +79,7 @@ impl ModelStats {
         }
     }
 
-    /// 고정된 항목 순서·문구(로그 접두 제외). 정수 %d, 실수 %f.
+    /// Fixed item order and wording (log prefix excluded). Integers use %d, reals use %f.
     pub fn lines(&self) -> Vec<String> {
         vec![
             format!("Rigs: {}", self.num_rigs),
@@ -97,13 +97,13 @@ impl ModelStats {
     }
 }
 
-/// model_analyzer 출력 줄. verbose 이면 카메라·등록 영상 목록을 덧붙인다.
+/// model_analyzer output lines. If verbose, the camera and registered-image lists are appended.
 pub fn analyzer_lines(rec: &Reconstruction, verbose: bool) -> Vec<String> {
     let mut out = ModelStats::compute(rec).lines();
     if verbose {
         out.push("--- Cameras ---".into());
         for c in rec.cameras().values() {
-            // 설계 결정: 파라미터 숫자 서식은 유효숫자 6자리 %g.
+            // Design decision: parameter numbers are formatted with 6 significant digits (%g).
             let params = c.params.iter().map(|p| format_g(*p, 6)).collect::<Vec<_>>().join(", ");
             out.push(format!(" - Camera Id: {}, Model Name: {}, Params: {}", c.camera_id, c.model.name(), params));
         }

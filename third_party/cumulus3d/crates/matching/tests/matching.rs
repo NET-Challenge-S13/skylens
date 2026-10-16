@@ -25,7 +25,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 기술자 매칭·짝 목록·저장소 파이프라인 검증.
+//! Verification of descriptor matching, pair list, and store pipeline.
 
 use cumulus3d_core::{
     images_of_pair, pair_id_of, Camera, CameraModelKind, Descriptors, FeatureMatch, FeatureStore, Keypoint, TwoViewGeometryConfig as C,
@@ -46,7 +46,7 @@ fn quantize(v: &[f64]) -> [u8; 128] {
 }
 
 fn rand_desc(r: &mut Pcg64) -> Vec<f64> {
-    // SIFT 처럼 음이 아니고 성긴 벡터.
+    // Non-negative sparse vector like SIFT.
     (0..128).map(|_| if r.random_range(0.0..1.0) < 0.4 { r.random_range(0.0..1.0f64).powi(2) } else { 0.0 }).collect()
 }
 
@@ -76,7 +76,7 @@ fn descriptor_matching() {
     for b in &base {
         d1.push(&quantize(b));
     }
-    // 영상2: 무작위 200 + 잡음 복제 99(영상1 의 3k) + 영상1[21] 의 동일 사본 2개.
+    // Image 2: 200 random + 99 noisy copies (3k of image 1) + 2 identical copies of image 1[21].
     let mut d2 = Descriptors::new();
     let mut expected = Vec::new();
     let mut idx2 = 0u32;
@@ -87,7 +87,7 @@ fn descriptor_matching() {
     for k in 0..100u32 {
         let src = (k * 3) as usize;
         if src == 21 {
-            continue; // 아래에서 동일 사본 2개로 사용
+            continue; // used as the 2 identical copies below
         }
         d2.push(&quantize(&perturb(&mut r, &base[src], 0.01)));
         expected.push(FeatureMatch::new(src as u32, idx2));
@@ -103,26 +103,26 @@ fn descriptor_matching() {
     let m = cpu.match_descriptors(&d1, &d2, &opts, 8192);
     assert_eq!(m, expected, "복제 쌍만 정확히 매칭, 동일 사본 2개는 비율 검사로 거부");
 
-    // 타일 커널 = 순차 기준 구현(비트 일치).
+    // Tile kernel = sequential reference implementation (bit-identical).
     let (n1, n2) = (d1.len(), d2.len());
     let (rc, cc) = cpu.top2(d1.as_slice(), n1, d2.as_slice(), n2);
     let (rn, cn) = top2_naive(d1.as_slice(), n1, d2.as_slice(), n2);
     assert_eq!(rc, rn);
     assert_eq!(cc, cn);
-    // 작은 타일·홀수 블록에서도 동일.
+    // Same for small tiles and odd blocks.
     let odd = CpuMatcher { row_block: 7, col_tile: 5 };
     let (ro, co) = odd.top2(d1.as_slice(), n1, d2.as_slice(), n2);
     assert_eq!(ro, rn);
     assert_eq!(co, cn);
 
-    // GPU 규칙 vs CPU 무차별 규칙: 경계값 없는 자료에서 완전 일치.
+    // GPU rule vs CPU brute-force rule: exact match on data without boundary values.
     let cpu_rule = DescriptorMatchOptions { rule: AcceptRule::CpuBruteForce, ..Default::default() };
     assert_eq!(apply_tests(&rn, &cn, &opts, 8192), apply_tests(&rn, &cn, &cpu_rule, 8192));
 
-    // 교차 검사 끔 → 매칭이 같거나 많다.
+    // Cross-check off -> the number of matches is the same or larger.
     let no_cc = DescriptorMatchOptions { cross_check: false, ..Default::default() };
     assert!(cpu.match_descriptors(&d1, &d2, &no_cc, 8192).len() >= m.len());
-    // 최대 매칭 수 자르기(앞쪽 기술자만 사용 + 출력 자르기).
+    // Truncation of the maximum match count (use only the leading descriptors + truncate the output).
     let few = cpu.match_descriptors(&d1, &d2, &opts, 250);
     assert!(few.len() <= 250);
     assert!(few.iter().all(|f| f.idx1 < 250 && f.idx2 < 250));
@@ -133,8 +133,8 @@ fn ratio_boundary_rules() {
     use cumulus3d_matching::Top2;
     let opts = DescriptorMatchOptions { cross_check: false, ..Default::default() };
     let cpu_rule = DescriptorMatchOptions { rule: AcceptRule::CpuBruteForce, ..opts.clone() };
-    // θ1 = 0.7 정확히 근처: GPU (<) 와 CPU (≤) 가 다를 수 있는 경계는 내적 정수라 정확히 맞추기 어려움 →
-    // 동일 내적(θ1 = θ2)은 둘 다 거부.
+    // Near exactly θ1 = 0.7: the boundary where GPU (<) and CPU (≤) may differ is hard to hit exactly since dot products are integers ->
+    // identical dot products (θ1 = θ2) are rejected by both.
     let t = Top2 { best: 250000, idx: 0, second: 250000 };
     assert!(apply_tests(&[t], &[], &opts, 10).is_empty());
     assert!(apply_tests(&[t], &[], &cpu_rule, 10).is_empty());
@@ -153,7 +153,7 @@ fn pair_list_parser() {
     assert!(l.missing_names.iter().any(|n| n.contains('\t')));
 }
 
-/// 저장소에 영상 3장 + 공통 3D 점의 키포인트/기술자.
+/// 3 images in the store + keypoints/descriptors of common 3D points.
 fn build_store() -> FeatureStore {
     let store = FeatureStore::new();
     let mut cam = Camera::new(0, CameraModelKind::OpenCv, 2000, 1500, vec![1000.0, 1000.0, 1000.0, 750.0, 0.0, 0.0, 0.0, 0.0]).unwrap();
@@ -168,7 +168,7 @@ fn build_store() -> FeatureStore {
         let id = store.add_image(&format!("cam/{k}.jpg"), cid).unwrap();
         let mut kps = Vec::new();
         let mut d = Descriptors::new();
-        // 영상마다 순서를 섞어 인덱스가 다르게.
+        // Shuffle the order per image so the indices differ.
         let mut order: Vec<usize> = (0..800).collect();
         for i in (1..800).rev() {
             let j = r.random_range(0..=i);
@@ -183,7 +183,7 @@ fn build_store() -> FeatureStore {
             kps.push(Keypoint::new((p.x + 0.3 * r.random_range(-1.0..1.0)) as f32, (p.y + 0.3 * r.random_range(-1.0..1.0)) as f32));
             d.push(&quantize(&perturb(&mut r, &descs[i], 0.01)));
         }
-        // 잡음 특징 200개.
+        // 200 noise features.
         for _ in 0..200 {
             kps.push(Keypoint::new(r.random_range(0.0..2000.0f32), r.random_range(0.0..1500.0f32)));
             d.push(&quantize(&rand_desc(&mut r)));
@@ -201,34 +201,34 @@ fn store_pipeline_incremental() {
     let mut opts = PairMatchingOptions::default();
     opts.geometry.ransac.random_seed = Some(3);
     let cpu = CpuMatcher::default();
-    // 첫 위치: (1,2). id1 > id2 방향으로도 넣는다: (3,1).
+    // First position: (1,2). Also insert in the id1 > id2 direction: (3,1).
     let s = match_pairs(&store, &[(1, 2), (2, 1), (3, 1)], &opts, &cpu).unwrap();
     assert_eq!(s.num_matched, 2);
     assert_eq!(s.num_valid_geometries, 2);
     let g12 = store.get_two_view(1, 2).unwrap();
     assert_eq!(g12.config, C::Calibrated);
     assert!(g12.inlier_matches.len() > 300);
-    // (3,1) 은 작은 id → 큰 id 로 반전 저장: 읽을 때 (1,3) 방향은 열 교환, F 전치.
+    // (3,1) is stored reversed as small id -> large id: when reading, the (1,3) direction swaps columns and transposes F.
     let g31 = store.get_two_view(3, 1).unwrap();
     let g13 = store.get_two_view(1, 3).unwrap();
     assert_eq!(g13.inlier_matches[0], g31.inlier_matches[0].swapped());
     assert!((g13.f.unwrap() - g31.f.unwrap().transpose()).norm() < 1e-12);
-    // 원시 매칭도 같은 규칙.
+    // Raw matches follow the same rule.
     let m31 = store.read_matches(3, 1).unwrap();
     let m13 = store.read_matches(1, 3).unwrap();
     assert_eq!(m13[0], m31[0].swapped());
 
-    // 누적 목록 재투입: 기존 짝은 건너뜀, 새 짝 (2,3) 만 처리.
+    // Re-feeding the accumulated list: existing pairs are skipped, only the new pair (2,3) is processed.
     let s = match_pairs(&store, &[(1, 2), (3, 1), (2, 3)], &opts, &cpu).unwrap();
     assert_eq!(s.num_skipped_existing, 2);
     assert_eq!(s.num_matched, 1);
 
-    // 규칙 6: 원시 매칭만 있음 → 검증만.
+    // Rule 6: only raw matches exist -> verification only.
     store.remove_two_view(1, 2);
     let s = match_pairs(&store, &[(1, 2)], &opts, &cpu).unwrap();
     assert_eq!(s.num_verified_only, 1);
     assert!(store.contains_two_view(1, 2));
-    // 규칙 5: 기하만 있음 → 다시 매칭.
+    // Rule 5: only geometry exists -> match again.
     store.delete_matches(1, 2);
     let s = match_pairs(&store, &[(1, 2)], &opts, &cpu).unwrap();
     assert_eq!(s.num_matched, 1);
@@ -252,7 +252,7 @@ fn pair_list_file_roundtrip() {
 
 #[test]
 fn few_matches_store_empty() {
-    // 매칭 15 미만이면 원시 매칭은 빈 목록, 기하는 UNDEFINED 로 "항상 한 줄" 기록.
+    // If matches are below 15, the raw matches are an empty list and geometry is UNDEFINED, recorded as "always one row".
     let store = FeatureStore::new();
     let mut cam = Camera::new(0, CameraModelKind::Pinhole, 100, 100, vec![100.0, 100.0, 50.0, 50.0]).unwrap();
     cam.camera_id = cumulus3d_core::INVALID_CAMERA_ID;

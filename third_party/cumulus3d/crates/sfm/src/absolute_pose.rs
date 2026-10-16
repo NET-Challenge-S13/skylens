@@ -29,17 +29,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 절대 자세: P3P 최소해법, EPnP 비최소해법, LO-RANSAC.
+//! Absolute pose: P3P minimal solver, EPnP non-minimal solver, LO-RANSAC.
 
 use crate::math::{adjugate3, kabsch, solve_cubic_real, solve_quadratic_real};
 use cumulus3d_core::ransac::{lo_ransac, BatchedRansac, Estimator, RandomSubsetSampler, RansacParams, RansacReport, Support};
 use cumulus3d_core::{Camera, Mat3, Rigid3, Vec2, Vec3};
 use nalgebra::{Matrix3, SMatrix, SVector, SymmetricEigen, SVD};
 
-/// P3P. 단위 광선 3개와 월드점 3개 → 최대 4개 world_to_cam.
+/// P3P. 3 unit rays and 3 world points give up to 4 world_to_cam poses.
 ///
-/// 거리 보존 이차식 3개에서 두 퇴화 원뿔 조합 D1 + γ D2 의 행렬식 3차식을 풀고,
-/// 퇴화 원뿔을 직선 쌍으로 분해해 깊이 λ 를 구한다(Lambda Twist 계열). 이후 가우스-뉴턴 보정.
+/// Solves the cubic determinant of the degenerate-conic pencil D1 + γ D2 from the 3 distance-preserving quadratic equations,
+/// decomposes the degenerate conic into a line pair to get the depths λ (Lambda Twist family). Then a Gauss-Newton refinement.
 pub fn p3p(rays: &[Vec3; 3], points: &[Vec3; 3]) -> Vec<Rigid3> {
     let y = rays;
     let x = points;
@@ -69,7 +69,7 @@ pub fn p3p(rays: &[Vec3; 3], points: &[Vec3; 3]) -> Vec<Rigid3> {
     let c2 = 0.5 * (fp + fm) - c0;
     let c1 = 0.5 * (fp - fm) - c3;
     let mut gammas = solve_cubic_real(c3, c2, c1, c0);
-    // 큰 근부터(수치적으로 D1 의 기여가 작아지는 쪽) 시도.
+    // Try from the largest root (the side where the contribution of D1 becomes numerically smaller).
     gammas.sort_by(|a, b| b.abs().total_cmp(&a.abs()));
 
     let mut sols: Vec<[f64; 3]> = Vec::new();
@@ -89,7 +89,7 @@ pub fn p3p(rays: &[Vec3; 3], points: &[Vec3; 3]) -> Vec<Rigid3> {
         }
         let before = sols.len();
         for l in lines {
-            // λ_k 를 나머지 둘로 표현: 가장 큰 계수 성분 k.
+            // Express λ_k with the other two: component k with the largest coefficient.
             let mut k = 0;
             for i in 1..3 {
                 if l[i].abs() > l[k].abs() {
@@ -128,7 +128,7 @@ pub fn p3p(rays: &[Vec3; 3], points: &[Vec3; 3]) -> Vec<Rigid3> {
                     continue;
                 }
                 let mut lam = [lam[0], lam[1], lam[2]];
-                // 가우스-뉴턴 보정.
+                // Gauss-Newton refinement.
                 for _ in 0..5 {
                     let r = eqs(&lam);
                     let j = Matrix3::new(
@@ -150,7 +150,7 @@ pub fn p3p(rays: &[Vec3; 3], points: &[Vec3; 3]) -> Vec<Rigid3> {
                     }
                     lam = nl;
                 }
-                // 중복 해 제거.
+                // Remove duplicate solutions.
                 if sols.iter().any(|s| (0..3).all(|i| (s[i] - lam[i]).abs() <= 1e-9 * (1.0 + lam[i].abs()))) {
                     continue;
                 }
@@ -172,7 +172,7 @@ pub fn p3p(rays: &[Vec3; 3], points: &[Vec3; 3]) -> Vec<Rigid3> {
     out
 }
 
-/// 계수 2 대칭 3×3 원뿔을 두 직선으로 분해(실수 직선이 아니면 빈 목록).
+/// Decomposes a rank-2 symmetric 3×3 conic into two lines (empty list if the lines are not real).
 fn split_degenerate_conic(c: &Matrix3<f64>) -> Vec<Vec3> {
     let b = adjugate3(c);
     let mut i = 0;
@@ -186,7 +186,7 @@ fn split_degenerate_conic(c: &Matrix3<f64>) -> Vec<Vec3> {
         let beta = (-b[(i, i)]).sqrt();
         b.column(i) / beta
     } else if b[(i, i)].abs() <= 1e-12 * scale {
-        // 이중 직선(교점 없음): 원뿔이 계수 1 → 그대로 분해.
+        // Double line (no intersection): the conic has rank 1, so decompose as is.
         Vec3::zeros()
     } else {
         return Vec::new();
@@ -211,14 +211,14 @@ fn split_degenerate_conic(c: &Matrix3<f64>) -> Vec<Vec3> {
     vec![g, h]
 }
 
-/// EPnP. 4점 이상. `camera` 가 주어지면 세 근사 중 픽셀 오차 합으로 선택,
-/// 없으면 각도 오차 합.
+/// EPnP. 4 or more points. If `camera` is given, picks among the three approximations by the sum of pixel errors,
+/// otherwise by the sum of angular errors.
 pub fn epnp(rays: &[Vec3], points: &[Vec3], camera: Option<&Camera>, points2d: Option<&[Vec2]>) -> Option<Rigid3> {
     let n = points.len();
     if n < 4 || rays.len() != n {
         return None;
     }
-    // 제어점.
+    // Control points.
     let c0 = points.iter().sum::<Vec3>() / n as f64;
     let mut cov = Mat3::zeros();
     for p in points {
@@ -243,7 +243,7 @@ pub fn epnp(rays: &[Vec3], points: &[Vec3], camera: Option<&Camera>, points2d: O
             [1.0 - a.x - a.y - a.z, a.x, a.y, a.z]
         })
         .collect();
-    // MᵀM (12×12) 누적: 점마다 [b]× Σ α_j c_j = 0.
+    // Accumulate MᵀM (12×12): per point [b]× Σ α_j c_j = 0.
     let mut mtm = SMatrix::<f64, 12, 12>::zeros();
     for (b, al) in rays.iter().zip(&alphas) {
         if b.norm_squared() < 0.5 {
@@ -259,7 +259,7 @@ pub fn epnp(rays: &[Vec3], points: &[Vec3], camera: Option<&Camera>, points2d: O
     let eig = SymmetricEigen::new(mtm);
     let mut order: Vec<usize> = (0..12).collect();
     order.sort_by(|&a, &b| eig.eigenvalues[a].total_cmp(&eig.eigenvalues[b]));
-    // v[0] = 최소 고유값.
+    // v[0] = smallest eigenvalue.
     let v: Vec<SVector<f64, 12>> = order[..4].iter().map(|&k| eig.eigenvectors.column(k).into_owned()).collect();
 
     // L (6×10), ρ (6).
@@ -395,7 +395,7 @@ fn gauss_newton_beta(l: &SMatrix<f64, 6, 10>, rho: &SVector<f64, 6>, beta: &mut 
             j[(i, 2)] = li(3) * b[0] + li(4) * b[1] + 2.0 * li(5) * b[2] + li(8) * b[3];
             j[(i, 3)] = li(6) * b[0] + li(7) * b[1] + li(8) * b[2] + 2.0 * li(9) * b[3];
         }
-        // J δ = r (최소제곱, QR).
+        // J δ = r (least squares, QR).
         let qr = j.qr();
         let qtr = qr.q().transpose() * r;
         let Some(d) = qr.r().solve_upper_triangular(&qtr) else { return };
@@ -424,12 +424,12 @@ fn pose_from_betas(v: &[SVector<f64, 12>], beta: &[f64; 4], alphas: &[[f64; 4]],
     Some(Rigid3::from_rotation_matrix(&r, t))
 }
 
-/// 2D-3D 대응 하나(RANSAC 자료).
+/// One 2D-3D correspondence (RANSAC data).
 #[derive(Clone, Debug)]
 pub struct Corr2D {
-    /// 픽셀 좌표.
+    /// Pixel coordinates.
     pub xy: Vec2,
-    /// 역투영 단위 광선(실패 시 영벡터).
+    /// Back-projected unit ray (zero vector on failure).
     pub ray: Vec3,
 }
 
@@ -484,22 +484,22 @@ impl Estimator for EPnPEstimator<'_> {
     }
 }
 
-/// 절대 자세 RANSAC 옵션.
+/// Absolute pose RANSAC options.
 #[derive(Clone, Debug)]
 pub struct AbsolutePoseOptions {
-    /// 최대 재투영 오차(픽셀).
+    /// Maximum reprojection error (pixels).
     pub max_error: f64,
-    /// 최소 인라이어 비율(동적 반복 횟수 계산용).
+    /// Minimum inlier ratio (for computing the dynamic iteration count).
     pub min_inlier_ratio: f64,
-    /// RANSAC 신뢰도(동적 반복 횟수 계산용).
+    /// RANSAC confidence (for computing the dynamic iteration count).
     pub confidence: f64,
-    /// 최소 반복 횟수.
+    /// Minimum number of iterations.
     pub min_trials: usize,
-    /// 최대 반복 횟수.
+    /// Maximum number of iterations.
     pub max_trials: usize,
-    /// 동적 반복 횟수에 곱하는 배율.
+    /// Multiplier applied to the dynamic iteration count.
     pub dyn_trials_factor: f64,
-    /// 난수 시드. `None` 이면 비결정적.
+    /// Random seed. `None` means nondeterministic.
     pub random_seed: Option<u64>,
 }
 
@@ -517,16 +517,16 @@ impl Default for AbsolutePoseOptions {
     }
 }
 
-/// 절대 자세 추정 결과.
+/// Absolute pose estimation result.
 #[derive(Clone, Debug)]
 pub struct AbsolutePoseResult {
-    /// 추정한 세계 → 카메라 자세.
+    /// Estimated world to camera pose.
     pub world_to_cam: Rigid3,
-    /// 입력 대응별 인라이어 여부.
+    /// Whether each input correspondence is an inlier.
     pub inlier_mask: Vec<bool>,
-    /// 인라이어 수.
+    /// Number of inliers.
     pub num_inliers: usize,
-    /// 수행한 RANSAC 반복 횟수.
+    /// Number of RANSAC iterations performed.
     pub num_trials: usize,
 }
 
@@ -557,7 +557,7 @@ fn pose_result(rep: RansacReport<Rigid3>) -> Option<AbsolutePoseResult> {
     Some(AbsolutePoseResult { world_to_cam: rep.model?, inlier_mask: rep.inlier_mask, num_inliers, num_trials: rep.num_trials })
 }
 
-/// P3P + EPnP LO-RANSAC (초점 고정 경로). 인라이어 < 3 이면 None.
+/// P3P + EPnP LO-RANSAC (fixed-focal path). None if inliers < 3.
 pub fn solve_abs_pose(camera: &Camera, points2d: &[Vec2], points3d: &[Vec3], opts: &AbsolutePoseOptions) -> Option<AbsolutePoseResult> {
     if points2d.len() != points3d.len() || points2d.len() < 3 {
         return None;
@@ -567,20 +567,20 @@ pub fn solve_abs_pose(camera: &Camera, points2d: &[Vec2], points3d: &[Vec3], opt
     pose_result(rep)
 }
 
-/// 절대 자세 가설 일괄 채점기(GPU 백엔드가 구현). 대응 자료는 채점기를 만들 때 올려 둔다.
+/// Bulk scorer of absolute pose hypotheses (implemented by the GPU backend). The correspondences are uploaded when it is built.
 pub trait PoseScorer {
-    /// 자세(world_to_cam)마다, 픽셀 재투영 제곱 오차(투영 실패면 f64::MAX)가 `max_residual` 이하인
-    /// 대응의 지지도. [`Support::measure`] 와 같은 값이어야 한다(잔차 합은 대응 순서대로).
+    /// For each pose (world_to_cam), the support of the correspondences whose squared pixel reprojection error (f64::MAX if
+    /// the projection fails) is at most `max_residual`. Must equal [`Support::measure`] (residuals summed in correspondence order).
     fn score(&mut self, poses: &[Rigid3], max_residual: f64) -> Result<Vec<Support>, String>;
 }
 
-/// 한 라운드의 최소 반복 수.
+/// Minimum number of iterations per round.
 const POSE_MIN_BATCH: usize = 16;
-/// 한 라운드의 최대 반복 수.
+/// Maximum number of iterations per round.
 const POSE_MAX_BATCH: usize = 256;
 
-/// [`solve_abs_pose`] 와 같되 가설 채점을 `scorer` 에 묶음으로 맡긴다(표본·해법·LO 는 같음).
-/// 채점 결과가 CPU 와 같으면 결과도 같다. 채점기 오류는 그대로 돌려준다.
+/// Like [`solve_abs_pose`], but hands hypothesis scoring to `scorer` in batches (sampling, solvers and LO are the same).
+/// If the scores equal the CPU ones, the result is the same. Scorer errors are returned as is.
 pub fn solve_abs_pose_scored(
     camera: &Camera,
     points2d: &[Vec2],
@@ -594,7 +594,8 @@ pub fn solve_abs_pose_scored(
     let corrs = correspondences(camera, points2d);
     let est = P3PEstimator { camera };
     let k = est.min_num_samples();
-    let mut r = BatchedRansac::new(est, Some(EPnPEstimator { camera }), RandomSubsetSampler::new(k), &ransac_params(opts), &corrs[..], points3d);
+    let mut r =
+        BatchedRansac::new(est, Some(EPnPEstimator { camera }), RandomSubsetSampler::new(k), &ransac_params(opts), &corrs[..], points3d);
     while !r.is_done() {
         r.propose(POSE_MIN_BATCH, POSE_MAX_BATCH);
         let s = if r.models().is_empty() { Vec::new() } else { scorer.score(r.models(), r.max_residual())? };
@@ -606,13 +607,13 @@ pub fn solve_abs_pose_scored(
     Ok(pose_result(r.finish()))
 }
 
-/// 절대 자세 RANSAC 백엔드(등록 단계). CPU 기본 구현은 [`CpuAbsPose`].
+/// Absolute pose RANSAC backend (registration stage). The default CPU implementation is [`CpuAbsPose`].
 pub trait AbsPoseBackend: Send + Sync {
-    /// [`solve_abs_pose`] 와 같은 규칙의 결과.
+    /// Result under the same rules as [`solve_abs_pose`].
     fn solve(&self, camera: &Camera, points2d: &[Vec2], points3d: &[Vec3], opts: &AbsolutePoseOptions) -> Option<AbsolutePoseResult>;
 }
 
-/// CPU 기본 구현([`solve_abs_pose`]).
+/// Default CPU implementation ([`solve_abs_pose`]).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct CpuAbsPose;
 
@@ -622,7 +623,7 @@ impl AbsPoseBackend for CpuAbsPose {
     }
 }
 
-/// CPU 채점기(대조·시험용): CPU 잔차와 [`Support::measure`].
+/// CPU scorer (for comparison and tests): CPU residuals and [`Support::measure`].
 pub struct CpuPoseScorer<'a> {
     camera: &'a Camera,
     corrs: Vec<Corr2D>,
@@ -630,7 +631,7 @@ pub struct CpuPoseScorer<'a> {
 }
 
 impl<'a> CpuPoseScorer<'a> {
-    /// 대응을 담아 만든다.
+    /// Builds it holding the correspondences.
     pub fn new(camera: &'a Camera, points2d: &[Vec2], points3d: &'a [Vec3]) -> Self {
         Self { camera, corrs: correspondences(camera, points2d), points3d }
     }
@@ -664,7 +665,7 @@ mod tests {
     }
 
     fn random_points(rng: &mut rand_pcg::Pcg64, pose: &Rigid3, n: usize) -> Vec<Vec3> {
-        // 카메라 앞 점 → 월드로.
+        // Points in front of the camera to world.
         let inv = pose.inverse();
         (0..n)
             .map(|_| {
@@ -772,9 +773,9 @@ mod tests {
             }
             let opts = AbsolutePoseOptions { random_seed: Some(trial), ..Default::default() };
             let Some(res) = solve_abs_pose(&cam, &p2, &p3, &opts) else { continue };
-            // 등록 경로에서는 RANSAC 뒤 비선형 정제(refine_abs_pose)가 따른다. 여기서는
-            // 그 대신 인라이어 전체 EPnP 로 다듬어 평가한다(LO 는 인라이어 수 우선이라
-            // 경계 이상치 1개를 품은 P3P 모델이 남을 수 있음).
+            // In the registration path a nonlinear refinement (refine_abs_pose) follows RANSAC. Here
+            // we instead polish with EPnP on all inliers for evaluation (LO prefers the inlier count,
+            // so a P3P model containing one boundary outlier may remain).
             let (ir, (ip2, ip3)): (Vec<Vec3>, (Vec<Vec2>, Vec<Vec3>)) =
                 (0..p2.len()).filter(|&i| res.inlier_mask[i]).map(|i| (cam.img_to_ray(&p2[i]).unwrap(), (p2[i], p3[i]))).unzip();
             let polished = epnp(&ir, &ip3, Some(&cam), Some(&ip2)).unwrap();

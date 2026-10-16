@@ -29,11 +29,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 깊이맵 융합: 이웃의 이웃으로 깊이 우선 확장하며 일치 픽셀을 모아 성분별 중앙값 점을 만든다.
+//! Depth map fusion: gathers agreeing pixels by depth-first expansion through neighbors of neighbors and builds per-component median
+//! points.
 //!
-//! 영상 순서: 첫 사용 영상에서 시작해, 끝낸 영상의 겹침 목록에서 처음 나오는 미완료 영상(없으면 색인이 가장 작은
-//! 미완료 영상)으로 넘어간다. 한 영상 안의 시작 픽셀은 행 띠 단위로 병렬 처리하며, "융합됨" 표시는 원자적으로
-//! 점유한다(먼저 점유한 확장이 픽셀을 가진다). `threads == 1` 이면 행 우선 순차 처리와 같다.
+//! Image order: start from the first used image, then move to the first unfinished image in the overlap list of the finished image (if
+//! none, the unfinished image with the smallest
+//! index). Start pixels within one image are processed in parallel by row bands, and the "fused" mark is
+//! taken atomically (the expansion that occupies a pixel first owns it). With `threads == 1` this equals row-major sequential processing.
 
 use crate::params::{FusionMode, FusionParams, FusionResidual};
 use crate::scene::DenseScene;
@@ -42,27 +44,38 @@ use rayon::prelude::*;
 use std::sync::atomic::{AtomicU32, AtomicU8, Ordering};
 use std::time::{Duration, Instant};
 
-/// 융합 입력: 뷰 크기의 깊이(0 = 무효)와 기준 카메라 좌표 법선.
+/// Identifying key of a fused point: `(image_id << 32) | (row << 16) | col`. (image_id, col, row) are the reference view that made the
+/// point and the
+/// integer pixel of its depth map (depth map resolution). For agreement fusion it is the pixel where a candidate starts as reference; for
+/// extended fusion it is the seed pixel that started the expansion.
+/// It is unique within a point cloud and the same when the same depth map is fused again (the same pixel between re-densifications = the
+/// same point).
+#[inline]
+pub fn point_key(image_id: u32, col: usize, row: usize) -> u64 {
+    ((image_id as u64) << 32) | ((row as u64 & 0xffff) << 16) | (col as u64 & 0xffff)
+}
+
+/// Fusion input: per-view-size depth (0 = invalid) and normals in reference camera coordinates.
 #[derive(Clone, Copy, Debug)]
 pub struct FusionInput<'a> {
-    /// 뷰 크기의 깊이(0 = 무효).
+    /// Depth of view size (0 = invalid).
     pub depth: &'a [f32],
-    /// 기준 카메라 좌표 법선.
+    /// Normal in the reference camera coordinates.
     pub normal: &'a [[f32; 3]],
-    /// 픽셀별 최종 정합 비용(있으면 역분산 가중에 쓴다).
+    /// Per-pixel final registration cost (used for inverse-variance weighting if present).
     pub cost: Option<&'a [f32]>,
-    /// 뷰의 대표 기준선(원천 뷰와의 중심 거리 중앙값). 0 이면 가중 없음.
+    /// Representative baseline of the view (median center distance to source views). 0 means no weighting.
     pub baseline: f64,
 }
 
 impl<'a> FusionInput<'a> {
-    /// 가중 정보 없는 입력.
+    /// Input without weighting information.
     pub fn plain(depth: &'a [f32], normal: &'a [[f32; 3]]) -> Self {
         Self { depth, normal, cost: None, baseline: 0.0 }
     }
 }
 
-/// 스테레오 오차 전파 깊이 분산의 역수: σ_d = d²·σ_px/(f·b), σ_px = σ0 + s·비용.
+/// Inverse of the depth variance from stereo error propagation: σ_d = d²·σ_px/(f·b), σ_px = σ0 + s·cost.
 #[inline]
 fn inv_var(p: &FusionParams, inp: &FusionInput<'_>, f: f64, pix: usize, d: f64) -> f64 {
     match (p.inverse_variance, inp.cost) {
@@ -75,27 +88,33 @@ fn inv_var(p: &FusionParams, inp: &FusionInput<'_>, f: f64, pix: usize, d: f64) 
     }
 }
 
-/// 융합 결과(점, 점마다 기여 뷰 색인 오름차순).
+/// Fusion result (points, with contributing view indices per point in ascending order).
 #[derive(Clone, Debug, Default)]
 pub struct FusionOutput {
-    /// 융합된 점군.
+    /// Fused point cloud.
     pub cloud: PointCloud,
-    /// 점마다 기여 뷰 색인(오름차순).
+    /// Contributing view indices per point (ascending).
     pub visibility: Vec<Vec<u32>>,
-    /// 점마다 2차 융합 점 여부(2차 융합을 하지 않았으면 비어 있다).
+    /// Whether each point is a second-fusion point (empty if no second fusion was done).
     pub residual: Vec<bool>,
-    /// 1차 융합 시간(일치 융합만 기록).
+    /// First fusion time (recorded only for agreement fusion).
     pub pass1_time: Duration,
-    /// 2차 융합 시간(2차 융합을 했을 때만).
+    /// Second fusion time (only when the second fusion ran).
     pub pass2_time: Duration,
+    /// Normal-direction smoothing time (only when smoothing ran).
+    pub smooth_time: Duration,
+    /// Visibility filter time (only when the filter ran).
+    pub visibility_time: Duration,
+    /// Points removed by the visibility filter.
+    pub visibility_removed: usize,
 }
 
 impl FusionOutput {
-    /// 2차 융합 점 수.
+    /// Number of second-fusion points.
     pub fn num_residual(&self) -> usize {
         self.residual.iter().filter(|&&r| r).count()
     }
-    /// 2차 융합 점만 모은 점군.
+    /// Point cloud of only the second-fusion points.
     pub fn residual_cloud(&self) -> PointCloud {
         let mut pc = PointCloud::default();
         for (i, _) in self.residual.iter().enumerate().filter(|(_, &r)| r) {
@@ -105,6 +124,9 @@ impl FusionOutput {
             }
             if let Some(c) = self.cloud.colors.get(i) {
                 pc.colors.push(*c);
+            }
+            if let Some(k) = self.cloud.keys.get(i) {
+                pc.keys.push(*k);
             }
         }
         pc
@@ -163,7 +185,7 @@ struct Scratch {
     vis: Vec<u32>,
 }
 
-/// 깊이맵 융합. `inputs[v]` 가 None 이면 뷰 v 는 쓰지 않는다. `overlap[v]` 는 확장 대상 뷰 순서.
+/// Depth map fusion. If `inputs[v]` is None, view v is not used. `overlap[v]` is the order of views to expand into.
 pub fn fuse(
     scene: &DenseScene,
     inputs: &[Option<FusionInput<'_>>],
@@ -177,17 +199,23 @@ pub fn fuse(
     }
 }
 
-/// 일치 융합: 뷰를 색인 순서로, 뷰 안의 행은 병렬. 기준 픽셀의 3D 점을 겹침 뷰(앞 `consistency_num_images` 개)에 투영해
-/// 최근접 픽셀 깊이가 상대 허용치 안이고, 그 픽셀 점을 기준에 되투영한 오차가 허용치 안이며, 법선 각이 허용치 안이면 일치.
-/// 일치 뷰가 `min_consistent_views` 이상이면 기준과 일치 점들의 평균 위치·법선·색을 점으로 낸다.
-/// `mark_used` 면 일치에 쓰인 다른 뷰 픽셀은 그 뷰의 기준 픽셀로 다시 쓰지 않는다(앞 뷰가 정하므로 결정적).
+/// Agreement fusion: views in index order, rows within a view in parallel. The 3D point of a reference pixel is projected onto the overlap
+/// views (first `consistency_num_images`);
+/// it agrees if the nearest-pixel depth is within the relative tolerance, the error of reprojecting that pixel's point back to the
+/// reference is within tolerance, and the normal angle is within tolerance.
+/// If the number of agreeing views is at least `min_consistent_views`, the mean position, normal and color of the reference and the
+/// agreeing points are emitted as a point.
+/// With `mark_used`, pixels of other views used for agreement are not reused as reference pixels of that view (earlier views decide, so it
+/// is deterministic).
 ///
-/// 남은 픽셀 처리(`residual`):
-/// - `Release`: 후보가 검사 중 점유한 픽셀(기준·이웃)을 채택 실패 시 되돌린다. 이 구현은 표시를 채택이 확정된 뒤에만
-///   남기므로 결과는 `None` 과 같다(버려진 후보가 표시를 남기지 않음을 명시적으로 보장하는 경로).
-/// - `SecondPass`: 1차가 끝난 뒤, 1차 점의 기준·일치 픽셀이 아니었던 유효 깊이 픽셀만 기준으로 삼아 2차 허용치로 다시 검사한다.
-///   영상 단위 병렬이며, 2차 후보는 자기 기준 픽셀과 일치 픽셀을 후보 번호의 최솟값으로 원자적 점유(`fetch_min`)하고
-///   자기 기준 픽셀의 점유자가 자신인 후보만 남는다(실행 순서와 무관). 1차 점과 `min_dist_gsd`·GSD 이내인 후보는 버린다.
+/// Leftover pixel handling (`residual`):
+/// - `Release`: pixels (reference and neighbor) occupied by a candidate during checking are given back if adoption fails. This
+///   implementation leaves marks only after adoption is confirmed, so the result equals `None` (a path that explicitly guarantees discarded
+///   candidates leave no marks).
+/// - `SecondPass`: after the first pass ends, only valid-depth pixels that were not reference or agreeing pixels of first-pass points are
+///   used as references and rechecked with the second-pass tolerances. Parallel per image; a second-pass candidate atomically occupies
+///   (`fetch_min`) its own reference pixel and agreeing pixels with the minimum candidate number, and only candidates that own their
+///   reference pixel remain (independent of execution order). Candidates within `min_dist_gsd`·GSD of a first-pass point are discarded.
 pub fn fuse_consistency(
     scene: &DenseScene,
     inputs: &[Option<FusionInput<'_>>],
@@ -205,7 +233,7 @@ pub fn fuse_consistency(
     let marks = alloc_u8(true);
     let second = p.residual == FusionResidual::SecondPass;
     let release = p.residual == FusionResidual::Release;
-    // 1차 점의 기준·일치 픽셀(2차 대상 제외용).
+    // Reference and agreeing pixels of first-pass points (to exclude them from the second pass).
     let consumed = alloc_u8(second);
     let tol =
         Tol { depth: p.max_depth_error, cos_n: p.max_normal_error_deg.to_radians().cos(), r2: p.max_reproj_error * p.max_reproj_error };
@@ -235,8 +263,10 @@ pub fn fuse_consistency(
                         let pt = ctx.evaluate(p, v, &inp, row, col, ov, &tol, &mut hits);
                         let ok = hits.len() >= p.min_consistent_views && pt.is_some();
                         if release && p.mark_used {
-                            // 검사한 후보의 픽셀을 임시 점유(2)했다가, 채택되면 확정(1), 아니면 이 후보가 점유한 것만 되돌린다.
-                            // 확정 표시(1)는 되돌리지 않으므로 같은 픽셀을 함께 쓴 다른 후보의 채택 표시는 지워지지 않는다.
+                            // Temporarily occupy (2) the pixels of the checked candidate; on adoption confirm (1), otherwise give back only
+                            // what this candidate occupied.
+                            // Confirmed marks (1) are not given back, so the adoption marks of other candidates that shared the same pixels
+                            // are not erased.
                             claimed.clear();
                             for &(o, q) in std::iter::once(&(v, pix)).chain(hits.iter()) {
                                 if marks[o][q].compare_exchange(0, TENTATIVE, Ordering::AcqRel, Ordering::Acquire).is_ok() {
@@ -264,6 +294,7 @@ pub fn fuse_consistency(
                         pc.positions.push(x);
                         pc.normals.push(nrm);
                         pc.colors.push(c);
+                        pc.keys.push(point_key(scene.views[v].image_id, col, row));
                         vis.push(sorted_vis(v, &hits));
                     }
                     (pc, vis)
@@ -278,6 +309,7 @@ pub fn fuse_consistency(
             out.cloud.positions.extend(pc.positions);
             out.cloud.normals.extend(pc.normals);
             out.cloud.colors.extend(pc.colors);
+            out.cloud.keys.extend(pc.keys);
             out.visibility.extend(vis);
         }
     }
@@ -295,6 +327,7 @@ pub fn fuse_consistency(
             out.cloud.positions.extend(pc.positions);
             out.cloud.normals.extend(pc.normals);
             out.cloud.colors.extend(pc.colors);
+            out.cloud.keys.extend(pc.keys);
             out.visibility.extend(vis);
         }
         out.pass2_time = t2.elapsed();
@@ -302,10 +335,10 @@ pub fn fuse_consistency(
     out
 }
 
-/// 남은 픽셀 `Release` 처리의 임시 점유 표시 값.
+/// Temporary occupation mark value for leftover-pixel `Release` handling.
 const TENTATIVE: u8 = 2;
 
-/// 채택된 점의 일치 픽셀을 "사용됨"으로 표시(반경이 있으면 깊이가 일치하는 주변 픽셀까지).
+/// Marks the agreeing pixels of an adopted point as "used" (including surrounding pixels with matching depth if there is a radius).
 fn mark_hits(p: &FusionParams, cams: &[Cam], inputs: &[Option<FusionInput<'_>>], marks: &[Vec<AtomicU8>], hits: &[(usize, usize)]) {
     let r = p.mark_radius as i64;
     for &(o, opix) in hits {
@@ -313,7 +346,7 @@ fn mark_hits(p: &FusionParams, cams: &[Cam], inputs: &[Option<FusionInput<'_>>],
             marks[o][opix].store(1, Ordering::Relaxed);
             continue;
         }
-        // 반경 안에서 깊이가 일치하는 픽셀까지 표시(같은 표면 조각의 중복 기준 픽셀 억제).
+        // Also mark pixels within the radius whose depth agrees (suppresses duplicate reference pixels of the same surface patch).
         let oc = &cams[o];
         let oin = inputs[o].expect("사용 뷰");
         let (cx0, cy0) = ((opix % oc.w) as i64, (opix / oc.w) as i64);
@@ -337,7 +370,7 @@ fn sorted_vis(v: usize, hits: &[(usize, usize)]) -> Vec<u32> {
     vv
 }
 
-/// 일치 검사 허용치.
+/// Agreement check tolerances.
 struct Tol {
     depth: f64,
     cos_n: f64,
@@ -353,7 +386,8 @@ struct ConsCtx<'a> {
 type Point = ([f32; 3], [f32; 3], [u8; 3]);
 
 impl ConsCtx<'_> {
-    /// 기준 픽셀 하나의 일치 검사: 일치한 (뷰, 픽셀)을 `hits` 에 모으고 가중 평균 점을 낸다(법선 합이 0 이면 None).
+    /// Agreement check for one reference pixel: gathers the agreeing (view, pixel) into `hits` and yields the weighted average point (None
+    /// if the normal sum is 0).
     #[allow(clippy::too_many_arguments)]
     fn evaluate(
         &self,
@@ -425,7 +459,13 @@ impl ConsCtx<'_> {
     }
 }
 
-/// 깊이맵의 지상 표본 간격(뷰별 유효 깊이 중앙값/초점의 중앙값).
+/// Ground sample distance of the depth maps (median over views of median valid depth / focal length).
+pub fn scene_gsd(scene: &DenseScene, inputs: &[Option<FusionInput<'_>>]) -> f64 {
+    let cams: Vec<Cam> = scene.views.iter().map(|v| Cam { k: v.k, r: v.r, t: v.t, w: v.width, h: v.height }).collect();
+    depth_gsd(&cams, inputs)
+}
+
+/// Ground sample distance of a depth map (median over views of the median valid depth / focal length).
 fn depth_gsd(cams: &[Cam], inputs: &[Option<FusionInput<'_>>]) -> f64 {
     let mut gs: Vec<f64> = inputs
         .iter()
@@ -446,7 +486,7 @@ fn depth_gsd(cams: &[Cam], inputs: &[Option<FusionInput<'_>>]) -> f64 {
     }
 }
 
-/// 점 위치의 격자 해시(칸 크기 `cell`): 정렬된 (칸 열쇠, 점 번호).
+/// Grid hash of point positions (cell size `cell`): sorted (cell key, point index).
 struct GridIndex {
     cell: f64,
     keys: Vec<(u64, u32)>,
@@ -469,7 +509,7 @@ impl GridIndex {
         g.keys.par_sort_unstable();
         g
     }
-    /// `x` 에서 거리 `r`(≤ 칸 크기) 이내 점이 있는지.
+    /// Whether there is a point within distance `r` (≤ cell size) of `x`.
     fn any_within(&self, cloud: &PointCloud, x: &[f32; 3], r: f64) -> bool {
         let c = self.cell_of(x);
         let r2 = r * r;
@@ -495,7 +535,8 @@ impl GridIndex {
     }
 }
 
-/// 2차 융합: 1차에서 쓰이지 않은 유효 깊이 픽셀만 기준으로, 2차 허용치로 검사. 뷰별 (점, 가시성) 을 뷰 순서로 돌려준다.
+/// Second fusion: uses only valid-depth pixels not used in the first pass as references, checked with the second-pass tolerances. Returns
+/// per-view (points, visibility) in view order.
 fn second_pass(
     ctx: &ConsCtx<'_>,
     p: &FusionParams,
@@ -514,7 +555,7 @@ fn second_pass(
     };
     let min_dist = rp.min_dist_gsd * depth_gsd(cams, ctx.inputs);
     let grid = (min_dist > 0.0).then(|| GridIndex::new(first, min_dist));
-    // 픽셀 번호: 뷰 시작 오프셋 + 뷰 안 픽셀.
+    // Pixel index: view start offset + pixel within the view.
     let mut offset = vec![0u64; n + 1];
     for v in 0..n {
         offset[v + 1] = offset[v] + if used[v] { (cams[v].w * cams[v].h) as u64 } else { 0 };
@@ -522,7 +563,7 @@ fn second_pass(
     assert!(offset[n] < u32::MAX as u64, "2차 융합: 픽셀 수가 u32 범위를 넘음");
     let owner: Vec<Vec<AtomicU32>> =
         (0..n).map(|v| if used[v] { (0..cams[v].w * cams[v].h).map(|_| AtomicU32::new(u32::MAX)).collect() } else { Vec::new() }).collect();
-    // 1단계: 뷰 단위 병렬로 후보를 만들고 점유.
+    // Stage 1: build and occupy candidates in parallel per view.
     struct Cand {
         pix: usize,
         pt: Point,
@@ -561,7 +602,7 @@ fn second_pass(
             out
         })
         .collect();
-    // 2단계: 자기 기준 픽셀의 점유자가 자신인 후보만 남긴다(점유 최솟값이라 실행 순서와 무관).
+    // Stage 2: keep only candidates that own their reference pixel (independent of execution order since it is the occupation minimum).
     cands
         .into_par_iter()
         .enumerate()
@@ -576,6 +617,7 @@ fn second_pass(
                 pc.positions.push(c.pt.0);
                 pc.normals.push(c.pt.1);
                 pc.colors.push(c.pt.2);
+                pc.keys.push(point_key(ctx.scene.views[v].image_id, c.pix % ctx.cams[v].w, c.pix / ctx.cams[v].w));
                 vis.push(c.vis);
             }
             (pc, vis)
@@ -583,7 +625,7 @@ fn second_pass(
         .collect()
 }
 
-/// 확장 중앙값 융합.
+/// Extended median fusion.
 pub fn fuse_traversal(
     scene: &DenseScene,
     inputs: &[Option<FusionInput<'_>>],
@@ -621,6 +663,7 @@ pub fn fuse_traversal(
                                 pc.positions.push(x);
                                 pc.normals.push(nrm);
                                 pc.colors.push(c);
+                                pc.keys.push(point_key(scene.views[v].image_id, col, row));
                                 vis.push(vv);
                             }
                         }
@@ -637,6 +680,7 @@ pub fn fuse_traversal(
             out.cloud.positions.extend(pc.positions);
             out.cloud.normals.extend(pc.normals);
             out.cloud.colors.extend(pc.colors);
+            out.cloud.keys.extend(pc.keys);
             out.visibility.extend(vis);
         }
         done[v] = true;

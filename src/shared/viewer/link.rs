@@ -281,7 +281,7 @@ use web::Transport;
 #[cfg(not(target_arch = "wasm32"))]
 mod native {
     use super::{RawEvent, TICK_MS, Waker};
-    use crate::config::link::{CONNECT_TIMEOUT_MS, IDLE_TIMEOUT_MS};
+    use crate::config::link::{CONNECT_TIMEOUT_MS, IDLE_TIMEOUT_MS, MAX_MESSAGE_BYTES};
     use crate::protocol::Backoff;
     use futures_util::{SinkExt as _, StreamExt as _};
     use std::sync::atomic::{AtomicBool, Ordering};
@@ -289,6 +289,13 @@ mod native {
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
     use tokio_tungstenite::tungstenite::Message as WsMessage;
+
+    /// Message and frame limits large enough for point slot messages.
+    fn ws_config() -> tokio_tungstenite::tungstenite::protocol::WebSocketConfig {
+        tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default()
+            .max_message_size(Some(MAX_MESSAGE_BYTES))
+            .max_frame_size(Some(MAX_MESSAGE_BYTES))
+    }
 
     #[derive(Default)]
     struct Shared {
@@ -389,7 +396,7 @@ mod native {
             }
             let attempt = tokio::time::timeout(
                 Duration::from_millis(CONNECT_TIMEOUT_MS),
-                tokio_tungstenite::connect_async(url.as_str()),
+                tokio_tungstenite::connect_async_with_config(url.as_str(), Some(ws_config()), false),
             );
             match attempt.await {
                 Ok(Ok((ws, _))) => {

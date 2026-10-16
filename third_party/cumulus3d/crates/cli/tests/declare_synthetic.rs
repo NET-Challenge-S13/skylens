@@ -25,10 +25,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 선언형 빌더 층(`declare`)을 합성 장면(드론 3대 × 8위치)으로 시험한다. 조밀화는 끈다(장치 없이 돌도록).
-//! - 빌더·build 는 실행 전 부수효과가 없다(파일 생성 없음, 훅 호출 없음).
-//! - 같은 계획이면 같은 결과(시드 고정).
-//! - `cumulus3d run <plan.toml>` 이 같은 설정의 `cumulus3d stream` 과 같은 출력을 만든다.
+//! Test the declarative builder layer (`declare`) with a synthetic scene (3 drones x 8 positions). Densification is off (so it runs
+//! without a device).
+//! - The builder and build have no side effects before execution (no files created, no hook calls).
+//! - The same plan gives the same result (fixed seed).
+//! - `cumulus3d run <plan.toml>` produces the same output as `cumulus3d stream` with the same settings.
 
 mod common;
 use common::{make_dataset, NPOS};
@@ -44,7 +45,7 @@ fn base() -> PathBuf {
     PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("declare_synth")
 }
 
-/// 시험들이 함께 쓰는 합성 입력 폴더(한 번만 만든다).
+/// Synthetic input folder shared by the tests (created only once).
 fn dataset() -> &'static Path {
     static DIR: OnceLock<PathBuf> = OnceLock::new();
     DIR.get_or_init(|| {
@@ -55,7 +56,7 @@ fn dataset() -> &'static Path {
     })
 }
 
-/// `stream --stride 1 --span 4 --overlap 1 --no-dense --seed 7 --save-models --quiet` 과 같은 계획.
+/// The same plan as `stream --stride 1 --span 4 --overlap 1 --no-dense --seed 7 --save-models --quiet`.
 fn plan(out: &Path) -> Plan {
     Recon::declare()
         .input(dataset())
@@ -69,7 +70,7 @@ fn plan(out: &Path) -> Plan {
         .clone()
 }
 
-/// 폴더의 파일 목록(상대 경로 → 크기).
+/// File listing of a folder (relative path -> size).
 fn files(dir: &Path) -> BTreeMap<String, u64> {
     fn walk(root: &Path, d: &Path, m: &mut BTreeMap<String, u64>) {
         for e in std::fs::read_dir(d).unwrap().flatten() {
@@ -86,7 +87,7 @@ fn files(dir: &Path) -> BTreeMap<String, u64> {
     m
 }
 
-/// timeline 문구(시각 제외). 배경 정밀 작업과 전경 사이 순서는 실행마다 다를 수 있어 정렬한다.
+/// Timeline text (excluding time). The order between background refinement and the foreground can differ from run to run, so sort.
 fn timeline(dir: &Path) -> Vec<String> {
     let s = std::fs::read_to_string(dir.join("timeline.txt")).unwrap();
     let mut v: Vec<String> = s.lines().map(|l| l.split_once(' ').unwrap().1.to_string()).collect();
@@ -94,7 +95,7 @@ fn timeline(dir: &Path) -> Vec<String> {
     v
 }
 
-/// 희소 모델 파일 내용이 같은지(구역별 snap/preview/ba/refined + chain).
+/// Whether the sparse model file contents are the same (per-zone snap/preview/ba/refined + chain).
 fn assert_same_models(a: &Path, b: &Path) {
     let fa = files(a);
     let models: Vec<&String> = fa.keys().filter(|k| k.starts_with("work/models/") && k.ends_with(".bin")).collect();
@@ -143,7 +144,7 @@ fn builder_and_build_have_no_side_effects() {
 fn same_plan_same_result() {
     let (a, b) = (base().join("same_a"), base().join("same_b"));
     let p = plan(&a);
-    // TOML 로 저장했다 읽은 계획도 같은 계획.
+    // A plan saved to TOML and read back is the same plan.
     let mut q = Plan::from_toml(&p.to_toml()).unwrap();
     assert_eq!(q, p);
     q.sinks.out = Some(b.clone());
@@ -172,7 +173,7 @@ fn cli_run_matches_stream() {
     let st = Command::new(bin).arg("run").arg(&toml_path).status().expect("run 실행");
     assert!(st.success());
     assert_same_outputs(&s_out, &r_out);
-    // run.log 의 설정 줄도 같다.
+    // The settings line of run.log is the same too.
     let conf = |d: &Path| {
         std::fs::read_to_string(d.join("run.log"))
             .unwrap()
@@ -183,12 +184,12 @@ fn cli_run_matches_stream() {
     };
     assert_eq!(conf(&s_out), conf(&r_out));
 
-    // 기본 계획 출력은 TOML 로 읽힌다.
+    // The default plan output can be read as TOML.
     let o = Command::new(bin).args(["plan", "--print-default"]).output().unwrap();
     assert!(o.status.success());
     assert_eq!(Plan::from_toml(&String::from_utf8(o.stdout).unwrap()).unwrap(), Plan::default());
 
-    // 검사 실패는 실행 없이 문제를 모두 보고.
+    // On validation failure, report all problems without running.
     let bad = base().join("cli_bad.toml");
     let bad_out = base().join("cli_bad_out");
     let mut p = plan(&bad_out);

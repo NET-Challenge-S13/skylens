@@ -29,7 +29,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 두 뷰 기하 검증.
+//! Two-view geometry verification.
 
 use crate::estimators::{
     EssentialFivePointEstimator, Fundamental7PtEstimator, FundamentalEightPointEstimator, HomographyEstimator, TranslationEstimator,
@@ -38,43 +38,43 @@ use crate::pose::recover_two_view_pose;
 use cumulus3d_core::ransac::{lo_ransac, RansacParams, RansacReport};
 use cumulus3d_core::{Camera, FeatureMatch, Keypoint, Mat3, TwoViewGeometry, TwoViewGeometryConfig, Vec2, Vec3};
 
-/// 두 뷰 기하 옵션.
+/// Two-view geometry options.
 #[derive(Clone, Debug, PartialEq)]
 pub struct TwoViewOptions {
-    /// 유효 기하로 인정할 최소 인라이어 수.
+    /// Minimum number of inliers to accept as a valid geometry.
     pub min_num_inliers: usize,
-    /// 판정용 최소 인라이어 비율(0 = 꺼짐). 0 보다 크면 RANSAC 사전 비율도 덮어씀.
+    /// Minimum inlier ratio for the decision (0 = off). If greater than 0, it also overrides the RANSAC prior ratio.
     pub min_inlier_ratio: f64,
-    /// E 인라이어 / F 인라이어 비율이 이보다 크면 E(보정) 쪽 판정.
+    /// If the E inlier / F inlier ratio exceeds this, decide on the E (calibrated) side.
     pub min_e_f_inliers_ratio: f64,
-    /// H 인라이어 / E(또는 F) 인라이어 비율이 이보다 크면 평면·회전 구성으로 판정.
+    /// If the H inlier / E (or F) inlier ratio exceeds this, decide on a planar/rotational configuration.
     pub max_h_inliers_ratio: f64,
-    /// 워터마크(영상 가장자리 고정 매칭) 검출 여부.
+    /// Whether to detect watermarks (fixed matches at image edges).
     pub detect_watermark: bool,
-    /// 가장자리 인라이어 비율과 평행이동 인라이어 비율이 이보다 크면 워터마크로 판정.
+    /// If both the edge-inlier ratio and the translation-inlier ratio exceed this, decide it is a watermark.
     pub watermark_inlier_ratio: f64,
-    /// 가장자리 띠 폭(영상 대각선 길이 대비 비율).
+    /// Edge strip width (as a fraction of the image diagonal length).
     pub watermark_band: f64,
-    /// 워터마크 평행이동 RANSAC 오차 임계(px).
+    /// Watermark translation RANSAC error threshold (px).
     pub watermark_detection_max_error: f64,
-    /// 인라이어를 제거하며 여러 기하를 반복 추정.
+    /// Repeatedly estimate several geometries while removing inliers.
     pub multiple_models: bool,
-    /// 다중 모델 모드에서 워터마크 기하를 결과에서 제외.
+    /// In multi-model mode, exclude the watermark geometry from the result.
     pub multiple_ignore_watermark: bool,
-    /// 거의 움직이지 않는 매칭을 사전 제거.
+    /// Pre-remove matches that barely move.
     pub filter_stationary_matches: bool,
-    /// 정지 매칭 판정 이동량 임계(px).
+    /// Movement threshold (px) for deciding a stationary match.
     pub stationary_matches_max_error: f64,
-    /// H 만 추정하는 경로 사용(평면 구성 강제).
+    /// Use the path that estimates only H (forces a planar configuration).
     pub force_h_use: bool,
-    /// 기하 확정 후 상대 자세·삼각측량 각도도 계산.
+    /// After the geometry is confirmed, also compute the relative pose and triangulation angle.
     pub compute_relative_pose: bool,
-    /// 하틀리 정규화 DLT(개선; 결과가 미세하게 달라지므로 기본 끔).
+    /// Hartley-normalized DLT (improvement; off by default since results change slightly).
     pub normalize_homography: bool,
-    /// 보정 경로에서 E/F/H 세 RANSAC 을 rayon::join 으로 동시 실행(결과 불변).
+    /// On the calibrated path, run the E/F/H RANSACs concurrently with rayon::join (results unchanged).
     pub parallel_models: bool,
-    /// RANSAC: max_error 4 px, 사전 비율 0.25, 신뢰도 0.999, 배수 3, 반복 100..10000.
-    /// `random_seed` 가 있으면 모델 종류별로 파생 시드를 쓴다.
+    /// RANSAC: max_error 4 px, prior ratio 0.25, confidence 0.999, multiplier 3, iterations 100..10000.
+    /// If `random_seed` is set, a derived seed is used per model type.
     pub ransac: RansacParams,
 }
 
@@ -110,7 +110,7 @@ impl Default for TwoViewOptions {
     }
 }
 
-/// 모델 종류별 시드 파생(splitmix64).
+/// Per-model-type seed derivation (splitmix64).
 pub fn derive_seed(seed: Option<u64>, salt: u64) -> Option<u64> {
     seed.map(|s| {
         let mut z = s ^ salt.wrapping_mul(0x9E37_79B9_7F4A_7C15);
@@ -125,36 +125,36 @@ pub(crate) const SALT_F: u64 = 2;
 pub(crate) const SALT_H: u64 = 3;
 const SALT_T: u64 = 4;
 
-/// 선택된 인라이어 마스크.
+/// Selected inlier mask.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MaskChoice {
-    /// 본질 행렬 인라이어.
+    /// Essential matrix inliers.
     E,
-    /// 기초 행렬 인라이어.
+    /// Fundamental matrix inliers.
     F,
-    /// 호모그래피 인라이어.
+    /// Homography inliers.
     H,
 }
 
-/// 판정 결과: 구성과 사용할 마스크(DEGENERATE 이면 None).
+/// Decision result: configuration and the mask to use (None if DEGENERATE).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Decision {
-    /// 판정된 기하 구성.
+    /// Decided geometric configuration.
     pub config: TwoViewGeometryConfig,
-    /// 사용할 인라이어 마스크(DEGENERATE 이면 None).
+    /// Inlier mask to use (None if DEGENERATE).
     pub mask: Option<MaskChoice>,
 }
 
-/// 한 RANSAC 의 (성공 여부, 인라이어 수).
+/// (success flag, inlier count) of one RANSAC.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub struct ModelOutcome {
-    /// RANSAC 성공 여부.
+    /// Whether the RANSAC succeeded.
     pub success: bool,
-    /// 인라이어 수.
+    /// Inlier count.
     pub num_inliers: usize,
 }
 
-/// 보정 경로 판정.
+/// Calibrated-path decision.
 pub fn decide_calibrated(e: ModelOutcome, f: ModelOutcome, h: ModelOutcome, opts: &TwoViewOptions) -> Decision {
     use TwoViewGeometryConfig as C;
     let min = opts.min_num_inliers;
@@ -191,7 +191,7 @@ pub fn decide_calibrated(e: ModelOutcome, f: ModelOutcome, h: ModelOutcome, opts
     }
 }
 
-/// 비보정 경로 판정. n_H ≥ n_F(같아도) 이면 H 마스크.
+/// Uncalibrated-path decision. If n_H ≥ n_F (even when equal), use the H mask.
 pub fn decide_uncalibrated(f: ModelOutcome, h: ModelOutcome, opts: &TwoViewOptions) -> Decision {
     use TwoViewGeometryConfig as C;
     let min = opts.min_num_inliers;
@@ -243,7 +243,7 @@ fn run_e(opts: &TwoViewOptions, max_error: f64, r1: &[Vec3], r2: &[Vec3]) -> Ran
     lo_ransac(&e, &e, &ransac_opts(opts, max_error, SALT_E), r1, r2)
 }
 
-/// 두 뷰 기하 추정(원시 결과; 15 미만 → 기본값 변환은 호출자 몫, `finalize_geometry`).
+/// Two-view geometry estimation (raw result; the conversion to defaults below 15 is the caller's job, `finalize_geometry`).
 pub fn estimate_two_view(
     cam1: &Camera,
     kps1: &[Keypoint],
@@ -262,12 +262,12 @@ pub fn estimate_two_view(
     }
 }
 
-/// 추정 경로.
+/// Estimation path.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum EstimationPath {
-    /// 다중 모델(인라이어를 지우며 반복).
+    /// Multiple models (repeat while removing inliers).
     Multiple,
-    /// H 만.
+    /// H only.
     HomographyOnly,
     /// E/F/H.
     Calibrated,
@@ -287,7 +287,7 @@ pub(crate) fn path_of(cam1: &Camera, cam2: &Camera, opts: &TwoViewOptions) -> Es
     }
 }
 
-/// 정지 매칭 사전 제거(옵션이 꺼져 있으면 그대로).
+/// Pre-removal of stationary matches (unchanged if the option is off).
 pub(crate) fn filter_stationary<'m>(
     kps1: &[Keypoint],
     kps2: &[Keypoint],
@@ -308,7 +308,7 @@ pub(crate) fn filter_stationary<'m>(
     }
 }
 
-/// 인라이어가 `min_num_inliers` 미만이면 기본값(UNDEFINED, 빈 인라이어).
+/// If inliers are below `min_num_inliers`, defaults (UNDEFINED, empty inliers).
 pub fn finalize_geometry(tvg: TwoViewGeometry, min_num_inliers: usize) -> TwoViewGeometry {
     if tvg.inlier_matches.len() < min_num_inliers {
         TwoViewGeometry::default()
@@ -342,7 +342,7 @@ fn finish(
     tvg
 }
 
-/// 보정 경로 입력: (픽셀1, 픽셀2, 광선1, 광선2, E 오차 임계).
+/// Calibrated path inputs: (pixels 1, pixels 2, rays 1, rays 2, E error threshold).
 pub(crate) type CalibratedInputs = (Vec<Vec2>, Vec<Vec2>, Vec<Vec3>, Vec<Vec3>, f64);
 
 pub(crate) fn calibrated_inputs(
@@ -380,7 +380,7 @@ fn estimate_calibrated(
     assemble_calibrated(cam1, kps1, cam2, kps2, matches, opts, er, fr, hr)
 }
 
-/// 보정 경로 마무리: E/F/H RANSAC 결과로 판정·인라이어·워터마크.
+/// Finishes the calibrated path: decision, inliers and watermark from the E/F/H RANSAC results.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn assemble_calibrated(
     cam1: &Camera,
@@ -401,11 +401,11 @@ pub(crate) fn assemble_calibrated(
         MaskChoice::H => &hr.inlier_mask,
     };
     let inliers = select_inliers(matches, m);
-    // 판정용 최소 인라이어 비율(기본 꺼짐).
+    // Minimum inlier ratio for the decision (off by default).
     if opts.min_inlier_ratio > 0.0 && (inliers.len() as f64 / matches.len() as f64) < opts.min_inlier_ratio {
         return degenerate();
     }
-    // 설계 결정: 실패한 RANSAC 의 모델은 버리고 성공한 모델만 기록한다.
+    // Design decision: discard models from failed RANSACs and record only the successful ones.
     let tvg = TwoViewGeometry {
         config: d.config,
         e: er.success.then_some(er.model).flatten(),
@@ -437,7 +437,7 @@ fn estimate_uncalibrated(
     assemble_uncalibrated(cam1, kps1, cam2, kps2, matches, opts, fr, hr)
 }
 
-/// 비보정 경로 마무리.
+/// Finishes the uncalibrated path.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn assemble_uncalibrated(
     cam1: &Camera,
@@ -478,7 +478,7 @@ fn estimate_homography_only(
     assemble_homography_only(cam1, kps1, cam2, kps2, matches, opts, hr)
 }
 
-/// H 전용 경로 마무리.
+/// Finishes the H-only path.
 pub(crate) fn assemble_homography_only(
     cam1: &Camera,
     kps1: &[Keypoint],
@@ -519,7 +519,7 @@ fn estimate_multiple(
         }
         let used: std::collections::HashSet<FeatureMatch> = g.inlier_matches.iter().copied().collect();
         remaining.retain(|m| !used.contains(m));
-        // 설계 결정: 워터마크 무시 시에도 그 인라이어는 제거하고 계속 진행.
+        // Design decision: even when ignoring watermarks, remove their inliers and continue.
         if !(opts.multiple_ignore_watermark && g.config == TwoViewGeometryConfig::Watermark) {
             found.push(g);
         }
@@ -535,7 +535,7 @@ fn estimate_multiple(
     }
 }
 
-/// 워터마크 검출.
+/// Watermark detection.
 pub fn is_watermark(
     cam1: &Camera,
     kps1: &[Keypoint],

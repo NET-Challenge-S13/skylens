@@ -325,3 +325,73 @@ fn builder_reports_all_problems_and_duplicate_ids() {
     assert!(matches!(ReconNode::declare().id("x").images(&dir).cameras(CAMS).build(&host), Err(ComposeError::DuplicateNode(_))));
     assert_eq!(host.close_all().len(), 1);
 }
+
+#[test]
+fn stable_display_node_has_no_previews_and_writes_the_stream_folder() {
+    // SkyLens patch: the composition layer passes stable display to the session and, with an output folder, turns the
+    // live diff stream on. The synthetic run has no dense stage, so the stream gets its heartbeat but no event.
+    let host = CompositionHost::new();
+    let out = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("compose_stable_out");
+    let _ = std::fs::remove_dir_all(&out);
+    let log = Arc::new(Mutex::new(Vec::new()));
+    let l = Arc::clone(&log);
+    let n = ReconNode::declare()
+        .id("stable")
+        .images(images("stable"))
+        .cameras(CAMS)
+        .zones(3, 1)
+        .seed(7)
+        .stable_display(true)
+        .settle(0.01, 2)
+        .live_stride(3)
+        .stream_origin(36.5, 127.25, 30.0)
+        .output(&out, cumulus3d_cli::sinks::SinkOptions::default())
+        .sync_hooks(true)
+        .on_event(move |e| l.lock().unwrap().push(e.clone()))
+        .build(&host)
+        .unwrap();
+    for s in 0..NPOS as u64 {
+        n.compose(FrameState::ready(set(s, 0))).unwrap();
+    }
+    host.close("stable").unwrap();
+    let evs = log.lock().unwrap();
+    assert_eq!(count(&evs, EventKind::ZonePreview), 0);
+    assert!(count(&evs, EventKind::ZoneRefined) >= 2);
+    assert!(out.join("live").join("stream").join("status.json").is_file());
+    assert!(out.join("run.log").is_file());
+
+    let bad = ReconNode::declare().id("bad").images(images("stable_bad")).cameras(CAMS).live_stride(0).build(&host).unwrap_err();
+    assert!(matches!(bad, ComposeError::Config(ref p) if p.iter().any(|x| x.starts_with("live_stride"))), "{bad:?}");
+}
+
+#[test]
+fn stream_only_output_writes_the_stream_folder_and_no_plys() {
+    // SkyLens patch: with stream_only the output folder holds run.log, the timeline and live/stream/ only.
+    let host = CompositionHost::new();
+    let out = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("compose_stream_only_out");
+    let _ = std::fs::remove_dir_all(&out);
+    let n = ReconNode::declare()
+        .id("stream-only")
+        .images(images("stream_only"))
+        .cameras(CAMS)
+        .zones(3, 1)
+        .seed(7)
+        .stable_display(true)
+        .stream_origin(36.5, 127.25, 30.0)
+        .output(&out, cumulus3d_cli::sinks::SinkOptions { save_models: true, ..Default::default() })
+        .stream_only(true)
+        .sync_hooks(true)
+        .build(&host)
+        .unwrap();
+    for s in 0..NPOS as u64 {
+        n.compose(FrameState::ready(set(s, 0))).unwrap();
+    }
+    host.close("stream-only").unwrap();
+    assert!(out.join("live").join("stream").join("status.json").is_file());
+    assert!(out.join("run.log").is_file());
+    assert!(!out.join("full").exists(), "no zone PLYs");
+    assert!(!out.join("work").join("models").exists(), "no per-zone models");
+    assert!(!out.join("snapshots").exists(), "no post-processing outputs");
+    let plys = std::fs::read_dir(out.join("live")).unwrap().filter(|e| e.as_ref().unwrap().path().extension().is_some_and(|x| x == "ply")).count();
+    assert_eq!(plys, 0, "no display PLYs");
+}

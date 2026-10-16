@@ -29,14 +29,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 삼각측량 수식: 두 뷰 DLT, 다중 뷰, 중점법, 각도·깊이 검사, RANSAC 삼각측량.
+//! Triangulation formulas: two-view DLT, multi-view, midpoint method, angle and depth checks, RANSAC triangulation.
 
 use cumulus3d_core::geometry::triangulation_angle;
 use cumulus3d_core::ransac::{n_choose_k, ransac_with_sampler, Estimator, ExhaustiveSampler, RansacParams};
 use cumulus3d_core::{Camera, Mat3x4, Rigid3, Vec2, Vec3};
 use nalgebra::{Matrix4, SymmetricEigen, SVD};
 
-/// 두 뷰 DLT. `x1`, `x2` 는 정규화 평면 좌표, `p1`, `p2` 는 [R|t].
+/// Two-view DLT. `x1`, `x2` are normalized-plane coordinates, `p1`, `p2` are [R|t].
 pub fn triangulate_dlt(p1: &Mat3x4, p2: &Mat3x4, x1: &Vec2, x2: &Vec2) -> Option<Vec3> {
     let mut a = Matrix4::<f64>::zeros();
     a.set_row(0, &(x1.x * p1.row(2) - p1.row(0)));
@@ -45,7 +45,7 @@ pub fn triangulate_dlt(p1: &Mat3x4, p2: &Mat3x4, x1: &Vec2, x2: &Vec2) -> Option
     a.set_row(3, &(x2.y * p2.row(2) - p2.row(1)));
     let svd = SVD::new(a, false, true);
     let vt = svd.v_t?;
-    // 특이값 내림차순 → 마지막 행이 최소 특이값.
+    // Singular values in descending order, so the last row has the smallest singular value.
     let h = vt.row(3);
     if h[3] == 0.0 {
         return None;
@@ -54,8 +54,8 @@ pub fn triangulate_dlt(p1: &Mat3x4, p2: &Mat3x4, x1: &Vec2, x2: &Vec2) -> Option
     x.iter().all(|v| v.is_finite()).then_some(x)
 }
 
-/// 다중 뷰 삼각측량: 광선에 수직 성분의 대수 오차 최소.
-/// `rays` 는 카메라 좌표 단위 광선.
+/// Multi-view triangulation: minimizes the algebraic error of the component perpendicular to the rays.
+/// `rays` are unit rays in camera coordinates.
 pub fn triangulate_multi_view(poses: &[Mat3x4], rays: &[Vec3]) -> Option<Vec3> {
     if poses.len() < 2 || poses.len() != rays.len() {
         return None;
@@ -80,7 +80,7 @@ pub fn triangulate_multi_view(poses: &[Mat3x4], rays: &[Vec3]) -> Option<Vec3> {
     x.iter().all(|v| v.is_finite()).then_some(x)
 }
 
-/// 중점법. 결과는 카메라1 좌표. 카메라 뒤면 None.
+/// Midpoint method. The result is in camera 1 coordinates. None if behind a camera.
 pub fn triangulate_midpoint(cam1_to_cam2: &Rigid3, ray1: &Vec3, ray2: &Vec3) -> Option<Vec3> {
     let rt = cam1_to_cam2.rotation_matrix().transpose();
     let r2 = rt * ray2;
@@ -98,12 +98,12 @@ pub fn triangulate_midpoint(cam1_to_cam2: &Rigid3, ray1: &Vec3, ray2: &Vec3) -> 
     Some(0.5 * (l1 * ray1 + c2 + l2 * r2))
 }
 
-/// 깊이 양수 검사: P 의 셋째 행 · (X, 1) ≥ ε.
+/// Positive depth check: third row of P · (X, 1) ≥ ε.
 pub fn has_positive_depth(p: &Mat3x4, x: &Vec3) -> bool {
     p[(2, 0)] * x.x + p[(2, 1)] * x.y + p[(2, 2)] * x.z + p[(2, 3)] >= f64::EPSILON
 }
 
-/// 각도 오차(라디안): 관측 광선과 카메라 좌표 점 방향 사이.
+/// Angular error (radians): between the observation ray and the direction to the point in camera coordinates.
 pub fn angular_error(p: &Mat3x4, ray: &Vec3, x: &Vec3) -> f64 {
     let xc = p * x.push(1.0);
     let n = xc.norm();
@@ -113,38 +113,38 @@ pub fn angular_error(p: &Mat3x4, ray: &Vec3, x: &Vec3) -> f64 {
     (ray.dot(&xc) / n).clamp(-1.0, 1.0).acos()
 }
 
-/// RANSAC 삼각측량 입력 관측 하나.
+/// One observation input for RANSAC triangulation.
 #[derive(Clone, Debug)]
 pub struct TriObservation {
     /// world_to_cam [R|t].
     pub proj: Mat3x4,
-    /// 투영 중심.
+    /// Projection center.
     pub center: Vec3,
-    /// 카메라 좌표 단위 광선.
+    /// Unit ray in camera coordinates.
     pub ray: Vec3,
 }
 
 impl TriObservation {
-    /// world_to_cam 자세와 카메라 좌표 광선으로 관측을 만든다.
+    /// Builds an observation from a world_to_cam pose and a camera-coordinate ray.
     pub fn new(pose: &Rigid3, ray: Vec3) -> Self {
         Self { proj: pose.matrix(), center: pose.center(), ray }
     }
 }
 
-/// RANSAC 삼각측량 옵션.
+/// RANSAC triangulation options.
 #[derive(Clone, Debug)]
 pub struct TriangulationRansacParams {
-    /// 최대 각도 오차(도).
+    /// Maximum angular error (degrees).
     pub max_angle_error_deg: f64,
-    /// 최소 삼각측량 각(도).
+    /// Minimum triangulation angle (degrees).
     pub min_tri_angle_deg: f64,
-    /// RANSAC 신뢰도.
+    /// RANSAC confidence.
     pub confidence: f64,
-    /// 최소 인라이어 비율.
+    /// Minimum inlier ratio.
     pub min_inlier_ratio: f64,
-    /// 최대 반복 횟수.
+    /// Maximum number of iterations.
     pub max_trials: usize,
-    /// 관측 수가 이 이하이면 모든 2점 조합을 전수 탐색.
+    /// If the number of observations is at most this, exhaustively search all 2-point combinations.
     pub exhaustive_max_num_obs: usize,
 }
 
@@ -161,7 +161,7 @@ impl Default for TriangulationRansacParams {
     }
 }
 
-/// 모델 검증: 모든 뷰 깊이 양수 + 뷰 쌍 최대 각 ≥ 최소각.
+/// Model validation: all view depths positive + maximum angle over view pairs ≥ minimum angle.
 fn valid_point(obs: &[TriObservation], x: &Vec3, min_angle_rad: f64) -> bool {
     if !obs.iter().all(|o| has_positive_depth(&o.proj, x)) {
         return false;
@@ -213,7 +213,7 @@ impl Estimator for TriEstimator {
     }
 }
 
-/// RANSAC 다중 뷰 삼각측량. 성공 시 (점, 인라이어 마스크).
+/// RANSAC multi-view triangulation. On success (point, inlier mask).
 pub fn estimate_triangulation(obs: &[TriObservation], opts: &TriangulationRansacParams) -> Option<(Vec3, Vec<bool>)> {
     let n = obs.len();
     if n < 2 {
@@ -240,50 +240,50 @@ pub fn estimate_triangulation(obs: &[TriObservation], opts: &TriangulationRansac
     rep.model.map(|m| (m, rep.inlier_mask))
 }
 
-/// RANSAC 삼각측량 문제 하나.
+/// One RANSAC triangulation problem.
 #[derive(Clone, Debug)]
 pub struct TriProblem<'a> {
-    /// 관측.
+    /// Observations.
     pub obs: &'a [TriObservation],
-    /// 옵션.
+    /// Options.
     pub params: TriangulationRansacParams,
 }
 
-/// 관측 검사 하나: 등록 영상의 관측(픽셀)과 3D 점.
+/// One observation check: an observation (pixel) in a registered image and a 3D point.
 #[derive(Clone, Copy, Debug)]
 pub struct ObsQuery {
-    /// `cameras` 안 번호.
+    /// Index into `cameras`.
     pub camera: u32,
-    /// `poses` 안 번호(world_to_cam).
+    /// Index into `poses` (world_to_cam).
     pub pose: u32,
-    /// 관측 픽셀.
+    /// Observed pixel.
     pub xy: Vec2,
-    /// 3D 점(세계 좌표).
+    /// 3D point (world coordinates).
     pub xyz: Vec3,
 }
 
-/// 관측 검사 결과.
+/// Observation check result.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ObsCheck {
-    /// 픽셀 재투영 제곱 오차(`Reconstruction::squared_reprojection_error` 와 같음, 투영 실패면 f64::MAX).
+    /// Squared pixel reprojection error (same as `Reconstruction::squared_reprojection_error`, f64::MAX if the projection fails).
     pub sq_reproj_error: f64,
-    /// 카메라 깊이 = P 의 셋째 행 · (X, 1) ([`has_positive_depth`] 는 이 값 ≥ ε).
+    /// Camera depth = third row of P · (X, 1) ([`has_positive_depth`] means this value ≥ ε).
     pub depth: f64,
 }
 
-/// 삼각측량 일괄 계산 백엔드. CPU 기본 구현은 [`CpuTriangulation`].
+/// Batched triangulation backend. The default CPU implementation is [`CpuTriangulation`].
 pub trait TriangulationBackend: Send + Sync {
-    /// RANSAC 삼각측량 여러 문제. 결과는 문제마다 [`estimate_triangulation`] 과 같은 규칙, 순서는 입력 순서.
+    /// Several RANSAC triangulation problems. Each result follows the same rules as [`estimate_triangulation`], in input order.
     fn estimate_batch(&self, problems: &[TriProblem<'_>]) -> Vec<Option<(Vec3, Vec<bool>)>>;
-    /// 관측 여러 개의 재투영 오차와 깊이.
+    /// Reprojection errors and depths of several observations.
     fn check_observations(&self, cameras: &[Camera], poses: &[Rigid3], queries: &[ObsQuery]) -> Vec<ObsCheck>;
 }
 
-/// CPU 기본 구현.
+/// Default CPU implementation.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct CpuTriangulation;
 
-/// 관측 검사 하나(CPU).
+/// One observation check (CPU).
 pub fn check_observation(camera: &Camera, pose: &Rigid3, xy: &Vec2, xyz: &Vec3) -> ObsCheck {
     let p = pose.matrix();
     let depth = p[(2, 0)] * xyz.x + p[(2, 1)] * xyz.y + p[(2, 2)] * xyz.z + p[(2, 3)];
@@ -340,7 +340,7 @@ mod tests {
 
     #[test]
     fn multi_view_noise_within_3sigma() {
-        // 10 뷰, 0.5 px 잡음(f=1000): 3D 오차가 대략적 공분산 3σ 이내.
+        // 10 views, 0.5 px noise (f=1000): 3D error within roughly 3σ of the covariance.
         let mut rng = rand_pcg::Pcg64::seed_from_u64(2);
         let f = 1000.0;
         let x = Vec3::new(0.5, -0.3, 1.0);
@@ -354,7 +354,7 @@ mod tests {
             let uv = xc.xy() / xc.z + Vec2::new(crate::math::gaussian(&mut rng), crate::math::gaussian(&mut rng)) * (0.5 / f);
             rays.push(uv.push(1.0).normalize());
             poses.push(p.matrix());
-            // 정보 행렬 근사: 광선에 수직인 두 방향, 분산 (0.5/f · depth)².
+            // Information matrix approximation: two directions perpendicular to the ray, variance (0.5/f · depth)².
             let d = xc.norm();
             let sig = 0.5 / f * d;
             let b = (p.rotation_matrix().transpose() * xc).normalize();
@@ -364,7 +364,7 @@ mod tests {
         let cov = info.try_inverse().unwrap();
         let e = y - x;
         let mahal = (e.transpose() * cov.try_inverse().unwrap() * e)[0];
-        // 3 자유도 χ² 의 3σ 대응 값(≈ 14.2)
+        // 3σ-equivalent value of χ² with 3 degrees of freedom (≈ 14.2)
         assert!(mahal < 14.2, "mahalanobis² = {mahal}");
     }
 
@@ -373,18 +373,18 @@ mod tests {
         let p = Rigid3::identity().matrix();
         assert!(has_positive_depth(&p, &Vec3::new(0.0, 0.0, 1.0)));
         assert!(!has_positive_depth(&p, &Vec3::new(0.0, 0.0, -1.0)));
-        // RANSAC 모델 검증: 두 카메라 뒤의 점은 거부.
+        // RANSAC model validation: points behind both cameras are rejected.
         let p1 = Rigid3::identity();
         let p2 = Rigid3::new(cumulus3d_core::Quat::IDENTITY, Vec3::new(-1.0, 0.0, 0.0));
         let x = Vec3::new(0.3, 0.1, -5.0);
         let o = [TriObservation::new(&p1, -(p1 * x).normalize()), TriObservation::new(&p2, -(p2 * x).normalize())];
-        // 광선을 뒤집어 주면 DLT 해가 카메라 뒤로 나온다.
+        // Flipping the rays makes the DLT solution land behind the cameras.
         assert!(estimate_triangulation(&o, &TriangulationRansacParams::default()).is_none());
     }
 
     #[test]
     fn ransac_angle_thresholds() {
-        // 각도 오차 경계: 1.99° 는 인라이어(잔차 ≤ (2°)²), 2.01° 는 아웃라이어.
+        // Angular error boundary: 1.99° is an inlier (residual ≤ (2°)²), 2.01° is an outlier.
         let x = Vec3::new(0.0, 0.0, 10.0);
         let p = Rigid3::identity().matrix();
         let max2 = 2f64.to_radians().powi(2);
@@ -392,7 +392,7 @@ mod tests {
             let r = so3_exp(&Vec3::new(deg.to_radians(), 0.0, 0.0)) * x.normalize();
             assert_eq!(angular_error(&p, &r, &x).powi(2) <= max2, inl);
         }
-        // RANSAC: 정답 뷰 5개 + 1.9° 틀어진 뷰(인라이어) + 10° 틀어진 뷰(아웃라이어).
+        // RANSAC: 5 correct views + a view off by 1.9° (inlier) + a view off by 10° (outlier).
         let mut o = Vec::new();
         for k in 0..5 {
             let pk = Rigid3::new(cumulus3d_core::Quat::IDENTITY, Vec3::new(-4.0 + 2.0 * k as f64, 0.5 * k as f64, 0.0));
@@ -410,7 +410,7 @@ mod tests {
 
     #[test]
     fn min_tri_angle_boundary() {
-        // 대칭 두 중심, 쌍각 1.49° → 생성 안 됨, 1.51° → 생성.
+        // Two symmetric centers, parallax angle 1.49° so not created, 1.51° so created.
         for (deg, ok) in [(1.49f64, false), (1.51, true)] {
             let half = (deg / 2.0).to_radians();
             let z = 1.0 / half.tan();

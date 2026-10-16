@@ -25,7 +25,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 해법·잔차·분해 검증.
+//! Verification of solvers, residuals, and decomposition.
 
 use cumulus3d_core::ransac::{static_max_num_trials, RansacParams};
 use cumulus3d_core::{Mat3, Quat, Vec2, Vec3};
@@ -52,7 +52,7 @@ fn skew(v: &Vec3) -> Mat3 {
 
 fn normalize_sign(m: &Mat3) -> Mat3 {
     let m = m / m.norm();
-    // 가장 큰 절댓값 원소를 양수로.
+    // Make the element with the largest absolute value positive.
     let mut k = 0;
     for i in 0..9 {
         if m[i].abs() > m[k].abs() {
@@ -72,7 +72,7 @@ fn gauss(r: &mut Pcg64) -> f64 {
     (-2.0 * u1.ln()).sqrt() * (2.0 * std::f64::consts::PI * u2).cos()
 }
 
-/// 점 n 개(깊이 2..10, 카메라1 좌표)와 카메라2 기준 점.
+/// n points (depth 2..10, camera-1 coordinates) and the corresponding points in camera 2.
 fn scene(r: &mut Pcg64, n: usize, rot: &Mat3, t: &Vec3) -> (Vec<Vec3>, Vec<Vec3>) {
     let mut a = Vec::new();
     let mut b = Vec::new();
@@ -94,7 +94,7 @@ fn ransac_trial_bounds() {
     assert_eq!(static_max_num_trials(&mk(0.25), 5), 21217);
     assert_eq!(static_max_num_trials(&mk(0.25), 7), 339734);
     assert_eq!(static_max_num_trials(&mk(0.7), 1), 18);
-    // 기본 옵션 적용 시 상한 10000.
+    // With default options the upper limit is 10000.
     let o = TwoViewOptions::default().ransac;
     assert_eq!(static_max_num_trials(&o, 5), 10000);
     assert_eq!(static_max_num_trials(&o, 4), 5296);
@@ -110,19 +110,19 @@ fn sampson_first_order() {
     let f = ki.transpose() * skew(&t) * rot * ki;
     let x1 = Vec3::new(420.0, 310.0, 1.0);
     let l = f * x1;
-    // 에피폴라선 위의 점 + 법선 방향 d.
+    // Point on the epipolar line + normal direction d.
     let p0 = Vec2::new(600.0, -(l.x * 600.0 + l.z) / l.y);
     let nrm = Vec2::new(l.x, l.y).normalize();
     for d in [1e-3, 1e-2, 0.1] {
         let p = p0 + nrm * d;
         let e = sampson_error_sq(&f, &x1, &Vec3::new(p.x, p.y, 1.0));
-        // Sampson 은 두 영상 오차를 합친 근사 → d² 보다 작거나 같음. 영상2 만 움직였으므로
-        // 분모의 영상1 항 비율만큼 작다. 순수 영상2 거리 = 분자/(l_x²+l_y²).
+        // Sampson is an approximation combining both image errors -> less than or equal to d². Since only image 2 moved,
+        // it is smaller by the image-1 term ratio in the denominator. Pure image-2 distance = numerator/(l_x²+l_y²).
         let lb = f.transpose() * Vec3::new(p.x, p.y, 1.0);
         let pure = e * (lb.x * lb.x + lb.y * lb.y + l.x * l.x + l.y * l.y) / (l.x * l.x + l.y * l.y);
         assert!(((pure - d * d) / (d * d)).abs() < 1e-6, "d={d} pure={pure}");
     }
-    // F 가 영행렬이면 분모 0 → ∞.
+    // If F is the zero matrix the denominator is 0 -> ∞.
     assert_eq!(sampson_error_sq(&Mat3::zeros(), &x1, &x1), f64::INFINITY);
 }
 
@@ -143,7 +143,7 @@ fn five_point_essential() {
         let sols_n = essential_five_point(&r1, &r2);
         let best = sols_n.iter().map(|e| (normalize_sign(e) - e_true).norm()).fold(f64::INFINITY, f64::min);
         assert!(best < 1e-8, "N점 trial {trial}: {best}");
-        // 8점 E 도 같은 E.
+        // The 8-point E is also the same E.
         let e8 = essential_eight_point(&r1, &r2).unwrap();
         let d8 = (normalize_sign(&e8) - e_true).norm();
         assert!(d8 < 1e-8, "8점 {d8}");
@@ -186,7 +186,7 @@ fn seven_and_eight_point_fundamental() {
         let (mx, mn) = (sv.max(), sv.min());
         assert!(mn / mx < 1e-10);
 
-        // 잡음 0.5 px 8점 이상.
+        // Noise 0.5 px, 8 or more points.
         let n1: Vec<Vec2> = x1.iter().map(|p| p + Vec2::new(0.5 * gauss(&mut r), 0.5 * gauss(&mut r))).collect();
         let n2: Vec<Vec2> = x2.iter().map(|p| p + Vec2::new(0.5 * gauss(&mut r), 0.5 * gauss(&mut r))).collect();
         let f8 = fundamental_eight_point(&n1, &n2).unwrap();
@@ -222,7 +222,7 @@ fn homography_dlt_exact() {
             let h = h / h[(2, 2)];
             assert!((h - h_true).norm() / h_true.norm() < 1e-8);
         }
-        // N점(잡음 없음)
+        // N-point (no noise)
         let x1n: Vec<Vec2> = (0..30).map(|_| Vec2::new(r.random_range(0.0..2000.0), r.random_range(0.0..1500.0))).collect();
         let x2n: Vec<Vec2> = x1n
             .iter()
@@ -231,7 +231,7 @@ fn homography_dlt_exact() {
                 Vec2::new(q.x / q.z, q.y / q.z)
             })
             .collect();
-        // det 스케일 규칙: N점 해는 단위 노름이므로 det(H/‖H‖) 가 1e-8 미만이면 거부된다.
+        // det scale rule: the N-point solution has unit norm, so it is rejected if det(H/‖H‖) is below 1e-8.
         let det_unit = (h_true / h_true.norm()).determinant().abs();
         for normalize in [false, true] {
             let res = homography_dlt(&x1n, &x2n, normalize);
@@ -246,17 +246,17 @@ fn homography_dlt_exact() {
         }
     }
     assert!(n_checked > 0);
-    // 퇴화: 한 점에 몰린 대응 → det 작음/특이 → None.
+    // Degenerate: correspondences clustered at one point -> small det / singular -> None.
     let p = vec![Vec2::new(1.0, 1.0); 4];
     assert!(homography_dlt(&p, &p, false).is_none());
-    // 크기 1e-3 스케일 축소: det = 1e-9 < 1e-8 → None.
+    // Scale shrunk by 1e-3: det = 1e-9 < 1e-8 -> None.
     let x1 = vec![Vec2::new(0.0, 0.0), Vec2::new(1.0, 0.0), Vec2::new(0.0, 1.0), Vec2::new(1.0, 1.0)];
     let x2: Vec<Vec2> = x1.iter().map(|p| p * 1e-3 + Vec2::new(0.0, 0.0)).collect();
-    // H = diag(1e-3,1e-3,1) → det 1e-6 (통과), diag(1e-5,1e-5,1) → 1e-10 (거부)
+    // H = diag(1e-3,1e-3,1) -> det 1e-6 (pass), diag(1e-5,1e-5,1) -> 1e-10 (rejected)
     assert!(homography_dlt(&x1, &x2, false).is_some());
     let x3: Vec<Vec2> = x1.iter().map(|p| p * 1e-5).collect();
     assert!(homography_dlt(&x1, &x3, false).is_none());
-    // 전이 오차의 NaN/∞ 은 ∞.
+    // NaN/∞ in the transfer error gives ∞.
     assert_eq!(homography_transfer_error_sq(&Mat3::zeros(), &Vec2::new(1.0, 1.0), &Vec2::new(1.0, 1.0)), f64::INFINITY);
 }
 
@@ -276,7 +276,7 @@ fn essential_decomposition_cheirality() {
         assert!(dr < 1e-6, "rot err {dr}");
         let ang = pose.translation.normalize().dot(&t).clamp(-1.0, 1.0).acos();
         assert!(ang < 1e-6, "t err {ang}");
-        // 4후보 중 정답만 모든 점 통과.
+        // Of the 4 candidates, only the correct one passes all points.
         let cands = decompose_essential(&e).unwrap();
         let full: Vec<usize> =
             cands.iter().map(|(rr, tt)| r1.iter().zip(&r2).filter(|(a, b)| triangulate_midpoint(rr, tt, a, b).is_some()).count()).collect();
@@ -304,7 +304,7 @@ fn homography_decomposition() {
         });
         assert!(ok, "{cands:?} vs R t/d={td:?} n={n:?}");
     }
-    // 순수 회전 → 후보 1개, t = 0.
+    // Pure rotation -> 1 candidate, t = 0.
     let rot = rand_rot(&mut r, 0.3);
     let h = k2 * rot * k1.try_inverse().unwrap();
     let c = decompose_homography(&h, &k1, &k2);

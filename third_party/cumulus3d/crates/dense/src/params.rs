@@ -29,20 +29,20 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 조밀화 매개변수: 프로파일, PatchMatch 상수, 필터·융합 허용치.
+//! Densification parameters: profiles, PatchMatch constants, filter and fusion tolerances.
 
-/// 조밀화 프로파일.
+/// Densification profile.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 pub enum MvsProfile {
-    /// 짧은 반복 일정(기본). 세부 복원 단계는 상향 표본 가설에서 시작한다.
+    /// Short iteration schedule (default). The detail-restoration stage starts from the upsampled hypothesis.
     #[default]
     Fast,
-    /// 긴 반복 일정. 세부 복원 단계는 무작위 초기화에서 시작한다.
+    /// Long iteration schedule. The detail-restoration stage starts from random initialization.
     Quality,
 }
 
 impl MvsProfile {
-    /// 이름("fast" / "quality", 대소문자 무시)으로 찾는다.
+    /// Looks up by name ("fast" / "quality", case-insensitive).
     pub fn parse(s: &str) -> Option<Self> {
         match s.to_ascii_lowercase().as_str() {
             "fast" => Some(Self::Fast),
@@ -50,7 +50,7 @@ impl MvsProfile {
             _ => None,
         }
     }
-    /// 프로파일 이름.
+    /// Profile name.
     pub fn name(self) -> &'static str {
         match self {
             Self::Fast => "fast",
@@ -59,67 +59,67 @@ impl MvsProfile {
     }
 }
 
-/// 한 스케일의 반복 일정.
+/// Iteration schedule of one scale.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct LevelSchedule {
-    /// 광도 실행의 적·흑 반복 수(최저 스케일: 무작위 초기화, 그 위: 세부 복원 실행).
+    /// Number of red-black iterations of a photometric run (lowest scale: random initialization; above it: detail-restoration run).
     pub photometric_iters: u32,
-    /// 세부 복원 실행을 무작위 초기화로 시작할지(거짓이면 상향 표본 가설로 시작).
+    /// Whether the detail-restoration run starts from random initialization (if false, it starts from the upsampled hypothesis).
     pub restorer_random_init: bool,
-    /// 기하 일관성 실행 회차 수(모든 기준 뷰 동기).
+    /// Number of geometric-consistency run rounds (synchronized over all reference views).
     pub geometric_rounds: u32,
-    /// 기하 실행 한 회차의 반복 수.
+    /// Number of iterations in one geometric run round.
     pub geometric_iters: u32,
 }
 
-/// PatchMatch 상수(비용·뷰 선택·정제·기하 항).
+/// PatchMatch constants (cost, view selection, refinement, geometric term).
 #[derive(Clone, Debug, PartialEq)]
 pub struct PmParams {
-    /// 창 반경(픽셀).
+    /// Window radius (pixels).
     pub window_radius: i32,
-    /// 창 안 표본 간격(1 = 전수, 2 = 행·열 하나 걸러).
+    /// Sample spacing inside the window (1 = all, 2 = every other row and column).
     pub window_step: i32,
-    /// 양방향 가중치 공간 σ(픽셀). ≤ 0 이면 창 반경.
+    /// Bilateral weight spatial σ (pixels). Window radius if ≤ 0.
     pub sigma_spatial: f32,
-    /// 양방향 가중치 밝기 σ(\[0,1\] 밝기).
+    /// Bilateral weight brightness σ (brightness in \[0,1\]).
     pub sigma_color: f32,
-    /// 좋은 비용 경계 τ(t) = tau0·exp(−t²/tau_alpha).
+    /// Good-cost boundary τ(t) = tau0·exp(−t²/tau_alpha).
     pub tau0: f32,
-    /// 좋은 비용 경계의 감쇠 상수 α.
+    /// Decay constant α of the good-cost boundary.
     pub tau_alpha: f32,
-    /// 나쁜 비용 경계.
+    /// Bad-cost boundary.
     pub tau1: f32,
-    /// 비용 신뢰도 exp(−m²/(2β²)).
+    /// Cost confidence exp(−m²/(2β²)).
     pub beta: f32,
-    /// 뷰 채택: 좋은 비용 수 > n1 이고 나쁜 비용 수 < n2.
+    /// View adoption: number of good costs > n1 and number of bad costs < n2.
     pub n1: u32,
-    /// 뷰 채택의 나쁜 비용 수 상한 n2.
+    /// Upper bound n2 on the number of bad costs for view adoption.
     pub n2: u32,
-    /// 채택되지 않은 직전 최중요 뷰의 가중치.
+    /// Weight of the previous most important view when it is not adopted.
     pub prev_view_weight: f32,
-    /// 삼각측량 사전 최소 각(도).
+    /// Triangulation prior minimum angle (degrees).
     pub min_triangulation_angle_deg: f32,
-    /// 입사각 사전 σ.
+    /// Incidence angle prior σ.
     pub incident_angle_sigma: f32,
-    /// 기하 항 가중치 λ 와 상한 δ(픽셀).
+    /// Geometric term weight λ and upper bound δ (pixels).
     pub geom_lambda: f32,
-    /// 기하 항 상한 δ(픽셀).
+    /// Geometric term upper bound δ (pixels).
     pub geom_max_cost: f32,
-    /// 가중치 합이 0 일 때 쓰는 상위 K 평균의 K.
+    /// K of the top-K mean used when the weight sum is 0.
     pub top_k: u32,
-    /// 정제 섭동 시작 크기(역깊이 상대, 법선 각 도): 광도/기하.
+    /// Initial refinement perturbation size (relative inverse depth, normal angle in degrees): photometric/geometric.
     pub eps0_photometric: f32,
-    /// 정제 섭동 시작 크기(역깊이 상대): 기하 실행.
+    /// Initial refinement perturbation size (relative inverse depth): geometric run.
     pub eps0_geometric: f32,
-    /// 정제 법선 섭동 시작 각(도): 광도 실행.
+    /// Initial refinement normal perturbation angle (degrees): photometric run.
     pub phi0_photometric_deg: f32,
-    /// 정제 법선 섭동 시작 각(도): 기하 실행.
+    /// Initial refinement normal perturbation angle (degrees): geometric run.
     pub phi0_geometric_deg: f32,
-    /// 역깊이 섭동 하한.
+    /// Lower bound of the inverse-depth perturbation.
     pub eps_min: f32,
-    /// 법선 섭동 각 하한(도).
+    /// Lower bound of the normal perturbation angle (degrees).
     pub phi_min_deg: f32,
-    /// 거친 스케일 가설을 후보로 더할 기준 패치 분산 문턱(\[0,1\] 밝기²). 0 이면 끔.
+    /// Reference patch variance threshold (brightness² in \[0,1\]) for adding the coarse-scale hypothesis as a candidate. 0 turns it off.
     pub weak_texture_var: f32,
 }
 
@@ -154,7 +154,7 @@ impl Default for PmParams {
 }
 
 impl PmParams {
-    /// 실효 공간 σ.
+    /// Effective spatial σ.
     pub fn sigma_s(&self) -> f32 {
         if self.sigma_spatial > 0.0 {
             self.sigma_spatial
@@ -162,7 +162,7 @@ impl PmParams {
             self.window_radius as f32
         }
     }
-    /// 창 표본 오프셋(−R..R, 간격 step).
+    /// Window sample offsets (−R..R, spacing step).
     pub fn window_offsets(&self) -> Vec<i32> {
         let r = self.window_radius;
         let s = self.window_step.max(1);
@@ -176,20 +176,20 @@ impl PmParams {
     }
 }
 
-/// 깊이맵 필터 허용치.
+/// Depth map filter tolerances.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FilterParams {
-    /// 광도 조건: 가시 확률 ≥ E(1 − min_ncc).
+    /// Photometric condition: visibility probability ≥ E(1 − min_ncc).
     pub min_ncc: f32,
-    /// 이 각(도)보다 작은 삼각측량각의 뷰는 세지 않는다.
+    /// Views with a triangulation angle smaller than this (degrees) are not counted.
     pub min_triangulation_angle_deg: f32,
-    /// 일치 뷰 최소 수(실효값은 min(원천 수, 이 값)).
+    /// Minimum number of agreeing views (effective value is min(source count, this value)).
     pub min_num_consistent: u32,
-    /// 순·역 재투영 오차 허용(픽셀).
+    /// Forward/backward reprojection error tolerance (pixels).
     pub geom_max_cost: f32,
-    /// 확률 방출 σ.
+    /// Probability emission σ.
     pub ncc_sigma: f32,
-    /// 판독 전 5×5 중앙값 평면 필터.
+    /// 5×5 median plane filter before readout.
     pub median_filter: bool,
 }
 
@@ -206,18 +206,20 @@ impl Default for FilterParams {
     }
 }
 
-/// 융합 방식.
+/// Fusion method.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 pub enum FusionMode {
-    /// 이웃의 이웃으로 깊이 우선 확장해 모은 픽셀의 성분별 중앙값 점(표면당 점 하나에 가깝다).
+    /// Per-component median point of the pixels gathered by depth-first expansion through neighbors of neighbors (close to one point per
+    /// surface).
     Traversal,
-    /// 기준 픽셀마다 이웃 뷰에서 깊이·법선·재투영이 일치하는 뷰 수를 세어, 충분하면 일치 점들의 평균 점.
+    /// For each reference pixel, count the neighbor views whose depth, normal and reprojection agree; if enough, the mean point of the
+    /// agreeing points.
     #[default]
     Consistency,
 }
 
 impl FusionMode {
-    /// 이름("traversal"/"median", "consistency"/"average")으로 찾는다.
+    /// Looks up by name ("traversal"/"median", "consistency"/"average").
     pub fn parse(s: &str) -> Option<Self> {
         match s.to_ascii_lowercase().as_str() {
             "traversal" | "median" => Some(Self::Traversal),
@@ -227,20 +229,21 @@ impl FusionMode {
     }
 }
 
-/// 일치 융합에서 기준 미달 픽셀(남은 픽셀) 처리.
+/// Handling of below-criterion (leftover) pixels in agreement fusion.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 pub enum FusionResidual {
-    /// 처리 없음(기본).
+    /// No handling (default).
     #[default]
     None,
-    /// 버려진 후보가 일시 점유했던 픽셀(기준·이웃)을 되돌려 뒤 기준 영상이 다시 쓸 수 있게 한다.
+    /// Gives back the pixels (reference and neighbor) temporarily occupied by discarded candidates so later reference images can use them
+    /// again.
     Release,
-    /// 1차 융합 뒤, 점이 되지 못한 유효 깊이 픽셀만으로 더 엄격한 허용치의 2차 융합.
+    /// After the first fusion, a second fusion with stricter tolerances using only valid-depth pixels that did not become a point.
     SecondPass,
 }
 
 impl FusionResidual {
-    /// 이름("none", "release", "second-pass")으로 찾는다.
+    /// Looks up by name ("none", "release", "second-pass").
     pub fn parse(s: &str) -> Option<Self> {
         match s.to_ascii_lowercase().replace('_', "-").as_str() {
             "none" => Some(Self::None),
@@ -249,7 +252,7 @@ impl FusionResidual {
             _ => None,
         }
     }
-    /// 처리 방식 이름.
+    /// Handling method name.
     pub fn name(self) -> &'static str {
         match self {
             Self::None => "none",
@@ -259,16 +262,16 @@ impl FusionResidual {
     }
 }
 
-/// 2차 융합 허용치.
+/// Second fusion tolerances.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ResidualParams {
-    /// 기준 외 일치 뷰 최소 수.
+    /// Minimum number of agreeing views other than the reference.
     pub min_views: usize,
-    /// 상대 깊이 허용치(None = 1차의 0.5배).
+    /// Relative depth tolerance (None = 0.5 times the first pass).
     pub depth_error: Option<f64>,
-    /// 법선 허용 각(도, None = 1차의 0.67배).
+    /// Normal tolerance angle (degrees, None = 0.67 times the first pass).
     pub normal_error_deg: Option<f64>,
-    /// 1차 점과 이 거리(GSD 배수) 이내인 2차 점은 버린다.
+    /// Second-pass points within this distance (multiple of GSD) of a first-pass point are discarded.
     pub min_dist_gsd: f64,
 }
 
@@ -278,43 +281,47 @@ impl Default for ResidualParams {
     }
 }
 
-/// 융합 허용치.
+/// Fusion tolerances.
 #[derive(Clone, Debug, PartialEq)]
 pub struct FusionParams {
-    /// 융합 방식.
+    /// Fusion method.
     pub mode: FusionMode,
-    /// 일치 융합: 남은 픽셀 처리.
+    /// Agreement fusion: handling of leftover pixels.
     pub residual: FusionResidual,
-    /// 2차 융합 허용치.
+    /// Second fusion tolerances.
     pub residual_params: ResidualParams,
-    /// 일치 융합: 기준 외 일치 뷰 최소 수.
+    /// Agreement fusion: minimum number of agreeing views other than the reference.
     pub min_consistent_views: usize,
-    /// 일치 융합: 이미 다른 기준 픽셀의 점에 쓰인 픽셀은 기준으로 다시 쓰지 않음.
+    /// Agreement fusion: a pixel already used by the point of another reference pixel is not reused as a reference.
     pub mark_used: bool,
-    /// 일치 융합: 표시 반경(픽셀, 0 = 투영 픽셀만).
+    /// Agreement fusion: marking radius (pixels, 0 = projected pixel only).
     pub mark_radius: usize,
-    /// 일치 융합: 깊이 불확실성 역분산 가중 평균(끄면 단순 평균).
+    /// Agreement fusion: inverse-variance weighted average of depth uncertainty (simple average if off).
     pub inverse_variance: bool,
-    /// 정합 불확실성 σ_px = sigma_px0 + sigma_px_slope·비용 (픽셀).
+    /// Registration uncertainty σ_px = sigma_px0 + sigma_px_slope·cost (pixels).
     pub sigma_px0: f64,
-    /// σ_px 의 비용 기울기.
+    /// Cost slope of σ_px.
     pub sigma_px_slope: f64,
-    /// 일치 융합: 검사할 겹침 뷰 수(공유 점 순).
+    /// Agreement fusion: number of overlapping views to check (in shared-point order).
     pub consistency_num_images: usize,
-    /// 확장 융합: 점 하나에 필요한 최소 픽셀 수.
+    /// Extended fusion: minimum number of pixels required for a point.
     pub min_num_pixels: usize,
-    /// 확장 융합: 점 하나에 모을 최대 픽셀 수.
+    /// Extended fusion: maximum number of pixels gathered into a point.
     pub max_num_pixels: usize,
-    /// 확장 융합: 최대 확장 깊이.
+    /// Extended fusion: maximum expansion depth.
     pub max_traversal_depth: usize,
-    /// 재투영 오차 허용치(픽셀).
+    /// Reprojection error tolerance (pixels).
     pub max_reproj_error: f64,
-    /// 상대 깊이 허용치.
+    /// Relative depth tolerance.
     pub max_depth_error: f64,
-    /// 법선 허용 각(도).
+    /// Normal tolerance angle (degrees).
     pub max_normal_error_deg: f64,
-    /// 확장 융합: 검사할 겹침 뷰 수.
+    /// Extended fusion: number of overlapping views to check.
     pub check_num_images: usize,
+    /// Normal-direction bilateral smoothing applied to the fused cloud (iterations 0 = off).
+    pub smooth: crate::smooth::SmoothParams,
+    /// Free-space visibility filter applied to the fused cloud before smoothing (check_views 0 = off).
+    pub visibility: crate::visibility::VisibilityParams,
 }
 
 impl Default for FusionParams {
@@ -337,20 +344,22 @@ impl Default for FusionParams {
             max_depth_error: 0.01,
             max_normal_error_deg: 10.0,
             check_num_images: 50,
+            smooth: crate::smooth::SmoothParams::default(),
+            visibility: crate::visibility::VisibilityParams::default(),
         }
     }
 }
 
-/// 이웃 뷰 선택.
+/// Neighbor view selection.
 #[derive(Clone, Debug, PartialEq)]
 pub struct NeighborParams {
-    /// 기준 뷰당 원천 뷰 최대 수(≤ 32).
+    /// Maximum number of source views per reference view (≤ 32).
     pub num_views: usize,
-    /// 75 분위 삼각측량각 하한(도).
+    /// Lower bound of the 75th-percentile triangulation angle (degrees).
     pub min_triangulation_angle_deg: f64,
-    /// 방향 다양성: 기준선 방위각 구간 수와 같은 구간 반복 선택 감쇠(1 = 끔).
+    /// Direction diversity: number of baseline azimuth sectors and the decay for repeated selection in the same sector (1 = off).
     pub direction_bins: usize,
-    /// 같은 구간 반복 선택 감쇠(1 = 방향 다양성 끔).
+    /// Decay for repeated selection in the same sector (1 = direction diversity off).
     pub diversity_decay: f64,
 }
 
@@ -360,41 +369,49 @@ impl Default for NeighborParams {
     }
 }
 
-/// `densify` 옵션.
+/// `densify` options.
 #[derive(Clone, Debug, PartialEq)]
 pub struct DensifyOptions {
-    /// 반복 일정 프로파일.
+    /// Iteration schedule profile.
     pub profile: MvsProfile,
-    /// 이웃 뷰 선택.
+    /// Neighbor view selection.
     pub neighbors: NeighborParams,
-    /// PatchMatch 상수.
+    /// PatchMatch constants.
     pub pm: PmParams,
-    /// 깊이맵 필터 허용치.
+    /// Depth map filter tolerances.
     pub filter: FilterParams,
-    /// 융합 허용치.
+    /// Fusion tolerances.
     pub fusion: FusionParams,
-    /// 필터 뒤 후처리.
+    /// Post-processing after the filter.
     pub post: crate::postproc::PostParams,
-    /// 스케일 수 상한(축소율 0.5).
+    /// Upper bound on the number of scales (downscale ratio 0.5).
     pub max_levels: usize,
-    /// 최저 스케일의 짧은 변 하한(이보다 작아지면 스케일 수를 줄인다).
+    /// Lower bound of the short side at the lowest scale (the scale count is reduced if it would become smaller).
     pub min_level_size: usize,
-    /// 결합 양방향 상향 표본 매개변수: 공간 σ(저해상 픽셀), 밝기 σ.
+    /// Joint bilateral upsampling parameters: spatial σ (low-res pixels), brightness σ.
     pub jbu_sigma_spatial: f32,
-    /// 결합 양방향 상향 표본 밝기 σ.
+    /// Joint bilateral upsampling brightness σ.
     pub jbu_sigma_color: f32,
-    /// 세부 복원기 교체 문턱 ξ.
+    /// Detail restorer replacement threshold ξ.
     pub restorer_threshold: f32,
-    /// 난수 시드.
+    /// Random seed.
     pub seed: u64,
-    /// 일정 덮어쓰기(측정용): 기하 실행 반복 수, 회차 수.
+    /// Schedule override (for measurement): geometric run iteration count, round count.
     pub geometric_iters_override: Option<u32>,
-    /// 일정 덮어쓰기: 기하 실행 회차 수.
+    /// Schedule override: geometric run round count.
     pub geometric_rounds_override: Option<u32>,
 }
 
 impl Default for DensifyOptions {
+    /// Same as [`DensifyOptions::with_profile`]`(MvsProfile::Fast)`.
     fn default() -> Self {
+        Self::with_profile(MvsProfile::Fast)
+    }
+}
+
+impl DensifyOptions {
+    /// Untuned base values shared by all profiles (component defaults).
+    fn base() -> Self {
         Self {
             profile: MvsProfile::Fast,
             neighbors: NeighborParams::default(),
@@ -415,17 +432,33 @@ impl Default for DensifyOptions {
 }
 
 impl DensifyOptions {
-    /// 프로파일 기본값: fast 는 창 반경 5·간격 2(36 표본), quality 는 반경 5·간격 1(121 표본).
+    /// Profile defaults: fast uses window radius 5 with spacing 2 (36 samples), quality uses radius 5 with spacing 1 (121 samples).
+    ///
+    /// The fast profile also carries the filter/fusion values tuned on 240 aerial views at 960 px
+    /// (see `docs/tuning/`): stricter depth-map filter, no median filter, hole filling on, 3-view
+    /// consistency fusion with a tight depth tolerance, and normal-direction smoothing of the fused cloud.
     pub fn with_profile(profile: MvsProfile) -> Self {
-        let mut o = Self { profile, ..Self::default() };
+        let mut o = Self { profile, ..Self::base() };
         o.pm.window_step = match profile {
             MvsProfile::Fast => 2,
             MvsProfile::Quality => 1,
         };
+        if profile == MvsProfile::Fast {
+            o.apply_fast_tuning();
+        }
         o
     }
 
-    /// 스케일 `level`(0 = 최저)의 일정. `top` 은 최고 스케일 번호.
+    /// Tuned fast-profile filter, post-processing and fusion values.
+    fn apply_fast_tuning(&mut self) {
+        let f = &mut self.filter;
+        (f.min_ncc, f.geom_max_cost, f.min_num_consistent, f.median_filter) = (0.2, 0.5, 3, false);
+        self.post.fill_holes = true;
+        let u = &mut self.fusion;
+        (u.min_consistent_views, u.max_depth_error, u.max_normal_error_deg, u.max_reproj_error) = (3, 0.005, 23.0, 100.0);
+    }
+
+    /// Schedule of scale `level` (0 = lowest). `top` is the highest scale number.
     pub fn schedule(&self, level: usize, top: usize) -> LevelSchedule {
         let mut s = self.base_schedule(level, top);
         if let Some(v) = self.geometric_iters_override {
@@ -457,7 +490,7 @@ impl DensifyOptions {
         }
     }
 
-    /// 설정 해시(깊이맵 캐시 열쇠용).
+    /// Settings hash (for the depth map cache key).
     pub fn fingerprint(&self) -> u64 {
         let s = format!(
             "{:?}",

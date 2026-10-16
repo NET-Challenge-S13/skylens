@@ -25,11 +25,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! `densify --fusion-variants <파일>`: 깊이맵은 한 번만 만들고 융합 설정만 바꿔 여러 번 융합한다.
+//! `densify --fusion-variants <file>`: build the depth maps once and fuse several times, changing only the fusion settings.
 //!
-//! 파일 형식: 줄마다 `이름|융합 플래그들`(densify 와 같은 형식, 공백 구분). 빈 줄과 `#` 로 시작하는 줄은 건너뛴다.
-//! 플래그는 densify 하위 명령의 인자 파서로 해석해 기본 설정 위에 덮어쓰므로, 새 융합 플래그도 그대로 쓸 수 있다.
-//! 깊이맵을 바꾸는 플래그(필터·PatchMatch·영상 크기 등)는 거부한다.
+//! File format: one `name|fusion flags` per line (same format as densify, whitespace separated). Empty lines and lines starting with `#`
+//! are skipped.
+//! The flags are interpreted by the densify subcommand's argument parser and overlaid on the base settings, so new fusion flags can be
+//! used as they are.
+//! Flags that change the depth maps (filter, PatchMatch, image size, etc.) are rejected.
 
 use crate::interop::{apply_densify_args, score_options, DensifyArgs};
 use clap::Parser;
@@ -39,16 +41,16 @@ use cumulus3d_dense::{DenseScene, DensifyOptions, DepthMapSet};
 use std::path::Path;
 use std::time::Instant;
 
-/// 융합 변형 하나.
+/// One fusion variant.
 #[derive(Clone, Debug)]
 pub struct FusionVariant {
-    /// 변형 이름(출력 파일 이름에 쓴다).
+    /// Variant name (used in the output file name).
     pub name: String,
-    /// 원래 줄의 플래그 문자열(보고용).
+    /// Flag string of the original line (for reporting).
     pub flags: String,
-    /// 이 변형의 조밀화 옵션.
+    /// Densification options of this variant.
     pub opts: DensifyOptions,
-    /// 점수 융합 설정(있으면 점수 융합).
+    /// Score fusion settings (if present, score fusion).
     pub score: Option<ScoreFusionOptions>,
 }
 
@@ -65,11 +67,13 @@ fn parse_line(tokens: &[&str]) -> Result<DensifyArgs, String> {
     VariantLine::try_parse_from(argv).map(|v| v.a).map_err(|e| e.to_string())
 }
 
-/// 변형 파일을 읽어 기본 설정(`base`, densify 명령 인자 `base_args` 를 반영한 것) 위에 각 줄의 플래그를 덮어쓴 설정 목록을 만든다.
-/// 줄에 `--fusion-mode` 가 없으면 명령의 융합 방식(점수 융합 포함)을 따른다.
+/// Read the variants file and build the settings list in which each line's flags are overlaid on the base settings (`base`, with the
+/// densify command arguments `base_args` applied).
+/// If a line has no `--fusion-mode`, it follows the command's fusion mode (including score fusion).
 pub fn read_variants(path: &Path, base_args: &DensifyArgs, base: &DensifyOptions) -> Result<Vec<FusionVariant>, String> {
     let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
-    // 플래그 없는 줄의 해석 결과: 설정 밖 인자(영상 크기 등)가 바뀌었는지 비교하는 기준.
+    // Interpretation result of a line without flags: the reference for checking whether arguments outside the settings (image size etc.)
+    // changed.
     let empty = parse_line(&[])?;
     let mut out: Vec<FusionVariant> = Vec::new();
     for (ln, raw) in text.lines().enumerate() {
@@ -118,8 +122,8 @@ pub fn read_variants(path: &Path, base_args: &DensifyArgs, base: &DensifyOptions
     Ok(out)
 }
 
-/// 변형마다 융합해 `out_dir/<이름>.ply` 를 쓴다. 변형별 융합 시간을 출력하고, `stats` 면 점군 통계도 낸다.
-/// `out_dir/fusion_variants.tsv` 에 이름·점 수·융합 시간·플래그를 모은다.
+/// Fuse per variant and write `out_dir/<name>.ply`. Print the fusion time per variant, and with `stats` also the point-cloud statistics.
+/// Collect name, point count, fusion time and flags in `out_dir/fusion_variants.tsv`.
 pub fn run_variants(scene: &DenseScene, maps: &DepthMapSet, variants: &[FusionVariant], out_dir: &Path, stats: bool) -> Result<(), String> {
     std::fs::create_dir_all(out_dir).map_err(|e| format!("{}: {e}", out_dir.display()))?;
     let mut tsv = String::from("name\tpoints\tresidual_points\tfusion_s\tpass1_s\tpass2_s\twrite_s\tflags\n");
@@ -134,8 +138,10 @@ pub fn run_variants(scene: &DenseScene, maps: &DepthMapSet, variants: &[FusionVa
         let write_s = tw.elapsed().as_secs_f64();
         let extra = if wrote_residual { format!(" (2차 점 {} → {})", out.num_residual(), rpath.display()) } else { String::new() };
         let (p1, p2) = (out.timings.fusion_pass1.as_secs_f64(), out.timings.fusion_pass2.as_secs_f64());
+        let sm = out.timings.fusion_smooth.as_secs_f64();
+        let (vis, vis_n) = (out.timings.fusion_visibility.as_secs_f64(), out.timings.fusion_visibility_removed);
         println!(
-            "변형 {}: 점 {} 융합 {fusion_s:.2}s (1차 {p1:.2}s 2차 {p2:.2}s) 쓰기 {write_s:.2}s → {}{extra}",
+            "변형 {}: 점 {} 융합 {fusion_s:.2}s (1차 {p1:.2}s 2차 {p2:.2}s 평활 {sm:.2}s, 가시성 {vis:.2}s, 제거 {vis_n}) 쓰기 {write_s:.2}s → {}{extra}",
             v.name,
             out.cloud.len(),
             path.display()

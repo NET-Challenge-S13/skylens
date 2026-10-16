@@ -29,11 +29,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 희소 재구성 자료 구조.
+//! Sparse reconstruction data structures.
 //!
-//! 사본 비용: 영상과 3D 점은 `Arc` 로 보관하고 수정 시 `Arc::make_mut`(copy-on-write)로 복제한다.
-//! 따라서 `Reconstruction::clone()` 은 참조 수 증가만 하고, 이후 실제로 바뀐 영상/점만 복사된다.
-//! 불변식(`check_invariants`)은 모든 공개 수정 연산이 유지한다.
+//! Copy cost: images and 3D points are held in `Arc` and cloned with `Arc::make_mut` (copy-on-write) on modification.
+//! So `Reconstruction::clone()` only increments reference counts, and afterwards only the images/points that actually change are copied.
+//! The invariants (`check_invariants`) are maintained by every public mutating operation.
 
 use crate::camera::Camera;
 use crate::error::{Error, Result};
@@ -43,103 +43,103 @@ use rayon::prelude::*;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
-/// 트랙 원소 (영상 id, 2D 점 인덱스).
+/// Track element (image id, 2D point index).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TrackEntry {
-    /// 영상 id.
+    /// Image id.
     pub image_id: ImageId,
-    /// 영상 내 2D 점 인덱스.
+    /// 2D point index within the image.
     pub point2d_idx: Point2DIdx,
 }
 
 impl TrackEntry {
-    /// (영상, 2D 점)으로 생성.
+    /// Creates from (image, 2D point).
     pub fn new(image_id: ImageId, point2d_idx: Point2DIdx) -> Self {
         Self { image_id, point2d_idx }
     }
 }
 
-/// 영상의 2D 점: 픽셀 좌표 + 연결된 3D 점 id(없으면 `INVALID_POINT3D_ID`).
+/// 2D point of an image: pixel coordinates + linked 3D point id (`INVALID_POINT3D_ID` if none).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Point2D {
-    /// 픽셀 좌표.
+    /// Pixel coordinates.
     pub xy: Vec2,
-    /// 연결된 3D 점 id.
+    /// Linked 3D point id.
     pub point3d_id: Point3DId,
 }
 
 impl Point2D {
-    /// 연결 없는 2D 점 생성.
+    /// Creates a 2D point without a link.
     pub fn new(xy: Vec2) -> Self {
         Self { xy, point3d_id: INVALID_POINT3D_ID }
     }
-    /// 3D 점과 연결됐는지.
+    /// Whether it is linked to a 3D point.
     pub fn has_point3d(&self) -> bool {
         self.point3d_id != INVALID_POINT3D_ID
     }
 }
 
-/// 3D 점. error 는 픽셀 평균 재투영 오차, −1 = 없음.
+/// 3D point. error is the mean pixel reprojection error, −1 = none.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Point3D {
-    /// 세계 좌표.
+    /// World coordinates.
     pub xyz: Vec3,
-    /// RGB 색.
+    /// RGB color.
     pub color: [u8; 3],
-    /// 평균 재투영 오차(픽셀, −1 = 없음).
+    /// Mean reprojection error (pixels, −1 = none).
     pub error: f64,
-    /// 관측 트랙.
+    /// Observation track.
     pub track: Vec<TrackEntry>,
 }
 
 impl Point3D {
-    /// 빈 트랙·검정색·오차 없음으로 생성.
+    /// Creates with an empty track, black color and no error.
     pub fn new(xyz: Vec3) -> Self {
         Self { xyz, color: [0, 0, 0], error: -1.0, track: Vec::new() }
     }
-    /// 오차가 기록돼 있는지.
+    /// Whether an error is recorded.
     pub fn has_error(&self) -> bool {
         self.error != -1.0
     }
-    /// 트랙 길이.
+    /// Track length.
     pub fn track_len(&self) -> usize {
         self.track.len()
     }
 }
 
-/// Rig: 기준 센서(자세 = 항등) + 비기준 센서별 선택적 rig_to_sensor.
+/// Rig: reference sensor (pose = identity) + optional rig_to_sensor per non-reference sensor.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Rig {
     /// rig id.
     pub rig_id: RigId,
-    /// 기준 센서.
+    /// Reference sensor.
     pub ref_sensor_id: Option<SensorKey>,
-    /// 비기준 센서(정렬 보관). None = 미보정.
+    /// Non-reference sensors (kept sorted). None = uncalibrated.
     pub sensors: BTreeMap<SensorKey, Option<Rigid3>>,
 }
 
 impl Rig {
-    /// 빈 rig.
+    /// Empty rig.
     pub fn new(rig_id: RigId) -> Self {
         Self { rig_id, ref_sensor_id: None, sensors: BTreeMap::new() }
     }
-    /// 단일 카메라 rig(rig id = 카메라 id).
+    /// Single-camera rig (rig id = camera id).
     pub fn trivial(camera_id: CameraId) -> Self {
         Self { rig_id: camera_id, ref_sensor_id: Some(SensorKey::camera(camera_id)), sensors: BTreeMap::new() }
     }
-    /// 센서 수(기준 포함).
+    /// Number of sensors (including the reference).
     pub fn num_sensors(&self) -> usize {
         self.sensors.len() + self.ref_sensor_id.is_some() as usize
     }
-    /// 기준 센서인지.
+    /// Whether it is the reference sensor.
     pub fn is_reference_sensor(&self, s: SensorKey) -> bool {
         self.ref_sensor_id == Some(s)
     }
-    /// 센서가 rig 에 있는지.
+    /// Whether the sensor is in the rig.
     pub fn has_sensor(&self, s: SensorKey) -> bool {
         self.is_reference_sensor(s) || self.sensors.contains_key(&s)
     }
-    /// rig_to_sensor. 기준 센서면 항등, 미보정/없음이면 None.
+    /// rig_to_sensor. Identity for the reference sensor, None if uncalibrated or absent.
     pub fn rig_to_sensor(&self, s: SensorKey) -> Option<Rigid3> {
         if self.is_reference_sensor(s) {
             Some(Rigid3::identity())
@@ -149,60 +149,60 @@ impl Rig {
     }
 }
 
-/// 프레임: 같은 시각 rig 의 데이터 묶음 + 선택적 world_to_rig.
+/// Frame: group of data of a rig at the same time + optional world_to_rig.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Frame {
-    /// 프레임 id.
+    /// Frame id.
     pub frame_id: FrameId,
-    /// 소속 rig id.
+    /// Rig id it belongs to.
     pub rig_id: RigId,
     data_ids: Vec<SensorDataKey>,
-    /// 세계 → rig 자세(없으면 미정).
+    /// World -> rig pose (undetermined if absent).
     pub world_to_rig: Option<Rigid3>,
 }
 
 impl Frame {
-    /// 데이터·자세 없는 프레임.
+    /// Frame without data or pose.
     pub fn new(frame_id: FrameId, rig_id: RigId) -> Self {
         Self { frame_id, rig_id, data_ids: Vec::new(), world_to_rig: None }
     }
-    /// 정렬 상태를 유지하며 추가(중복 무시).
+    /// Adds while keeping the sorted state (duplicates ignored).
     pub fn attach_data(&mut self, d: SensorDataKey) {
         if let Err(pos) = self.data_ids.binary_search(&d) {
             self.data_ids.insert(pos, d);
         }
     }
-    /// 데이터 키 목록(정렬).
+    /// List of data keys (sorted).
     pub fn data_ids(&self) -> &[SensorDataKey] {
         &self.data_ids
     }
-    /// 자세가 있는지.
+    /// Whether a pose exists.
     pub fn has_pose(&self) -> bool {
         self.world_to_rig.is_some()
     }
-    /// 카메라 데이터의 영상 id(데이터 순서).
+    /// Image ids of the camera data (in data order).
     pub fn image_ids(&self) -> impl Iterator<Item = ImageId> + '_ {
         self.data_ids.iter().filter(|d| d.sensor_id.sensor_type == SensorKind::Camera).map(|d| d.id as ImageId)
     }
 }
 
-/// 영상. 자세는 저장하지 않고 프레임에서 유도한다.
+/// Image. The pose is not stored but derived from the frame.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Image {
-    /// 영상 id.
+    /// Image id.
     pub image_id: ImageId,
-    /// 공백 불가(텍스트 형식 구분자).
+    /// Must not contain whitespace (text format delimiter).
     pub name: String,
-    /// 카메라 id.
+    /// Camera id.
     pub camera_id: CameraId,
-    /// 소속 프레임 id.
+    /// Frame id it belongs to.
     pub frame_id: FrameId,
     points2d: Vec<Point2D>,
     num_points3d: usize,
 }
 
 impl Image {
-    /// 2D 점 좌표로 생성(연결 없음, 프레임 미지정).
+    /// Creates from 2D point coordinates (no links, frame unassigned).
     pub fn new(image_id: ImageId, name: impl Into<String>, camera_id: CameraId, points: impl IntoIterator<Item = Vec2>) -> Self {
         Self {
             image_id,
@@ -213,47 +213,47 @@ impl Image {
             num_points3d: 0,
         }
     }
-    /// 2D 점 전체.
+    /// All 2D points.
     pub fn points2d(&self) -> &[Point2D] {
         &self.points2d
     }
-    /// idx 번째 2D 점.
+    /// The idx-th 2D point.
     pub fn point2d(&self, idx: Point2DIdx) -> &Point2D {
         &self.points2d[idx as usize]
     }
-    /// 2D 점 수.
+    /// Number of 2D points.
     pub fn num_points2d(&self) -> usize {
         self.points2d.len()
     }
-    /// 3D 점이 연결된 2D 점 수(캐시).
+    /// Number of 2D points linked to a 3D point (cached).
     pub fn num_points3d(&self) -> usize {
         self.num_points3d
     }
 }
 
-/// 관측 필터 후 점 error 갱신 방식.
+/// How to update the point error after an observation filter.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FilterErrorUpdate {
-    /// 갱신 안 함.
+    /// No update.
     None,
-    /// (인라이어 오차 합) / (삭제 전 트랙 길이)
+    /// (sum of inlier errors) / (track length before deletion)
     SumOverOriginalLength,
-    /// 남은 관측 오차 평균
+    /// Mean error of the remaining observations
     MeanOfRemaining,
 }
 
-/// 정규화 옵션.
+/// Normalization options.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct NormalizeOptions {
-    /// 참이면 스케일 1(평행이동만).
+    /// If true, scale 1 (translation only).
     pub fixed_scale: bool,
-    /// 정규화 후 범위 크기.
+    /// Extent size after normalization.
     pub extent: f64,
-    /// 범위 계산용 하위 분위수.
+    /// Lower quantile for computing the extent.
     pub p0: f64,
-    /// 범위 계산용 상위 분위수.
+    /// Upper quantile for computing the extent.
     pub p1: f64,
-    /// 참이면 등록 영상 투영 중심, 거짓이면 3D 점 기준.
+    /// If true, use the projection centers of registered images; if false, use the 3D points.
     pub use_images: bool,
 }
 
@@ -263,7 +263,7 @@ impl Default for NormalizeOptions {
     }
 }
 
-/// 희소 재구성.
+/// Sparse reconstruction.
 #[derive(Clone, Debug, Default)]
 pub struct Reconstruction {
     cameras: BTreeMap<CameraId, Camera>,
@@ -271,7 +271,7 @@ pub struct Reconstruction {
     frames: BTreeMap<FrameId, Frame>,
     images: BTreeMap<ImageId, Arc<Image>>,
     points3d: BTreeMap<Point3DId, Arc<Point3D>>,
-    /// 등록 순서.
+    /// Registration order.
     registered_frames: Vec<FrameId>,
     registered_image_count: usize,
     max_point3d_id: Point3DId,
@@ -282,118 +282,118 @@ fn nf<T>(what: impl std::fmt::Display) -> Result<T> {
 }
 
 impl Reconstruction {
-    /// 빈 재구성.
+    /// Empty reconstruction.
     pub fn new() -> Self {
         Self::default()
     }
 
-    // ================= 조회 =================
+    // ================= Queries =================
 
-    /// 카메라 전체(id 순).
+    /// All cameras (in id order).
     pub fn cameras(&self) -> &BTreeMap<CameraId, Camera> {
         &self.cameras
     }
-    /// 카메라 조회.
+    /// Camera lookup.
     pub fn camera(&self, id: CameraId) -> Option<&Camera> {
         self.cameras.get(&id)
     }
-    /// 카메라 내부 파라미터 수정(불변식과 무관).
+    /// Modifies camera intrinsics (independent of the invariants).
     pub fn camera_mut(&mut self, id: CameraId) -> Option<&mut Camera> {
         self.cameras.get_mut(&id)
     }
-    /// rig 전체(id 순).
+    /// All rigs (in id order).
     pub fn rigs(&self) -> &BTreeMap<RigId, Rig> {
         &self.rigs
     }
-    /// rig 조회.
+    /// Rig lookup.
     pub fn rig(&self, id: RigId) -> Option<&Rig> {
         self.rigs.get(&id)
     }
-    /// rig 가변 조회.
+    /// Mutable rig lookup.
     pub fn rig_mut(&mut self, id: RigId) -> Option<&mut Rig> {
         self.rigs.get_mut(&id)
     }
-    /// 프레임 전체(id 순).
+    /// All frames (in id order).
     pub fn frames(&self) -> &BTreeMap<FrameId, Frame> {
         &self.frames
     }
-    /// 프레임 조회.
+    /// Frame lookup.
     pub fn frame(&self, id: FrameId) -> Option<&Frame> {
         self.frames.get(&id)
     }
-    /// 영상(id 오름차순).
+    /// Images (ascending by id).
     pub fn images(&self) -> impl Iterator<Item = &Image> + '_ {
         self.images.values().map(|a| &**a)
     }
-    /// 영상 조회.
+    /// Image lookup.
     pub fn image(&self, id: ImageId) -> Option<&Image> {
         self.images.get(&id).map(|a| &**a)
     }
-    /// 영상 id(오름차순).
+    /// Image ids (ascending).
     pub fn image_ids(&self) -> impl Iterator<Item = ImageId> + '_ {
         self.images.keys().copied()
     }
-    /// 영상이 있는지.
+    /// Whether the image exists.
     pub fn exists_image(&self, id: ImageId) -> bool {
         self.images.contains_key(&id)
     }
-    /// 이름으로 영상 조회.
+    /// Looks up an image by name.
     pub fn image_by_name(&self, name: &str) -> Option<&Image> {
         self.images().find(|im| im.name == name)
     }
-    /// 3D 점(id 오름차순).
+    /// 3D points (ascending by id).
     pub fn points3d(&self) -> impl Iterator<Item = (Point3DId, &Point3D)> + '_ {
         self.points3d.iter().map(|(k, v)| (*k, &**v))
     }
-    /// 3D 점 조회.
+    /// 3D point lookup.
     pub fn point3d(&self, id: Point3DId) -> Option<&Point3D> {
         self.points3d.get(&id).map(|a| &**a)
     }
-    /// 3D 점 id 목록(오름차순).
+    /// List of 3D point ids (ascending).
     pub fn point3d_ids(&self) -> Vec<Point3DId> {
         self.points3d.keys().copied().collect()
     }
-    /// 3D 점이 있는지.
+    /// Whether the 3D point exists.
     pub fn exists_point3d(&self, id: Point3DId) -> bool {
         self.points3d.contains_key(&id)
     }
-    /// 카메라 수.
+    /// Number of cameras.
     pub fn num_cameras(&self) -> usize {
         self.cameras.len()
     }
-    /// rig 수.
+    /// Number of rigs.
     pub fn num_rigs(&self) -> usize {
         self.rigs.len()
     }
-    /// 프레임 수.
+    /// Number of frames.
     pub fn num_frames(&self) -> usize {
         self.frames.len()
     }
-    /// 영상 수.
+    /// Number of images.
     pub fn num_images(&self) -> usize {
         self.images.len()
     }
-    /// 3D 점 수.
+    /// Number of 3D points.
     pub fn num_points3d(&self) -> usize {
         self.points3d.len()
     }
-    /// 등록 프레임 수.
+    /// Number of registered frames.
     pub fn registered_frame_count(&self) -> usize {
         self.registered_frames.len()
     }
-    /// 등록 영상 수.
+    /// Number of registered images.
     pub fn registered_image_count(&self) -> usize {
         self.registered_image_count
     }
-    /// 지금까지 발급/관측한 최대 3D 점 id.
+    /// Maximum 3D point id issued/observed so far.
     pub fn max_point3d_id(&self) -> Point3DId {
         self.max_point3d_id
     }
-    /// 등록 프레임(등록 순서).
+    /// Registered frames (in registration order).
     pub fn registered_frames(&self) -> &[FrameId] {
         &self.registered_frames
     }
-    /// 등록 영상: 등록 프레임 순서 → 프레임 내 데이터 순서.
+    /// Registered images: registered frame order -> data order within the frame.
     pub fn registered_images(&self) -> Vec<ImageId> {
         let mut out = Vec::with_capacity(self.registered_image_count);
         for fid in &self.registered_frames {
@@ -403,16 +403,16 @@ impl Reconstruction {
         }
         out
     }
-    /// 프레임이 등록됐는지.
+    /// Whether the frame is registered.
     pub fn is_frame_registered(&self, frame_id: FrameId) -> bool {
         self.registered_frames.contains(&frame_id)
     }
-    /// 영상(의 프레임)이 등록됐는지.
+    /// Whether the image's frame is registered.
     pub fn is_image_registered(&self, image_id: ImageId) -> bool {
         self.image(image_id).is_some_and(|im| self.is_frame_registered(im.frame_id))
     }
 
-    /// 영상의 world_to_cam. 자세 없으면 None.
+    /// world_to_cam of the image. None if there is no pose.
     pub fn world_to_cam(&self, image_id: ImageId) -> Option<Rigid3> {
         let im = self.image(image_id)?;
         let frame = self.frames.get(&im.frame_id)?;
@@ -425,18 +425,18 @@ impl Reconstruction {
             Some(rig.rig_to_sensor(s)?.compose(&world_to_rig))
         }
     }
-    /// 영상 자세가 있는지.
+    /// Whether the image has a pose.
     pub fn has_pose(&self, image_id: ImageId) -> bool {
         self.image(image_id).and_then(|im| self.frames.get(&im.frame_id)).is_some_and(|f| f.has_pose())
     }
-    /// 투영 중심 C = −Rᵀ t.
+    /// Projection center C = −Rᵀ t.
     pub fn projection_center(&self, image_id: ImageId) -> Option<Vec3> {
         self.world_to_cam(image_id).map(|p| p.center())
     }
 
-    // ================= 추가 =================
+    // ================= Adding =================
 
-    /// 카메라 추가(id 중복이면 오류).
+    /// Adds a camera (error if the id is duplicated).
     pub fn add_camera(&mut self, camera: Camera) -> Result<()> {
         if self.cameras.contains_key(&camera.camera_id) {
             return Err(Error::AlreadyExists(format!("카메라 {}", camera.camera_id)));
@@ -447,14 +447,14 @@ impl Reconstruction {
         self.cameras.insert(camera.camera_id, camera);
         Ok(())
     }
-    /// 카메라와 단일 카메라 rig(rig id = 카메라 id)를 함께 추가. rig 가 이미 있으면 생략.
+    /// Adds a camera together with a single-camera rig (rig id = camera id). Skipped if the rig already exists.
     pub fn add_camera_own_rig(&mut self, camera: Camera) -> Result<()> {
         let id = camera.camera_id;
         self.add_camera(camera)?;
         self.rigs.entry(id).or_insert_with(|| Rig::trivial(id));
         Ok(())
     }
-    /// rig 추가(id 중복이면 오류).
+    /// Adds a rig (error if the id is duplicated).
     pub fn add_rig(&mut self, rig: Rig) -> Result<()> {
         if self.rigs.contains_key(&rig.rig_id) {
             return Err(Error::AlreadyExists(format!("rig {}", rig.rig_id)));
@@ -462,7 +462,7 @@ impl Reconstruction {
         self.rigs.insert(rig.rig_id, rig);
         Ok(())
     }
-    /// 프레임 추가(등록 안 됨).
+    /// Adds a frame (not registered).
     pub fn add_frame(&mut self, frame: Frame) -> Result<()> {
         if self.frames.contains_key(&frame.frame_id) {
             return Err(Error::AlreadyExists(format!("프레임 {}", frame.frame_id)));
@@ -473,8 +473,8 @@ impl Reconstruction {
         self.frames.insert(frame.frame_id, frame);
         Ok(())
     }
-    /// 영상 추가. 카메라가 있어야 하고, frame_id 가 유효하면 그 프레임이 있어야 한다.
-    /// 2D 점의 기존 3D 연결은 지워진다(연결은 3D 점 추가로만 만든다).
+    /// Adds an image. The camera must exist, and if frame_id is valid that frame must exist.
+    /// Existing 3D links of the 2D points are cleared (links are created only by adding 3D points).
     pub fn add_image(&mut self, mut image: Image) -> Result<()> {
         if self.images.contains_key(&image.image_id) {
             return Err(Error::AlreadyExists(format!("영상 {}", image.image_id)));
@@ -492,7 +492,7 @@ impl Reconstruction {
         self.images.insert(image.image_id, Arc::new(image));
         Ok(())
     }
-    /// 영상 + 자명 프레임(frame id = 영상 id, rig id = 카메라 id) 추가. rig 가 없으면 만든다.
+    /// Adds an image + trivial frame (frame id = image id, rig id = camera id). Creates the rig if absent.
     pub fn add_image_own_frame(&mut self, mut image: Image, world_to_cam: Option<Rigid3>) -> Result<()> {
         if !self.cameras.contains_key(&image.camera_id) {
             return nf(format!("카메라 {}", image.camera_id));
@@ -510,9 +510,9 @@ impl Reconstruction {
         self.add_image(image)
     }
 
-    // ================= 자세와 등록 =================
+    // ================= Pose and registration =================
 
-    /// 프레임 자세 설정/제거. 등록된 프레임의 자세는 제거할 수 없다.
+    /// Sets/removes a frame pose. The pose of a registered frame cannot be removed.
     pub fn set_frame_pose(&mut self, frame_id: FrameId, world_to_rig: Option<Rigid3>) -> Result<()> {
         if world_to_rig.is_none() && self.is_frame_registered(frame_id) {
             return Err(Error::InvalidArgument(format!("등록된 프레임 {frame_id} 의 자세 제거")));
@@ -525,7 +525,7 @@ impl Reconstruction {
             None => nf(format!("프레임 {frame_id}")),
         }
     }
-    /// 영상의 world_to_cam 로 프레임 자세를 설정(비기준 센서면 world_to_rig 를 역산).
+    /// Sets the frame pose from the image's world_to_cam (back-computes world_to_rig for a non-reference sensor).
     pub fn set_world_to_cam(&mut self, image_id: ImageId, world_to_cam: Rigid3) -> Result<()> {
         let im = self.image(image_id).ok_or_else(|| Error::NotFound(format!("영상 {image_id}")))?;
         let (fid, s) = (im.frame_id, SensorKey::camera(im.camera_id));
@@ -541,7 +541,7 @@ impl Reconstruction {
         self.frames.get_mut(&fid).expect("checked").world_to_rig = Some(world_to_rig);
         Ok(())
     }
-    /// 프레임 등록(자세 필요). 이미 등록됐으면 Ok(false).
+    /// Registers a frame (pose required). Ok(false) if already registered.
     pub fn register_frame(&mut self, frame_id: FrameId) -> Result<bool> {
         let f = self.frames.get(&frame_id).ok_or_else(|| Error::NotFound(format!("프레임 {frame_id}")))?;
         if !f.has_pose() {
@@ -555,13 +555,13 @@ impl Reconstruction {
         self.registered_image_count += n;
         Ok(true)
     }
-    /// 영상이 속한 프레임 등록(`register_frame`).
+    /// Registers the frame the image belongs to (`register_frame`).
     pub fn register_image(&mut self, image_id: ImageId) -> Result<bool> {
         let fid = self.image(image_id).ok_or_else(|| Error::NotFound(format!("영상 {image_id}")))?.frame_id;
         self.register_frame(fid)
     }
-    /// 프레임 등록 해제: 각 영상의 관측을 2D 점 인덱스 오름차순으로 삭제 →
-    /// 등록 영상 수 감소 → 자세 제거 → 등록 목록에서 제거. 등록되지 않았으면 Ok(false).
+    /// Deregisters a frame: deletes each image's observations in ascending 2D point index order ->
+    /// decreases the registered image count -> removes the pose -> removes from the registration list. Ok(false) if not registered.
     pub fn deregister_frame(&mut self, frame_id: FrameId) -> Result<bool> {
         let Some(pos) = self.registered_frames.iter().position(|f| *f == frame_id) else {
             return Ok(false);
@@ -582,13 +582,13 @@ impl Reconstruction {
         self.registered_frames.remove(pos);
         Ok(true)
     }
-    /// 영상이 속한 프레임 등록 해제(`deregister_frame`).
+    /// Deregisters the frame the image belongs to (`deregister_frame`).
     pub fn deregister_image(&mut self, image_id: ImageId) -> Result<bool> {
         let fid = self.image(image_id).ok_or_else(|| Error::NotFound(format!("영상 {image_id}")))?.frame_id;
         self.deregister_frame(fid)
     }
 
-    // ================= 3D 점·관측 =================
+    // ================= 3D points and observations =================
 
     fn link(&mut self, e: TrackEntry, pid: Point3DId) {
         let im = Arc::make_mut(self.images.get_mut(&e.image_id).expect("검증됨"));
@@ -619,14 +619,15 @@ impl Reconstruction {
         Ok(())
     }
 
-    /// 새 3D 점 추가(id = 최대 id + 1). 트랙 원소의 2D 점이 다른 점에 연결돼 있으면 오류.
+    /// Adds a new 3D point (id = max id + 1). Error if a 2D point of a track element is linked to another point.
     pub fn add_point3d(&mut self, xyz: Vec3, track: Vec<TrackEntry>, color: [u8; 3]) -> Result<Point3DId> {
-        // 설계 결정: 빈 재구성의 첫 id. "최대 id + 1" 규칙에서 최대값 초기값 0 → 첫 id 1.
+        // Design decision: the first id of an empty reconstruction. In the "max id + 1" rule the initial maximum is 0 -> first id
+        // 1.
         let id = self.max_point3d_id + 1;
         self.add_point3d_with_id(id, Point3D { xyz, color, error: -1.0, track })?;
         Ok(id)
     }
-    /// 지정 id 로 3D 점 추가(파일 읽기·전역 매퍼용). 최대 id 를 갱신한다.
+    /// Adds a 3D point with the given id (for file reading and the global mapper). Updates the max id.
     pub fn add_point3d_with_id(&mut self, id: Point3DId, point: Point3D) -> Result<()> {
         if id == INVALID_POINT3D_ID {
             return Err(Error::InvalidArgument("무효 3D 점 id".into()));
@@ -644,7 +645,7 @@ impl Reconstruction {
         self.max_point3d_id = self.max_point3d_id.max(id);
         Ok(())
     }
-    /// 기존 3D 점에 관측 추가.
+    /// Adds an observation to an existing 3D point.
     pub fn add_observation(&mut self, point3d_id: Point3DId, e: TrackEntry) -> Result<()> {
         if !self.points3d.contains_key(&point3d_id) {
             return nf(format!("3D 점 {point3d_id}"));
@@ -657,8 +658,8 @@ impl Reconstruction {
         Arc::make_mut(self.points3d.get_mut(&point3d_id).expect("검증됨")).track.push(e);
         Ok(())
     }
-    /// 관측 삭제: 트랙 길이 ≤ 2 면 3D 점 전체 삭제, 아니면 그 원소만 제거.
-    /// 반환: 점 전체가 삭제됐으면 true.
+    /// Deletes an observation: if track length <= 2 the whole 3D point is deleted, otherwise only that element is removed.
+    /// Returns: true if the whole point was deleted.
     pub fn delete_observation(&mut self, image_id: ImageId, point2d_idx: Point2DIdx) -> Result<bool> {
         let im = self.image(image_id).ok_or_else(|| Error::NotFound(format!("영상 {image_id}")))?;
         let pid =
@@ -678,7 +679,7 @@ impl Reconstruction {
         self.unlink(e, pid);
         Ok(false)
     }
-    /// 3D 점 삭제(모든 관측 연결 해제).
+    /// Deletes a 3D point (unlinks all observations).
     pub fn delete_point3d(&mut self, id: Point3DId) -> Result<()> {
         let p = self.points3d.remove(&id).ok_or_else(|| Error::NotFound(format!("3D 점 {id}")))?;
         for e in &p.track {
@@ -686,7 +687,7 @@ impl Reconstruction {
         }
         Ok(())
     }
-    /// 두 3D 점 병합: 트랙 길이 가중 평균 위치·색(색은 절삭), 트랙 연결(a 다음 b), 새 id.
+    /// Merges two 3D points: track-length-weighted mean position and color (color truncated), tracks concatenated (a then b), new id.
     pub fn merge_points3d(&mut self, a: Point3DId, b: Point3DId) -> Result<Point3DId> {
         if a == b {
             return Err(Error::InvalidArgument("같은 점 병합".into()));
@@ -704,28 +705,28 @@ impl Reconstruction {
         track.extend_from_slice(&pb.track);
         self.delete_point3d(a)?;
         self.delete_point3d(b)?;
-        // 설계 결정: 병합 점의 error 는 −1(없음)로 둔다. 이후 단계가 재계산한다.
+        // Design decision: the error of the merged point is set to −1 (none). A later stage recomputes it.
         self.add_point3d(xyz, track, color)
     }
-    /// 3D 점 위치 설정.
+    /// Sets a 3D point position.
     pub fn set_point3d_xyz(&mut self, id: Point3DId, xyz: Vec3) -> Result<()> {
         let p = self.points3d.get_mut(&id).ok_or_else(|| Error::NotFound(format!("3D 점 {id}")))?;
         Arc::make_mut(p).xyz = xyz;
         Ok(())
     }
-    /// 3D 점 오차 설정.
+    /// Sets a 3D point error.
     pub fn set_point3d_error(&mut self, id: Point3DId, error: f64) -> Result<()> {
         let p = self.points3d.get_mut(&id).ok_or_else(|| Error::NotFound(format!("3D 점 {id}")))?;
         Arc::make_mut(p).error = error;
         Ok(())
     }
-    /// 3D 점 색 설정.
+    /// Sets a 3D point color.
     pub fn set_point3d_color(&mut self, id: Point3DId, color: [u8; 3]) -> Result<()> {
         let p = self.points3d.get_mut(&id).ok_or_else(|| Error::NotFound(format!("3D 점 {id}")))?;
         Arc::make_mut(p).color = color;
         Ok(())
     }
-    /// 모든 3D 점 삭제(관측 연결 해제).
+    /// Deletes all 3D points (unlinks observations).
     pub fn delete_all_points3d(&mut self) {
         self.points3d.clear();
         for a in self.images.values_mut() {
@@ -739,13 +740,13 @@ impl Reconstruction {
         }
     }
 
-    // ================= 통계 =================
+    // ================= Statistics =================
 
-    /// 등록 영상들의 "3D 점이 연결된 2D 점 수" 합.
+    /// Sum over registered images of "number of 2D points linked to a 3D point".
     pub fn total_observations(&self) -> usize {
         self.registered_images().iter().map(|i| self.images[i].num_points3d).sum()
     }
-    /// 3D 점 평균 트랙 길이.
+    /// Mean track length of the 3D points.
     pub fn mean_track_len(&self) -> f64 {
         if self.points3d.is_empty() {
             0.0
@@ -753,7 +754,7 @@ impl Reconstruction {
             self.total_observations() as f64 / self.points3d.len() as f64
         }
     }
-    /// 등록 영상당 평균 관측 수.
+    /// Mean number of observations per registered image.
     pub fn mean_obs_per_registered_image(&self) -> f64 {
         if self.registered_image_count == 0 {
             0.0
@@ -761,7 +762,7 @@ impl Reconstruction {
             self.total_observations() as f64 / self.registered_image_count as f64
         }
     }
-    /// 저장된 점 error 중 −1 이 아닌 것의 평균(재계산 안 함). 없으면 0.
+    /// Mean of the stored point errors that are not −1 (not recomputed). 0 if none.
     pub fn mean_reproj_error(&self) -> f64 {
         let (mut s, mut n) = (0.0, 0usize);
         for p in self.points3d.values() {
@@ -777,9 +778,9 @@ impl Reconstruction {
         }
     }
 
-    // ================= 재투영 오차 =================
+    // ================= Reprojection error =================
 
-    /// 영상별 (world_to_cam, 카메라) 캐시.
+    /// Per-image (world_to_cam, camera) cache.
     fn pose_cache(&self) -> HashMap<ImageId, (Rigid3, &Camera)> {
         let mut m = HashMap::with_capacity(self.images.len());
         for im in self.images() {
@@ -790,7 +791,7 @@ impl Reconstruction {
         m
     }
 
-    /// 픽셀 재투영 제곱 오차. 투영 실패(깊이 < ε)면 f64::MAX.
+    /// Pixel reprojection squared error. f64::MAX if projection fails (depth < ε).
     pub fn squared_reprojection_error(pose: &Rigid3, camera: &Camera, xy: &Vec2, xyz: &Vec3) -> f64 {
         match camera.cam_to_img(&pose.transform_point(xyz)) {
             Some(p) => (p - xy).norm_squared(),
@@ -816,7 +817,7 @@ impl Reconstruction {
         s / p.track.len() as f64
     }
 
-    /// 모든 3D 점의 error 를 픽셀 평균 재투영 오차로 재계산.
+    /// Recomputes the error of every 3D point as the mean pixel reprojection error.
     pub fn update_point3d_errors(&mut self) {
         let cache = self.pose_cache();
         let errs: Vec<(Point3DId, f64)> = self.points3d.par_iter().map(|(id, p)| (*id, self.compute_point_error(&cache, p))).collect();
@@ -828,7 +829,7 @@ impl Reconstruction {
             }
         }
     }
-    /// 점 하나의 평균 픽셀 재투영 오차(저장하지 않음).
+    /// Mean pixel reprojection error of one point (not stored).
     pub fn point3d_reprojection_error(&self, id: Point3DId) -> Option<f64> {
         let p = self.point3d(id)?;
         let mut cache = HashMap::new();
@@ -840,12 +841,12 @@ impl Reconstruction {
         Some(self.compute_point_error(&cache, p))
     }
 
-    // ================= 필터 =================
+    // ================= Filters =================
 
-    /// 범용 관측 필터: 관측마다 `error_fn(카메라, world_to_cam, 2D 좌표, 3D 점)` 를 구해
-    /// max_error 초과(NaN 포함)인 것을 삭제 대상으로 한다. 트랙 길이 < 2 인 점은 즉시 삭제,
-    /// 삭제 대상 수가 (길이 − 1) 이상이면 점 전체 삭제, 아니면 해당 관측만 삭제.
-    /// 자세 없는 영상의 관측 오차는 +∞. 반환: 삭제된 관측 수.
+    /// General observation filter: for each observation computes `error_fn(camera, world_to_cam, 2D coordinates, 3D point)`
+    /// and marks those exceeding max_error (including NaN) for deletion. Points with track length < 2 are deleted immediately;
+    /// if the number marked is (length − 1) or more the whole point is deleted, otherwise only those observations.
+    /// The observation error of an image without a pose is +∞. Returns: number of deleted observations.
     pub fn filter_observations<F>(
         &mut self,
         point_ids: Option<&[Point3DId]>,
@@ -861,7 +862,7 @@ impl Reconstruction {
             None => self.point3d_ids(),
         };
         let cache = self.pose_cache();
-        // (점 id, 관측별 오차)
+        // (point id, per-observation errors)
         let evals: Vec<(Point3DId, Vec<f64>)> = ids
             .par_iter()
             .map(|id| {
@@ -884,9 +885,10 @@ impl Reconstruction {
         self.apply_observation_filter(evals, max_error, update)
     }
 
-    /// [`filter_observations`](Self::filter_observations) 의 삭제 단계: 미리 계산한 관측별 오차
-    /// (`evals` = (점 id, 트랙 순서의 오차))로 같은 규칙을 적용한다. 오차는 GPU 등 바깥에서 한꺼번에
-    /// 계산할 수 있다. 없는 점이나 트랙 길이와 오차 수가 다른 항목은 건너뛴다. 반환: 삭제된 관측 수.
+    /// Removal step of [`filter_observations`](Self::filter_observations): applies the same rule with precomputed
+    /// per-observation errors (`evals` = (point id, errors in track order)). The errors can be computed in bulk outside, e.g. on
+    /// the GPU. Missing points and entries whose error count differs from the track length are skipped. Returns: number of
+    /// removed observations.
     pub fn apply_observation_filter(&mut self, evals: Vec<(Point3DId, Vec<f64>)>, max_error: f64, update: FilterErrorUpdate) -> usize {
         let mut removed = 0usize;
         for (id, errs) in evals {
@@ -931,7 +933,7 @@ impl Reconstruction {
         removed
     }
 
-    /// 픽셀 재투영 오차 필터. 반환: 삭제된 관측 수.
+    /// Pixel reprojection error filter. Returns: number of deleted observations.
     pub fn filter_observations_with_large_reprojection_error(
         &mut self,
         max_reproj_error_px: f64,
@@ -945,8 +947,8 @@ impl Reconstruction {
         )
     }
 
-    /// 삼각측량 각 필터: 트랙 영상 쌍 중 하나라도 각 ≥ min_tri_angle_deg 이면 유지, 아니면 점 삭제.
-    /// 반환: 삭제된 관측 수.
+    /// Triangulation angle filter: keep if any track image pair has angle >= min_tri_angle_deg, otherwise delete the point.
+    /// Returns: number of deleted observations.
     pub fn filter_points3d_with_small_triangulation_angle(&mut self, min_tri_angle_deg: f64, point_ids: Option<&[Point3DId]>) -> usize {
         let min_rad = min_tri_angle_deg.to_radians();
         let ids: Vec<Point3DId> = match point_ids {
@@ -974,9 +976,9 @@ impl Reconstruction {
         removed
     }
 
-    // ================= 변환·정규화 =================
+    // ================= Transform and normalization =================
 
-    /// 상사 변환 적용: 점, 프레임 자세, rig 센서 평행이동(s 배).
+    /// Applies a similarity transform: points, frame poses, rig sensor translations (times s).
     pub fn transform(&mut self, t: &Sim3) {
         for p in self.points3d.values_mut() {
             let m = Arc::make_mut(p);
@@ -994,7 +996,7 @@ impl Reconstruction {
         }
     }
 
-    /// 정규화. 적용한 Sim3 반환, 등록 프레임 < 2 면 None.
+    /// Normalization. Returns the applied Sim3; None if fewer than 2 registered frames.
     pub fn normalize(&mut self, opts: &NormalizeOptions) -> Option<Sim3> {
         if self.registered_frames.len() < 2 {
             return None;
@@ -1029,9 +1031,9 @@ impl Reconstruction {
         Some(t)
     }
 
-    // ================= 영상 삭제(image_deleter) =================
+    // ================= Image deletion (image_deleter) =================
 
-    /// id 목록의 영상이 속한 프레임을 등록 해제. 반환: 경고 문구 목록.
+    /// Deregisters the frames the images in an id list belong to. Returns: list of warning messages.
     pub fn deregister_images_by_id(&mut self, ids: &[ImageId]) -> Vec<String> {
         let mut warnings = Vec::new();
         for &id in ids {
@@ -1045,7 +1047,7 @@ impl Reconstruction {
         }
         warnings
     }
-    /// 이름 목록의 영상을 등록 해제. 반환: 경고 문구 목록.
+    /// Deregisters the images in a name list. Returns: list of warning messages.
     pub fn deregister_images_by_name(&mut self, names: &[&str]) -> Vec<String> {
         let mut warnings = Vec::new();
         for &name in names {
@@ -1057,7 +1059,7 @@ impl Reconstruction {
         warnings
     }
 
-    /// 등록되지 않은 프레임·영상을 삭제하고, 쓰이지 않는 카메라·rig 도 삭제.
+    /// Deletes unregistered frames and images, and also deletes unused cameras and rigs.
     pub fn remove_unregistered(&mut self) {
         let unreg: Vec<ImageId> = self.images.keys().copied().filter(|i| !self.is_image_registered(*i)).collect();
         for &iid in &unreg {
@@ -1077,10 +1079,10 @@ impl Reconstruction {
         self.rigs.retain(|k, _| used_rigs.contains(k));
     }
 
-    // ================= 색 =================
+    // ================= Color =================
 
-    /// 색 추출: 등록 영상마다 `load(영상)` 으로 표본기를 얻어
-    /// 각 관측의 (x − 0.5, y − 0.5) 를 넘기고, 점별 평균을 반올림. 표본이 없는 점은 검정.
+    /// Color extraction: for each registered image gets a sampler via `load(image)`,
+    /// passes each observation's (x − 0.5, y − 0.5), and rounds the per-point mean. Points with no samples are black.
     pub fn extract_colors<S, F>(&mut self, mut load: F)
     where
         F: FnMut(&Image) -> Option<S>,
@@ -1111,9 +1113,9 @@ impl Reconstruction {
         }
     }
 
-    // ================= 검사 =================
+    // ================= Checks =================
 
-    /// 불변식 검사: 양방향 연결, 영상별 연결 수 캐시, 등록 영상 수.
+    /// Invariant check: bidirectional links, per-image link count cache, registered image count.
     pub fn check_invariants(&self) -> Result<()> {
         let bad = |m: String| Err(Error::Invariant(m));
         for (pid, p) in &self.points3d {
@@ -1154,8 +1156,8 @@ impl Reconstruction {
     }
 }
 
-/// u8 RGB(행 우선, 3채널) 영상에서 양선형 보간. (x, y) 는 화소 중심이 정수인 좌표.
-/// 범위 밖이면 None.
+/// Bilinear interpolation from a u8 RGB (row-major, 3-channel) image. (x, y) are coordinates where the pixel center is an integer.
+/// Returns None if out of range.
 pub fn bilinear_rgb(data: &[u8], width: usize, height: usize, x: f64, y: f64) -> Option<[f64; 3]> {
     if width == 0 || height == 0 || !(x >= 0.0 && y >= 0.0 && x <= (width - 1) as f64 && y <= (height - 1) as f64) {
         return None;
@@ -1180,7 +1182,7 @@ pub(crate) mod tests {
     use crate::camera::CameraModelKind;
     use crate::geometry::Quat;
 
-    /// 카메라 1개, 영상 n 장(x 축으로 늘어선 카메라), 각 영상 2D 점 m 개(모두 같은 좌표 집합).
+    /// One camera, n images (cameras lined up along the x axis), m 2D points per image (all the same coordinate set).
     pub(crate) fn line_scene(n: u32, m: usize) -> Reconstruction {
         let mut r = Reconstruction::new();
         let mut cam = Camera::from_focal(CameraModelKind::Pinhole, 100.0, 200, 200);
@@ -1299,7 +1301,7 @@ pub(crate) mod tests {
         r.check_invariants().unwrap();
         // triangulation angle: centers at x=1,2,3, point at (2,0,10): max angle between c1,c3
         let ang = crate::geometry::triangulation_angle(&Vec3::new(1.0, 0.0, 0.0), &Vec3::new(3.0, 0.0, 0.0), &x).to_degrees();
-        // one_bad 는 영상 2,3 만 남아 최대 각이 작다 → 먼저 삭제(관측 2개).
+        // one_bad keeps only images 2 and 3 so its maximum angle is small -> delete first (2 observations).
         assert_eq!(r.filter_points3d_with_small_triangulation_angle(ang - 1e-9, None), 2);
         assert!(r.exists_point3d(good));
         assert_eq!(r.filter_points3d_with_small_triangulation_angle(ang + 1e-9, None), 3);

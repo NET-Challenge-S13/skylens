@@ -29,22 +29,22 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 카메라 초기 파라미터.
+//! Initial camera parameters.
 
 use crate::exif_info::ExifInfo;
 use cumulus3d_core::{Camera, CameraModelKind, Error, Result};
 
-/// 초점거리 결정 결과.
+/// Focal-length determination result.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FocalEstimate {
-    /// 초점거리(화소).
+    /// Focal length (pixels).
     pub focal: f64,
-    /// EXIF 에서 정해졌으면 참.
+    /// True if determined from EXIF.
     pub prior: bool,
 }
 
-/// 내장 센서 폭 표 (제조사, 모델, 센서 폭 mm).
-// 설계 결정: 공개 제품 사양으로 알려진 드론 카메라 일부만 넣는다.
+/// Built-in sensor width table (manufacturer, model, sensor width mm).
+// Design decision: include only some drone cameras known from public product specifications.
 const SENSOR_WIDTHS: &[(&str, &str, f64)] = &[
     ("dji", "fc6310", 13.2),
     ("dji", "fc6310s", 13.2),
@@ -67,7 +67,7 @@ const SENSOR_WIDTHS: &[(&str, &str, f64)] = &[
     ("dji", "m3e", 17.3),
 ];
 
-/// 제조사·모델로 센서 폭 조회(대소문자·공백 무시, 모델 앞에 제조사가 붙은 경우 허용).
+/// Looks up sensor width by manufacturer and model (ignores case and whitespace; allows a model prefixed with the manufacturer).
 pub fn lookup_sensor_width(make: &str, model: &str) -> Option<f64> {
     let norm = |s: &str| s.chars().filter(|c| !c.is_whitespace() && *c != '_' && *c != '-').collect::<String>().to_lowercase();
     let mk = norm(make);
@@ -78,7 +78,7 @@ pub fn lookup_sensor_width(make: &str, model: &str) -> Option<f64> {
     SENSOR_WIDTHS.iter().find(|(m, n, _)| mk.starts_with(&norm(m)) && norm(n) == md).map(|&(_, _, w)| w)
 }
 
-/// 초점거리 규칙. (W, H) 는 입력 영상 크기.
+/// Focal-length rules. (W, H) is the input image size.
 pub fn infer_focal(exif: &ExifInfo, width: u64, height: u64, default_factor: f64) -> FocalEstimate {
     let (w, h) = (width as f64, height as f64);
     let max_size = w.max(h);
@@ -107,7 +107,8 @@ pub fn infer_focal(exif: &ExifInfo, width: u64, height: u64, default_factor: f64
     FocalEstimate { focal: default_factor * max_size, prior: false }
 }
 
-/// 새 카메라 초기화: `params` 가 주어지면 그대로(플래그 참), 아니면 EXIF/기본값 초점 + 주점 (W/2, H/2), 왜곡 0.
+/// Initializes a new camera: uses `params` as-is if given (flag set); otherwise EXIF/default focal length
+/// + principal point (W/2, H/2), zero distortion.
 pub fn init_camera(
     model: CameraModelKind,
     width: u64,

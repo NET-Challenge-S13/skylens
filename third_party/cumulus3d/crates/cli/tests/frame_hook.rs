@@ -25,7 +25,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 프레임 훅(`on_frame`): 디코딩된 입력 프레임이 위치 처리 전에, 카메라 한 장씩 전달되는지 시험한다.
+//! Frame hook (`on_frame`): test that decoded input frames are delivered one camera at a time before the position is processed.
 
 mod common;
 use common::{make_dataset, NPOS};
@@ -74,7 +74,7 @@ fn frames_arrive_before_processing() {
         assert!(fr.path.exists());
         assert!(fr.name.starts_with(&fr.camera));
     }
-    // 위치마다 프레임 3장이 모두 그 위치의 특징 추출보다 먼저(버전이 작게) 나온다.
+    // For every position, all 3 frames come out before that position's feature extraction (smaller version).
     let order = order.lock().unwrap();
     for p in 0..NPOS {
         let of = |k: &str| order.iter().filter(|t| t.0 == k && t.1 == p).map(|t| t.2).collect::<Vec<_>>();

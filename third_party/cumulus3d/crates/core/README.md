@@ -6,7 +6,6 @@ The common foundation crate of cumulus3d: camera models, geometry (quaternions, 
 feature and match types, an in-memory feature store, a correspondence graph, sparse reconstruction data structures,
 generic RANSAC, and file I/O.
 
-API doc comments are currently in Korean; English translation is planned.
 
 **Role in the pipeline**: it does not run a stage of its own; it defines the types and stores exchanged by every stage
 (features → matching → SfM → alignment → densification). The feature stage writes to a `FeatureStore`, the matching stage

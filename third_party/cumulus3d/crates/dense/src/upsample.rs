@@ -25,14 +25,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 영상 피라미드, 스케일 사이 깊이·법선 전달(결합 양방향 상향 표본), 5×5 중앙값 평면 필터, 깊이 축소.
+//! Image pyramid, depth/normal transfer between scales (joint bilateral upsampling), 5×5 median plane filter, depth downscaling.
 
 use crate::kernel::{LevelImage, ViewState};
 use crate::math::plane_transfer;
 use rayon::prelude::*;
 use std::sync::Arc;
 
-/// 스케일 수: 짧은 변을 절반씩 줄여 `min_size` 이상으로 남는 만큼(최대 `max_levels`, 최소 1).
+/// Number of scales: halve the short side repeatedly while it stays at least `min_size` (at most `max_levels`, at least 1).
 pub fn num_levels(min_side: usize, max_levels: usize, min_size: usize) -> usize {
     let mut l = 1;
     let mut s = min_side;
@@ -43,7 +43,7 @@ pub fn num_levels(min_side: usize, max_levels: usize, min_size: usize) -> usize 
     l
 }
 
-/// 2×2 평균 축소 전 가우스(σ = 0.5 상위 픽셀) 평활 커널(반경 1).
+/// Gaussian (σ = 0.5 of the upper-level pixel) smoothing kernel (radius 1) applied before 2×2 average downscaling.
 fn blur3(src: &[f32], w: usize, h: usize) -> Vec<f32> {
     let g = [(-1.0f32 / (2.0 * 0.25)).exp(), 1.0, (-1.0f32 / (2.0 * 0.25)).exp()];
     let s: f32 = g.iter().sum();
@@ -73,8 +73,8 @@ fn blur3(src: &[f32], w: usize, h: usize) -> Vec<f32> {
     out
 }
 
-/// 회색 피라미드(0 = 최저). 각 단계는 평활 후 2×2 평균, 8비트로 반올림 저장.
-/// 내부 행렬: f·0.5, c ← (c + 0.5)·0.5 − 0.5.
+/// Gray pyramid (0 = lowest). Each level is smoothed, then 2×2 averaged, and stored rounded to 8 bits.
+/// Intrinsic matrix: f·0.5, c ← (c + 0.5)·0.5 − 0.5.
 pub fn build_pyramid(gray: &Arc<Vec<u8>>, width: usize, height: usize, k: [f64; 4], levels: usize) -> Vec<LevelImage> {
     let mut out = vec![LevelImage { width, height, gray: gray.clone(), k: [k[0] as f32, k[1] as f32, k[2] as f32, k[3] as f32] }];
     let (mut w, mut h) = (width, height);
@@ -111,8 +111,9 @@ fn dot(a: [f64; 3], b: [f64; 3]) -> f64 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
 
-/// 결합 양방향 상향 표본: 저해상 5×5 창의 평면들을 고해상 광선에 옮겨 공간·밝기 가중 평균.
-/// 법선은 같은 가중치의 성분 평균을 정규화하고 카메라 쪽으로 뒤집는다.
+/// Joint bilateral upsampling: moves the planes of the low-res 5×5 window onto the high-res ray and takes a spatial/intensity weighted
+/// average.
+/// The normal is the component average with the same weights, normalized and flipped toward the camera.
 pub fn joint_bilateral_upsample(low: &ViewState, low_img: &LevelImage, high_img: &LevelImage, sigma_s: f32, sigma_c: f32) -> ViewState {
     let (w, h) = (high_img.width, high_img.height);
     let mut out = ViewState::new(w, h);
@@ -188,7 +189,8 @@ pub fn joint_bilateral_upsample(low: &ViewState, low_img: &LevelImage, high_img:
     out
 }
 
-/// 5×5 중앙값 평면 필터: 창 안 이웃 평면을 자기 광선에 옮긴 깊이들의 중앙(아래쪽 가운데) 평면을 채택.
+/// 5×5 median plane filter: adopts the median (lower middle) plane of the depths obtained by moving the neighbor planes in the window onto
+/// its own ray.
 pub fn median_plane_filter(s: &ViewState, img: &LevelImage) -> ViewState {
     let (w, h) = (s.width, s.height);
     let mut out = s.clone();
@@ -235,7 +237,7 @@ pub fn median_plane_filter(s: &ViewState, img: &LevelImage) -> ViewState {
     out
 }
 
-/// 깊이맵 2배 축소(2×2 안의 양수 평균). 크기는 내림.
+/// Depth map 2x downscale (average of positive values within 2×2). Size is rounded down.
 pub fn downsample_depth(d: &[f32], w: usize, h: usize) -> (Vec<f32>, usize, usize) {
     let (nw, nh) = (w / 2, h / 2);
     let mut out = vec![0.0f32; nw * nh];
@@ -275,7 +277,7 @@ mod tests {
 
     #[test]
     fn upsample_reproduces_plane() {
-        // 정면 평면 깊이 5 + 기울어진 평면: 상향 표본 깊이가 고해상 광선 교점과 일치.
+        // Frontal plane at depth 5 + tilted plane: the upsampled depth matches the intersection with the high-res ray.
         let hk = [40.0f32, 40.0, 15.5, 11.5];
         let lk = [20.0f32, 20.0, (15.5 + 0.5) * 0.5 - 0.5, (11.5 + 0.5) * 0.5 - 0.5];
         let n = {

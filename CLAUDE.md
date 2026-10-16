@@ -124,10 +124,10 @@ scripts/         # sync-main.sh (develop → main 동기화) · 학습 평가 �
 | `cargo clippy --workspace --all-targets` | 린트 |
 | `cargo run -p skylens-demo` | 데모 런처 |
 
-- Rust 1.99 이상 stable(pointblitz 0.2 요구, `rust-version`이 강제). 웹 빌드는 `wasm32-unknown-unknown` 타깃. 버전을 올려도 된다.
+- Rust 1.99 이상 stable(pointblitz 0.3 요구, `rust-version`이 강제). 웹 빌드는 `wasm32-unknown-unknown` 타깃. 버전을 올려도 된다.
 - UNet 추론은 `tch` 0.24(libtorch 2.11). libtorch는 빌드 때 내려받는다(`download-libtorch`, CUDA 판은 `.cargo/config.toml`의 `TORCH_CUDA_VERSION`). Python venv와 무관하다.
 - 프로토콜 계약은 `src/shared/proto/`(model · viewer · payload). `skylens-shared`가 protox로 컴파일하므로 protoc가 없어도 된다.
-- cumulus3d의 `CompositionHost`(라이브 입력)는 crates.io 0.3.1에 없어 GitHub 리비전으로 고정했다.
+- cumulus3d는 0.4.0 릴리스 커밋을 `third_party/cumulus3d`에 두고 SkyLens 패치를 얹어 쓴다(`third_party/cumulus3d/PATCHES.md`). 라이브 점은 stable display의 차분 스트림(점 슬롯 청크)으로 나간다.
 
 **Go** (`src/skylens_core`, 루트 `go.work`)
 

@@ -29,13 +29,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! `cumulus3d_dense::PatchMatchBackend` 의 CUDA 구현.
+//! CUDA implementation of `cumulus3d_dense::PatchMatchBackend`.
 //!
-//! - 세션 시작 때 모든 뷰·스케일의 회색 영상을 피치 정렬 버퍼 하나(기준 패치 읽기)와 뷰·스케일별 블록 선형 배열 +
-//!   텍스처 객체(원천 표본, 하드웨어 쌍선형)로 올린다(상주).
-//! - 반쪽 단계 커널은 활성 색 픽셀 하나당 스레드 하나(반쪽 격자), 블록 32×8 스레드 = 64×8 픽셀, 기준 패치는 공유 메모리 타일.
-//! - 여러 기준 뷰를 그리드 z 축으로 묶어 한 번에 발사한다(픽셀 예산 안에서).
-//! - 기하 실행의 원천 깊이 스냅숏은 스냅숏 번호가 바뀔 때만 다시 올린다.
+//! - At session start, the gray images of all views and scales are uploaded (resident) as one pitch-aligned buffer (reference patch reads)
+//!   and per-view-and-scale block-linear arrays +
+//!   texture objects (source samples, hardware bilinear).
+//! - A half-step kernel uses one thread per active-color pixel (half grid), blocks of 32×8 threads = 64×8 pixels, and the reference patch
+//!   is a shared-memory tile.
+//! - Several reference views are bundled along the grid z axis and launched at once (within the pixel budget).
+//! - The source depth snapshot of a geometric run is re-uploaded only when the snapshot number changes.
 
 use crate::device::{CudaDevice, GpuError, SyncedCopy};
 use cudarc::driver::sys;
@@ -51,18 +53,18 @@ const MAXSRC: usize = 32;
 const BX: u32 = 32;
 const BY: u32 = 8;
 
-/// CUDA PatchMatch 옵션.
+/// CUDA PatchMatch options.
 #[derive(Clone, Debug, PartialEq)]
 pub struct CudaPatchMatchOptions {
-    /// 원천 표본을 텍스처 하드웨어 쌍선형으로(거짓이면 소프트웨어 쌍선형).
+    /// Source samples with texture hardware bilinear (software bilinear if false).
     pub hw_interp: bool,
-    /// 한 번 발사에 묶는 픽셀 수 상한(여러 기준 뷰 동시 처리).
+    /// Upper bound on the number of pixels bundled in one launch (several reference views at once).
     pub batch_pixels: usize,
-    /// 한 번 발사에 묶는 뷰 수 상한.
+    /// Upper bound on the number of views bundled in one launch.
     pub max_batch: usize,
-    /// 커널 `__launch_bounds__` 의 SM 당 최소 블록 수(레지스터 상한을 정한다).
+    /// Minimum blocks per SM of kernel `__launch_bounds__` (determines the register limit).
     pub min_blocks: u32,
-    /// 근사 나눗셈·제곱근(속도 우선).
+    /// Approximate division and square root (speed first).
     pub fast_math: bool,
 }
 
@@ -86,12 +88,12 @@ struct Funcs {
     median: CudaFunction,
 }
 
-/// CUDA PatchMatch 백엔드.
+/// CUDA PatchMatch backend.
 pub struct CudaPatchMatch {
     dev: Arc<CudaDevice>,
     opts: CudaPatchMatchOptions,
     funcs: Mutex<HashMap<(i32, i32, bool), Arc<Funcs>>>,
-    /// 장치 사용 직렬화(세션 하나씩).
+    /// Device use serialization (one session at a time).
     lock: Mutex<()>,
 }
 
@@ -126,7 +128,7 @@ struct LevelPair {
     b: [f32; 3],
 }
 
-/// A = K_j R K⁻¹, b = K_j t (스케일별).
+/// A = K_j R K⁻¹, b = K_j t (per scale).
 fn level_pair(kr: [f32; 4], kj: [f32; 4], r: &[f32; 9], t: &[f32; 3]) -> LevelPair {
     let (fx, fy, cx, cy) = (kr[0] as f64, kr[1] as f64, kr[2] as f64, kr[3] as f64);
     let kinv = [[1.0 / fx, 0.0, -cx / fx], [0.0, 1.0 / fy, -cy / fy], [0.0, 0.0, 1.0]];
@@ -217,11 +219,11 @@ struct KParams {
     lpairs: u64,
 }
 
-// SAFETY: 위 구조체들은 repr(C) 평범한 값이고 커널 쪽 선언과 배치가 같다.
+// SAFETY: the structs above are plain repr(C) values and their layout matches the kernel-side declarations.
 unsafe impl DeviceRepr for KParams {}
 
 fn bytes_of<T: Copy>(v: &[T]) -> Vec<u8> {
-    // SAFETY: T 는 repr(C) Copy 값(패딩 없는 배치로 선언), 바이트로만 읽는다.
+    // SAFETY: T is a repr(C) Copy value (declared with padding-free layout), read only as bytes.
     unsafe { std::slice::from_raw_parts(v.as_ptr() as *const u8, std::mem::size_of_val(v)) }.to_vec()
 }
 
@@ -234,19 +236,19 @@ fn gerr(e: impl std::fmt::Display) -> Error {
 }
 
 impl CudaPatchMatch {
-    /// 장치 `dev` 와 옵션으로 만든다(커널은 첫 사용 때 컴파일).
+    /// Builds with device `dev` and options (kernels are compiled on first use).
     pub fn new(dev: Arc<CudaDevice>, opts: CudaPatchMatchOptions) -> std::result::Result<Self, GpuError> {
         Ok(Self { dev, opts, funcs: Mutex::new(HashMap::new()), lock: Mutex::new(()) })
     }
-    /// 장치 0, 기본 옵션.
+    /// Device 0, default options.
     pub fn try_default() -> std::result::Result<Self, GpuError> {
         Self::new(CudaDevice::new(0)?, CudaPatchMatchOptions::default())
     }
-    /// 사용하는 장치.
+    /// Device in use.
     pub fn device(&self) -> &Arc<CudaDevice> {
         &self.dev
     }
-    /// 현재 옵션.
+    /// Current options.
     pub fn options(&self) -> &CudaPatchMatchOptions {
         &self.opts
     }
@@ -317,12 +319,12 @@ struct Session<'a> {
     bview: CudaSlice<u8>,
     count: CudaSlice<u8>,
     batch: CudaSlice<u8>,
-    /// 고정 호스트 버퍼(0: 평면 올림, 1: 사전·입력 평면 올림, 2: 평면 내림).
+    /// Pinned host buffers (0: plane upload, 1: prior/input plane upload, 2: plane download).
     stages: [Option<PinnedHostSlice<f32>>; 3],
     base: KParams,
 }
 
-/// 상태들을 (nx, ny, nz, d) 평면 배열로(병렬).
+/// States → (nx, ny, nz, d) plane array (parallel).
 fn pack_planes(host: &mut [f32], states: &[&ViewState], offs: &[usize]) {
     use rayon::prelude::*;
     for (st, &o) in states.iter().zip(offs) {
@@ -333,7 +335,7 @@ fn pack_planes(host: &mut [f32], states: &[&ViewState], offs: &[usize]) {
     }
 }
 
-/// 평면 배열 → 상태(병렬).
+/// Plane array → states (parallel).
 fn unpack_planes(p: &[f32], st: &mut ViewState, o: usize) {
     use rayon::prelude::*;
     let n = st.width * st.height;
@@ -355,7 +357,7 @@ impl<'a> Session<'a> {
         let s = &dev.stream;
         let nl = input.num_levels;
         let nv = input.views.len();
-        // 영상 배치: 뷰·스케일마다 피치 정렬, 시작 주소 텍스처 정렬.
+        // Image layout: pitch-aligned per view and scale, start address aligned for textures.
         let ta = dev.tex_align.max(256);
         let pa = dev.pitch_align.max(32);
         let mut layout = Vec::with_capacity(nv * nl);
@@ -404,7 +406,7 @@ impl<'a> Session<'a> {
             for l in &v.levels {
                 let (off, pitch) = layout[i];
                 i += 1;
-                // 블록 선형 배열(2D 지역성이 좋은 텍스처 배치)에 복사.
+                // Copy into a block-linear array (a texture layout with good 2D locality).
                 let ad = sys::CUDA_ARRAY_DESCRIPTOR {
                     Width: l.width,
                     Height: l.height,
@@ -412,7 +414,7 @@ impl<'a> Session<'a> {
                     NumChannels: 1,
                 };
                 let mut arr: sys::CUarray = std::ptr::null_mut();
-                // SAFETY: 유효한 서술자. 배열은 Drop 에서 해제한다.
+                // SAFETY: valid descriptor. The array is freed in Drop.
                 let r = unsafe { sys::cuArrayCreate_v2(&mut arr, &ad) };
                 if r != sys::CUresult::CUDA_SUCCESS {
                     return Err(gerr(format!("배열 생성 실패 {r:?}")));
@@ -436,22 +438,22 @@ impl<'a> Session<'a> {
                     WidthInBytes: l.width,
                     Height: l.height,
                 };
-                // SAFETY: 입력 호스트 버퍼는 width·height 바이트, 대상 배열은 같은 크기.
+                // SAFETY: the input host buffer is width·height bytes, the destination array has the same size.
                 let r = unsafe { sys::cuMemcpy2D_v2(&cp) };
                 if r != sys::CUresult::CUDA_SUCCESS {
                     return Err(gerr(format!("배열 복사 실패 {r:?}")));
                 }
-                // SAFETY: 0 으로 채운 뒤 필요한 필드만 쓴다.
+                // SAFETY: fill with 0, then write only the needed fields.
                 let mut res: sys::CUDA_RESOURCE_DESC = unsafe { std::mem::zeroed() };
                 res.resType = sys::CUresourcetype::CU_RESOURCE_TYPE_ARRAY;
                 res.res.array = sys::CUDA_RESOURCE_DESC_st__bindgen_ty_1__bindgen_ty_1 { hArray: arr };
-                // SAFETY: 위와 같음.
+                // SAFETY: same as above.
                 let mut td: sys::CUDA_TEXTURE_DESC = unsafe { std::mem::zeroed() };
                 td.addressMode = [sys::CUaddress_mode::CU_TR_ADDRESS_MODE_BORDER; 3];
                 td.filterMode = sys::CUfilter_mode::CU_TR_FILTER_MODE_LINEAR;
                 td.flags = 0;
                 let mut tex: sys::CUtexObject = 0;
-                // SAFETY: 유효한 서술자, 버퍼는 세션 동안 살아 있다(Drop 에서 객체를 먼저 해제).
+                // SAFETY: valid descriptor, the buffer stays alive during the session (the object is freed first in Drop).
                 let r = unsafe { sys::cuTexObjectCreate(&mut tex, &res, &td, std::ptr::null()) };
                 if r != sys::CUresult::CUDA_SUCCESS {
                     return Err(gerr(format!("텍스처 생성 실패 {r:?}")));
@@ -549,7 +551,7 @@ impl<'a> Session<'a> {
             Some(b) if b.len() >= n => Ok(b),
             _ => {
                 drop(self.stages[which].take());
-                // SAFETY: 고정 메모리 할당; 쓰기 전에 읽지 않는다(필요 구간을 먼저 채운다).
+                // SAFETY: pinned memory allocation; not read before being written (the needed range is filled first).
                 unsafe { self.be.dev.ctx.alloc_pinned::<f32>(n.max(1) + n / 4) }.map_err(gerr)
             }
         }
@@ -601,7 +603,7 @@ impl<'a> Session<'a> {
         Ok(())
     }
 
-    /// 뷰 목록을 픽셀 예산으로 묶는다(반환: 시작·끝 색인).
+    /// Bundles the view list by pixel budget (returns: start and end indices).
     fn batches(&self, views: &[usize], level: usize) -> Vec<(usize, usize)> {
         let mut out = Vec::new();
         let mut start = 0;
@@ -622,7 +624,7 @@ impl<'a> Session<'a> {
         out
     }
 
-    /// 묶음 하나의 상태를 올리고 매개변수를 채운다. 반환: (픽셀 수, 최대 폭, 최대 높이, 항목들).
+    /// Uploads the states of one bundle and fills the parameters. Returns: (pixel count, max width, max height, items).
     fn upload_batch(
         &mut self,
         views: &[usize],
@@ -705,7 +707,7 @@ impl<'a> Session<'a> {
         let s = &self.be.dev.stream;
         let mut l = s.launch_builder(&self.f.eval);
         l.arg(k).arg(&mode);
-        // SAFETY: pm_eval(KParams, int); 버퍼 크기는 upload_batch 가 맞춘다.
+        // SAFETY: pm_eval(KParams, int); the buffer sizes are matched by upload_batch.
         unsafe { l.launch(cfg) }.map_err(gerr)?;
         Ok(())
     }
@@ -717,7 +719,7 @@ impl<'a> Session<'a> {
         let s = &self.be.dev.stream;
         let mut l = s.launch_builder(&self.f.half);
         l.arg(k);
-        // SAFETY: pm_half(KParams); 정적 공유 메모리.
+        // SAFETY: pm_half(KParams); static shared memory.
         unsafe { l.launch(cfg) }.map_err(gerr)?;
         Ok(())
     }
@@ -867,7 +869,7 @@ impl PatchMatchSession for Session<'_> {
 }
 
 impl Session<'_> {
-    /// 평면 묶음 올리기(prior 버퍼, 항목별 시작 `offs`).
+    /// Plane bundle upload (prior buffer, per-item start `offs`).
     fn upload_planes_to_prior(&mut self, states: &[&ViewState], offs: &[usize], total: usize) -> Result<()> {
         let s = self.be.dev.stream.clone();
         if self.prior.len() < 4 * total.max(1) {
@@ -921,7 +923,7 @@ impl Session<'_> {
         if extra.is_some() {
             l.arg(&a).arg(&b);
         }
-        // SAFETY: pm_upsample(KParams, float, float) / pm_median(KParams); 버퍼 크기는 호출자가 맞춘다.
+        // SAFETY: pm_upsample(KParams, float, float) / pm_median(KParams); buffer sizes are matched by the caller.
         unsafe { l.launch(cfg) }.map_err(gerr)?;
         Ok(())
     }
@@ -992,13 +994,13 @@ impl Drop for Session<'_> {
         let _ = self.be.dev.stream.synchronize();
         let _ = self.img_shift;
         for &t in &self.texs {
-            // SAFETY: 이 세션이 만든 텍스처 객체.
+            // SAFETY: texture object created by this session.
             unsafe {
                 let _ = sys::cuTexObjectDestroy(t);
             }
         }
         for &a in &self.arrays {
-            // SAFETY: 이 세션이 만든 배열(텍스처를 먼저 해제했다).
+            // SAFETY: array created by this session (the texture was freed first).
             unsafe {
                 let _ = sys::cuArrayDestroy(a);
             }
@@ -1006,7 +1008,7 @@ impl Drop for Session<'_> {
     }
 }
 
-/// 커널 컴파일 정의(창 반경·간격·하드웨어 보간·블록 수).
+/// Kernel compile defines (window radius, step, hardware interpolation, block count).
 pub(crate) fn defines(wr: i32, step: i32, hw_interp: bool, min_blocks: u32) -> Vec<String> {
     vec![
         format!("WR={wr}"),

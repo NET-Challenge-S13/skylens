@@ -45,13 +45,19 @@
 //! 긴 작업(조밀화·UNet) 뒤에 줄 서면 계산보다 기다리는 시간이 길어진다.
 
 use crate::device::{CudaDevice, GpuError, SyncedCopy};
-use cudarc::driver::{CudaContext, CudaFunction, CudaSlice, CudaStream, DeviceRepr, LaunchConfig, PinnedHostSlice, PushKernelArg, ValidAsZeroBits};
+use cudarc::driver::{
+    CudaContext, CudaFunction, CudaSlice, CudaStream, DeviceRepr, LaunchConfig, PinnedHostSlice, PushKernelArg, ValidAsZeroBits,
+};
 use cumulus3d_core::ransac::{n_choose_k, static_max_num_trials, RansacParams, Support};
 use cumulus3d_core::{Camera, CameraModelKind, FeatureStore, Rigid3, TwoViewGeometry, Vec2, Vec3};
-use cumulus3d_matching::{verify_pairs_batched, BatchScorer, CpuTwoView, ResidualSet, ScoreRequest, TwoViewBackend, TwoViewOptions, VerifyJob};
+use cumulus3d_matching::{
+    verify_pairs_batched, BatchScorer, CpuTwoView, ResidualSet, ScoreRequest, TwoViewBackend, TwoViewOptions, VerifyJob,
+};
 use cumulus3d_sfm::absolute_pose::{solve_abs_pose, AbsolutePoseOptions, AbsolutePoseResult};
 use cumulus3d_sfm::triangulation::estimate_triangulation;
-use cumulus3d_sfm::{solve_abs_pose_scored, AbsPoseBackend, CpuTriangulation, ObsCheck, ObsQuery, PoseScorer, TriProblem, TriangulationBackend};
+use cumulus3d_sfm::{
+    solve_abs_pose_scored, AbsPoseBackend, CpuTriangulation, ObsCheck, ObsQuery, PoseScorer, TriProblem, TriangulationBackend,
+};
 use rayon::prelude::*;
 use std::sync::{Arc, Mutex, MutexGuard};
 
@@ -208,17 +214,7 @@ fn pack_camera(cam: &Camera) -> [f64; 9] {
         CameraModelKind::Radial => (p[3], p[4], 0.0, 0.0),
         CameraModelKind::OpenCv => (p[4], p[5], p[6], p[7]),
     };
-    [
-        cam.model.id() as f64,
-        cam.focal_length_x(),
-        cam.focal_length_y(),
-        cam.principal_point_x(),
-        cam.principal_point_y(),
-        k1,
-        k2,
-        p1,
-        p2,
-    ]
+    [cam.model.id() as f64, cam.focal_length_x(), cam.focal_length_y(), cam.principal_point_x(), cam.principal_point_y(), k1, k2, p1, p2]
 }
 
 /// 자세를 커널 형식으로: [R 행 우선 9, t 3]. R 은 CPU 와 같은 `rotation_matrix()`.
@@ -263,8 +259,7 @@ impl CudaSparse {
     /// 관측이 2개 미만이거나 64개를 넘는 문제는 CPU 로 푼다.
     pub fn estimate_batch_gpu(&self, problems: &[TriProblem<'_>]) -> Result<Vec<Option<(Vec3, Vec<bool>)>>, GpuError> {
         let mut out: Vec<Option<(Vec3, Vec<bool>)>> = (0..problems.len()).map(|_| None).collect();
-        let (gpu, cpu): (Vec<usize>, Vec<usize>) =
-            (0..problems.len()).partition(|&i| (2..=MAX_TRI_OBS).contains(&problems[i].obs.len()));
+        let (gpu, cpu): (Vec<usize>, Vec<usize>) = (0..problems.len()).partition(|&i| (2..=MAX_TRI_OBS).contains(&problems[i].obs.len()));
         let cpu_res: Vec<(usize, Option<(Vec3, Vec<bool>)>)> =
             cpu.par_iter().map(|&i| (i, estimate_triangulation(problems[i].obs, &problems[i].params))).collect();
         for (i, r) in cpu_res {

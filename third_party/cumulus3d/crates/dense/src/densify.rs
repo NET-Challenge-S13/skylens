@@ -29,7 +29,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 조밀화 진행: 이웃·깊이 범위 → 피라미드 → 스케일별 실행(광도, 세부 복원, 기하 회차) → 중앙값 필터 → 판독·필터 → 융합.
+//! Densification progression: neighbors and depth range → pyramid → per-scale runs (photometric, detail restoration, geometric rounds) →
+//! median filter → readout and filter → fusion.
 
 use crate::cache::{CachedDepth, DepthMapCache};
 use crate::fusion::{fuse, FusionInput, FusionOutput};
@@ -46,95 +47,101 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-/// 단계별 시간.
+/// Per-stage timings.
 #[derive(Clone, Debug, Default)]
 pub struct DenseTimings {
-    /// 이웃 선택 + 깊이 범위.
+    /// Neighbor selection + depth range.
     pub neighbors: Duration,
-    /// 피라미드 구성 + 백엔드 세션 시작(업로드).
+    /// Pyramid construction + backend session start (upload).
     pub prepare: Duration,
-    /// 스케일별 깊이 추정(커널 실행 + 상향 표본 + 세부 복원 판정). 0 = 최저 스케일.
+    /// Per-scale depth estimation (kernel runs + upsampling + detail-restoration decision). 0 = lowest scale.
     pub levels: Vec<Duration>,
-    /// 그중 CPU 쪽 상향 표본·세부 판정 시간 합.
+    /// Of that, the total CPU-side upsampling and detail decision time.
     pub upsample: Duration,
-    /// 중앙값 필터 + 판독·필터.
+    /// Median filter + readout and filter.
     pub filter: Duration,
-    /// 융합.
+    /// Fusion.
     pub fusion: Duration,
-    /// 그중 일치 융합 1차·2차 시간(2차 융합을 했을 때만 2차가 0 이 아니다).
+    /// Of that, agreement fusion first and second pass times (the second is nonzero only when the second fusion ran).
     pub fusion_pass1: Duration,
-    /// 일치 융합 2차 시간.
+    /// Agreement fusion second pass time.
     pub fusion_pass2: Duration,
+    /// Of the fusion time, normal-direction smoothing of the fused cloud (0 when off).
+    pub fusion_smooth: Duration,
+    /// Of the fusion time, free-space visibility filtering of the fused cloud (0 when off).
+    pub fusion_visibility: Duration,
+    /// Points removed by the visibility filter.
+    pub fusion_visibility_removed: usize,
 }
 
 impl DenseTimings {
-    /// 깊이 추정 합.
+    /// Total depth estimation.
     pub fn depth(&self) -> Duration {
         self.levels.iter().sum()
     }
-    /// 전체 시간(이웃 + 준비 + 깊이 + 필터 + 융합).
+    /// Total time (neighbors + preparation + depth + filter + fusion).
     pub fn total(&self) -> Duration {
         self.neighbors + self.prepare + self.depth() + self.filter + self.fusion
     }
 }
 
-/// 최종 깊이맵 한 장(뷰 해상도).
+/// One final depth map (view resolution).
 #[derive(Clone, Debug)]
 pub struct DepthMapResult {
-    /// 너비(픽셀).
+    /// Width (pixels).
     pub width: usize,
-    /// 높이(픽셀).
+    /// Height (pixels).
     pub height: usize,
-    /// 필터 전 최종 깊이.
+    /// Final depth before filtering.
     pub raw_depth: Vec<f32>,
-    /// 필터 통과 깊이(무효 0).
+    /// Depth after the filter (0 = invalid).
     pub depth: Vec<f32>,
-    /// 기준 카메라 좌표 법선.
+    /// Normal in the reference camera coordinates.
     pub normal: Vec<[f32; 3]>,
-    /// 최종 집계 비용(신뢰도).
+    /// Final aggregated cost (confidence).
     pub cost: Vec<f32>,
-    /// 깊이맵 캐시에서 왔는지.
+    /// Whether it came from the depth map cache.
     pub from_cache: bool,
 }
 
-/// 깊이맵 계산 결과.
+/// Depth map computation result.
 #[derive(Clone, Debug, Default)]
 pub struct DepthMapSet {
-    /// 뷰별 깊이맵(깊이맵을 만들지 못한 뷰는 None).
+    /// Depth map per view (None for views that failed to produce one).
     pub maps: Vec<Option<Arc<DepthMapResult>>>,
-    /// 뷰별 원천 뷰.
+    /// Source views per view.
     pub sources: Vec<Vec<usize>>,
-    /// 뷰별 대표 기준선(원천 중심 거리 중앙값).
+    /// Representative baseline per view (median source center distance).
     pub baselines: Vec<f64>,
-    /// 캐시 적중 뷰 수.
+    /// Number of cache-hit views.
     pub cache_hits: usize,
-    /// 사용한 스케일 수.
+    /// Number of scales used.
     pub num_levels: usize,
-    /// 단계별 시간.
+    /// Per-stage timings.
     pub timings: DenseTimings,
 }
 
-/// 조밀화 결과.
+/// Densification result.
 #[derive(Clone, Debug, Default)]
 pub struct DenseOutput {
-    /// 조밀 점군(위치·법선·색).
+    /// Dense point cloud (position, normal, color).
     pub cloud: PointCloud,
-    /// 점마다 기여 뷰 색인.
+    /// Contributing view indices per point.
     pub visibility: Vec<Vec<u32>>,
-    /// 단계별 시간.
+    /// Per-stage timings.
     pub timings: DenseTimings,
-    /// 캐시 적중 뷰 수.
+    /// Number of cache-hit views.
     pub cache_hits: usize,
-    /// 깊이맵을 만든 뷰 수.
+    /// Number of views for which a depth map was built.
     pub depth_views: usize,
-    /// 깊이맵(통계·진단용).
+    /// Depth maps (for statistics and diagnostics).
     pub depth_maps: DepthMapSet,
-    /// 점마다 2차 융합 점 여부(2차 융합을 하지 않았으면 비어 있다).
+    /// Whether each point is a second-fusion point (empty if no second fusion was done).
     pub residual: Vec<bool>,
 }
 
 impl DenseOutput {
-    /// PLY(x y z nx ny nz red green blue) 쓰기. 부모 폴더를 만든다.
+    /// Writes PLY (x y z nx ny nz red green blue). Creates the parent folder.
     pub fn write_ply(&self, path: impl AsRef<Path>) -> Result<()> {
         let path = path.as_ref();
         if let Some(p) = path.parent() {
@@ -145,12 +152,12 @@ impl DenseOutput {
         write_ply(path, &self.cloud, PlyLayout::XyzNormalRgb)
     }
 
-    /// 2차 융합 점 수.
+    /// Number of second-fusion points.
     pub fn num_residual(&self) -> usize {
         self.residual.iter().filter(|&&r| r).count()
     }
 
-    /// 2차 융합 점만 PLY 로 쓴다(없으면 쓰지 않고 거짓).
+    /// Writes only the second-fusion points as PLY (returns false without writing if there are none).
     pub fn write_residual_ply(&self, path: impl AsRef<Path>) -> Result<bool> {
         if self.num_residual() == 0 {
             return Ok(false);
@@ -163,6 +170,9 @@ impl DenseOutput {
             }
             if let Some(c) = self.cloud.colors.get(i) {
                 pc.colors.push(*c);
+            }
+            if let Some(k) = self.cloud.keys.get(i) {
+                pc.keys.push(*k);
             }
         }
         write_ply(path.as_ref(), &pc, PlyLayout::XyzNormalRgb)?;
@@ -181,7 +191,7 @@ fn mat_mul_t(a: &[[f64; 3]; 3], b: &[[f64; 3]; 3]) -> [[f64; 3]; 3] {
     m
 }
 
-/// 기준 → 원천 상대 기하.
+/// Reference → source relative geometry.
 pub fn pair_geometry(scene: &DenseScene, r: usize, s: usize) -> PairGeometry {
     let (vr, vs) = (&scene.views[r], &scene.views[s]);
     let rr = mat_mul_t(&vs.r, &vr.r);
@@ -198,7 +208,7 @@ fn cache_key(scene: &DenseScene, v: usize, fp: u64) -> (u64, u64) {
     (scene.views[v].geometry_hash(), fp)
 }
 
-/// 모든 뷰의 최종 깊이맵을 계산한다.
+/// Computes the final depth maps of all views.
 pub fn compute_depth_maps(
     scene: &DenseScene,
     opts: &DensifyOptions,
@@ -300,7 +310,7 @@ pub fn compute_depth_maps(
     let mut pm = opts.pm.clone();
     pm.sigma_spatial = pm.sigma_s();
     let input = KernelInput { views, num_levels: nl, pm, filter: opts.filter.clone(), seed: opts.seed };
-    // 캐시 뷰의 스케일별 깊이(기하 실행의 원천 깊이로만 쓴다).
+    // Per-scale depth of cached views (used only as the source depth for geometric runs).
     let cached_levels: Vec<Option<Vec<Arc<Vec<f32>>>>> = cached
         .iter()
         .map(|c| {
@@ -487,12 +497,12 @@ pub fn compute_depth_maps(
     Ok(set)
 }
 
-/// 깊이맵 융합(겹침 목록은 공유 점 수 순 최대 `check_num_images`).
+/// Depth map fusion (overlap list is at most `check_num_images`, in shared-point-count order).
 pub fn fuse_depth_maps(scene: &DenseScene, maps: &DepthMapSet, opts: &DensifyOptions, threads: usize) -> FusionOutput {
     fuse_depth_maps_with(scene, maps, opts, None, threads)
 }
 
-/// 깊이맵 융합. `score` 가 있으면 점수 융합(겹침 목록 길이 = `score.num_neighbors`), 없으면 `opts.fusion.mode`.
+/// Depth map fusion. With `score`, score fusion (overlap list length = `score.num_neighbors`); otherwise `opts.fusion.mode`.
 pub fn fuse_depth_maps_with(
     scene: &DenseScene,
     maps: &DepthMapSet,
@@ -520,14 +530,35 @@ pub fn fuse_depth_maps_with(
             })
         })
         .collect();
-    match score {
+    let mut out = match score {
         Some(s) => fuse_scored(scene, &inputs, &overlap, s, threads),
         None => fuse(scene, &inputs, &overlap, &opts.fusion, threads),
+    };
+    let pool = (threads > 0).then(|| rayon::ThreadPoolBuilder::new().num_threads(threads).build().ok()).flatten();
+    if opts.fusion.visibility.enabled() {
+        let t = Instant::now();
+        let vp = &opts.fusion.visibility;
+        out.visibility_removed = match &pool {
+            Some(pool) => pool.install(|| crate::visibility::filter_visibility(scene, &inputs, &overlap, &mut out, vp)),
+            None => crate::visibility::filter_visibility(scene, &inputs, &overlap, &mut out, vp),
+        };
+        out.visibility_time = t.elapsed();
     }
+    if opts.fusion.smooth.enabled() {
+        let t = Instant::now();
+        let gsd = crate::fusion::scene_gsd(scene, &inputs);
+        let sp = &opts.fusion.smooth;
+        match &pool {
+            Some(pool) => pool.install(|| crate::smooth::smooth_along_normals(&mut out.cloud, gsd, sp)),
+            None => crate::smooth::smooth_along_normals(&mut out.cloud, gsd, sp),
+        };
+        out.smooth_time = t.elapsed();
+    }
+    out
 }
 
-/// 보관한 깊이맵으로 융합만 다시 실행한다(깊이 추정·필터는 하지 않는다). `opts` 에서는 융합 설정만 쓰고,
-/// `score` 가 있으면 점수 융합을 쓴다. 결과의 `timings` 는 깊이맵 쪽 시간에 이번 융합 시간을 넣은 것이다.
+/// Reruns only fusion with the retained depth maps (no depth estimation or filtering). From `opts` only the fusion settings are used,
+/// and score fusion is used if `score` is present. The result's `timings` are the depth map timings with this fusion time put in.
 pub fn fuse_output(scene: &DenseScene, maps: &DepthMapSet, opts: &DensifyOptions, score: Option<&ScoreFusionOptions>) -> DenseOutput {
     let tf = Instant::now();
     let f = fuse_depth_maps_with(scene, maps, opts, score, 0);
@@ -535,6 +566,9 @@ pub fn fuse_output(scene: &DenseScene, maps: &DepthMapSet, opts: &DensifyOptions
     timings.fusion = tf.elapsed();
     timings.fusion_pass1 = f.pass1_time;
     timings.fusion_pass2 = f.pass2_time;
+    timings.fusion_smooth = f.smooth_time;
+    timings.fusion_visibility = f.visibility_time;
+    timings.fusion_visibility_removed = f.visibility_removed;
     let depth_views = maps.maps.iter().filter(|m| m.is_some()).count();
     DenseOutput {
         cloud: f.cloud,
@@ -547,7 +581,7 @@ pub fn fuse_output(scene: &DenseScene, maps: &DepthMapSet, opts: &DensifyOptions
     }
 }
 
-/// 조밀화 전체: 깊이맵 → 필터 → 융합.
+/// Full densification: depth maps → filter → fusion.
 pub fn densify(
     scene: &DenseScene,
     opts: &DensifyOptions,
@@ -557,7 +591,7 @@ pub fn densify(
     densify_with(scene, opts, None, backend, cache)
 }
 
-/// [`densify`] 와 같되 `score` 가 있으면 점수 융합.
+/// Same as [`densify`], but with score fusion if `score` is present.
 pub fn densify_with(
     scene: &DenseScene,
     opts: &DensifyOptions,

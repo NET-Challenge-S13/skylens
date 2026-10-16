@@ -25,14 +25,14 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 작은 선형대수 도우미(영공간, 3×3 SVD, 하틀리 정규화).
+//! Small linear-algebra helpers (null space, 3×3 SVD, Hartley normalization).
 
 use cumulus3d_core::{Mat3, Vec2, Vec3};
 use nalgebra::{DMatrix, SMatrix};
 
-/// 행 우선 N×9 제약 행렬의 영공간 기저(가장 작은 특이값 순서대로 `k` 개).
+/// Null-space basis of a row-major N×9 constraint matrix (`k` vectors in order of smallest singular value).
 ///
-/// N < 9 이면 영행으로 채워 9×9 로 만든 뒤 SVD 한다(기저가 생성하는 공간은 QR 판과 같다).
+/// If N < 9, pad with zero rows to make it 9×9 and then run SVD (the space spanned by the basis is the same as the QR version).
 pub fn null_space_9(rows: &[[f64; 9]], k: usize) -> Option<Vec<[f64; 9]>> {
     let (sv, vt) = svd_rows_9(rows)?;
     let mut order: Vec<usize> = (0..9).collect();
@@ -49,7 +49,7 @@ pub fn null_space_9(rows: &[[f64; 9]], k: usize) -> Option<Vec<[f64; 9]>> {
     Some(out)
 }
 
-/// 특이값(정렬 안 됨)과 Vᵀ(9×9). 9행 이하는 고정 크기 행렬로 할당 없이 처리.
+/// Singular values (unsorted) and Vᵀ (9×9). Up to 9 rows are handled with a fixed-size matrix without allocation.
 fn svd_rows_9(rows: &[[f64; 9]]) -> Option<([f64; 9], SMatrix<f64, 9, 9>)> {
     let mut sv = [0.0; 9];
     if rows.len() <= 9 {
@@ -63,7 +63,7 @@ fn svd_rows_9(rows: &[[f64; 9]]) -> Option<([f64; 9], SMatrix<f64, 9, 9>)> {
         sv.copy_from_slice(svd.singular_values.as_slice());
         Some((sv, svd.v_t?))
     } else {
-        // 큰 N: QᵀQ 대신 직접 SVD(조건수 제곱 방지).
+        // Large N: direct SVD instead of QᵀQ (avoids squaring the condition number).
         let mut a = DMatrix::<f64>::zeros(rows.len(), 9);
         for (i, r) in rows.iter().enumerate() {
             for j in 0..9 {
@@ -77,7 +77,7 @@ fn svd_rows_9(rows: &[[f64; 9]]) -> Option<([f64; 9], SMatrix<f64, 9, 9>)> {
     }
 }
 
-/// 9열 행렬 SVD 의 특이값(내림차순)과 최소 우특이벡터.
+/// Singular values (descending) and smallest right singular vector of the SVD of a 9-column matrix.
 pub fn singular_values_9(rows: &[[f64; 9]]) -> Option<(Vec<f64>, [f64; 9])> {
     let (sv, vt) = svd_rows_9(rows)?;
     let mut order: Vec<usize> = (0..9).collect();
@@ -90,14 +90,14 @@ pub fn singular_values_9(rows: &[[f64; 9]]) -> Option<(Vec<f64>, [f64; 9])> {
     Some((s, v))
 }
 
-/// 행 우선 9-벡터 → 3×3.
+/// Row-major 9-vector -> 3×3.
 pub fn mat3_from_row_major(e: &[f64; 9]) -> Mat3 {
     Mat3::new(e[0], e[1], e[2], e[3], e[4], e[5], e[6], e[7], e[8])
 }
 
 pub use cumulus3d_core::linalg::svd3;
 
-/// 3×3 의 (근사) 영벡터: 행 쌍 외적 중 가장 큰 것.
+/// (Approximate) null vector of a 3×3: the largest of the row-pair cross products.
 pub fn null_vector3(m: &Mat3) -> Vec3 {
     let r0 = m.row(0).transpose();
     let r1 = m.row(1).transpose();
@@ -117,8 +117,8 @@ pub fn null_vector3(m: &Mat3) -> Vec3 {
     }
 }
 
-/// 하틀리 정규화: 무게중심 c, 무게중심까지 거리 RMS = s, k = √2/s.
-/// `T = [[k,0,−k cx],[0,k,−k cy],[0,0,1]]`. 정규화 점과 T 를 돌려준다.
+/// Hartley normalization: centroid c, RMS distance to the centroid = s, k = √2/s.
+/// `T = [[k,0,-k cx],[0,k,-k cy],[0,0,1]]`. Returns the normalized points and T.
 pub fn hartley_normalize(pts: &[Vec2]) -> (Vec<Vec2>, Mat3) {
     let n = pts.len().max(1) as f64;
     let c = pts.iter().fold(Vec2::zeros(), |a, p| a + p) / n;
@@ -129,7 +129,7 @@ pub fn hartley_normalize(pts: &[Vec2]) -> (Vec<Vec2>, Mat3) {
     (pts.iter().map(|p| (p - c) * k).collect(), t)
 }
 
-/// 행 우선 8×8 선형계 부분 피벗 LU. 특이하면 None.
+/// Row-major 8×8 linear system partial-pivot LU. None if singular.
 pub fn solve8(a: SMatrix<f64, 8, 8>, b: SMatrix<f64, 8, 1>) -> Option<SMatrix<f64, 8, 1>> {
     a.lu().solve(&b)
 }

@@ -84,8 +84,11 @@ func main() {
 	mux.Handle("GET /site", c.SiteHandler())
 	mux.Handle("GET /vworld/", feed.VWorldHandler())
 	mux.Handle("/uplink", ws.Route(c.Uplinks, c.UplinkHandler(), ws.Options{Name: "uplink"}))
-	mux.Handle("/control", ws.Route(c.Controls, c.ControlHandler(), ws.Options{Name: "control"}))
-	mux.Handle("/viewer", ws.Route(c.Viewers, c.ViewerHandler(), ws.Options{Name: "viewer"}))
+	// Screens get point slot messages of tens of MB each (one per live diff stream event), so
+	// they may lag further behind than the uplink before they are dropped.
+	screens := 512 << 20
+	mux.Handle("/control", ws.Route(c.Controls, c.ControlHandler(), ws.Options{Name: "control", BacklogLimit: screens}))
+	mux.Handle("/viewer", ws.Route(c.Viewers, c.ViewerHandler(), ws.Options{Name: "viewer", BacklogLimit: screens}))
 	mux.Handle("/", webHandler(resolveWebDir(cfg.WebDir, cwd)))
 
 	srv := &http.Server{

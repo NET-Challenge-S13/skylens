@@ -25,22 +25,25 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! cumulus3d 실행 파일의 라이브러리 부분: 점진 스트림 파이프라인과 단계별 호환 하위 명령([`interop`]).
+//! Library part of the cumulus3d executable: the incremental stream pipeline and the stage-by-stage compatible subcommands ([`interop`]).
 //!
-//! - [`session`]: 상태 값 [`session::Session`] 과 리듀서 함수 [`session::step`] / [`session::poll`] /
+//! - [`session`]: the state value [`session::Session`] and the reducer functions [`session::step`] / [`session::poll`] /
 //!   [`session::command`] / [`session::finish`].
-//! - [`pipeline`]: 리듀서를 감싸 훅·큐 정책·패닉 격리·구독 채널을 제공하는 [`pipeline::Pipeline`].
-//! - [`events`]: 단계별 결과 [`events::Event`] 와 명령 [`events::Command`].
-//! - [`sinks`]: `cumulus3d stream` 의 파일 출력(timeline.txt, run.log, PLY, 스냅샷)을 만드는 기본 훅.
-//! - [`stream`]: 입력 폴더 → 세션 → 파이프라인 조립([`stream::run_stream`]).
-//! - [`compose`]: 실시간 입력용 유지 노드. 지금의 입력 상태([`compose::FrameState`])를 선언하면 받아들인 기록과 비교해 증분 처리한다.
-//! - [`declare`]: 선언형 빌더 층. 계획([`declare::Plan`])을 기록만 하고, `build` 에서 검사, `run` 에서 한 번에 실행
-//!   ([`declare::Recon`]). 계획은 TOML 로 저장·읽기(`cumulus3d run plan.toml`).
+//! - [`pipeline`]: [`pipeline::Pipeline`], which wraps the reducer and provides hooks, queue policy, panic isolation and subscription
+//!   channels.
+//! - [`events`]: per-stage results [`events::Event`] and commands [`events::Command`].
+//! - [`sinks`]: default hooks that produce the file output of `cumulus3d stream` (timeline.txt, run.log, PLY, snapshots).
+//! - [`stream`]: input folder -> session -> pipeline assembly ([`stream::run_stream`]).
+//! - [`compose`]: a persistent node for live input. Declare the current input state ([`compose::FrameState`]) and it is compared with the
+//!   accepted record to process incrementally.
+//! - [`declare`]: the declarative builder layer. It only records a plan ([`declare::Plan`]); `build` validates it and `run` executes it
+//!   in one go
+//!   ([`declare::Recon`]). Plans are saved and read as TOML (`cumulus3d run plan.toml`).
 //!
-//! # 사용 예
+//! # Usage example
 //!
-//! 영상 폴더(`images/camF|camR|camL/*.jpg`, `gps_ref.txt`)를 위치 단위로 넣어 점진 재구성하고,
-//! 기본 출력 훅으로 `cumulus3d stream` 과 같은 파일을 만든다.
+//! Feed an image folder (`images/camF|camR|camL/*.jpg`, `gps_ref.txt`) position by position for incremental reconstruction,
+//! and use the default output hook to produce the same files as `cumulus3d stream`.
 //!
 //! ```no_run
 //! use cumulus3d_cli::events::{Event, EventKind};
@@ -60,7 +63,7 @@
 //!
 //!     let pipeline = Pipeline::new(Session::new(cfg)).on(EventKind::ZonePreview, |e: &Event| {
 //!         if let Event::ZonePreview { range, cloud, .. } = e {
-//!             println!("초벌 구역 {}: 점 {}", range.zone, cloud.len());
+//!             println!("preview zone {}: {} points", range.zone, cloud.len());
 //!         }
 //!     });
 //!     let mut pipeline = sinks::attach(pipeline, Path::new("out"), &SinkOptions::default()).map_err(|e| e.to_string())?;
@@ -68,12 +71,12 @@
 //!         pipeline.push(Input::Frames(frame_set(&layout, p)));
 //!     }
 //!     let (_session, summary) = pipeline.finish();
-//!     println!("이벤트 {} 개", summary.events);
+//!     println!("{} events", summary.events);
 //!     Ok(())
 //! }
 //! ```
 //!
-//! 선언형(계획 기록 → 검사 → 실행):
+//! Declarative (record a plan -> validate -> run):
 //!
 //! ```no_run
 //! use cumulus3d_cli::declare::{Dense, Recon, Sinks};
@@ -88,10 +91,10 @@
 //!     .build()
 //!     .unwrap_or_else(|e| panic!("{e}"));
 //! let summary = recon.run().unwrap();
-//! println!("이벤트 {} 개", summary.events);
+//! println!("{} events", summary.events);
 //! ```
 //!
-//! 훅 없이 상태 값만 주고받는 함수형 사용:
+//! Functional use that only passes state values around, without hooks:
 //!
 //! ```no_run
 //! use cumulus3d_cli::session::{finish, step, FrameSet, Session, SessionConfig};
@@ -109,12 +112,14 @@
 
 #![warn(missing_docs)]
 
+pub mod blocks;
 pub mod compose;
 pub mod declare;
 pub mod densewrap;
 pub mod events;
 pub mod fusion_variants;
 pub mod interop;
+pub mod intrinsics;
 pub mod pipeline;
 pub mod post;
 pub mod session;

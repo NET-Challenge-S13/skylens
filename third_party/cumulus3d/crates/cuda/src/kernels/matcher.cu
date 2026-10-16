@@ -29,8 +29,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// 기술자 정수 내적 top-2. 스레드 하나가 질의 기술자 하나를 맡아 대상 기술자를 0번부터 차례로 훑는다.
-// 순차 갱신(엄격히 큼)이라 CPU Top2::push 를 순서대로 부른 것과 같은 결과다.
+// Descriptor integer dot product top-2. One thread takes one query descriptor and scans the target descriptors in order from 0.
+// Sequential update (strictly greater), so the result equals calling CPU Top2::push in order.
 
 typedef unsigned int u32;
 

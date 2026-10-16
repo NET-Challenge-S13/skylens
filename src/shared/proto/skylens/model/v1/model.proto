@@ -191,6 +191,13 @@ enum ChunkKind {
   CHUNK_KIND_DETECTIONS = 3; // skylens.payload.v1.DetectionBatch
   CHUNK_KIND_TERRAIN = 4;    // skylens.payload.v1.TerrainTile, from the core terrain feed (control tower only)
   CHUNK_KIND_BUILDINGS = 5;  // skylens.payload.v1.BuildingSet, from the core terrain feed (control tower only)
+  // pointblitz slot diff message: the 32-byte "PBSD" header in front of one event pack of the
+  // cumulus3d live diff stream v4 (stable display). Every shown point owns a slot id; adds and
+  // moves write slots, removes hide them. Not compacted: a viewer applies every message of a
+  // stream in order. segment = the zone that triggered the event, level = refined,
+  // version = the message seq (1, 2, ...), generation = the stream id (one per model run; a new
+  // id starts a new stream at seq 1).
+  CHUNK_KIND_POINT_SLOTS = 6;
 }
 
 // Routing metadata is all the core reads. payload goes to viewers unchanged.
@@ -200,7 +207,7 @@ message Chunk {
   uint32 segment = 3;
   Level level = 4;
   repeated int32 block_id = 5; // [x, y, z] for mesh blocks
-  uint32 version = 6;          // mesh block version; keep only if newer
-  uint32 generation = 7;       // refined snapshot generation; replaces older ones
+  uint32 version = 6;          // mesh block version; keep only if newer. Point slots: message seq
+  uint32 generation = 7;       // refined snapshot generation; replaces older ones. Point slots: stream id
   bytes payload = 8;
 }

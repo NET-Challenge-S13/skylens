@@ -29,8 +29,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 전역 매퍼: 상대 자세 → 뷰 그래프 → 회전 평균 2회 → 트랙 → 위치 추정 → 필터·정규화
-//! → (BA 단계) → (재삼각측량) → 오차 재계산.
+//! Global mapper: relative poses, view graph, 2 rounds of rotation averaging, tracks, position estimation, filtering and normalization,
+//! then (BA stage), (re-triangulation), and error recomputation.
 
 use crate::positioning::{global_positioning, PositionSolverOptions, PositioningSummary};
 use crate::rotation_averaging::{solve_rotation_averaging, RotationAveragingOptions, ViewGraph, ViewGraphEdge};
@@ -42,65 +42,65 @@ use cumulus3d_core::{images_of_pair, Camera, FeatureStore, Image, ImageId, Match
 use rayon::prelude::*;
 use std::collections::HashSet;
 
-/// 전역 매퍼 옵션. 기본값은 일반 항공 영상 기준으로 정한 값.
+/// Global mapper options. Defaults are tuned for typical aerial images.
 #[derive(Clone, Debug)]
 pub struct GlobalSfmOptions {
-    /// 상대 자세가 없는 짝은 E/F/H 를 다시 맞춰 상대 자세를 분해할지.
+    /// For pairs with no relative pose, whether to refit E/F/H and decompose the relative pose.
     pub decompose_relative_pose: bool,
-    /// BA 단계 반복 횟수(0 이면 끝 필터만 실행).
+    /// Number of BA stage iterations (if 0, only the final filter runs).
     pub ba_num_iterations: usize,
-    /// 회전 평균 단계 생략.
+    /// Skip the rotation averaging stage.
     pub skip_rotation_averaging: bool,
-    /// 트랙 구성 단계 생략.
+    /// Skip the track construction stage.
     pub skip_track_establishment: bool,
-    /// 전역 위치 추정 단계 생략.
+    /// Skip the global position estimation stage.
     pub skip_global_positioning: bool,
-    /// BA 단계 생략.
+    /// Skip the BA stage.
     pub skip_bundle_adjustment: bool,
-    /// 재삼각측량 단계 생략.
+    /// Skip the re-triangulation stage.
     pub skip_retriangulation: bool,
-    /// 트랙 구성 옵션.
+    /// Track construction options.
     pub tracks: TrackOptions,
-    /// 위치 추정 후 필터의 최대 각도 재투영 오차(도).
+    /// Maximum angular reprojection error (degrees) of the filter after position estimation.
     pub max_angular_reproj_error_deg: f64,
-    /// 정규 좌표 재투영 오차 필터 임계.
+    /// Threshold of the normalized-coordinate reprojection error filter.
     pub max_normalized_reproj_error: f64,
-    /// 점 필터의 최소 삼각측량 각(도).
+    /// Minimum triangulation angle (degrees) of the point filter.
     pub min_tri_angle_deg: f64,
-    /// 회전 평균 후 간선을 무효화하는 상대 회전 오차 상한(도).
+    /// Upper bound on the relative rotation error (degrees) beyond which edges are invalidated after rotation averaging.
     pub ra_max_rotation_error_deg: f64,
-    /// 회전 평균 옵션.
+    /// Rotation averaging options.
     pub rotation_averaging: RotationAveragingOptions,
-    /// 전역 위치 추정 옵션.
+    /// Global position estimation options.
     pub positioning: PositionSolverOptions,
-    /// BA 공통 설정(정제 대상).
+    /// Common BA settings (what to refine).
     pub ba_refine_focal_length: bool,
-    /// BA 에서 주점 정제 여부.
+    /// Whether BA refines the principal point.
     pub ba_refine_principal_point: bool,
-    /// BA 에서 왜곡 등 추가 파라미터 정제 여부.
+    /// Whether BA refines extra parameters such as distortion.
     pub ba_refine_extra_params: bool,
-    /// BA Huber 손실 척도.
+    /// Huber loss scale of BA.
     pub ba_loss_scale: f64,
-    /// BA 한 번의 최대 반복 횟수.
+    /// Maximum iterations of a single BA run.
     pub ba_max_num_iterations: usize,
-    /// 회전 고정 BA 하위 단계 생략.
+    /// Skip the rotation-fixed BA sub-stage.
     pub ba_skip_fixed_rotation_stage: bool,
-    /// 전체 변수 BA 하위 단계 생략.
+    /// Skip the all-variables BA sub-stage.
     pub ba_skip_joint_optimization_stage: bool,
-    /// 재삼각측량 트랙 완성 재투영 오차 상한(픽셀).
+    /// Upper bound on the reprojection error (pixels) for track completion in re-triangulation.
     pub tri_complete_max_reproj_error: f64,
-    /// 재삼각측량 트랙 병합 재투영 오차 상한(픽셀).
+    /// Upper bound on the reprojection error (pixels) for track merging in re-triangulation.
     pub tri_merge_max_reproj_error: f64,
-    /// 재삼각측량 최소 삼각측량 각(도).
+    /// Minimum triangulation angle (degrees) in re-triangulation.
     pub tri_min_angle: f64,
-    /// 재삼각측량 후 점 정제 최대 횟수.
+    /// Maximum number of point refinements after re-triangulation.
     pub retri_max_refinements: usize,
-    /// 정제 반복을 멈추는 변경 관측 비율.
+    /// Fraction of changed observations at which refinement iteration stops.
     pub retri_max_refinement_change: f64,
-    /// 재삼각측량 점 정제 BA 최대 반복.
+    /// Maximum iterations of the point-refinement BA in re-triangulation.
     pub retri_ba_max_num_iterations: usize,
-    /// 번들 조정 풀이 백엔드(기본 CPU). BA 단계와 재삼각측량 끝의 전체 BA 에 쓴다.
-    /// 재삼각측량 중 점만 정제하는 BA(`refine_points`)는 CPU 그대로다.
+    /// Bundle adjustment solver backend (CPU by default). Used for the BA stage and the full BA at the end of re-triangulation.
+    /// The point-only refinement BA during re-triangulation (`refine_points`) stays on the CPU.
     pub ba_backend: BaBackendRef,
 }
 
@@ -124,7 +124,8 @@ impl Default for GlobalSfmOptions {
             ba_refine_focal_length: true,
             ba_refine_principal_point: false,
             ba_refine_extra_params: true,
-            // 설계 결정: 전역 매퍼 BA 의 Huber 척도 기본값 → 1.0 (픽셀 아닌 정규좌표면 달라질 수 있음).
+            // Design decision: default Huber scale of the global mapper BA is 1.0
+            // (may differ if in normalized coordinates rather than pixels).
             ba_loss_scale: 1.0,
             ba_max_num_iterations: 200,
             ba_skip_fixed_rotation_stage: false,
@@ -141,7 +142,7 @@ impl Default for GlobalSfmOptions {
 }
 
 impl GlobalSfmOptions {
-    /// 사용자 스크립트 설정(ba_num_iterations 0, skip_retriangulation, keep_max_num_tracks 100000).
+    /// User script settings (ba_num_iterations 0, skip_retriangulation, keep_max_num_tracks 100000).
     pub fn script() -> Self {
         let mut o = Self { ba_num_iterations: 0, skip_retriangulation: true, ..Default::default() };
         o.tracks.max_num_tracks = 100_000;
@@ -149,41 +150,41 @@ impl GlobalSfmOptions {
     }
 }
 
-/// 단계별 통계.
+/// Per-stage statistics.
 #[derive(Clone, Debug, Default)]
 pub struct GlobalMapperSummary {
-    /// 뷰 그래프 간선 수.
+    /// Number of view graph edges.
     pub num_view_graph_edges: usize,
-    /// 회전 평균 후 유효 간선 수.
+    /// Number of valid edges after rotation averaging.
     pub num_valid_edges_after_ra: usize,
-    /// 트랙 구성 통계.
+    /// Track construction statistics.
     pub tracks: TrackSummary,
-    /// 위치 추정 통계.
+    /// Position estimation statistics.
     pub positioning: PositioningSummary,
-    /// 위치 추정 후 필터가 지운 관측 수.
+    /// Number of observations removed by the filter after position estimation.
     pub num_filtered_after_positioning: usize,
-    /// BA 단계 필터가 지운 관측 수.
+    /// Number of observations removed by the BA stage filter.
     pub num_filtered_after_ba: usize,
-    /// 최종 등록 영상 수.
+    /// Final number of registered images.
     pub registered_image_count: usize,
-    /// 최종 3D 점 수.
+    /// Final number of 3D points.
     pub num_points3d: usize,
 }
 
-/// 결과. 실패해도 그때까지의 재구성을 쓸 수 있도록 `failure` 와 함께 돌려준다.
+/// Result. Returned together with `failure` so the reconstruction up to that point stays usable even on failure.
 #[derive(Clone, Debug)]
 pub struct GlobalMapperOutput {
-    /// 만들어진 재구성(실패 시 그 시점까지).
+    /// Reconstruction built (up to the failure point, on failure).
     pub reconstruction: Reconstruction,
-    /// 회전 평균 후 뷰 그래프.
+    /// View graph after rotation averaging.
     pub view_graph: ViewGraph,
-    /// 단계별 통계.
+    /// Per-stage statistics.
     pub summary: GlobalMapperSummary,
-    /// 중간 단계 실패 사유. `None` 이면 끝까지 성공.
+    /// Reason an intermediate stage failed. `None` means it succeeded to the end.
     pub failure: Option<String>,
 }
 
-/// 저장소의 카메라·영상(대응 그래프에 있는 것)으로 자세 없는 재구성을 만든다.
+/// Builds a pose-less reconstruction from the cameras and images in the store (those in the correspondence graph).
 pub fn init_reconstruction(store: &FeatureStore, graph: &MatchGraph) -> Result<Reconstruction> {
     let mut rec = Reconstruction::new();
     let mut ids = graph.image_ids();
@@ -200,7 +201,7 @@ pub fn init_reconstruction(store: &FeatureStore, graph: &MatchGraph) -> Result<R
     Ok(rec)
 }
 
-/// 상대 자세 분해로 뷰 그래프 구성. 짝 단위 병렬.
+/// Builds the view graph by decomposing relative poses. Parallel per pair.
 pub fn build_view_graph(rec: &Reconstruction, graph: &MatchGraph, decompose: bool) -> ViewGraph {
     let mut pairs = graph.image_pairs();
     pairs.sort();
@@ -222,7 +223,8 @@ pub fn build_view_graph(rec: &Reconstruction, graph: &MatchGraph, decompose: boo
                 let kp = |im: &Image| -> Vec<cumulus3d_core::Keypoint> {
                     im.points2d().iter().map(|p| cumulus3d_core::Keypoint::new(p.xy.x as f32, p.xy.y as f32)).collect()
                 };
-                // 설계 결정: 키포인트를 f64 모델 좌표에서 f32 로 되돌려 넘긴다(원래 f32 이므로 손실 없음).
+                // Design decision: keypoints are converted back from f64 model coordinates to f32 for passing on
+                // (they were f32 originally, so no loss).
                 if !cumulus3d_matching::pose::refit_and_estimate_relative_pose(ca, cb, &kp(ia), &kp(ib), &mut tvg) {
                     return None;
                 }
@@ -233,7 +235,7 @@ pub fn build_view_graph(rec: &Reconstruction, graph: &MatchGraph, decompose: boo
     ViewGraph::new(edges)
 }
 
-/// 회전 평균 한 회차. `posed_only` 면 자세 있는 프레임만 노드.
+/// One round of rotation averaging. If `posed_only`, only frames that have poses become nodes.
 pub fn rotation_averaging_round(rec: &mut Reconstruction, vg: &mut ViewGraph, posed_only: bool, opts: &GlobalSfmOptions) -> Result<()> {
     let nodes = if posed_only {
         let posed: HashSet<ImageId> = rec.image_ids().filter(|i| rec.has_pose(*i)).collect();
@@ -260,7 +262,7 @@ pub fn rotation_averaging_round(rec: &mut Reconstruction, vg: &mut ViewGraph, po
             rec.deregister_image(id)?;
         }
     }
-    // 등록되지 않았지만 자세가 남은 영상 정리.
+    // Clean up images that are not registered but still have poses.
     let stray: Vec<ImageId> = rec.image_ids().filter(|i| rec.has_pose(*i) && !rec.is_image_registered(*i)).collect();
     for id in stray {
         let fid = rec.image(id).expect("존재").frame_id;
@@ -288,12 +290,13 @@ fn normalized_error(cam: &Camera, pose: &Rigid3, xy: &Vec2, x: &Vec3) -> f64 {
     (Vec2::new(xc.x / xc.z, xc.y / xc.z) - uv).norm()
 }
 
-/// 각도 오차 필터("길이−1" 규칙, 점 error ← 남은 관측 평균(도)). 반환: 삭제 관측 수.
+/// Angular error filter ("length−1" rule, point error ← mean of remaining observations (degrees)).
+/// Returns: number of deleted observations.
 pub fn filter_angular_error(rec: &mut Reconstruction, max_deg: f64) -> usize {
     rec.filter_observations(None, max_deg, angular_error_deg, FilterErrorUpdate::MeanOfRemaining)
 }
 
-/// 초점 사전값 있는 카메라만, 각도 오차 초과 관측을 하나씩 삭제.
+/// Only for cameras with a focal prior, delete observations exceeding the angular error one by one.
 pub fn filter_angular_error_prior_focal(rec: &mut Reconstruction, max_deg: f64) -> usize {
     let mut del = Vec::new();
     for (_, p) in rec.points3d() {
@@ -320,12 +323,12 @@ pub fn filter_angular_error_prior_focal(rec: &mut Reconstruction, max_deg: f64) 
     n
 }
 
-/// 정규화 재투영 오차 필터("길이−1" 규칙). 반환: 삭제 관측 수.
+/// Normalized reprojection error filter ("length−1" rule). Returns: number of deleted observations.
 pub fn filter_normalized_reproj_error(rec: &mut Reconstruction, max_err: f64) -> usize {
     rec.filter_observations(None, max_err, normalized_error, FilterErrorUpdate::MeanOfRemaining)
 }
 
-/// 위치 추정 직후 필터·정규화.
+/// Filter and normalization right after position estimation.
 pub fn post_positioning_filters(rec: &mut Reconstruction, opts: &GlobalSfmOptions) -> usize {
     let mut n = filter_angular_error(rec, 2.0 * opts.max_angular_reproj_error_deg);
     n += filter_angular_error_prior_focal(rec, opts.max_angular_reproj_error_deg);
@@ -356,7 +359,7 @@ fn ba_config(rec: &Reconstruction, opts: &GlobalSfmOptions, fix_rotation: bool) 
     }
 }
 
-/// 반복 BA 단계. `ba_num_iterations` = 0 이어도 끝의 필터 두 개는 실행.
+/// Iterative BA stage. The two final filters run even when `ba_num_iterations` = 0.
 pub fn bundle_adjustment_stage(rec: &mut Reconstruction, opts: &GlobalSfmOptions) -> Result<usize> {
     let mut removed = 0;
     for it in 0..opts.ba_num_iterations {
@@ -367,7 +370,8 @@ pub fn bundle_adjustment_stage(rec: &mut Reconstruction, opts: &GlobalSfmOptions
             cumulus3d_ba::bundle_adjust_with(rec, &ba_config(rec, opts, false), opts.ba_backend.get())?;
         }
         rec.normalize(&NormalizeOptions::default());
-        // 제거가 점 수의 0.1% 이하이면 반복 번호를 올려 더 엄격히 재필터, 끝까지 적으면 조기 종료.
+        // If removal is at most 0.1% of the point count, raise the iteration number and re-filter more strictly;
+        // stop early if it stays small to the end.
         let mut k = it;
         let mut stop = false;
         loop {
@@ -392,7 +396,7 @@ pub fn bundle_adjustment_stage(rec: &mut Reconstruction, opts: &GlobalSfmOptions
     Ok(removed)
 }
 
-/// 재삼각측량 단계.
+/// Re-triangulation stage.
 pub fn retriangulation_stage(rec: &mut Reconstruction, graph: &MatchGraph, opts: &GlobalSfmOptions) -> Result<()> {
     rec.delete_all_points3d();
     let tri_opts = TrackTriangulatorOptions {
@@ -426,7 +430,7 @@ pub fn retriangulation_stage(rec: &mut Reconstruction, graph: &MatchGraph, opts:
     Ok(())
 }
 
-/// 전역 매퍼 실행. 색 추출은 호출자가 `Reconstruction::extract_colors` 로 한다.
+/// Global mapper run. Color extraction is done by the caller with `Reconstruction::extract_colors`.
 pub fn global_mapper(store: &FeatureStore, graph: &MatchGraph, opts: &GlobalSfmOptions) -> Result<GlobalMapperOutput> {
     let mut rec = init_reconstruction(store, graph)?;
     let mut vg = build_view_graph(&rec, graph, opts.decompose_relative_pose);
@@ -475,7 +479,7 @@ mod tests {
     use cumulus3d_core::{CameraModelKind, Point3D, TrackEntry};
 
     fn two_cam_rec(err_deg: f64) -> Reconstruction {
-        // 두 카메라와 점 하나, 둘째 영상 관측을 err_deg 만큼 틀어 둔다.
+        // Two cameras and one point, with the second image observation rotated by err_deg.
         let mut rec = Reconstruction::new();
         let mut cam = Camera::new(1, CameraModelKind::Pinhole, 1000, 1000, vec![1000.0, 1000.0, 500.0, 500.0]).unwrap();
         cam.focal_from_prior = true;
@@ -518,20 +522,20 @@ mod tests {
 
     #[test]
     fn normalized_filter_boundary_and_point_deletion() {
-        // 각도 오차 θ → 정규 좌표 오차 ≈ tan 차이. 임계 근처 두 경우.
+        // Angular error θ gives normalized coordinate error ≈ tan difference. Two cases near the threshold.
         let rec = two_cam_rec(0.0);
         let x = rec.point3d(0).unwrap().xyz;
         let pose = rec.world_to_cam(2).unwrap();
         let cam = rec.camera(1).unwrap().clone();
         let e = normalized_error(&cam, &pose, &rec.image(2).unwrap().point2d(0).xy, &x);
         assert!(e < 1e-12);
-        // 관측 둘이 나쁘면(≥ 길이−1) 점 전체 삭제.
+        // If two observations are bad (≥ length−1), the whole point is deleted.
         let mut rec = two_cam_rec(0.0);
         rec.set_world_to_cam(2, Rigid3::new(cumulus3d_core::Quat::IDENTITY, Vec3::new(-1.0, 3.0, 0.0))).unwrap();
         rec.set_world_to_cam(3, Rigid3::new(cumulus3d_core::Quat::IDENTITY, Vec3::new(0.0, 4.0, 0.0))).unwrap();
         filter_normalized_reproj_error(&mut rec, 0.1);
         assert_eq!(rec.num_points3d(), 0);
-        // 경계: 0.1 ± 1e-9 (첫 영상 관측을 정규좌표에서 정확히 이동).
+        // Boundary: 0.1 ± 1e-9 (move the first image observation exactly in normalized coordinates).
         for (d, keep) in [(0.1 - 1e-9, true), (0.1 + 1e-9, false)] {
             let mut rec = two_cam_rec(0.0);
             let shifted = Rigid3::new(cumulus3d_core::Quat::IDENTITY, Vec3::new(1.0 + d * 10.0, 0.0, 0.0));

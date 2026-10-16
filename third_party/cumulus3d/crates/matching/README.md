@@ -4,7 +4,6 @@ English | [한국어](https://github.com/AH100-1/cumulus3d/blob/main/crates/matc
 
 SIFT descriptor matching, two-view geometry (E/F/H) estimation and verification, and relative pose decomposition.
 
-API doc comments are currently in Korean; English translation is planned.
 
 **Pipeline stage**: the step after feature extraction (`cumulus3d-features`). For each image pair in a pair list it matches
 descriptors, verifies the geometry with E/F/H LO-RANSAC, and writes the raw matches and the `TwoViewGeometry` to the `FeatureStore`.

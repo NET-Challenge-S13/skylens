@@ -25,8 +25,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 합성 장면(레이 캐스팅으로 그린 무늬 바닥 + 상자, 드론 3대 × 8위치)으로 `cumulus3d stream` 을 끝까지 돌리고
-//! 출력 파일 구조·사건 기록을 확인한다.
+//! Run `cumulus3d stream` to the end on a synthetic scene (patterned floor + boxes drawn by ray casting, 3 drones x 8 positions)
+//! and check the output file structure and the event record.
 
 mod common;
 use common::{make_dataset, NPOS};
@@ -54,7 +54,7 @@ fn stream_end_to_end_synthetic() {
         .expect("실행");
     assert!(status.success());
 
-    // 사건 기록: 스크립트와 같은 문구·순서.
+    // Event record: same text and order as the script.
     let tl = std::fs::read_to_string(out.join("timeline.txt")).unwrap();
     let evs: Vec<String> = tl.lines().map(|l| l.split_once(' ').unwrap().1.to_string()).collect();
     for l in tl.lines() {
@@ -80,7 +80,7 @@ fn stream_end_to_end_synthetic() {
     let reg: usize = last_pos.split(' ').nth(3).unwrap().split('/').next().unwrap().parse().unwrap();
     assert!(reg >= 20, "{last_pos}");
 
-    // 출력 구조.
+    // Output structure.
     for f in [
         "run.log",
         "DONE",
@@ -130,7 +130,8 @@ fn stream_end_to_end_synthetic() {
     ] {
         assert!(man.contains(key), "manifest 에 {key} 없음");
     }
-    // 정밀·초벌 모두 GPS ENU 좌표계(첫 GPS 기록 camF_0000 = 원점, 고도 15 m): 바닥(하위 10%)이 z ≈ −15.
+    // Refined and preview are both in the GPS ENU frame (first GPS record camF_0000 = origin, altitude 15 m): the floor (lowest 10%) is
+    // at z ~ -15.
     for f in ["full/refined/refined_00_pos0-5.ply", "aligned/preview/preview_01_pos3-8.ply", "final_frame/preview/preview_00_pos0-5.ply"] {
         let cloud = cumulus3d_core::io::read_ply(out.join(f)).unwrap();
         assert!(cloud.len() > 1000, "{f}: 조밀 점 {}", cloud.len());

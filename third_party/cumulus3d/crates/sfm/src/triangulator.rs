@@ -29,8 +29,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 기존 점 유지 삼각측량(point_triangulator): 연장·생성·완성·병합·재삼각측량,
-//! 자세 고정 점 정제 반복과 필터.
+//! Triangulation that keeps existing points (point_triangulator): extension, creation, completion, merging, re-triangulation,
+//! the pose-fixed point refinement loop, and the filters.
 
 use crate::triangulation::{
     angular_error, estimate_triangulation, CpuTriangulation, ObsQuery, TriObservation, TriProblem, TriangulationBackend,
@@ -47,36 +47,36 @@ use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-/// 증분 삼각측량기 옵션.
+/// Incremental triangulator options.
 #[derive(Clone, Debug)]
 pub struct TrackTriangulatorOptions {
-    /// 새 점 생성 시 대응 그래프 전이 탐색 깊이.
+    /// Correspondence-graph transitive search depth when creating new points.
     pub max_transitivity: usize,
-    /// 새 점 생성 시 각도 오차 허용(도).
+    /// Angular error tolerance (degrees) when creating new points.
     pub create_angle_tol: f64,
-    /// 기존 점 연장 시 각도 오차 허용(도).
+    /// Angular error tolerance (degrees) when extending existing points.
     pub continue_angle_tol: f64,
-    /// 트랙 병합 재투영 오차 상한(픽셀).
+    /// Upper bound on the reprojection error (pixels) for merging tracks.
     pub merge_max_reproj_error: f64,
-    /// 트랙 완성 재투영 오차 상한(픽셀).
+    /// Upper bound on the reprojection error (pixels) for completing tracks.
     pub complete_max_reproj_error: f64,
-    /// 트랙 완성 시 전이 탐색 깊이.
+    /// Transitive search depth when completing tracks.
     pub complete_transitivity: usize,
-    /// 재삼각측량 각도 오차 허용(도).
+    /// Angular error tolerance (degrees) for re-triangulation.
     pub retri_angle_tol: f64,
-    /// 짝의 삼각측량 비율이 이보다 낮을 때만 재삼각측량.
+    /// Re-triangulate a pair only when its triangulated ratio is below this.
     pub retri_min_ratio: f64,
-    /// 짝당 재삼각측량 최대 시도 횟수.
+    /// Maximum re-triangulation attempts per pair.
     pub retri_max_attempts: usize,
-    /// 최소 삼각측량 각(도).
+    /// Minimum triangulation angle (degrees).
     pub min_angle: f64,
-    /// 두 영상뿐인 트랙은 건너뛸지.
+    /// Whether to skip tracks that have only two images.
     pub skip_two_view_tracks: bool,
-    /// 비정상 카메라 판정: 초점 비율 하한.
+    /// Abnormal camera test: lower bound of the focal ratio.
     pub min_focal_length_ratio: f64,
-    /// 비정상 카메라 판정: 초점 비율 상한.
+    /// Abnormal camera test: upper bound of the focal ratio.
     pub max_focal_length_ratio: f64,
-    /// 비정상 카메라 판정: 추가 파라미터 절대값 상한.
+    /// Abnormal camera test: upper bound of the absolute value of the extra parameters.
     pub max_extra_param: f64,
 }
 
@@ -101,46 +101,46 @@ impl Default for TrackTriangulatorOptions {
     }
 }
 
-/// 점 정제 방식(자세·내부 고정 BA).
+/// Point refinement method (BA with fixed poses and intrinsics).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PointRefiner {
-    /// cumulus3d-ba 의 `bundle_adjust` (자세·카메라 상수, 점만 변수). 기본 동작.
+    /// `bundle_adjust` of cumulus3d-ba (poses and cameras constant, only points variable). Default behavior.
     BundleAdjuster,
-    /// 점별 독립 3변수 LM(자세·내부가 고정이면 BA 와 같은 문제).
+    /// Independent 3-variable LM per point (the same problem as BA when pose and intrinsics are fixed).
     PerPoint,
-    /// 정제 생략.
+    /// Skip refinement.
     None,
 }
 
-/// 처리 범위.
+/// Processing scope.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TriangulationScope {
-    /// 기본 동작: 모든 등록 영상 재삼각측량, 모든 점 완성·병합·필터.
+    /// Default behavior: re-triangulate all registered images, complete, merge and filter all points.
     AllRegistered,
-    /// 증분: 주어진(새로 등록된) 영상과 그 대응, 그로 인해 바뀐 점만.
+    /// Incremental: only the given (newly registered) images, their correspondences, and the points changed by them.
     Images(Vec<ImageId>),
 }
 
-/// point_triangulator 옵션.
+/// point_triangulator options.
 #[derive(Clone, Debug)]
 pub struct PointTriangulatorOptions {
-    /// 증분 삼각측량기 옵션.
+    /// Incremental triangulator options.
     pub tri: TrackTriangulatorOptions,
-    /// 참이면 시작 전에 모든 3D 점 삭제(파이프라인은 거짓).
+    /// If true, delete all 3D points before starting (false in the pipeline).
     pub clear_points: bool,
-    /// 끝 필터의 재투영 오차 상한(픽셀).
+    /// Upper bound on the reprojection error (pixels) of the final filter.
     pub filter_max_reproj_error: f64,
-    /// 끝 필터의 최소 삼각측량 각(도).
+    /// Minimum triangulation angle (degrees) of the final filter.
     pub filter_min_tri_angle: f64,
-    /// 점 정제·재삼각측량 반복 최대 횟수.
+    /// Maximum number of point refinement / re-triangulation iterations.
     pub ba_global_max_refinements: usize,
-    /// 반복을 멈추는 변경 관측 비율.
+    /// Fraction of changed observations at which iteration stops.
     pub ba_global_max_refinement_change: f64,
-    /// 점 정제 BA 최대 반복.
+    /// Maximum iterations of the point-refinement BA.
     pub ba_global_max_num_iterations: usize,
-    /// 점 정제 방식.
+    /// Point refinement method.
     pub refiner: PointRefiner,
-    /// 처리 범위(전체 또는 새 영상).
+    /// Processing scope (all, or the new images).
     pub scope: TriangulationScope,
 }
 
@@ -160,22 +160,22 @@ impl Default for PointTriangulatorOptions {
     }
 }
 
-/// 실행 통계.
+/// Run statistics.
 #[derive(Clone, Debug, Default)]
 pub struct TriangulationReport {
-    /// 새로 만든 점 수.
+    /// Number of newly created points.
     pub num_created: usize,
-    /// 기존 점에 이어 붙인 관측 수.
+    /// Number of observations appended to existing points.
     pub num_continued: usize,
-    /// 트랙 완성으로 붙인 관측 수.
+    /// Number of observations added by track completion.
     pub num_completed: usize,
-    /// 병합된 점들의 관측 수 합.
+    /// Sum of the observation counts of merged points.
     pub num_merged: usize,
-    /// 재삼각측량으로 만든 관측 수.
+    /// Number of observations created by re-triangulation.
     pub num_retriangulated: usize,
-    /// 필터가 지운 관측·점 수.
+    /// Number of observations and points removed by the filter.
     pub num_filtered: usize,
-    /// 수행한 정제 반복 수.
+    /// Number of refinement iterations performed.
     pub num_refinements: usize,
 }
 
@@ -195,42 +195,42 @@ enum Action {
     Create(Vec3, Vec<TrackEntry>),
 }
 
-/// RANSAC 삼각측량 결과(점, 인라이어 마스크).
+/// RANSAC triangulation result (point, inlier mask).
 type TriResult = Option<(Vec3, Vec<bool>)>;
 
-/// 2D 점 하나의 읽기 전용 준비(연장까지 반영, 첫 생성 RANSAC 직전).
+/// Read-only preparation of one 2D point (extension applied, right before the first creation RANSAC).
 struct Prepared {
     snapshot: Vec<(Correspondence, Point3DId)>,
     state: HashMap<Correspondence, Point3DId>,
     actions: Vec<Action>,
     input: Vec<Correspondence>,
-    /// 첫 생성 RANSAC 의 관측(생성 단계로 가지 않으면 None).
+    /// Observations of the first creation RANSAC (None if it does not reach the creation step).
     first: Option<Vec<TriObservation>>,
 }
 
-/// 증분 삼각측량기. 생성 시점 등록 영상의 자세·역투영 광선을 캐시한다(자세 고정 전제).
+/// Incremental triangulator. At creation it caches the poses and back-projection rays of the registered images (assumes poses are fixed).
 pub struct TrackTriangulator<'a> {
     graph: &'a MatchGraph,
-    /// 생성 RANSAC 을 묶음으로 푸는 백엔드.
+    /// Backend that solves creation RANSAC in batches.
     backend: &'a dyn TriangulationBackend,
-    /// 삼각측량 옵션.
+    /// Triangulation options.
     pub opts: TrackTriangulatorOptions,
     poses: HashMap<ImageId, PoseInfo>,
     merge_trials: HashSet<(Point3DId, Point3DId)>,
     re_trials: HashMap<(ImageId, ImageId), usize>,
-    /// 이번 실행에서 만들어지거나 바뀐 점.
+    /// Points created or changed in this run.
     pub touched: HashSet<Point3DId>,
-    /// 누적 실행 통계.
+    /// Accumulated run statistics.
     pub report: TriangulationReport,
 }
 
 impl<'a> TrackTriangulator<'a> {
-    /// 재구성의 등록 영상 자세·광선을 캐시해 삼각측량기를 만든다(CPU 백엔드).
+    /// Builds a triangulator by caching the poses and rays of the registered images of the reconstruction (CPU backend).
     pub fn new(rec: &Reconstruction, graph: &'a MatchGraph, opts: TrackTriangulatorOptions) -> Self {
         Self::with_backend(rec, graph, opts, &CpuTriangulation)
     }
 
-    /// [`new`](Self::new) 와 같되 생성 RANSAC 을 `backend` 로 묶어 푼다.
+    /// Like [`new`](Self::new), but creation RANSAC is solved in batches by `backend`.
     pub fn with_backend(
         rec: &Reconstruction,
         graph: &'a MatchGraph,
@@ -280,14 +280,14 @@ impl<'a> TrackTriangulator<'a> {
         rec.image(c.image_id).and_then(|im| im.points2d().get(c.point2d_idx as usize)).map_or(INVALID_POINT3D_ID, |p| p.point3d_id)
     }
 
-    /// 영상 하나의 2D 점 하나를 읽기 전용으로 계획(연장 → 생성). 반환: (참조한 상태, 동작).
+    /// Plans one 2D point of one image read-only (extend, then create). Returns: (referenced state, action).
     fn plan_point(&self, rec: &Reconstruction, image_id: ImageId, idx: Point2DIdx) -> Option<PointPlan> {
         let Prepared { snapshot, mut state, mut actions, input, .. } = self.prepare_point(rec, image_id, idx)?;
         self.plan_create(&input, &mut state, &mut actions, self.opts.create_angle_tol);
         Some((snapshot, actions))
     }
 
-    /// [`plan_point`](Self::plan_point) 의 앞부분: 연장까지 계획하고 첫 생성 RANSAC 의 관측을 모은다.
+    /// First part of [`plan_point`](Self::plan_point): plans up to extension and gathers the observations of the first creation RANSAC.
     fn prepare_point(&self, rec: &Reconstruction, image_id: ImageId, idx: Point2DIdx) -> Option<Prepared> {
         let corrs = self.corrs(image_id, idx);
         if corrs.is_empty() {
@@ -331,7 +331,7 @@ impl<'a> TrackTriangulator<'a> {
         TriangulationRansacParams { max_angle_error_deg: angle_limit_deg, min_tri_angle_deg: self.opts.min_angle, ..Default::default() }
     }
 
-    /// 생성 한 차례의 입력: 아직 점이 없는 대응과 그 관측. 생성으로 가지 않으면 None.
+    /// Input of one creation round: correspondences without a point yet and their observations. None if it does not go to creation.
     fn create_round(
         &self,
         input: &[Correspondence],
@@ -358,7 +358,7 @@ impl<'a> TrackTriangulator<'a> {
         Some((elems, obs))
     }
 
-    /// 생성 모의 실행: `state` 에 새 점을 가상 id 로 표시.
+    /// Dry-run of creation: marks a new point in `state` with a virtual id.
     fn plan_create(
         &self,
         input: &[Correspondence],
@@ -369,8 +369,8 @@ impl<'a> TrackTriangulator<'a> {
         self.plan_create_with(input, state, actions, angle_limit_deg, None);
     }
 
-    /// [`plan_create`](Self::plan_create) 와 같되 첫 차례 RANSAC 결과가 `first` 로 미리 주어질 수 있다
-    /// (백엔드가 묶음으로 푼 값). 다음 차례(드묾)는 CPU 로 푼다.
+    /// Like [`plan_create`](Self::plan_create), but the RANSAC result of the first round may be given in advance as `first`
+    /// (solved in a batch by the backend). Later rounds (rare) are solved on the CPU.
     fn plan_create_with(
         &self,
         input: &[Correspondence],
@@ -393,7 +393,8 @@ impl<'a> TrackTriangulator<'a> {
                 state.insert(Correspondence::new(t.image_id, t.point2d_idx), INVALID_POINT3D_ID - 1);
             }
             actions.push(Action::Create(x, track));
-            // 설계 결정: "입력 관측 수" = 3D 점 유무와 무관한 전체 입력 수로 해석.
+            // Design decision: "number of input observations" is interpreted as the total input count,
+            // regardless of whether a 3D point exists.
             if input.len() < len + 3 {
                 return;
             }
@@ -424,14 +425,12 @@ impl<'a> TrackTriangulator<'a> {
         Ok(n)
     }
 
-    /// 준비된 점들의 첫 생성 RANSAC 을 백엔드로 한꺼번에 푼다(준비 순서대로, 생성으로 가지 않는 점은 None).
+    /// Solves the first creation RANSAC of the prepared points in one backend call (in preparation order, None for points that
+    /// do not go to creation).
     fn estimate_firsts(&self, preps: &[Option<Prepared>]) -> Vec<Option<TriResult>> {
         let params = self.create_params(self.opts.create_angle_tol);
-        let problems: Vec<TriProblem<'_>> = preps
-            .iter()
-            .filter_map(|p| p.as_ref()?.first.as_deref())
-            .map(|obs| TriProblem { obs, params: params.clone() })
-            .collect();
+        let problems: Vec<TriProblem<'_>> =
+            preps.iter().filter_map(|p| p.as_ref()?.first.as_deref()).map(|obs| TriProblem { obs, params: params.clone() }).collect();
         if problems.is_empty() {
             return preps.iter().map(|_| None).collect();
         }
@@ -441,8 +440,8 @@ impl<'a> TrackTriangulator<'a> {
         preps.iter().map(|p| p.as_ref().and_then(|p| p.first.as_ref()).map(|_| it.next().expect("결과 수"))).collect()
     }
 
-    /// 영상 하나 삼각측량. 2D 점별 계획은 병렬, 적용은 순차 + 상태 검증
-    /// (계획 후 참조 상태가 바뀌었으면 다시 계획) → 순차 실행과 같은 결과.
+    /// Triangulates one image. Per-2D-point planning is parallel, application is sequential with state validation
+    /// (re-plan if the referenced state changed after planning) so the result equals the sequential run.
     pub fn triangulate_image(&mut self, rec: &mut Reconstruction, image_id: ImageId) -> Result<usize> {
         if !self.poses.contains_key(&image_id) {
             return Ok(0);
@@ -453,7 +452,7 @@ impl<'a> TrackTriangulator<'a> {
             let this: &Self = self;
             let preps: Vec<Option<Prepared>> =
                 (0..n as Point2DIdx).into_par_iter().map(|i| this.prepare_point(rec_ref, image_id, i)).collect();
-            // 첫 생성 RANSAC 은 모든 2D 점을 백엔드 호출 한 번으로.
+            // The first creation RANSAC of all 2D points in a single backend call.
             let firsts = this.estimate_firsts(&preps);
             preps
                 .into_par_iter()
@@ -489,7 +488,7 @@ impl<'a> TrackTriangulator<'a> {
         }
     }
 
-    /// 트랙 완성. 반환: 추가된 관측 수.
+    /// Track completion. Returns: number of observations added.
     pub fn complete_track(&mut self, rec: &mut Reconstruction, pid: Point3DId) -> Result<usize> {
         let Some(p) = rec.point3d(pid) else { return Ok(0) };
         let x = p.xyz;
@@ -527,7 +526,7 @@ impl<'a> TrackTriangulator<'a> {
         Ok(added)
     }
 
-    /// 트랙 병합. 반환: 병합에 관여한 관측 수(재귀 포함).
+    /// Track merging. Returns: number of observations involved in the merge (including recursion).
     pub fn merge_track(&mut self, rec: &mut Reconstruction, pid: Point3DId) -> Result<usize> {
         let Some(a) = rec.point3d(pid).cloned() else { return Ok(0) };
         for e in &a.track {
@@ -562,7 +561,7 @@ impl<'a> TrackTriangulator<'a> {
         Ok(0)
     }
 
-    /// 여러 점 완성. `ids` None = 모든 점.
+    /// Completes several points. `ids` None = all points.
     pub fn complete_tracks(&mut self, rec: &mut Reconstruction, ids: Option<&[Point3DId]>) -> Result<usize> {
         let ids: Vec<Point3DId> = ids.map_or_else(|| rec.point3d_ids(), |v| v.to_vec());
         let mut n = 0;
@@ -572,7 +571,7 @@ impl<'a> TrackTriangulator<'a> {
         Ok(n)
     }
 
-    /// 여러 점 병합(호출 묶음마다 시도 기록 초기화).
+    /// Merges several points (the attempt record is reset for each call batch).
     pub fn merge_tracks(&mut self, rec: &mut Reconstruction, ids: Option<&[Point3DId]>) -> Result<usize> {
         self.merge_trials.clear();
         let ids: Vec<Point3DId> = ids.map_or_else(|| rec.point3d_ids(), |v| v.to_vec());
@@ -585,7 +584,7 @@ impl<'a> TrackTriangulator<'a> {
         Ok(n)
     }
 
-    /// 덜 재구성된 영상쌍 재삼각측량. `only` 가 있으면 그 영상이 낀 쌍만.
+    /// Re-triangulates insufficiently reconstructed image pairs. If `only` is given, only pairs involving that image.
     pub fn retriangulate(&mut self, rec: &mut Reconstruction, only: Option<&HashSet<ImageId>>) -> Result<usize> {
         let mut pairs = self.graph.image_pairs();
         pairs.sort();
@@ -616,8 +615,8 @@ impl<'a> TrackTriangulator<'a> {
                 continue;
             }
             *trials += 1;
-            // 두 쪽 모두 점이 없는 매칭의 생성 RANSAC 을 짝 단위로 한꺼번에(모델 상태와 무관한 계산이라
-            // 미리 풀어 둔 값을 순차 처리에서 그대로 쓴다).
+            // Creation RANSAC of the matches with no point on either side, in one batch per pair (the computation does not
+            // depend on the model state, so the values solved in advance are used as is in the sequential pass).
             let mut pre: HashMap<usize, TriResult> = HashMap::new();
             {
                 let rec_ref: &Reconstruction = rec;
@@ -686,7 +685,7 @@ fn depth_and_filter_ids(touched: &HashSet<Point3DId>, rec: &Reconstruction, scop
     }
 }
 
-/// 관측 검사용 표: 자세가 있는 영상의 (카메라, 자세)와 영상 id → (카메라 번호, 자세 번호).
+/// Table for observation checks: (camera, pose) of the images with a pose, and image id -> (camera index, pose index).
 struct PoseTable {
     cameras: Vec<Camera>,
     poses: Vec<Rigid3>,
@@ -712,7 +711,8 @@ fn pose_table(rec: &Reconstruction) -> PoseTable {
     PoseTable { cameras, poses, index }
 }
 
-/// 등록 영상 기준 깊이가 양수가 아닌 관측 삭제(BA 사전 처리). 깊이는 `backend` 가 한꺼번에 계산.
+/// Removes observations whose depth relative to the registered image is not positive (BA preprocessing).
+/// Depths are computed in bulk by `backend`.
 fn delete_negative_depth(rec: &mut Reconstruction, ids: Option<&[Point3DId]>, backend: &dyn TriangulationBackend) -> Result<usize> {
     let ids: Vec<Point3DId> = ids.map_or_else(|| rec.point3d_ids(), |v| v.to_vec());
     let table = pose_table(rec);
@@ -732,7 +732,7 @@ fn delete_negative_depth(rec: &mut Reconstruction, ids: Option<&[Point3DId]>, ba
     }
     let checks = if queries.is_empty() { Vec::new() } else { backend.check_observations(&table.cameras, &table.poses, &queries) };
     assert_eq!(checks.len(), queries.len(), "관측 검사 결과 수");
-    // has_positive_depth: 깊이 ≥ ε (NaN 은 음수 취급).
+    // has_positive_depth: depth ≥ ε (NaN counts as negative).
     let positive = |d: f64| d >= f64::EPSILON;
     let del: Vec<TrackEntry> = entries.into_iter().zip(&checks).filter(|(_, c)| !positive(c.depth)).map(|(t, _)| t).collect();
     let mut n = 0;
@@ -745,8 +745,8 @@ fn delete_negative_depth(rec: &mut Reconstruction, ids: Option<&[Point3DId]>, ba
     Ok(n)
 }
 
-/// 픽셀 재투영 오차 필터(`Reconstruction::filter_observations_with_large_reprojection_error` 와 같은 규칙).
-/// 오차는 `backend` 가 한꺼번에 계산. 반환: 삭제된 관측 수.
+/// Pixel reprojection error filter (same rules as `Reconstruction::filter_observations_with_large_reprojection_error`).
+/// The errors are computed in bulk by `backend`. Returns: number of removed observations.
 fn filter_large_reprojection_error(
     rec: &mut Reconstruction,
     max_reproj_error_px: f64,
@@ -759,7 +759,7 @@ fn filter_large_reprojection_error(
     };
     let table = pose_table(rec);
     let mut queries = Vec::new();
-    // 점마다 관측별 질의 번호(자세 없는 영상이면 None → 오차 +∞).
+    // Query index per observation of each point (None for an image without a pose -> error +∞).
     let mut layout: Vec<(Point3DId, Vec<Option<usize>>)> = Vec::with_capacity(ids.len());
     for id in ids {
         let Some(p) = rec.point3d(id) else { continue };
@@ -784,7 +784,7 @@ fn filter_large_reprojection_error(
     rec.apply_observation_filter(evals, max_reproj_error_px, FilterErrorUpdate::SumOverOriginalLength)
 }
 
-/// 자세·내부 고정 점 정제. `ids` None = 모든 점.
+/// Pose- and intrinsics-fixed point refinement. `ids` None = all points.
 pub fn refine_points(rec: &mut Reconstruction, ids: Option<&[Point3DId]>, refiner: PointRefiner, max_iterations: usize) -> Result<()> {
     match refiner {
         PointRefiner::None => Ok(()),
@@ -835,7 +835,7 @@ pub fn refine_points(rec: &mut Reconstruction, ids: Option<&[Point3DId]>, refine
     }
 }
 
-/// 점 하나 LM(고정 자세에서 픽셀 재투영 제곱합 최소). 실패 시 None.
+/// LM for one point (minimizes the sum of squared pixel reprojection errors at fixed poses). None on failure.
 fn refine_one_point(rec: &Reconstruction, id: Point3DId, max_iterations: usize) -> Option<Vec3> {
     let p = rec.point3d(id)?;
     let obs: Vec<(Rigid3, &Camera, cumulus3d_core::Vec2)> = p
@@ -897,13 +897,13 @@ fn refine_one_point(rec: &Reconstruction, id: Point3DId, max_iterations: usize) 
     Some(x)
 }
 
-/// point_triangulator. 반환: 통계.
+/// point_triangulator. Returns: statistics.
 pub fn triangulate_points(rec: &mut Reconstruction, graph: &MatchGraph, opts: &PointTriangulatorOptions) -> Result<TriangulationReport> {
     triangulate_points_with(rec, graph, opts, &CpuTriangulation)
 }
 
-/// [`triangulate_points`] 와 같되 생성 RANSAC·깊이 검사·재투영 오차 필터를 `backend` 로 묶어 계산한다.
-/// 모델을 바꾸는 일(점 추가·연장·병합·삭제)은 CPU 가 같은 순서로 한다.
+/// Like [`triangulate_points`], but creation RANSAC, depth checks and the reprojection error filter are computed in batches by
+/// `backend`. Model-changing work (adding, extending, merging and deleting points) is done by the CPU in the same order.
 pub fn triangulate_points_with(
     rec: &mut Reconstruction,
     graph: &MatchGraph,
@@ -926,7 +926,7 @@ pub fn triangulate_points_with(
         tri.triangulate_image(rec, id)?;
     }
     if scoped {
-        // 새 영상 관측을 가진 기존 점도 완성·병합 대상.
+        // Existing points that have observations from new images are also targets of completion and merging.
         for &id in &images {
             if let Some(im) = rec.image(id) {
                 tri.touched.extend(im.points2d().iter().filter(|p| p.has_point3d()).map(|p| p.point3d_id));
@@ -935,7 +935,7 @@ pub fn triangulate_points_with(
     }
     let scope_ids = |tri: &TrackTriangulator, rec: &Reconstruction| depth_and_filter_ids(&tri.touched, rec, scoped);
 
-    // 반복 전역 정제.
+    // Iterative global refinement.
     let ids = scope_ids(&tri, rec);
     tri.complete_tracks(rec, ids.as_deref())?;
     let ids = scope_ids(&tri, rec);
@@ -975,7 +975,7 @@ mod tests {
         Camera::new(1, CameraModelKind::Pinhole, 1000, 1000, vec![1000.0, 1000.0, 500.0, 500.0]).unwrap()
     }
 
-    /// n 개 영상(가로로 2 m 간격), 각 영상 2D 점 1개 = X 의 투영(+ 영상별 섭동 함수).
+    /// n images (2 m apart horizontally), each with one 2D point = projection of X (+ a per-image perturbation function).
     fn scene(n: u32, x: Vec3, perturb: impl Fn(u32, Vec2) -> Vec2) -> Reconstruction {
         let mut rec = Reconstruction::new();
         let c = cam();
@@ -1017,7 +1017,7 @@ mod tests {
     fn continue_angle_boundary() {
         let x = Vec3::new(5.0, 0.0, 20.0);
         for (deg, ok) in [(1.9f64, true), (2.1, false)] {
-            // 영상 3 관측을 deg 만큼 틀어진 광선으로.
+            // Turn the image-3 observation into a ray rotated by deg.
             let mut rec = scene(3, x, |id, xy| {
                 if id != 3 {
                     return xy;
@@ -1078,7 +1078,7 @@ mod tests {
             rec.filter_observations_with_large_reprojection_error(4.0, None);
             assert_eq!(rec.points3d().next().map_or(0, |(_, p)| p.track.len()), keep_len);
         }
-        // 트랙 3 에서 2개가 나쁘면 점 전체 삭제.
+        // If 2 of the 3 observations of track 3 are bad, the whole point is deleted.
         let mut rec = scene(3, x, |id, xy| if id >= 2 { xy + Vec2::new(5.0, 0.0) } else { xy });
         rec.add_point3d(x, (1..=3).map(|i| TrackEntry::new(i, 0)).collect(), [0; 3]).unwrap();
         rec.filter_observations_with_large_reprojection_error(4.0, None);

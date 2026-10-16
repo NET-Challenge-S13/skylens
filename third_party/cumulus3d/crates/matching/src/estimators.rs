@@ -29,7 +29,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 최소/비최소 해법과 잔차, core RANSAC `Estimator` 구현.
+//! Minimal/non-minimal solvers and residuals, core RANSAC `Estimator` implementations.
 
 use crate::essential::{epipolar_row, essential_five_point};
 use crate::linalg::{hartley_normalize, mat3_from_row_major, null_space_9, singular_values_9, solve8, svd3};
@@ -38,7 +38,7 @@ use cumulus3d_core::ransac::Estimator;
 use cumulus3d_core::{Mat3, Vec2, Vec3};
 use nalgebra::SMatrix;
 
-/// Sampson 제곱 오차. l = M a, 분자 = (bᵀ l)², 분모 = (bᵀM)_x² + (bᵀM)_y² + l_x² + l_y². 분모 0 → +∞.
+/// Sampson squared error. l = M a, numerator = (bᵀ l)², denominator = (bᵀM)_x² + (bᵀM)_y² + l_x² + l_y². Denominator 0 -> +∞.
 #[inline]
 pub fn sampson_error_sq(m: &Mat3, a: &Vec3, b: &Vec3) -> f64 {
     let l = m * a;
@@ -52,7 +52,7 @@ pub fn sampson_error_sq(m: &Mat3, a: &Vec3, b: &Vec3) -> f64 {
     }
 }
 
-/// 호모그래피 단방향 전이 제곱 오차 ‖x2 − π(H x1)‖². 유한하지 않으면 +∞.
+/// Homography one-directional transfer squared error ‖x2 - π(H x1)‖². +∞ if not finite.
 #[inline]
 pub fn homography_transfer_error_sq(h: &Mat3, x1: &Vec2, x2: &Vec2) -> f64 {
     let p = h * Vec3::new(x1.x, x1.y, 1.0);
@@ -73,7 +73,7 @@ fn homog(p: &Vec2) -> Vec3 {
 
 // ---------------- Fundamental ----------------
 
-/// 7점 fundamental (정규화 없음). 최대 3개, 각 프로베니우스 노름 1.
+/// 7-point fundamental (no normalization). At most 3, each with Frobenius norm 1.
 pub fn fundamental_seven_point(x1: &[Vec2], x2: &[Vec2]) -> Vec<Mat3> {
     if x1.len() != 7 || x2.len() != 7 {
         return Vec::new();
@@ -82,7 +82,7 @@ pub fn fundamental_seven_point(x1: &[Vec2], x2: &[Vec2]) -> Vec<Mat3> {
     let Some(ns) = null_space_9(&rows, 2) else { return Vec::new() };
     let fa = mat3_from_row_major(&ns[0]);
     let fb = mat3_from_row_major(&ns[1]);
-    // det(λ D + B), D = fa − fb, B = fb: 다중선형성으로 열 혼합 행렬식.
+    // det(λ D + B), D = fa - fb, B = fb: column-mixed determinant via multilinearity.
     let d = fa - fb;
     let b = fb;
     let det3 = |c0: Vec3, c1: Vec3, c2: Vec3| c0.dot(&c1.cross(&c2));
@@ -105,7 +105,7 @@ pub fn fundamental_seven_point(x1: &[Vec2], x2: &[Vec2]) -> Vec<Mat3> {
         .collect()
 }
 
-/// 정규화 8점(이상) fundamental. rank-2 강제 후 역정규화. 모델 1개.
+/// Normalized 8-point (or more) fundamental. Enforce rank 2, then denormalize. One model.
 pub fn fundamental_eight_point(x1: &[Vec2], x2: &[Vec2]) -> Option<Mat3> {
     if x1.len() < 8 || x1.len() != x2.len() {
         return None;
@@ -123,9 +123,10 @@ pub fn fundamental_eight_point(x1: &[Vec2], x2: &[Vec2]) -> Option<Mat3> {
 
 // ---------------- Homography ----------------
 
-/// DLT 호모그래피. N = 4: h33 = 1 고정 8×8 LU, N > 4: 2N×9 SVD(수치 랭크 < 8 이면 실패).
-/// `normalize` 가 참이면 하틀리 정규화 후 역정규화(개선, 기본 끔). |det H| < 1e-8 이면 실패
-/// (N점 SVD 해는 단위 노름이라 평행이동 성분이 큰 픽셀 H 는 det 가 작아 거부될 수 있다 — 기본 동작).
+/// DLT homography. N = 4: 8×8 LU with h33 = 1 fixed; N > 4: 2N×9 SVD (fails if numerical rank < 8).
+/// If `normalize` is true, Hartley normalization then denormalization (improvement, off by default). Fails if |det H| < 1e-8
+/// (the N-point SVD solution has unit norm, so a pixel H with a large translation component has a small det
+/// and may be rejected - default behavior).
 pub fn homography_dlt(x1: &[Vec2], x2: &[Vec2], normalize: bool) -> Option<Mat3> {
     let n = x1.len();
     if n < 4 || x2.len() != n {
@@ -167,7 +168,7 @@ pub fn homography_dlt(x1: &[Vec2], x2: &[Vec2], normalize: bool) -> Option<Mat3>
             rows.push([0.0, 0.0, 0.0, u, v, 1.0, -t * u, -t * v, -t]);
         }
         let (sv, v) = singular_values_9(&rows)?;
-        // 설계 결정: 수치 랭크 허용오차. 표준 max(행,열)·ε·σ_max 사용.
+        // Design decision: numerical rank tolerance. Use the standard max(rows,cols)·ε·σ_max.
         let tol = (2 * n).max(9) as f64 * f64::EPSILON * sv[0];
         let rank = sv.iter().filter(|&&s| s > tol).count();
         if rank < 8 {
@@ -176,7 +177,7 @@ pub fn homography_dlt(x1: &[Vec2], x2: &[Vec2], normalize: bool) -> Option<Mat3>
         mat3_from_row_major(&v)
     };
     let mut h = t2.try_inverse()? * hn * t1;
-    // det 임계의 스케일 기준: 4점 = h33 = 1, N점 = 프로베니우스 노름 1.
+    // Scale reference for the det threshold: 4 points = h33 = 1, N points = Frobenius norm 1.
     if normalize {
         h = if n == 4 { h / h[(2, 2)] } else { h / h.norm() };
     }
@@ -186,9 +187,9 @@ pub fn homography_dlt(x1: &[Vec2], x2: &[Vec2], normalize: bool) -> Option<Mat3>
     Some(h)
 }
 
-// ---------------- Estimator 구현 ----------------
+// ---------------- Estimator implementations ----------------
 
-/// 5점 essential(최소) 겸 N점 국소 추정기. 입력은 단위 광선.
+/// 5-point essential (minimal) and N-point local estimator. Input is unit rays.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct EssentialFivePointEstimator;
 
@@ -213,7 +214,7 @@ fn fundamental_residuals(x: &[Vec2], y: &[Vec2], m: &Mat3, r: &mut Vec<f64>) {
     r.extend(x.iter().zip(y).map(|(a, b)| sampson_error_sq(m, &homog(a), &homog(b))));
 }
 
-/// 7점 fundamental(최소 해법). 픽셀 좌표.
+/// 7-point fundamental (minimal solver). Pixel coordinates.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct Fundamental7PtEstimator;
 
@@ -232,7 +233,7 @@ impl Estimator for Fundamental7PtEstimator {
     }
 }
 
-/// 정규화 8점 fundamental(국소 추정기). 픽셀 좌표.
+/// Normalized 8-point fundamental (local estimator). Pixel coordinates.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct FundamentalEightPointEstimator;
 
@@ -251,10 +252,10 @@ impl Estimator for FundamentalEightPointEstimator {
     }
 }
 
-/// DLT 호모그래피(최소 4점 겸 N점). 잔차 = 단방향 전이 제곱 오차.
+/// DLT homography (minimal 4 points and N points). Residual = one-directional transfer squared error.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct HomographyEstimator {
-    /// 하틀리 정규화(개선, 기본 끔).
+    /// Hartley normalization (improvement, off by default).
     pub normalize: bool,
 }
 
@@ -274,7 +275,7 @@ impl Estimator for HomographyEstimator {
     }
 }
 
-/// 2D 평행이동 t = 평균(x2) − 평균(x1) (워터마크 검출용).
+/// 2D translation t = mean(x2) - mean(x1) (for watermark detection).
 #[derive(Clone, Copy, Debug, Default)]
 pub struct TranslationEstimator;
 

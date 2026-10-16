@@ -29,10 +29,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-// SIFT 전 과정. 앞부분(정규화·업샘플·블러·축소)은 cumulus3d-features 의 CPU 피라미드와 같은 식·같은 연산 순서이고
-// 곱셈-덧셈 융합을 끈 채(--fmad=false) 컴파일해 CPU 와 비트 단위로 같다. 뒷부분(DoG·검출·방향·선택·기술자)은
-// CPU 의 detect.rs / orient.rs / mod.rs 와 같은 식이지만 합산 순서(워프 분할)와 초월함수 구현이 달라
-// 결과가 비트 단위로 같지는 않다(같은 품질). 합산 순서는 고정이라 실행마다 결과는 같다.
+// The whole SIFT. The front part (normalization, upsampling, blur, downsampling) uses the same formulas and operation order as
+// the CPU pyramid of cumulus3d-features and is compiled with fused multiply-add off (--fmad=false), so it matches the CPU bit for
+// bit. The back part (DoG, detection, orientation, selection, descriptors) uses the same formulas as the CPU detect.rs /
+// orient.rs / mod.rs, but the summation order (warp split) and transcendental implementations differ, so the result is not
+// bit-identical (same quality). The summation order is fixed, so every run gives the same result.
 
 typedef unsigned char u8;
 
@@ -44,7 +45,7 @@ extern "C" __global__ void sift_normalize(const u8* __restrict__ src, int sw, in
     dst[(size_t)y * w + x] = (float)src[(size_t)y * sw + x] / 255.0f;
 }
 
-// 2배 업샘플: 출력 (2r+a, 2c+b), 가장자리 복제.
+// 2x upsampling: output (2r+a, 2c+b), edge replication.
 extern "C" __global__ void sift_upsample2(const float* __restrict__ src, int w, int h, float* __restrict__ dst) {
     int c = blockIdx.x * blockDim.x + threadIdx.x;
     int yy = blockIdx.y * blockDim.y + threadIdx.y;
@@ -66,7 +67,7 @@ extern "C" __global__ void sift_upsample2(const float* __restrict__ src, int w, 
 #define TILE_W 128
 #define MAX_R 16
 
-// 가로 블러: out = k_r·p + Σ_{i<r} k_i·(row[x+i−r] + row[x+r−i]) (가장자리 복제), i 오름차순.
+// Horizontal blur: out = k_r·p + Σ_{i<r} k_i·(row[x+i−r] + row[x+r−i]) (edge replication), i ascending.
 extern "C" __global__ void sift_blur_h(const float* __restrict__ src, float* __restrict__ dst, int w, int h, const float* __restrict__ k, int r) {
     __shared__ float s[TILE_W + 2 * MAX_R];
     __shared__ float kk[2 * MAX_R + 1];
@@ -87,7 +88,7 @@ extern "C" __global__ void sift_blur_h(const float* __restrict__ src, float* __r
     dst[(size_t)y * w + x] = acc;
 }
 
-// 세로 블러: 같은 식을 행 방향으로(행 색인 고정).
+// Vertical blur: the same formula along the row direction (row index fixed).
 extern "C" __global__ void sift_blur_v(const float* __restrict__ src, float* __restrict__ dst, int w, int h, const float* __restrict__ k, int r) {
     __shared__ float kk[2 * MAX_R + 1];
     for (int i = threadIdx.y * blockDim.x + threadIdx.x; i <= 2 * r; i += blockDim.x * blockDim.y) kk[i] = k[i];
@@ -104,7 +105,7 @@ extern "C" __global__ void sift_blur_v(const float* __restrict__ src, float* __r
     dst[(size_t)y * w + x] = acc;
 }
 
-// 짝수 행·열만 취해 1/2 축소.
+// Take only even rows and columns for 1/2 downscaling.
 extern "C" __global__ void sift_decimate2(const float* __restrict__ src, int w, float* __restrict__ dst, int w2, int h2) {
     int x = blockIdx.x * blockDim.x + threadIdx.x;
     int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -113,7 +114,7 @@ extern "C" __global__ void sift_decimate2(const float* __restrict__ src, int w, 
 }
 
 // ---------------------------------------------------------------------------------------------
-// 검출·방향·선택·기술자
+// Detection, orientation, selection, descriptors
 // ---------------------------------------------------------------------------------------------
 
 #define PI_F 3.14159265358979f
@@ -137,7 +138,8 @@ extern "C" __global__ void sift_dog(const float* __restrict__ hi, const float* _
     dog[(size_t)d * n + i] = hi[i] - lo[i];
 }
 
-// 같은 레벨 좌우로 먼저 극대·극소를 정하고, 나머지 24 이웃은 같은 값 허용(CPU is_extremum).
+// First decide maximum vs minimum from the left and right neighbors on the same level; the remaining 24 neighbors allow
+// equal values (CPU is_extremum).
 __device__ bool sift_is_extremum(const float* dm, const float* d0, const float* dp, int w, int i, float v) {
     float l = d0[i - 1], rt = d0[i + 1];
     bool is_max;
@@ -167,7 +169,7 @@ __device__ bool sift_is_extremum(const float* dm, const float* d0, const float* 
     return true;
 }
 
-// 3×3 부분 피벗 가우스 소거(CPU solve3). 피벗 크기 < 1e−10 이면 거짓.
+// 3×3 partial-pivot Gaussian elimination (CPU solve3). False if the pivot magnitude < 1e−10.
 __device__ bool sift_solve3(float a[3][3], float b[3], float x[3]) {
     for (int col = 0; col < 3; ++col) {
         int piv = col;
@@ -198,7 +200,7 @@ __device__ bool sift_solve3(float a[3][3], float b[3], float x[3]) {
     return true;
 }
 
-// 부분화소 보정(CPU refine). 성공하면 out = (x, y, σ_o, 응답)(옥타브 화소 단위).
+// Sub-pixel refinement (CPU refine). On success out = (x, y, σ_o, response) (in octave pixel units).
 __device__ bool sift_refine(const float* dm, const float* d0, const float* dp, int w, int h, int r, int c, int j, int iters,
                             int reject, float peak, float sigma0, float kk, float out[4]) {
     if (iters < 1) iters = 1;
@@ -255,10 +257,10 @@ __device__ bool sift_refine(const float* dm, const float* d0, const float* dp, i
     return false;
 }
 
-// 한 옥타브의 검출 레벨 j = blockIdx.z (0..S) 극값 검출 + 엣지 억제 + 부분화소 보정(CPU detect_level).
-// dog 는 D_0..D_{S+1} 를 [d·w·h] 로 이어 붙인 것. 후보는 원자적 덧붙임:
-// cf[4·k] = (x, y, σ_o, 응답), ci[2·k] = (검출 화소 색인 r·w + c, 레벨 번호 lv_base + j).
-// counters[0] = 전체 후보 수, counters[1 + 레벨] = 레벨별 후보 수(용량을 넘어도 센다).
+// Extremum detection + edge suppression + sub-pixel refinement at detection level j = blockIdx.z (0..S) of one octave
+// (CPU detect_level). dog is D_0..D_{S+1} concatenated as [d·w·h]. Candidates are appended atomically:
+// cf[4·k] = (x, y, σ_o, response), ci[2·k] = (detection pixel index r·w + c, level index lv_base + j).
+// counters[0] = total candidate count, counters[1 + level] = per-level candidate count (counted even beyond the capacity).
 extern "C" __global__ void sift_detect(const float* __restrict__ dog, int w, int h, int lv_base, float peak, float edge, int iters,
                                        int reject, float sigma0, float kk, float* __restrict__ cf, int* __restrict__ ci, int cap,
                                        int* __restrict__ counters) {
@@ -274,7 +276,7 @@ extern "C" __global__ void sift_detect(const float* __restrict__ dog, int w, int
     float v = d0[i];
     if (fabsf(v) <= 0.8f * peak) return;
     if (!sift_is_extremum(dm, d0, dp, w, i, v)) return;
-    // 엣지 억제(같은 레벨 3×3).
+    // Edge suppression (3×3 at the same level).
     float fxx = d0[i - 1] + d0[i + 1] - 2.0f * v;
     float fyy = d0[i - w] + d0[i + w] - 2.0f * v;
     float fxy = 0.25f * (d0[i + w + 1] + d0[i - w - 1] - d0[i + w - 1] - d0[i - w + 1]);
@@ -297,7 +299,7 @@ extern "C" __global__ void sift_detect(const float* __restrict__ dog, int w, int
     }
 }
 
-// 기울기(CPU grad_at): 크기 ½‖∇‖, 각 atan2(dy, dx). 1 ≤ x ≤ w−2, 1 ≤ y ≤ h−2 전제.
+// Gradient (CPU grad_at): magnitude ½‖∇‖, angle atan2(dy, dx). Assumes 1 ≤ x ≤ w−2, 1 ≤ y ≤ h−2.
 __device__ __forceinline__ void sift_grad(const float* g, int w, int x, int y, float* m, float* th) {
     size_t i = (size_t)y * w + x;
     float dx = g[i + 1] - g[i - 1];
@@ -306,17 +308,18 @@ __device__ __forceinline__ void sift_grad(const float* g, int w, int x, int y, f
     *th = atan2f(dy, dx);
 }
 
-// 16비트 양자화 각(CPU quantize_angle).
+// 16-bit quantized angle (CPU quantize_angle).
 __device__ __forceinline__ int sift_quantize_angle(float theta) {
     float f = sift_rem_euclid(theta / TWO_PI_F, 1.0f);
     unsigned int q = (unsigned int)floorf(f * 65535.0f);
     return (int)min(q, 65534u);
 }
 
-// 방향 할당(CPU orient::orientations): 후보 하나당 워프 하나. 레인마다 자기 히스토그램 열(공유 메모리
-// [빈][레인])에 쌓고 고정 순서로 합친 뒤, 평활·피크 선택은 레인 0 이 한다.
-// 항목은 원자적 덧붙임: items[3·k] = (후보 번호, 양자화 각, 방향 순번). counters[0] 전체, counters[1 + 레벨] 레벨별.
-// lv_ptr[레벨] = 그 레벨 가우시안 영상의 장치 주소, lv_i[4·레벨] = (w, h, 옥타브, j).
+// Orientation assignment (CPU orient::orientations): one warp per candidate. Each lane accumulates into its own histogram
+// column (shared memory [bin][lane]), the columns are summed in a fixed order, then lane 0 does the smoothing and peak
+// selection. Items are appended atomically: items[3·k] = (candidate index, quantized angle, orientation slot).
+// counters[0] total, counters[1 + level] per level.
+// lv_ptr[level] = device address of that level's Gaussian image, lv_i[4·level] = (w, h, octave, j).
 extern "C" __global__ void sift_orient(const float* __restrict__ cf, const int* __restrict__ ci, int ncand,
                                        const unsigned long long* __restrict__ lv_ptr, const int* __restrict__ lv_i, int max_ori,
                                        int interp, int upright, int* __restrict__ items, int cap, int* __restrict__ counters) {
@@ -325,7 +328,7 @@ extern "C" __global__ void sift_orient(const float* __restrict__ cf, const int* 
     int warp = threadIdx.x >> 5;
     int lane = threadIdx.x & 31;
     int cid = blockIdx.x * ORI_WARPS + warp;
-    if (cid >= ncand) return;  // 워프 단위로 같은 판정
+    if (cid >= ncand) return;  // same decision for the whole warp
     int L = ci[2 * cid + 1];
     if (upright) {
         if (lane == 0) {
@@ -391,7 +394,7 @@ extern "C" __global__ void sift_orient(const float* __restrict__ cf, const int* 
     if (lane != 0) return;
     float hist[ORI_NB];
     for (int i = 0; i < ORI_NB; ++i) hist[i] = hf[warp][i];
-    // 원형 3탭 평균 6회.
+    // Circular 3-tap average, 6 times.
     for (int it = 0; it < 6; ++it) {
         float prev[ORI_NB];
         for (int i = 0; i < ORI_NB; ++i) prev[i] = hist[i];
@@ -403,7 +406,7 @@ extern "C" __global__ void sift_orient(const float* __restrict__ cf, const int* 
     unsigned long long taken = 0ull;
     int outq[ORI_NB];
     int nout = 0;
-    // 피크를 크기 내림차순(동률은 빈 번호 오름차순)으로 nsel 개, 같은 양자화 각은 하나만.
+    // Peaks in descending magnitude (ties by ascending bin index), nsel of them, only one per quantized angle.
     for (int t = 0; t < nsel; ++t) {
         int best = -1;
         float bv = 0.0f;
@@ -438,8 +441,8 @@ extern "C" __global__ void sift_orient(const float* __restrict__ cf, const int* 
     }
 }
 
-// 선택 무리 정하기. lv_state[레벨]: 0 버림, 1 통째 유지, 2 순위로 고름.
-// grid 가 거짓이면(TopK) 무리 0, 참이면(SpatialGrid) 입력 영상 좌표의 격자 칸 번호 + 칸별 개수.
+// Assigns the selection groups. lv_state[level]: 0 dropped, 1 kept whole, 2 picked by rank.
+// If grid is false (TopK), group 0; if true (SpatialGrid), the grid cell index in input image coordinates + per-cell counts.
 extern "C" __global__ void sift_group(const int* __restrict__ items, int n, const float* __restrict__ cf, const int* __restrict__ ci,
                                       const int* __restrict__ lv_i, const int* __restrict__ lv_state, int grid, int cells, float iw,
                                       float ih, int* __restrict__ group, int* __restrict__ bucket_count) {
@@ -458,7 +461,7 @@ extern "C" __global__ void sift_group(const int* __restrict__ items, int n, cons
     float so = ldexpf(1.0f, lv_i[4 * L + 2]);
     float x = so * (cf[4 * cid] - 0.5f) + 0.5f;
     float y = so * (cf[4 * cid + 1] - 0.5f) + 0.5f;
-    // Rust 의 `as usize`(음수·NaN → 0) 후 cells − 1 로 제한.
+    // Rust `as usize` (negative, NaN -> 0), then clamp to cells − 1.
     float tx = x / iw * (float)cells;
     float ty = y / ih * (float)cells;
     int cx = tx > 0.0f ? (tx >= (float)cells ? cells - 1 : (int)tx) : 0;
@@ -468,7 +471,8 @@ extern "C" __global__ void sift_group(const int* __restrict__ items, int n, cons
     atomicAdd(&bucket_count[b], 1);
 }
 
-// 무리 안 순위: |응답| 내림차순, 동률은 (거친 레벨 먼저, 검출 화소 순, 방향 순번) = CPU 목록 순서.
+// Rank within a group: descending |response|, ties by (coarser level first, detection pixel order, orientation slot) = CPU
+// list order.
 extern "C" __global__ void sift_rank(const int* __restrict__ items, int n, const float* __restrict__ cf, const int* __restrict__ ci,
                                      const int* __restrict__ group, int* __restrict__ rank) {
     __shared__ float sr[RANK_T];
@@ -512,8 +516,8 @@ extern "C" __global__ void sift_rank(const int* __restrict__ items, int n, const
     if (i < n) rank[i] = cnt;
 }
 
-// 남길 항목 목록. 상태 1 은 모두, 상태 2 는 mode 1(TopK): 순위 < limit,
-// mode 2(SpatialGrid): 순위 < rcut, 또는 순위 = rcut 이고 칸 번호 < bcut.
+// List of items to keep. State 1 keeps all; state 2 keeps, in mode 1 (TopK), rank < limit,
+// and in mode 2 (SpatialGrid), rank < rcut, or rank = rcut and cell index < bcut.
 extern "C" __global__ void sift_keep(const int* __restrict__ items, int n, const int* __restrict__ ci, const int* __restrict__ lv_state,
                                      const int* __restrict__ group, const int* __restrict__ rank, int mode, int limit, int rcut, int bcut,
                                      int* __restrict__ keep, int cap, int* __restrict__ counter) {
@@ -549,10 +553,10 @@ __device__ __forceinline__ void sift_l2(float d[4]) {
     }
 }
 
-// 128차원 기술자(CPU orient::descriptor + normalize_quantize): 남긴 항목 하나당 워프 하나.
-// 레인마다 자기 히스토그램 열([빈][레인])에 쌓고, 레인 l 이 빈 l, l+32, l+64, l+96 을 고정 순서로 합친다.
-// 출력 k: fo[5·k] = (x, y, 스케일, 출력 방향, 응답)(입력 영상 화소 단위), io[4·k] = (옥타브, 레벨, 검출 화소, 방향 순번),
-// desc[128·k..] = uint8 기술자. 처리 개수 = min(*kcount, cap).
+// 128-dimensional descriptor (CPU orient::descriptor + normalize_quantize): one warp per kept item.
+// Each lane accumulates into its own histogram column ([bin][lane]), and lane l sums bins l, l+32, l+64, l+96 in a fixed order.
+// Output k: fo[5·k] = (x, y, scale, output orientation, response) (input image pixel units), io[4·k] = (octave, level,
+// detection pixel, orientation slot), desc[128·k..] = uint8 descriptor. Processed count = min(*kcount, cap).
 extern "C" __global__ void sift_descriptor(const int* __restrict__ keep, const int* __restrict__ kcount, int cap,
                                            const int* __restrict__ items, const float* __restrict__ cf, const int* __restrict__ ci,
                                            const unsigned long long* __restrict__ lv_ptr, const int* __restrict__ lv_i, int l1root,
@@ -562,7 +566,7 @@ extern "C" __global__ void sift_descriptor(const int* __restrict__ keep, const i
     int lane = threadIdx.x & 31;
     int k = blockIdx.x * DESC_WARPS + warp;
     int nk = min(*kcount, cap);
-    if (k >= nk) return;  // 워프 단위로 같은 판정
+    if (k >= nk) return;  // same decision for the whole warp
     int it = keep[k];
     int cid = items[3 * it];
     int q = items[3 * it + 1];
@@ -593,7 +597,7 @@ extern "C" __global__ void sift_descriptor(const int* __restrict__ keep, const i
             int yi = y0 + p / nx;
             float dy = (float)yi + 0.5f - y;
             float dx = (float)xi + 0.5f - x;
-            // 회전된 셀 좌표(키포인트 중심 기준).
+            // Rotated cell coordinates (relative to the keypoint center).
             float rx = (c * dx + sn * dy) * inv_s;
             float ry = (c * dy - sn * dx) * inv_s;
             float fx = rx + 1.5f;
@@ -632,11 +636,11 @@ extern "C" __global__ void sift_descriptor(const int* __restrict__ keep, const i
     for (int qq = 0; qq < 4; ++qq) {
         int b = lane + 32 * qq;
         float acc = 0.0f;
-        // 레인마다 시작 열을 돌려 공유 메모리 뱅크 충돌을 피한다(레인별 순서는 고정).
+        // Rotate each lane's starting column to avoid shared memory bank conflicts (the order per lane is fixed).
         for (int t = 0; t < 32; ++t) acc += hl[b * 32 + ((t + lane) & 31)];
         d[qq] = acc;
     }
-    // L2 → 0.2 절단 → L2, 이어서 L1-ROOT(또는 L2), ×512 반올림 후 [0,255] 포화.
+    // L2 -> clip at 0.2 -> L2, then L1-ROOT (or L2), round after ×512 and saturate to [0,255].
     sift_l2(d);
     for (int qq = 0; qq < 4; ++qq) d[qq] = fminf(d[qq], 0.2f);
     sift_l2(d);

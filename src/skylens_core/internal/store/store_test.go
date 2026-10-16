@@ -236,3 +236,134 @@ func TestTelemetryRouteLinks(t *testing.T) {
 		t.Fatalf("links %v", l)
 	}
 }
+
+func slot(seq uint64, stream, msg, zone uint32, tag string) *modelv1.Chunk {
+	return &modelv1.Chunk{
+		Sequence:   seq,
+		Kind:       modelv1.ChunkKind_CHUNK_KIND_POINT_SLOTS,
+		Segment:    zone,
+		Level:      refined,
+		Version:    msg,
+		Generation: stream,
+		Payload:    []byte(tag),
+	}
+}
+
+func TestPointSlotsKeepEveryMessageInOrder(t *testing.T) {
+	s := New(Options{})
+	for i, z := range []uint32{0, 1, 0} {
+		got := s.PutAll(slot(uint64(i+1), 7, uint32(i+1), z, string(rune('a'+i))))
+		if len(got) != 1 {
+			t.Fatalf("message %d: forwarded %v", i+1, tags(got))
+		}
+	}
+	// Never compacted: a replace event of zone 0 does not drop the earlier ones.
+	sameTags(t, s.ModelChunks(), "a", "b", "c")
+	if s.Put(slot(4, 7, 2, 1, "dup")) {
+		t.Fatal("a repeated seq must be stale")
+	}
+	if s.Put(slot(5, 7, 0, 1, "zero")) {
+		t.Fatal("seq 0 is not a message")
+	}
+	got := s.Segments()
+	if len(got) != 2 || got[0].GetLevel() != refined || got[1].GetLevel() != refined {
+		t.Fatalf("segments %v", got)
+	}
+	c := s.Counters()
+	if c.Accepted != 3 || c.Model != 3 || c.Rejected != 2 || c.LastModelSeq != 5 {
+		t.Fatalf("counters %+v", c)
+	}
+}
+
+func TestPointSlotsHoldAheadOfAGapAndRelease(t *testing.T) {
+	s := New(Options{})
+	s.Put(slot(1, 7, 1, 0, "1"))
+	if got := s.PutAll(slot(3, 7, 3, 0, "3")); got != nil {
+		t.Fatalf("seq 3 before 2 must be held, forwarded %v", tags(got))
+	}
+	if got := s.PutAll(slot(4, 7, 4, 0, "4")); got != nil {
+		t.Fatalf("seq 4 must be held, forwarded %v", tags(got))
+	}
+	if kept, held := s.SlotMessages(); kept != 1 || held != 2 {
+		t.Fatalf("kept %d held %d", kept, held)
+	}
+	if s.Counters().Rejected != 0 {
+		t.Fatal("held messages are not rejected")
+	}
+	sameTags(t, s.PutAll(slot(2, 7, 2, 0, "2")), "2", "3", "4")
+	sameTags(t, s.ModelChunks(), "1", "2", "3", "4")
+	if kept, held := s.SlotMessages(); kept != 4 || held != 0 {
+		t.Fatalf("kept %d held %d", kept, held)
+	}
+	if c := s.Counters(); c.Accepted != 4 {
+		t.Fatalf("counters %+v", c)
+	}
+}
+
+func TestPointSlotsNewerStreamStartsOver(t *testing.T) {
+	s := New(Options{})
+	s.Put(pt(1, 0, refined, 1, "pts"))
+	s.Put(slot(2, 7, 1, 0, "old1"))
+	s.Put(slot(3, 7, 2, 0, "old2"))
+	if !s.Put(slot(4, 9, 1, 0, "new1")) {
+		t.Fatal("a newer stream must be accepted")
+	}
+	sameTags(t, s.ModelChunks(), "pts", "new1")
+	if s.Put(slot(5, 7, 3, 0, "late")) {
+		t.Fatal("a message of an older stream is stale")
+	}
+	sameTags(t, s.ModelChunks(), "pts", "new1")
+}
+
+func TestPointSlotsReplayBetweenPointsAndMesh(t *testing.T) {
+	s := New(Options{})
+	s.Put(meshBlock(1, []int32{0, 0, 0}, 1, "m"))
+	s.Put(slot(2, 1, 1, 0, "s1"))
+	s.Put(pt(3, 0, refined, 1, "p"))
+	s.Put(&modelv1.Chunk{Sequence: 4, Kind: dets, Payload: []byte("d")})
+	sameTags(t, s.ModelChunks(), "p", "s1", "m", "d")
+}
+
+func TestPointSlotsHeldMessagesAreBounded(t *testing.T) {
+	s := New(Options{MaxHeldSlots: 3})
+	// A stream whose start was missed: every message waits for seq 1.
+	for seq := uint32(2); seq <= 4; seq++ {
+		if got := s.PutAll(slot(uint64(seq), 8, seq, 0, "h")); got != nil {
+			t.Fatalf("seq %d forwarded %v", seq, tags(got))
+		}
+	}
+	if _, held := s.SlotMessages(); held != 3 {
+		t.Fatalf("held %d", held)
+	}
+	// One more would pass the limit: the held messages are dropped, not kept without bound.
+	if got := s.PutAll(slot(5, 8, 5, 0, "h")); got != nil {
+		t.Fatalf("forwarded %v", tags(got))
+	}
+	if kept, held := s.SlotMessages(); kept != 0 || held != 0 {
+		t.Fatalf("kept %d held %d", kept, held)
+	}
+	if c := s.Counters(); c.Rejected != 4 {
+		t.Fatalf("counters %+v", c)
+	}
+	// The stream can still start once seq 1 arrives, and a newer stream replaces it.
+	sameTags(t, s.PutAll(slot(6, 8, 1, 0, "one")), "one")
+	sameTags(t, s.PutAll(slot(7, 9, 1, 0, "new")), "new")
+	sameTags(t, s.ModelChunks(), "new")
+}
+
+func TestPointSlotsHeldBytesAreBounded(t *testing.T) {
+	s := New(Options{MaxHeldSlotBytes: 10})
+	s.Put(slot(1, 3, 1, 0, "a"))
+	if got := s.PutAll(slot(2, 3, 3, 0, "123456")); got != nil {
+		t.Fatalf("forwarded %v", tags(got))
+	}
+	if _, held := s.SlotMessages(); held != 1 {
+		t.Fatalf("held %d", held)
+	}
+	s.PutAll(slot(3, 3, 4, 0, "123456")) // 12 bytes held would pass 10
+	if _, held := s.SlotMessages(); held != 0 {
+		t.Fatalf("held %d after the byte limit", held)
+	}
+	sameTags(t, s.PutAll(slot(4, 3, 2, 0, "b")), "b")
+	sameTags(t, s.ModelChunks(), "a", "b")
+}

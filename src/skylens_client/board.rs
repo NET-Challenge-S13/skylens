@@ -6,6 +6,10 @@
 //! telemetry, the route, the mission line and the server status. What the board derives from it
 //! (per-segment samples, the framing, the interior and corridor analysis) is cached here and
 //! refreshed when a segment's chunks change.
+//!
+//! Points come either as point chunks per segment or as the point slot stream (stable display,
+//! decision 0052); a segment of the slot stream is the zone its slots belong to, read off the
+//! store's slot state the same way (samples, height range, box, point count).
 
 use crate::follow::{self, CorridorPath, DronePose, Framing, Interior};
 use crate::glam::DVec3;
@@ -23,6 +27,9 @@ const SAMPLES_PER_SEGMENT: usize = 2_000;
 const INTERIOR_SAMPLES: usize = 9_000;
 /// Samples per segment the point panel frames on (legacy `samplePoints(400)`).
 pub const FIT_SAMPLES_PER_SEGMENT: usize = 400;
+/// Second half of a [`SegmentInfo`] key read off the slot stream (the first half is the zone's
+/// stamp); point chunk keys count chunks and never get this high.
+const SLOT_KEY: usize = usize::MAX;
 
 /// A drone the pipeline reported (telemetry only; the board simulates nothing).
 #[derive(Debug, Clone, PartialEq)]
@@ -32,7 +39,7 @@ pub struct Drone {
     pub forward: DVec3,
 }
 
-/// What the board read off one segment's point chunks.
+/// What the board read off one segment's point chunks (or its slots).
 #[derive(Debug, Clone, PartialEq)]
 pub struct SegmentInfo {
     key: (u64, usize),
@@ -163,8 +170,11 @@ impl Board {
         let applied = self.store.apply(chunk);
         use skylens_viewer::Change as C;
         match (&applied.change, chunk.kind()) {
-            (C::Invalid(_), model::ChunkKind::Points | model::ChunkKind::MeshBlock) => self.geometry_failed = true,
+            (C::Invalid(_), model::ChunkKind::Points | model::ChunkKind::MeshBlock | model::ChunkKind::PointSlots) => {
+                self.geometry_failed = true
+            }
             (C::PointsAppended { .. } | C::PointsReplaced { .. } | C::PointsPending { .. }, _)
+            | (C::SlotsApplied { .. } | C::SlotsHeld { .. }, _)
             | (C::MeshUpserted { .. } | C::MeshRemoved { .. }, _) => {
                 self.geometry_failed = false;
                 self.local_chunks += 1;
@@ -180,10 +190,18 @@ impl Board {
         !self.store.arrived().is_empty()
     }
 
-    /// Re-reads the segments whose chunks changed, then the framing and the interior analysis.
+    /// Segments that hold points: point chunk segments and slot zones with shown slots.
+    pub fn point_segments(&self) -> BTreeSet<u32> {
+        let mut out: BTreeSet<u32> = self.store.segments().map(|(s, _)| s).collect();
+        out.extend(self.store.slots().zones().filter(|(_, z)| z.points > 0).map(|(z, _)| z));
+        out
+    }
+
+    /// Re-reads the segments whose chunks or slots changed, then the framing and the interior
+    /// analysis.
     pub fn refresh(&mut self) {
         let mut changed = false;
-        let live: BTreeSet<u32> = self.store.segments().map(|(s, _)| s).collect();
+        let live = self.point_segments();
         let before = self.segments.len();
         self.segments.retain(|s, _| live.contains(s));
         changed |= before != self.segments.len();
@@ -206,6 +224,7 @@ impl Board {
             self.segments.insert(seg, info);
             changed = true;
         }
+        changed |= self.refresh_slot_zones();
         // Mesh block centres, per stored version.
         let ids: BTreeSet<[i32; 3]> = self.store.mesh_blocks().map(|(id, _)| id).collect();
         self.mesh_centers.retain(|id, _| ids.contains(id));
@@ -220,6 +239,38 @@ impl Board {
         if changed {
             self.analyse();
         }
+    }
+
+    /// Re-reads the slot zones whose slots changed (one pass over the slots for all of them).
+    /// A segment that also has point chunks is read off its chunks.
+    fn refresh_slot_zones(&mut self) -> bool {
+        let sp = self.store.slots();
+        let stale: Vec<(u32, u64)> = sp
+            .zones()
+            .filter(|(z, s)| s.points > 0 && self.store.segment(*z).is_none())
+            .filter(|(z, s)| self.segments.get(z).is_none_or(|i| i.key != (s.stamp, SLOT_KEY)))
+            .map(|(z, s)| (z, s.stamp))
+            .collect();
+        if stale.is_empty() {
+            return false;
+        }
+        let mut samples = sp.samples(SAMPLES_PER_SEGMENT);
+        for (zone, stamp) in stale {
+            let Some(z) = sp.zone(zone) else { continue };
+            let samples: Vec<DVec3> = samples.remove(&zone).unwrap_or_default().into_iter().map(DVec3::from).collect();
+            let center = (z.lo[0] <= z.hi[0]).then(|| (DVec3::from(z.lo.map(f64::from)) + DVec3::from(z.hi.map(f64::from))) / 2.0);
+            let info = SegmentInfo {
+                key: (stamp, SLOT_KEY),
+                range: points::height_range(&samples),
+                core: points::core_box(&samples),
+                center,
+                points: z.points,
+                refined: true,
+                samples,
+            };
+            self.segments.insert(zone, info);
+        }
+        true
     }
 
     fn analyse(&mut self) {
@@ -245,7 +296,15 @@ impl Board {
             self.corridor = follow::build_corridor_path(&thin);
         }
         let payloads: Vec<&[u8]> = self.store.segments().flat_map(|(_, p)| p.payloads().iter().map(|c| &c[..])).collect();
-        self.point_size_m = points::point_size_m(payloads);
+        let mut spacing = points::chunk_spacings(payloads);
+        // Slot zones: the footprint of their core box over their point count.
+        spacing.extend(
+            self.segments
+                .values()
+                .filter(|i| i.key.1 == SLOT_KEY)
+                .filter_map(|i| points::spacing(i.core?, i.points)),
+        );
+        self.point_size_m = points::point_size_from_spacings(spacing);
     }
 
     /// Centres of the arrived segments: their points, else their mesh blocks.
@@ -451,6 +510,59 @@ mod tests {
         assert_eq!(b.fit_samples(10).len(), 20);
         assert!(b.points_box().is_some());
         assert_eq!(b.local_chunks, 2);
+    }
+
+    /// A slot message adding `n` points per zone (zone z at height 2z), ids from `first`.
+    fn slots_chunk(seq: u32, first: u32, zones: &[u8], n: u32) -> model::Chunk {
+        use crate::pointblitz::io::slots;
+        let mut pack = Vec::new();
+        let mut id = first;
+        for &z in zones {
+            for i in 0..n {
+                let position = [i as f32 * 0.5, (i % 9) as f32, 2.0 * f32::from(z)];
+                slots::Record { id, position, color: [7, 7, 7], zone: z }.write(&mut pack);
+                id += 1;
+            }
+        }
+        let header = slots::SlotHeader { seq, n_add: id - first, n_move: 0, n_remove: 0, capacity: id };
+        model::Chunk {
+            sequence: u64::from(seq),
+            kind: model::ChunkKind::PointSlots as i32,
+            segment: u32::from(*zones.last().unwrap()),
+            level: model::Level::Refined as i32,
+            version: seq,
+            generation: 1,
+            payload: slots::encode(&header, &pack).unwrap(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn slot_zones_are_read_like_segments() {
+        let mut b = board();
+        b.chunk(&detections_chunk(1, 1, "p1", true));
+        b.chunk(&slots_chunk(1, 0, &[0], 200));
+        b.refresh();
+        assert!(b.has_geometry());
+        assert_eq!(b.point_segments().into_iter().collect::<Vec<_>>(), vec![0]);
+        assert_eq!(b.total_points(), 200);
+        assert!(b.reveal_new().is_empty(), "zone 1 has not arrived");
+        b.chunk(&slots_chunk(2, 200, &[1], 100));
+        b.refresh();
+        assert_eq!(b.segments.len(), 2);
+        assert_eq!(b.total_points(), 300);
+        assert!(b.segments.values().all(|i| i.refined));
+        let (lo, hi) = b.height_range().unwrap();
+        assert!(lo.abs() < 1e-6 && (hi - 2.0).abs() < 1e-6, "{lo} {hi}");
+        assert_eq!(b.segment_centers().len(), 2);
+        assert_eq!(b.reveal_new().len(), 1, "a slot zone arrives at the final level");
+        assert!(b.framing.is_some());
+        assert!(b.point_size_m >= 0.05 && b.point_size_m <= 1.0);
+        assert_eq!(b.local_chunks, 2);
+        // Nothing changed: the cached samples stay.
+        let before = b.segments.clone();
+        b.refresh();
+        assert_eq!(b.segments, before);
     }
 
     #[test]

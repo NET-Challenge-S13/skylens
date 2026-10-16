@@ -40,12 +40,16 @@
 //! 정밀도: 전부 f64. 잔차는 픽셀 좌표(~10³)의 차이라 f32 로는 반올림이 1e−4 px 수준이 되고, 축소 계통은
 //! 초점·깊이 결합과 게이지 때문에 조건수가 커서 f32 누적이 LM 수락 판정을 흔든다.
 //! H·S·우변 누적은 원자적 덧셈이라 합산 순서가 실행마다 달라 마지막 자리 수준의 차이가 날 수 있다.
+//!
+//! 사전 제약(`ProblemInput::pose_priors`, `cam_priors`)은 개수가 영상·카메라 수 정도라 CPU 가 CPU 백엔드와 같은 식으로
+//! 잔차·야코비안을 계산하고, JᵀJ·Jᵀr 를 장치의 H·g_E 에 더한다(`ba_add_at`). 비용·모형 비용 변화에도 같은 항을 더한다.
 
 use crate::device::{CudaDevice, GpuError, SyncedCopy};
 use cudarc::driver::{CudaFunction, CudaSlice, CudaStream, DriverError, LaunchConfig, PushKernelArg};
 use cumulus3d_ba::{
     minimize, quat_plus, BaBackend, BaSolution, CpuBaBackend, LinearSolverType, Loss, ProblemInput, StepInfo, TrOptions, TrProblem,
 };
+use cumulus3d_core::geometry::skew;
 use cumulus3d_core::{Camera, Rigid3, Vec3};
 use nalgebra::{DMatrix, DVector};
 use std::sync::{Arc, Mutex};
@@ -97,6 +101,7 @@ struct Kernels {
     backsub: CudaFunction,
     model_cost: CudaFunction,
     gp_max: CudaFunction,
+    add_at: CudaFunction,
 }
 
 /// CUDA 번들 조정 백엔드. 실패하면 경고를 찍고 CPU 백엔드로 같은 문제를 다시 푼다.
@@ -132,6 +137,7 @@ impl CudaBundleAdjuster {
             backsub: f("ba_backsub")?,
             model_cost: f("ba_model_cost")?,
             gp_max: f("ba_gp_max")?,
+            add_at: f("ba_add_at")?,
         };
         Ok(Self { dev, k, lock: Mutex::new(()) })
     }
@@ -365,6 +371,16 @@ struct GpuProblem<'a> {
     g_e: Vec<f64>,
     gp_max: f64,
     delta_e: Vec<f64>,
+    /// 자세별 접공간 성분 고정(사전 제약 야코비안에 쓴다).
+    pose_mask: Vec<[bool; 6]>,
+    /// 위치 사전 제약 (자세 순번, 목표 중심, 1/σ)과 마지막 선형화의 잔차·야코비안(3×6 행 우선, 배율 적용).
+    priors: Vec<(usize, Vec3, f64)>,
+    prior_r: Vec<[f64; 3]>,
+    prior_j: Vec<[f64; 18]>,
+    /// 내부값 사전 제약 (카메라 순번, 카메라 E 블록 안 순번, 목표, 1/σ)과 잔차·야코비안.
+    cam_priors: Vec<(usize, usize, f64, f64)>,
+    cprior_r: Vec<f64>,
+    cprior_j: Vec<f64>,
     err: Option<CudaBaError>,
 }
 
@@ -647,6 +663,24 @@ impl<'a> GpuProblem<'a> {
         };
         let cur = HostState { poses: inp.poses.clone(), cams: inp.cams.clone() };
         let cand = HostState { poses: inp.poses.clone(), cams: inp.cams.clone() };
+        // 사전 제약: CPU 백엔드(problem.rs)와 같은 거르기.
+        let priors: Vec<(usize, Vec3, f64)> = inp
+            .pose_priors
+            .iter()
+            .filter(|&&(p, c, s)| p < np && s > 0.0 && s.is_finite() && c.iter().all(|x| x.is_finite()))
+            .map(|&(p, c, s)| (p, c, 1.0 / s))
+            .collect();
+        let cam_priors: Vec<(usize, usize, f64, f64)> = inp
+            .cam_priors
+            .iter()
+            .filter_map(|&(c, pi, target, w)| {
+                let q = inp.cam_var.get(c)?.iter().position(|&x| x == pi)?;
+                (w.is_finite() && w > 0.0 && target.is_finite()).then_some((c, q, target, w))
+            })
+            .collect();
+        if n_e * n_e >= i32::MAX as usize {
+            return Err(CudaBaError::Unsupported(format!("축소 계통 {n_e} 이 너무 큼")));
+        }
         Ok(Self {
             s,
             k,
@@ -673,6 +707,13 @@ impl<'a> GpuProblem<'a> {
             g_e: vec![0.0; n_e],
             gp_max: 0.0,
             delta_e: vec![0.0; n_e],
+            pose_mask: inp.pose_mask.clone(),
+            prior_r: vec![[0.0; 3]; priors.len()],
+            prior_j: vec![[0.0; 18]; priors.len()],
+            priors,
+            cprior_r: vec![0.0; cam_priors.len()],
+            cprior_j: vec![0.0; cam_priors.len()],
+            cam_priors,
             err: None,
         })
     }
@@ -761,11 +802,12 @@ impl<'a> GpuProblem<'a> {
     }
 
     fn linearize_impl(&mut self, first: bool) -> Result<Option<f64>, CudaBaError> {
-        let cost = self.eval(false, true)?;
+        let cost = self.eval(false, true)? + self.prior_cost(false);
         if !cost.is_finite() {
             return Ok(None);
         }
         self.build_normal()?;
+        self.add_priors()?;
         if first {
             self.set_scales()?;
             let c2 = self.eval(false, true)?;
@@ -773,8 +815,152 @@ impl<'a> GpuProblem<'a> {
                 return Ok(None);
             }
             self.build_normal()?;
+            self.add_priors()?;
         }
         Ok(Some(cost))
+    }
+
+    /// 위치 사전 제약 i 의 잔차 `(C − 목표)/σ` (`C = −Rᵀt`)와, `jac` 가 있으면 배율 적용 접공간 야코비안
+    /// (3×6 행 우선: δ회전, δ이동). CPU 백엔드의 `eval_prior` 와 같은 식.
+    fn prior_eval(&self, st: &HostState, i: usize, jac: Option<&mut [f64; 18]>) -> [f64; 3] {
+        let (p, target, w) = self.priors[i];
+        let rt = st.poses[p].rotation_matrix().transpose();
+        let t = st.poses[p].translation;
+        let r = (-(rt * t) - target) * w;
+        if let Some(j) = jac {
+            let jr = rt * skew(&t) * (-2.0 * w);
+            let jt = rt * (-w);
+            let pe = self.pose_eoff[p];
+            let mask = &self.pose_mask[p];
+            for row in 0..3 {
+                for q in 0..3 {
+                    let (s0, s1) = if pe >= 0 { (self.scale_e[pe as usize + q], self.scale_e[pe as usize + 3 + q]) } else { (1.0, 1.0) };
+                    j[row * 6 + q] = if mask[q] || pe < 0 { 0.0 } else { jr[(row, q)] * s0 };
+                    j[row * 6 + 3 + q] = if mask[3 + q] || pe < 0 { 0.0 } else { jt[(row, q)] * s1 };
+                }
+            }
+        }
+        [r.x, r.y, r.z]
+    }
+
+    /// 내부값 사전 제약 i 의 잔차 `(p − 목표)/σ` 와 배율 적용 야코비안(`want_jac` 일 때).
+    fn cam_prior_eval(&self, st: &HostState, i: usize, want_jac: bool) -> (f64, f64) {
+        let (c, q, target, w) = self.cam_priors[i];
+        let pi = self.cam_var[c][q];
+        let r = (st.cams[c].params[pi] - target) * w;
+        let ce = self.cam_eoff[c];
+        let j = if want_jac { w * if ce >= 0 { self.scale_e[ce as usize + q] } else { 1.0 } } else { 0.0 };
+        (r, j)
+    }
+
+    /// 사전 제약 비용 ½Σ‖r‖² (`cand` 면 후보 상태).
+    fn prior_cost(&self, cand: bool) -> f64 {
+        let st = if cand { &self.cand } else { &self.cur };
+        let mut c = 0.0;
+        for i in 0..self.priors.len() {
+            let r = self.prior_eval(st, i, None);
+            c += r[0] * r[0] + r[1] * r[1] + r[2] * r[2];
+        }
+        for i in 0..self.cam_priors.len() {
+            let r = self.cam_prior_eval(st, i, false).0;
+            c += r * r;
+        }
+        0.5 * c
+    }
+
+    /// 현재 상태에서 사전 제약을 선형화해 JᵀJ 를 장치 H 에, Jᵀr 를 장치·호스트 g_E 에 더한다.
+    fn add_priors(&mut self) -> Result<(), CudaBaError> {
+        if self.priors.is_empty() && self.cam_priors.is_empty() {
+            return Ok(());
+        }
+        let n_e = self.n_e;
+        let (mut hi, mut hv, mut gi, mut gv): (Vec<i32>, Vec<f64>, Vec<i32>, Vec<f64>) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        for i in 0..self.priors.len() {
+            let mut j = [0.0; 18];
+            let r = self.prior_eval(&self.cur, i, Some(&mut j));
+            self.prior_r[i] = r;
+            self.prior_j[i] = j;
+            let pe = self.pose_eoff[self.priors[i].0];
+            if pe < 0 {
+                continue;
+            }
+            let o = pe as usize;
+            for p in 0..6 {
+                gi.push((o + p) as i32);
+                gv.push(j[p] * r[0] + j[6 + p] * r[1] + j[12 + p] * r[2]);
+                for q in 0..6 {
+                    hi.push(((o + p) * n_e + o + q) as i32);
+                    hv.push(j[p] * j[q] + j[6 + p] * j[6 + q] + j[12 + p] * j[12 + q]);
+                }
+            }
+        }
+        for i in 0..self.cam_priors.len() {
+            let (r, j) = self.cam_prior_eval(&self.cur, i, true);
+            self.cprior_r[i] = r;
+            self.cprior_j[i] = j;
+            let (c, q) = (self.cam_priors[i].0, self.cam_priors[i].1);
+            let ce = self.cam_eoff[c];
+            if ce < 0 {
+                continue;
+            }
+            let o = ce as usize + q;
+            gi.push(o as i32);
+            gv.push(j * r);
+            hi.push((o * n_e + o) as i32);
+            hv.push(j * j);
+        }
+        for (&k, &v) in gi.iter().zip(&gv) {
+            self.g_e[k as usize] += v;
+        }
+        if hi.is_empty() {
+            return Ok(());
+        }
+        let (s, k, d) = (&self.s, self.k, &mut self.d);
+        let (hi_d, hv_d, gi_d, gv_d) = (up_i32(s, &hi)?, up_f64(s, &hv)?, up_i32(s, &gi)?, up_f64(s, &gv)?);
+        let (nh, ng) = (hi.len() as i32, gi.len() as i32);
+        {
+            let mut l = s.launch_builder(&k.add_at);
+            l.arg(&nh).arg(&hi_d).arg(&hv_d).arg(&mut d.h);
+            // SAFETY: ba_add_at(n, idx[n], val[n], a): 번호는 모두 n_e² 미만(H 크기).
+            unsafe { l.launch(launch_cfg(grid_for(hi.len()))) }?;
+        }
+        {
+            let mut l = s.launch_builder(&k.add_at);
+            l.arg(&ng).arg(&gi_d).arg(&gv_d).arg(&mut d.g_e);
+            // SAFETY: ba_add_at(n, idx[n], val[n], a): 번호는 모두 n_e 미만(g_E 크기).
+            unsafe { l.launch(launch_cfg(grid_for(gi.len()))) }?;
+        }
+        // 올린 버퍼를 놓기 전에 커널이 끝나게 한다.
+        s.synchronize()?;
+        Ok(())
+    }
+
+    /// 사전 제약의 모형 비용 변화 −Σ(rᵀy + ½‖y‖²), y = J δ_E.
+    fn prior_model_change(&self) -> f64 {
+        let mut m = 0.0;
+        for i in 0..self.priors.len() {
+            let pe = self.pose_eoff[self.priors[i].0];
+            if pe < 0 {
+                continue;
+            }
+            let o = pe as usize;
+            let (j, r) = (&self.prior_j[i], &self.prior_r[i]);
+            let mut y = [0.0; 3];
+            for (row, yr) in y.iter_mut().enumerate() {
+                *yr = (0..6).map(|q| j[row * 6 + q] * self.delta_e[o + q]).sum();
+            }
+            m -= r[0] * y[0] + r[1] * y[1] + r[2] * y[2] + 0.5 * (y[0] * y[0] + y[1] * y[1] + y[2] * y[2]);
+        }
+        for i in 0..self.cam_priors.len() {
+            let (c, q) = (self.cam_priors[i].0, self.cam_priors[i].1);
+            let ce = self.cam_eoff[c];
+            if ce < 0 {
+                continue;
+            }
+            let y = self.cprior_j[i] * self.delta_e[ce as usize + q];
+            m -= self.cprior_r[i] * y + 0.5 * y * y;
+        }
+        m
     }
 
     /// 축소 계통 S·우변 조립. 점 블록이 양정치가 아니면 Ok(false).
@@ -1113,6 +1299,7 @@ impl<'a> GpuProblem<'a> {
         let Some((model_cost_change, step_pts)) = self.back_substitute()? else {
             return Ok(None);
         };
+        let model_cost_change = model_cost_change + self.prior_model_change();
         let x_norm = self.x_norm()?;
         let sq = self.make_candidate()?;
         Ok(Some(StepInfo { model_cost_change, step_norm: (sq + step_pts).sqrt(), x_norm }))
@@ -1198,7 +1385,10 @@ impl TrProblem for GpuProblem<'_> {
         if self.err.is_some() {
             return None;
         }
-        let r = self.eval(true, false).map(|c| c.is_finite().then_some(c));
+        let r = self.eval(true, false).map(|c| {
+            let c = c + self.prior_cost(true);
+            c.is_finite().then_some(c)
+        });
         self.record(r)
     }
 

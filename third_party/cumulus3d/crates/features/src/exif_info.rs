@@ -29,34 +29,34 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! EXIF 에서 필요한 값만 읽는다(초점거리, 센서 정보, 방향, GPS).
+//! Reads only the needed values from EXIF (focal length, sensor info, orientation, GPS).
 
 use exif::{In, Tag, Value};
 use std::path::Path;
 
-/// 영상 EXIF 요약. 없는 값은 None.
+/// Image EXIF summary. Missing values are None.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ExifInfo {
-    /// 제조사(Make).
+    /// Manufacturer (Make).
     pub make: Option<String>,
-    /// 모델(Model).
+    /// Model (Model).
     pub model: Option<String>,
-    /// 초점거리(mm).
+    /// Focal length (mm).
     pub focal_mm: Option<f64>,
-    /// 35mm 환산 초점거리(mm).
+    /// 35mm-equivalent focal length (mm).
     pub focal_35mm: Option<f64>,
-    /// 초점면 x 해상도(FocalPlaneXResolution).
+    /// Focal-plane x resolution (FocalPlaneXResolution).
     pub focal_plane_x_resolution: Option<f64>,
-    /// 초점면 해상도 단위(2 = 인치, 3 = cm, 4 = mm …).
+    /// Focal-plane resolution unit (2 = inch, 3 = cm, 4 = mm ...).
     pub focal_plane_resolution_unit: Option<u32>,
-    /// EXIF Orientation 값(1~8).
+    /// EXIF Orientation value (1~8).
     pub orientation: Option<u32>,
-    /// (위도, 경도, 고도) [도, 도, m]. 셋 다 있을 때만.
+    /// (latitude, longitude, altitude) [deg, deg, m]. Only when all three are present.
     pub gps: Option<(f64, f64, f64)>,
 }
 
 impl ExifInfo {
-    /// 파일에서 읽는다. EXIF 가 없거나 깨졌으면 빈 값.
+    /// Reads from a file. Empty values if EXIF is missing or corrupt.
     pub fn read(path: &Path) -> Self {
         let Ok(file) = std::fs::File::open(path) else { return Self::default() };
         let mut r = std::io::BufReader::new(file);
@@ -66,7 +66,7 @@ impl ExifInfo {
         }
     }
 
-    /// 메모리의 파일 바이트에서 읽는다.
+    /// Reads from file bytes in memory.
     pub fn from_bytes(bytes: &[u8]) -> Self {
         let mut c = std::io::Cursor::new(bytes);
         match exif::Reader::new().read_from_container(&mut c) {
@@ -119,7 +119,7 @@ fn value_f64(v: &Value, i: usize) -> Option<f64> {
     }
 }
 
-/// 도·분·초 → 도.
+/// Degrees/minutes/seconds -> degrees.
 fn dms(v: &Value) -> Option<f64> {
     let d = value_f64(v, 0)?;
     let m = value_f64(v, 1).unwrap_or(0.0);

@@ -25,25 +25,25 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 람다 훅 파이프라인(`Pipeline`): 훅 등록·큐·정책·패닉 격리·채널.
+//! Closure hook pipeline (`Pipeline`): hook registration, queues, policies, panic isolation, channels.
 //!
-//! 리듀서(`Reducer`)를 감싸 입력을 밀어 넣고, 리듀서가 내놓은 이벤트를
-//! 1) 구독 채널(`subscribe`)로 모두 복제해 보내고,
-//! 2) 등록된 훅(`on`, `on_any`, ...)에 넘긴다.
+//! It wraps a reducer (`Reducer`), pushes inputs into it, and for the events the reducer emits:
+//! 1) copies all of them to subscription channels (`subscribe`),
+//! 2) passes them to the registered hooks (`on`, `on_any`, ...).
 //!
-//! 훅 실행 방식
-//! - 비동기(기본): 훅은 "레인" 단위 워커 스레드에서 실행된다. 레인은 이벤트 종류마다 하나,
-//!   `on_any` 훅을 위한 레인 하나다. 처리 루프(`push`)는 훅을 기다리지 않는다.
-//!   같은 레인 안에서는 도착 순서가 보존되므로 종류 안의 순서는 항상 보존된다.
-//!   (`on_any` 레인은 전체 순서를 보존한다.) 서로 다른 종류 사이의 실행 순서는 보장하지 않는다.
-//! - 동기(`sync(true)`): 훅을 `push` 를 부른 스레드에서 즉시, 이벤트 순서대로 실행한다
-//!   (이벤트마다 종류별 훅 → `on_any` 훅 순). 테스트·파일 출력용.
+//! How hooks run
+//! - Asynchronous (default): hooks run on "lane" worker threads. There is one lane per event kind
+//!   and one lane for `on_any` hooks. The processing loop (`push`) does not wait for hooks.
+//!   Arrival order is preserved within a lane, so order within a kind is always preserved.
+//!   (The `on_any` lane preserves the overall order.) The execution order between different kinds is not guaranteed.
+//! - Synchronous (`sync(true)`): hooks run immediately on the thread that called `push`, in event order
+//!   (for each event, hooks of its kind first, then `on_any` hooks). For tests and file output.
 //!
-//! 큐 정책(`policy`)은 종류별로 정한다. 기본은 모두 보존(`QueuePolicy::KeepAll`).
-//! 화면 갱신처럼 최신 것만 의미 있는 종류는 아직 처리되지 않은 이전 이벤트를 버리게 할 수 있다.
+//! The queue policy (`policy`) is set per kind. The default is to keep everything (`QueuePolicy::KeepAll`).
+//! For kinds where only the latest matters, such as display updates, earlier unprocessed events can be dropped.
 //!
-//! 훅이 패닉하면 `catch_unwind` 로 잡아 `Event::Error` 를 구독자에게 보내고 파이프라인은 계속 돈다.
-//! (그 `Error` 는 훅에는 전달하지 않는다. 오류 훅이 다시 패닉해 무한 반복되는 것을 막기 위함.)
+//! If a hook panics, it is caught with `catch_unwind`, an `Event::Error` is sent to subscribers, and the pipeline keeps running.
+//! (That `Error` is not delivered to hooks, to prevent an error hook from panicking again and looping forever.)
 
 use crate::events::{Command, Event, EventKind, Frame, Meta, ZoneRange};
 use cumulus3d_core::io::ply::PointCloud;
@@ -55,66 +55,66 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread::JoinHandle;
 use std::time::SystemTime;
 
-/// 파이프라인이 구동하는 리듀서.
+/// The reducer driven by the pipeline.
 ///
-/// session 모듈의 세션 상태가 이 trait 를 구현한다. 세션이 불변 값
-/// (`step(&Session, FrameSet) -> (Session, Vec<Event>)`) 형태라면 내부에 현재 세션을 들고
-/// `step` 에서 새 세션으로 교체하는 얇은 어댑터로 구현하면 된다.
+/// The session state of the session module implements this trait. If the session has the immutable-value form
+/// (`step(&Session, FrameSet) -> (Session, Vec<Event>)`), implement it as a thin adapter that holds the current session
+/// and replaces it with the new session in `step`.
 pub trait Reducer {
-    /// 한 번에 밀어 넣는 입력(예: 위치 하나의 프레임 묶음).
+    /// Input pushed in one go (e.g. the frame bundle of one position).
     type Input;
-    /// 입력 하나를 처리하고 그 결과 이벤트를 순서대로 돌려준다.
+    /// Process one input and return the resulting events in order.
     fn step(&mut self, input: Self::Input) -> Vec<Event>;
-    /// 입력을 받자마자, `step` 의 처리보다 먼저 내보낼 이벤트(예: 디코딩된 프레임). 기본: 없음.
+    /// Events to emit as soon as the input is received, before `step` processes it (e.g. decoded frames). Default: none.
     fn prelude(&mut self, _input: &Self::Input) -> Vec<Event> {
         Vec::new()
     }
-    /// 백그라운드 작업(정밀 처리 등) 중 끝난 것을 수거한다. 기다리지 않는다.
+    /// Collect finished background work (refinement etc.). Does not wait.
     fn poll(&mut self) -> Vec<Event>;
-    /// 명령을 처리한다.
+    /// Process a command.
     fn command(&mut self, c: Command) -> Vec<Event>;
-    /// 남은 백그라운드 작업을 모두 끝날 때까지 기다려 수거한다.
-    /// 기본 구현은 `poll` 한 번. 백그라운드 작업이 있는 리듀서는 재정의해야 한다.
+    /// Wait until all remaining background work finishes and collect it.
+    /// The default implementation is a single `poll`. Reducers with background work must override it.
     fn finish(&mut self) -> Vec<Event> {
         self.poll()
     }
 }
 
-/// 종류별 큐 정책.
+/// Per-kind queue policy.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum QueuePolicy {
-    /// 모두 보존(기본).
+    /// Keep everything (default).
     #[default]
     KeepAll,
-    /// 같은 키(구역 번호 / 스냅샷 인덱스)의 미처리 이전 이벤트를 버린다.
-    /// 키가 없는 종류는 `LatestOnly` 와 같다.
+    /// Drop earlier unprocessed events with the same key (zone index / snapshot index).
+    /// Kinds without a key behave like `LatestOnly`.
     LatestPerKey,
-    /// 같은 종류의 미처리 이전 이벤트를 모두 버린다.
+    /// Drop all earlier unprocessed events of the same kind.
     LatestOnly,
 }
 
-/// `finish` 가 돌려주는 요약.
+/// Summary returned by `finish`.
 #[derive(Clone, Debug, Default)]
 pub struct Summary {
-    /// 리듀서가 낸 이벤트 수.
+    /// Number of events emitted by the reducer.
     pub events: usize,
-    /// 종류별 이벤트 수.
+    /// Number of events per kind.
     pub by_kind: HashMap<EventKind, usize>,
-    /// 실행된 훅 호출 수(패닉 포함).
+    /// Number of hook calls executed (including panics).
     pub hook_calls: usize,
-    /// 패닉한 훅 호출 수.
+    /// Number of hook calls that panicked.
     pub hook_panics: usize,
-    /// 큐 정책으로 버려진 이벤트 수(레인 단위로 셈).
+    /// Number of events dropped by the queue policy (counted per lane).
     pub superseded: usize,
 }
 
 type Hook = Box<dyn FnMut(&Event) + Send + 'static>;
 type HookList = Arc<Mutex<Vec<Hook>>>;
 
-/// 레인 키: `Some(kind)` 는 종류별 레인, `None` 은 `on_any` 레인.
+/// Lane key: `Some(kind)` is a per-kind lane, `None` is the `on_any` lane.
 type LaneKey = Option<EventKind>;
 
-/// 워커 스레드와 처리 루프가 함께 쓰는 상태.
+/// State shared by the worker threads and the processing loop.
 struct Shared {
     subscribers: Mutex<Vec<Sender<Event>>>,
     hook_calls: AtomicUsize,
@@ -128,7 +128,7 @@ impl Shared {
         subs.retain(|tx| tx.send(ev.clone()).is_ok());
     }
 
-    /// 훅 목록을 이벤트 하나에 대해 실행하고 패닉을 격리한다.
+    /// Run the hook list for one event and isolate panics.
     fn run_hooks(&self, hooks: &HookList, ev: &Event) {
         let mut hooks = hooks.lock().unwrap_or_else(|p| p.into_inner());
         for hook in hooks.iter_mut() {
@@ -215,7 +215,7 @@ impl Lane {
         self.worker = Some(h);
     }
 
-    /// 정책에 따라 이전 이벤트를 버리고 큐에 넣는다. 버린 개수를 돌려준다.
+    /// Drop earlier events according to the policy and enqueue. Returns the number dropped.
     fn enqueue(&self, ev: Event, policy: QueuePolicy) -> usize {
         let mut q = self.state.q.lock().unwrap_or_else(|p| p.into_inner());
         let before = q.items.len();
@@ -236,7 +236,7 @@ impl Lane {
         dropped
     }
 
-    /// 큐가 비고 실행 중인 훅이 없을 때까지 기다린다.
+    /// Wait until the queue is empty and no hook is running.
     fn wait_idle(&self) {
         if self.worker.is_none() {
             return;
@@ -259,7 +259,7 @@ impl Lane {
     }
 }
 
-/// 같은 키 판별: 구역 이벤트는 구역 번호, 스냅샷은 인덱스. 나머지는 키 없음.
+/// Same-key test: zone events use the zone index, snapshots the index. Others have no key.
 fn supersede_key(ev: &Event) -> Option<usize> {
     match ev {
         Event::ZoneArrived { range, .. }
@@ -277,7 +277,7 @@ fn supersede_key(ev: &Event) -> Option<usize> {
     }
 }
 
-/// 레인 묶음. 버려질 때 워커를 닫고 남은 큐를 비운 뒤 합류한다.
+/// Lane set. On drop, it closes the workers, empties the remaining queues and joins.
 struct Lanes {
     map: HashMap<LaneKey, Lane>,
 }
@@ -296,7 +296,7 @@ impl Drop for Lanes {
     }
 }
 
-/// 리듀서를 감싸는 이벤트 구동기.
+/// Event driver that wraps a reducer.
 pub struct Pipeline<R: Reducer> {
     reducer: R,
     lanes: Lanes,
@@ -308,7 +308,7 @@ pub struct Pipeline<R: Reducer> {
 }
 
 impl<R: Reducer> Pipeline<R> {
-    /// 비동기 훅 실행, 모든 종류 `KeepAll` 로 만든다.
+    /// Create it with asynchronous hook execution and `KeepAll` for every kind.
     pub fn new(reducer: R) -> Self {
         Pipeline {
             reducer,
@@ -326,7 +326,8 @@ impl<R: Reducer> Pipeline<R> {
         }
     }
 
-    /// 동기 모드 설정. 첫 `push` 전에 정한다. 동기로 바꾸면 그때까지 쌓인 비동기 큐를 먼저 비운다.
+    /// Set synchronous mode. Decide before the first `push`. Switching to synchronous first drains the asynchronous queues accumulated so
+    /// far.
     pub fn sync(mut self, on: bool) -> Self {
         if on && !self.sync {
             self.flush();
@@ -335,13 +336,13 @@ impl<R: Reducer> Pipeline<R> {
         self
     }
 
-    /// 종류별 큐 정책 설정(비동기 모드에서만 의미가 있다).
+    /// Set the per-kind queue policy (only meaningful in asynchronous mode).
     pub fn policy(mut self, kind: EventKind, p: QueuePolicy) -> Self {
         self.policies.insert(kind, p);
         self
     }
 
-    /// 특정 종류 훅 등록. 같은 종류 훅은 등록 순서대로 실행된다.
+    /// Register a hook for a specific kind. Hooks of the same kind run in registration order.
     pub fn on<F>(mut self, kind: EventKind, f: F) -> Self
     where
         F: FnMut(&Event) + Send + 'static,
@@ -350,7 +351,7 @@ impl<R: Reducer> Pipeline<R> {
         self
     }
 
-    /// 모든 이벤트 훅 등록(전체 순서 보존).
+    /// Register a hook for all events (preserves the overall order).
     pub fn on_any<F>(mut self, f: F) -> Self
     where
         F: FnMut(&Event) + Send + 'static,
@@ -359,8 +360,8 @@ impl<R: Reducer> Pipeline<R> {
         self
     }
 
-    /// 프레임 훅: 디코딩된 입력 프레임을 카메라 한 장씩, 위치 처리 전에 받는다.
-    /// 세션은 `SessionConfig::decode_frames` 가 켜져 있어야 프레임을 낸다.
+    /// Frame hook: receives each decoded input frame, one camera at a time, before the position is processed.
+    /// The session emits frames only if `SessionConfig::decode_frames` is on.
     pub fn on_frame<F>(self, mut f: F) -> Self
     where
         F: FnMut(&Arc<Frame>) + Send + 'static,
@@ -372,7 +373,7 @@ impl<R: Reducer> Pipeline<R> {
         })
     }
 
-    /// 구역 초벌 점군 훅.
+    /// Zone preview point-cloud hook.
     pub fn on_zone_preview<F>(self, mut f: F) -> Self
     where
         F: FnMut(ZoneRange, &Arc<PointCloud>) + Send + 'static,
@@ -384,7 +385,7 @@ impl<R: Reducer> Pipeline<R> {
         })
     }
 
-    /// 구역 정밀 점군 훅.
+    /// Zone refined point-cloud hook.
     pub fn on_zone_refined<F>(self, mut f: F) -> Self
     where
         F: FnMut(ZoneRange, &Arc<PointCloud>) + Send + 'static,
@@ -396,7 +397,7 @@ impl<R: Reducer> Pipeline<R> {
         })
     }
 
-    /// 스냅샷 훅(인덱스, 합성 점군).
+    /// Snapshot hook (index, composite point cloud).
     pub fn on_snapshot<F>(self, mut f: F) -> Self
     where
         F: FnMut(usize, &Arc<PointCloud>) + Send + 'static,
@@ -408,7 +409,7 @@ impl<R: Reducer> Pipeline<R> {
         })
     }
 
-    /// 위치 처리 완료 훅(위치, 등록 수, 기대 수).
+    /// Position-done hook (position, registered count, expected count).
     pub fn on_position_done<F>(self, mut f: F) -> Self
     where
         F: FnMut(usize, usize, usize) + Send + 'static,
@@ -420,7 +421,7 @@ impl<R: Reducer> Pipeline<R> {
         })
     }
 
-    /// 경고·오류 메시지 훅(리듀서가 낸 것. 훅 패닉 오류는 구독 채널로만 간다).
+    /// Warning/error message hook (those emitted by the reducer; hook panic errors go only to the subscription channel).
     pub fn on_message<F>(self, f: F) -> Self
     where
         F: FnMut(EventKind, &str) + Send + 'static,
@@ -444,15 +445,15 @@ impl<R: Reducer> Pipeline<R> {
         lane.hooks.lock().unwrap_or_else(|p| p.into_inner()).push(hook);
     }
 
-    /// 모든 이벤트(훅 패닉 오류 포함)를 받는 채널. 수신 측이 버려지면 자동 해제된다.
+    /// Channel that receives all events (including hook panic errors). It is released automatically if the receiver is dropped.
     pub fn subscribe(&self) -> Receiver<Event> {
         let (tx, rx) = channel();
         self.shared.subscribers.lock().unwrap_or_else(|p| p.into_inner()).push(tx);
         rx
     }
 
-    /// 입력 하나를 리듀서에 넣고 결과 이벤트를 내보낸다. 낸 이벤트 수를 돌려준다.
-    /// [`Reducer::prelude`] 이벤트는 처리 전에 먼저 훅 큐에 들어가므로, 비동기 훅은 처리와 동시에 실행된다.
+    /// Feed one input to the reducer and emit the resulting events. Returns the number of events emitted.
+    /// [`Reducer::prelude`] events enter the hook queue before processing, so asynchronous hooks run concurrently with the processing.
     pub fn push(&mut self, input: R::Input) -> usize {
         let pre = self.reducer.prelude(&input);
         let n = self.dispatch(pre);
@@ -460,37 +461,37 @@ impl<R: Reducer> Pipeline<R> {
         n + self.dispatch(evs)
     }
 
-    /// 끝난 백그라운드 작업을 수거해 내보낸다(기다리지 않음).
+    /// Collect finished background work and emit it (does not wait).
     pub fn poll(&mut self) -> usize {
         let evs = self.reducer.poll();
         self.dispatch(evs)
     }
 
-    /// 명령을 리듀서에 전달하고 결과 이벤트를 내보낸다.
+    /// Pass a command to the reducer and emit the resulting events.
     pub fn command(&mut self, c: Command) -> usize {
         let evs = self.reducer.command(c);
         self.dispatch(evs)
     }
 
-    /// 지금까지 큐에 들어간 훅 실행이 모두 끝날 때까지 기다린다.
+    /// Wait until all hook executions queued so far have finished.
     pub fn flush(&mut self) {
         for lane in self.lanes.map.values() {
             lane.wait_idle();
         }
     }
 
-    /// 리듀서 참조.
+    /// Reducer reference.
     pub fn reducer(&self) -> &R {
         &self.reducer
     }
 
-    /// 리듀서 가변 참조(이벤트는 내보내지 않음).
+    /// Mutable reducer reference (events are not emitted).
     pub fn reducer_mut(&mut self) -> &mut R {
         &mut self.reducer
     }
 
-    /// 남은 백그라운드 작업을 수거해 내보내고, 훅 큐를 모두 비운 뒤 워커를 닫고 요약을 돌려준다.
-    /// 구독 채널은 파이프라인이 끝나면 닫힌다.
+    /// Collect and emit the remaining background work, drain the hook queues, close the workers and return the summary.
+    /// The subscription channels are closed when the pipeline ends.
     pub fn finish(mut self) -> (R, Summary) {
         let evs = self.reducer.finish();
         self.dispatch(evs);
@@ -576,8 +577,8 @@ mod tests {
         Event::ZoneRefined { meta: meta(v), range: range(z), cloud: cloud(), model: Arc::new(Reconstruction::default()), dense: true }
     }
 
-    /// 입력 n 하나에 대해 PositionDone(n), 짝수면 ZonePreview(zone n/2) 를 낸다.
-    /// finish 에서 남은 정밀 결과(ZoneRefined)를 낸다.
+    /// For input n, emit PositionDone(n), and for even n also ZonePreview(zone n/2).
+    /// In finish, emit the remaining refined results (ZoneRefined).
     #[derive(Default)]
     struct Fake {
         v: u64,
@@ -658,7 +659,7 @@ mod tests {
 
     #[test]
     fn pipeline_latest_per_key_policy() {
-        // 훅을 막아 둔 상태에서 같은 구역 초벌을 여러 번 넣으면 마지막 것만 남는다.
+        // With the hooks blocked, putting in previews of the same zone several times leaves only the last one.
         let gate = Arc::new((Mutex::new(false), Condvar::new()));
         let seen = log();
         let (g, s2) = (Arc::clone(&gate), Arc::clone(&seen));
@@ -689,7 +690,7 @@ mod tests {
                     s2.lock().unwrap().push(format!("{}@{}", range.zone, meta.version));
                 }
             });
-        // 첫 이벤트는 워커가 집어 막혀 있을 수 있으므로 잠시 기다려 확실히 집게 한다.
+        // The worker may have picked up the first event and be blocked, so wait a moment to make sure it is picked up.
         p.push((9, 0));
         std::thread::sleep(Duration::from_millis(50));
         for v in 1..=5 {

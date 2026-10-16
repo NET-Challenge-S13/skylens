@@ -6,7 +6,6 @@ GPU backends: multi-view stereo (PatchMatch), SIFT descriptor matching, and the 
 CUDA C kernels are compiled at run time through cudarc (driver API + NVRTC), and the crate plugs in by implementing
 backend traits defined in other crates.
 
-API doc comments are currently in Korean; English translation is planned.
 
 **Pipeline stage**: the compute parts of feature extraction (`cumulus3d_features::SiftEngine` → `CudaSift`), matching (`cumulus3d_matching::MatcherBackend` → `CudaMatcher`),
 and densification (`cumulus3d_dense::PatchMatchBackend` → `CudaPatchMatch`). `cumulus3d stream --gpu` uses these backends.

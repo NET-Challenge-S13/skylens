@@ -7,7 +7,7 @@
 이 프로젝트는 [유의적 버전(SemVer)](https://semver.org/lang/ko/)을 따른다. 0.x 동안에는 부 버전(0.1 → 0.2)에서 호환이 깨질 수 있다.
 각 버전의 날짜는 실제 작업·커밋 날짜다.
 
-## [0.4.0] — 계획(작업 중)
+## [0.4.0] — 2026-10-16
 ### 변경
 - CI: 매 push 마다 CUDA 컨테이너에서 NVRTC 로 커널 컴파일 검사(GPU 불필요, `cumulus3d_cuda::check_kernels`, 예제 `check_kernels`),
   `rustfmt` 검사 필수화(`rustfmt.toml`: 폭 140), 내용 정책 검사, 러너 고정(`ubuntu-24.04`, `macos-15`), `actions/checkout@v5`,
@@ -49,6 +49,29 @@
 ### 변경
 - `cumulus3d stream`(`stream::run_stream`)이 선언형 층(`Plan::from_stream` → `Recon`)으로 실행된다. 출력은 같다.
   계획 문제는 실행 전에 보고된다. 특히 CUDA 장치 없이 조밀화를 켜면 첫 구역이 아니라 시작 때 분명한 메시지로 실패한다.
+
+### 추가
+- 번들 조정 사전값: `BaConfig::position_priors`(σ 가 있는 카메라 위치 사전값, 자동 게이지 고정 대체)와
+  `BaConfig::intrinsics_priors`(잔차 `(p - p0) / σ`, 초점 σ 는 상대값, 왜곡 σ 는 절대값). CLI 옵션 `--intrinsics-prior <json>`,
+  `--intrinsics-prior-sigma`(기본 0.005), `--intrinsics-prior-dist-sigma`(기본 0.01). 읽기 코드는 `crates/cli/src/intrinsics.rs`.
+- 안정 표시 모드(`--stable-display`, `--settle-tol`, `--settle-max-zone`): 내부 파라미터를 수렴할 때까지 조정한 뒤 고정하고,
+  구역마다 공유 3D 점 기반 강건 Sim3 로 이전 지도에 다시 맞추며, 최종 출력은 항상 ENU 정렬이다.
+- 실시간 차분 스트림 형식 v4(`crates/cli/src/blocks.rs`): `live/stream/manifest.json`, `packs/e_NNNN.bin`(추가/이동 20 B,
+  제거 4 B 레코드), `status.json` 심박. 새 옵션 `--live-stride`(기본 6).
+- 조밀화: 융합 점군의 법선 방향 양방향 평활(`crates/dense/src/smooth.rs`, `--fusion-smooth-iters`, `--fusion-smooth-radius`,
+  `--fusion-smooth-range`, `--fusion-smooth-normal`), 가시성 필터(`crates/dense/src/visibility.rs`, `--visibility-views`,
+  `--visibility-tau`, `--visibility-min-violations`), `--max-levels`.
+- `PointCloud::keys`(`image << 32 | v << 16 | u`, 각 점이 나온 화소). 융합·평활·가시성 필터를 거쳐 유지된다.
+- 예제 `frame_hook_plan`(TOML 계획을 실행하고 프레임 훅이 받은 프레임을 보고).
+### 변경
+- 모든 소스 주석과 `cumulus3d --help` 문구를 영어로 바꿈(코드는 그대로). 로그·오류 문자열 리터럴은 여전히 한국어다.
+- 키 해시(splitmix64) 솎아내기, 구역 병합 시 복셀 소유 유지, 중복 키는 가장 낮은 구역을 유지.
+- 조밀화 fast 프로필 조정.
+- `plan --print-default` 가 주석이 달린 계획을 출력한다.
+- API 문서 주석은 영어이며, README 의 "주석이 한국어" 안내를 삭제했다.
+### 호환성 깨짐
+- `PointCloud` 에 공개 필드 `keys` 가 추가됨. 구조체 리터럴로 만들던 코드는 이 필드를 채워야 한다.
+- 작업공간 버전이 0.4.0(모든 크레이트).
 
 ## [0.3.1] — 2026-10-09
 ### 변경

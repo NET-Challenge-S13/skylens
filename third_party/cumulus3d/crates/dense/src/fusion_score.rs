@@ -25,21 +25,26 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 점수 기반 융합: 기준 픽셀의 3D 점을 이웃 뷰에 투영해 일치 뷰의 기여와 자유공간 위반 벌점을 합한 점수로 채택한다.
+//! Score-based fusion: projects the 3D point of a reference pixel onto neighbor views and adopts it by a score summing contributions of
+//! agreeing views and free-space violation penalties.
 //!
-//! 기준 픽셀 x 를 점 X 로 올리고 이웃 뷰 j 마다
-//! - 깊이·법선이 일치하면 기여 s_j = c_j · exp(−e_j²/(2σ_e²)) · (1 − exp(−θ_j²/(2σ_θ²))),
-//!   c_j = 그 픽셀의 광도 신뢰도 clamp(1 − 비용, 0, 1)(비용이 없으면 1), e_j = 왕복 재투영 오차(px),
-//!   θ_j = 기준·j 시선 사잇각;
-//! - 불일치이면서 X 가 j 의 관측 표면보다 카메라에 가까우면(자유공간 위반) 벌점 p_j = c_j.
+//! Lift the reference pixel x to a point X and, for each neighbor view j:
+//! - if depth and normal agree, contribution s_j = c_j · exp(−e_j²/(2σ_e²)) · (1 − exp(−θ_j²/(2σ_θ²))), with c_j = photometric confidence
+//!   of that pixel clamp(1 − cost, 0, 1) (1 if there is no cost), e_j = round-trip reprojection error (px), θ_j = angle between the
+//!   reference and j viewing rays;
+//! - if it disagrees and X is closer to the camera than the observed surface of j (free-space violation), penalty p_j = c_j.
 //!
-//! 기준 자신은 s_ref = c_ref. 점수 S = Σs − λΣp 가 τ 이상이면 후보가 되고, 위치·법선·색은 s(역분산 가중이
-//! 켜져 있으면 곱함)를 가중치로 평균한다.
+//! The reference itself has s_ref = c_ref. If the score S = Σs − λΣp is at least τ it becomes a candidate, and position, normal and color
+//! are averaged with s as weight (multiplied by the inverse-variance weight
+//! if it is on).
 //!
-//! 병렬·결정성: 1단계는 기준 영상 단위 병렬로 후보를 만든다(공유 상태 없음). 2단계(`mark_used`)는 각 후보가 쓰는
-//! 픽셀(기준 + 일치 픽셀) 집합이 겹치면 우선순위(점수 내림차순, 같으면 (뷰, 픽셀) 오름차순)가 높은 후보만 남긴다.
-//! 라운드마다 남은 후보가 자기 픽셀을 원자적 최소로 점유하고, 모든 픽셀을 이긴 후보를 채택해 그 픽셀을 잠근다.
-//! 결과는 우선순위 순 탐욕 선택과 같아 실행 순서·스레드 수와 무관하다. 출력은 (뷰, 픽셀) 순.
+//! Parallelism and determinism: stage 1 builds candidates in parallel per reference image (no shared state). Stage 2 (`mark_used`): if the
+//! pixel sets (reference + agreeing pixels) used by candidates overlap,
+//! only the candidate with higher priority (score descending, ties by (view, pixel) ascending) remains.
+//! In each round the remaining candidates atomically occupy their pixels by minimum, and a candidate that wins all its pixels is adopted
+//! and locks those pixels.
+//! The result equals greedy selection in priority order, so it is independent of execution order and thread count. Output is in (view,
+//! pixel) order.
 
 use crate::fusion::{FusionInput, FusionOutput};
 use crate::params::FusionParams;
@@ -47,30 +52,30 @@ use crate::scene::DenseScene;
 use rayon::prelude::*;
 use std::sync::atomic::{AtomicU32, Ordering};
 
-/// 점수 융합 옵션.
+/// Score fusion options.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ScoreFusionOptions {
-    /// 재투영 오차 가중의 σ_e(픽셀).
+    /// σ_e (pixels) of the reprojection error weight.
     pub sigma_e_px: f64,
-    /// 시선 사잇각 가중의 σ_θ(도).
+    /// σ_θ (degrees) of the viewing-ray angle weight.
     pub sigma_theta_deg: f64,
-    /// 자유공간 위반 벌점 계수 λ.
+    /// Free-space violation penalty coefficient λ.
     pub lambda: f64,
-    /// 채택 문턱 τ.
+    /// Adoption threshold τ.
     pub tau: f64,
-    /// 상대 깊이 허용치(일치 판정과 자유공간 위반의 여유).
+    /// Relative depth tolerance (margin for agreement judgment and free-space violation).
     pub depth_error: f64,
-    /// 법선 허용 각(도).
+    /// Normal tolerance angle (degrees).
     pub normal_error_deg: f64,
-    /// 검사할 겹침 뷰 수(겹침 목록 앞에서부터).
+    /// Number of overlapping views to check (from the front of the overlap list).
     pub num_neighbors: usize,
-    /// 채택된 점에 쓰인 픽셀을 다른 점에 다시 쓰지 않음.
+    /// Pixels used by an adopted point are not reused for other points.
     pub mark_used: bool,
-    /// 깊이 불확실성 역분산 가중을 기여 가중치에 곱함.
+    /// Multiply the depth-uncertainty inverse-variance weight into the contribution weight.
     pub inverse_variance: bool,
-    /// 역분산 가중의 정합 불확실성 σ_px = sigma_px0 + sigma_px_slope·비용 (픽셀).
+    /// Registration uncertainty σ_px = sigma_px0 + sigma_px_slope·cost (pixels) of the inverse-variance weight.
     pub sigma_px0: f64,
-    /// 역분산 가중 σ_px 의 비용 기울기.
+    /// Cost slope of the inverse-variance weight σ_px.
     pub sigma_px_slope: f64,
 }
 
@@ -93,7 +98,8 @@ impl Default for ScoreFusionOptions {
 }
 
 impl ScoreFusionOptions {
-    /// 기존 융합 허용치(깊이·법선 허용치, 겹침 뷰 수, 사용 표시, 역분산 가중)를 이어받고 점수 매개변수는 기본값.
+    /// Inherits the existing fusion tolerances (depth/normal tolerances, overlap view count, used mark, inverse-variance weight); score
+    /// parameters take defaults.
     pub fn from_fusion(p: &FusionParams) -> Self {
         Self {
             depth_error: p.max_depth_error,
@@ -150,7 +156,7 @@ fn dot(a: &[f64; 3], b: &[f64; 3]) -> f64 {
     a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 }
 
-/// 광도 신뢰도 [0,1]: clamp(1 − 비용, 0, 1), 비용이 없으면 1.
+/// Photometric confidence [0,1]: clamp(1 − cost, 0, 1), 1 if there is no cost.
 #[inline]
 fn confidence(inp: &FusionInput<'_>, pix: usize) -> f64 {
     inp.cost.map_or(1.0, |c| (1.0 - c[pix] as f64).clamp(0.0, 1.0))
@@ -168,14 +174,14 @@ fn inv_var(o: &ScoreFusionOptions, inp: &FusionInput<'_>, f: f64, pix: usize, d:
     }
 }
 
-/// 채택 후보(S ≥ τ).
+/// Adopted candidate (S ≥ τ).
 struct Cand {
     pix: u32,
     score: f32,
     pos: [f32; 3],
     nrm: [f32; 3],
     col: [u8; 3],
-    /// 일치 픽셀 (뷰, 픽셀) — 뷰 후보 묶음의 `hits` 안 구간.
+    /// Agreeing pixels (view, pixel): a range within `hits` of the view's candidate bundle.
     hit0: u32,
     nhit: u32,
 }
@@ -186,7 +192,7 @@ struct ViewCands {
     hits: Vec<(u32, u32)>,
 }
 
-/// 기준 뷰 v 의 후보 계산(공유 상태 없음).
+/// Candidate computation for reference view v (no shared state).
 fn view_candidates(
     scene: &DenseScene,
     cams: &[Cam],
@@ -305,11 +311,11 @@ fn install<R: Send>(pool: &Option<rayon::ThreadPool>, f: impl FnOnce() -> R + Se
 const FREE: u32 = u32::MAX;
 const LOCKED: u32 = 0;
 
-/// 점수 기반 융합. 입력은 [`crate::fusion::fuse_consistency`] 와 같다(`inputs[v]` 가 None 이면 뷰 v 미사용,
-/// `overlap[v]` 는 검사할 겹침 뷰 순서).
+/// Score-based fusion. Input is the same as [`crate::fusion::fuse_consistency`] (view v is unused if `inputs[v]` is None,
+/// `overlap[v]` is the order of overlap views to check).
 ///
-/// 연결: densify 의 `fuse_depth_maps` 에서 새 융합 모드일 때 `fuse(..)` 대신
-/// `fuse_scored(scene, &inputs, &overlap, &ScoreFusionOptions::from_fusion(&opts.fusion), threads)` 를 호출한다.
+/// Hookup: in densify's `fuse_depth_maps`, in the new fusion mode, call
+/// `fuse_scored(scene, &inputs, &overlap, &ScoreFusionOptions::from_fusion(&opts.fusion), threads)` instead of `fuse(..)`.
 pub fn fuse_scored(
     scene: &DenseScene,
     inputs: &[Option<FusionInput<'_>>],
@@ -329,7 +335,7 @@ pub fn fuse_scored(
         .collect();
     let pool = if threads > 0 { rayon::ThreadPoolBuilder::new().num_threads(threads).build().ok() } else { None };
 
-    // 1단계: 기준 영상 단위 병렬 후보 계산.
+    // Stage 1: candidate computation, parallel per reference image.
     let per_view: Vec<ViewCands> = install(&pool, || {
         (0..n)
             .into_par_iter()
@@ -337,14 +343,14 @@ pub fn fuse_scored(
             .collect()
     });
 
-    // 전역 후보 목록 (뷰, 후보 색인) — (뷰, 픽셀) 순.
+    // Global candidate list (view, candidate index), in (view, pixel) order.
     let ids: Vec<(u32, u32)> =
         per_view.iter().enumerate().flat_map(|(v, vc)| (0..vc.cands.len() as u32).map(move |i| (v as u32, i))).collect();
     let mut accepted = vec![!opts.mark_used; ids.len()];
 
     if opts.mark_used && !ids.is_empty() {
         assert!(ids.len() < (u32::MAX - 1) as usize, "융합 후보 수가 너무 많음");
-        // 우선순위 순위(1 부터; 작을수록 우선): 점수 내림차순, 같으면 (뷰, 픽셀) 순.
+        // Priority rank (from 1; smaller is higher priority): score descending, ties in (view, pixel) order.
         let mut order: Vec<u32> = (0..ids.len() as u32).collect();
         let score = |g: u32| {
             let (v, i) = ids[g as usize];
@@ -364,12 +370,12 @@ pub fn fuse_scored(
             std::iter::once((v, c.pix)).chain(vc.hits[c.hit0 as usize..(c.hit0 + c.nhit) as usize].iter().copied())
         };
         let cell = |(v, p): (u32, u32)| &claim[v as usize][p as usize];
-        // 0 = 미정, 1 = 채택, 2 = 기각.
+        // 0 = undecided, 1 = adopted, 2 = rejected.
         let state: Vec<std::sync::atomic::AtomicU8> = (0..ids.len()).map(|_| std::sync::atomic::AtomicU8::new(0)).collect();
         let mut active: Vec<usize> = (0..ids.len()).collect();
         while !active.is_empty() {
             install(&pool, || {
-                // 점유 초기화(잠긴 픽셀 제외).
+                // Reset occupation (excluding locked pixels).
                 active.par_iter().for_each(|&g| {
                     for q in pixels(g) {
                         let c = cell(q);
@@ -378,7 +384,7 @@ pub fn fuse_scored(
                         }
                     }
                 });
-                // 잠긴 픽셀이 있으면 기각, 아니면 순위로 점유.
+                // Reject if there is a locked pixel, otherwise occupy by rank.
                 active.par_iter().for_each(|&g| {
                     if pixels(g).any(|q| cell(q).load(Ordering::Relaxed) == LOCKED) {
                         state[g].store(2, Ordering::Relaxed);
@@ -388,13 +394,13 @@ pub fn fuse_scored(
                         cell(q).fetch_min(rank[g], Ordering::Relaxed);
                     }
                 });
-                // 모든 픽셀을 이긴 후보 채택.
+                // Adopt candidates that won all their pixels.
                 active.par_iter().for_each(|&g| {
                     if state[g].load(Ordering::Relaxed) == 0 && pixels(g).all(|q| cell(q).load(Ordering::Relaxed) == rank[g]) {
                         state[g].store(1, Ordering::Relaxed);
                     }
                 });
-                // 채택 후보의 픽셀 잠금.
+                // Lock the pixels of adopted candidates.
                 active.par_iter().for_each(|&g| {
                     if state[g].load(Ordering::Relaxed) == 1 {
                         for q in pixels(g) {
@@ -420,6 +426,11 @@ pub fn fuse_scored(
         out.cloud.positions.push(c.pos);
         out.cloud.normals.push(c.nrm);
         out.cloud.colors.push(c.col);
+        out.cloud.keys.push(crate::fusion::point_key(
+            scene.views[v as usize].image_id,
+            c.pix as usize % cams[v as usize].w,
+            c.pix as usize / cams[v as usize].w,
+        ));
         let mut vis: Vec<u32> =
             std::iter::once(v).chain(vc.hits[c.hit0 as usize..(c.hit0 + c.nhit) as usize].iter().map(|&(o, _)| o)).collect();
         vis.sort_unstable();
@@ -487,7 +498,7 @@ mod tests {
         let s = synth();
         let mut depth = s.depth.clone();
         let w = s.config.width;
-        // 뷰 4(가운데)의 한 구역을 카메라 쪽으로 당긴 떠 있는 점으로 만든다.
+        // Make a region of view 4 (the middle) into floating points pulled toward the camera.
         for row in 40..80 {
             for col in 60..100 {
                 depth[4][row * w + col] *= 0.6;
@@ -496,7 +507,7 @@ mod tests {
         let floating = |out: &FusionOutput| {
             out.cloud.positions.iter().filter(|p| s.surface_distance([p[0] as f64, p[1] as f64, p[2] as f64]) > 1.0).count()
         };
-        // 기준 혼자서도 채택되는 낮은 문턱: 벌점이 없으면 떠 있는 점이 남는다.
+        // Low threshold at which the reference alone is adopted: without penalty the floating points remain.
         let base = ScoreFusionOptions { tau: 0.5, ..Default::default() };
         let no_pen = run(&s, &depth, &ScoreFusionOptions { lambda: 0.0, ..base.clone() }, 0);
         let pen = run(&s, &depth, &base, 0);
@@ -507,7 +518,7 @@ mod tests {
     #[test]
     fn deterministic_across_threads() {
         let s = synth();
-        // 결정적 잡음으로 충돌을 늘린다.
+        // Increase collisions with deterministic noise.
         let depth: Vec<Vec<f32>> = s
             .depth
             .iter()

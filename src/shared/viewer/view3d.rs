@@ -8,7 +8,8 @@
 //!    [`Gpu3d`] (point clouds, meshes, lines) and returns a [`FrameSpec`]: camera, background, fog.
 //! 2. The widget records one pass ([`pointblitz::core::begin_pass`]): opaque meshes, then every
 //!    point cloud (one pointblitz `Scene` per reconstruction segment, each with its own alpha for
-//!    reveal fades), then transparent meshes, then lines. All share the reversed-Z depth buffer.
+//!    reveal fades, and the point slot stream as one pointblitz `SlotScene`), then transparent
+//!    meshes, then lines. All share the reversed-Z depth buffer.
 //! 3. The image goes into the Blitz scene, and [`ViewScreen::paint_overlay`] may draw vector
 //!    shapes over it.
 //!
@@ -27,7 +28,9 @@ use peniko::kurbo::{Affine, Rect};
 use peniko::{Fill, ImageBrush, ImageSampler};
 use pointblitz::Camera;
 use pointblitz::core::renderer::DEPTH_FORMAT;
-use pointblitz::core::{FrameStyle, Inserted, LineRenderer, Material, MeshData, MeshRenderer, PointSize, Renderer, Scene, begin_pass};
+use pointblitz::core::{
+    FrameStyle, Inserted, LineRenderer, Material, MeshData, MeshRenderer, PointSize, Renderer, Scene, SlotScene, begin_pass,
+};
 use pointblitz::io::chunk::{ChunkError, HEADER_LEN};
 use skylens_shared::proto::payload::v1 as payload;
 use std::cell::RefCell;
@@ -111,6 +114,25 @@ impl PointCloud {
     }
 }
 
+/// The point slot stream as one slot scene (decision 0052).
+struct SlotCloud {
+    scene: SlotScene,
+    alpha: f32,
+    visible: bool,
+    /// What the scene holds: (store slot epoch, last seq applied, caller's colour key).
+    source: Option<(u64, u32, u64)>,
+}
+
+/// What [`PointClouds::sync_slots`] did.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct SlotSync {
+    /// Messages applied to the scene as they are.
+    pub applied: Vec<u32>,
+    /// The scene was rebuilt from the folded state (first sync, new stream, reconnect, colour key
+    /// change, or too far behind).
+    pub rebuilt: bool,
+}
+
 /// What [`PointClouds::sync_segments`] did.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct SegmentSync {
@@ -121,10 +143,12 @@ pub struct SegmentSync {
     pub removed: Vec<u32>,
 }
 
-/// Several independent pointblitz scenes drawn in one frame, each with its own alpha.
+/// Several independent pointblitz scenes drawn in one frame, each with its own alpha, plus at
+/// most one slot scene for the point slot stream.
 #[derive(Default)]
 pub struct PointClouds {
     clouds: BTreeMap<u64, PointCloud>,
+    slots: Option<SlotCloud>,
 }
 
 impl PointClouds {
@@ -153,6 +177,7 @@ impl PointClouds {
 
     pub fn clear(&mut self) {
         self.clouds.clear();
+        self.slots = None;
     }
 
     pub fn contains(&self, id: u64) -> bool {
@@ -180,9 +205,78 @@ impl PointClouds {
         }
     }
 
-    /// Points on screen across visible clouds.
+    /// Points on screen across visible clouds and the slot scene.
     pub fn points(&self) -> u64 {
-        self.clouds.values().filter(|c| c.visible).map(|c| c.scene.points()).sum()
+        let slots = self.slots.as_ref().filter(|s| s.visible).map_or(0, |s| s.scene.points());
+        self.clouds.values().filter(|c| c.visible).map(|c| c.scene.points()).sum::<u64>() + slots
+    }
+
+    /// Points the slot scene shows (0 without one).
+    pub fn slot_points(&self) -> u64 {
+        self.slots.as_ref().map_or(0, |s| s.scene.points())
+    }
+
+    /// Opacity multiplier of the slot scene, 0..1.
+    pub fn set_slot_alpha(&mut self, alpha: f32) {
+        if let Some(s) = self.slots.as_mut() {
+            s.alpha = alpha.clamp(0.0, 1.0);
+        }
+    }
+
+    pub fn set_slots_visible(&mut self, visible: bool) {
+        if let Some(s) = self.slots.as_mut() {
+            s.visible = visible;
+        }
+    }
+
+    /// Brings the slot scene in line with the store's point slot stream: applies the messages the
+    /// scene has not seen, or rebuilds it from the folded state when it cannot (first sync, new
+    /// stream or reconnect, too far behind). Without slots in the store the scene is dropped.
+    pub fn sync_slots(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, store: &ChunkStore) -> SlotSync {
+        self.sync_slots_with(device, queue, store, 0, |m| m.to_vec())
+    }
+
+    /// Like [`PointClouds::sync_slots`], every message passed through `map` first (e.g. colour by
+    /// height). A different `key` rebuilds the scene (the mapping changed).
+    pub fn sync_slots_with(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        store: &ChunkStore,
+        key: u64,
+        map: impl Fn(&[u8]) -> Vec<u8>,
+    ) -> SlotSync {
+        let mut out = SlotSync::default();
+        let sp = store.slots();
+        if sp.is_empty() {
+            self.slots = None;
+            return out;
+        }
+        let cloud = self
+            .slots
+            .get_or_insert_with(|| SlotCloud { scene: SlotScene::new([0.0; 3]), alpha: 1.0, visible: true, source: None });
+        if let Some((epoch, seq, k)) = cloud.source
+            && epoch == sp.epoch()
+            && k == key
+            && let Some(msgs) = sp.messages_after(seq)
+        {
+            for m in msgs {
+                match cloud.scene.apply(device, queue, &map(&m)) {
+                    Ok(pointblitz::Applied::Shown(seqs)) => out.applied.extend(seqs),
+                    Ok(other) => crate::log(&format!("[view3d] slot message not shown: {other:?}")),
+                    Err(e) => crate::log(&format!("[view3d] dropped slot message: {e}")),
+                }
+            }
+            cloud.source = Some((epoch, sp.seq(), key));
+            return out;
+        }
+        out.rebuilt = true;
+        cloud.scene.clear();
+        if let Err(e) = cloud.scene.apply_state(device, queue, &map(&sp.state_message())) {
+            crate::log(&format!("[view3d] slot state not applied: {e}"));
+        }
+        cloud.source = Some((sp.epoch(), sp.seq(), key));
+        out
     }
 
     pub fn cloud_points(&self, id: u64) -> u64 {
@@ -248,6 +342,14 @@ impl PointClouds {
             .map(|c| (&c.scene, c.alpha))
             .unzip()
     }
+
+    fn slot_draw_list(&self) -> (Vec<&SlotScene>, Vec<f32>) {
+        self.slots
+            .iter()
+            .filter(|s| s.visible && s.alpha > 0.0 && s.scene.points() > 0)
+            .map(|s| (&s.scene, s.alpha))
+            .unzip()
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -293,6 +395,11 @@ impl Gpu3d {
     /// [`PointClouds::sync_segments`] with this device.
     pub fn sync_segments(&mut self, store: &ChunkStore, initial_alpha: f32) -> SegmentSync {
         self.clouds.sync_segments(&self.device, store, initial_alpha)
+    }
+
+    /// [`PointClouds::sync_slots`] with this device.
+    pub fn sync_slots(&mut self, store: &ChunkStore) -> SlotSync {
+        self.clouds.sync_slots(&self.device, &self.queue, store)
     }
 
     /// Brings the reconstruction mesh blocks in line with the store (ids from
@@ -556,8 +663,9 @@ impl<S: ViewScreen> View3d<S> {
             points.set_point_size(size);
         }
         let (scenes, alphas) = clouds.draw_list();
+        let (slot_scenes, slot_alphas) = clouds.slot_draw_list();
         let size = [w, h];
-        points.prepare(device, queue, size, &spec.camera, &scenes, spec.style.fog);
+        points.prepare_with_slots(device, queue, size, &spec.camera, &scenes, &slot_scenes, spec.style.fog);
         meshes.prepare(queue, size, &spec.camera, spec.style.fog);
         lines.prepare(queue, size, &spec.camera, spec.style.fog);
 
@@ -566,6 +674,7 @@ impl<S: ViewScreen> View3d<S> {
             let mut pass = begin_pass(&mut encoder, &color_view, &depth_view, &spec.style);
             meshes.draw_opaque(&mut pass);
             points.draw(&mut pass, &scenes, Some(alphas.as_slice()));
+            points.draw_slots(&mut pass, &slot_scenes, Some(slot_alphas.as_slice()));
             meshes.draw_transparent(&mut pass);
             lines.draw(&mut pass);
         }

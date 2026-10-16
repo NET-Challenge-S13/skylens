@@ -29,11 +29,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 외부 도구와 주고받는 파일 형식(상호운용).
+//! File formats exchanged with external tools (interoperability).
 //!
-//! 외부 SfM 도구(COLMAP)의 모델 형식(`cameras`/`images`/`points3D`, 선택적으로 `rigs`/`frames`,
-//! 각각 `.bin`·`.txt`)과 조밀 복원용 작업 폴더 구성(`stereo/patch-match.cfg`, `stereo/fusion.cfg`)을
-//! 이 모듈 한 곳에서만 다룬다. 파일 이름·헤더 문자열·필드 순서는 그 형식을 그대로 따른다.
+//! The model format of an external SfM tool (COLMAP) (`cameras`/`images`/`points3D`, optionally `rigs`/`frames`,
+//! each as `.bin` or `.txt`) and the working-folder layout for dense reconstruction (`stereo/patch-match.cfg`, `stereo/fusion.cfg`)
+//! are handled in this module only. File names, header strings and field order follow that format exactly.
 
 use crate::camera::{Camera, CameraModelKind};
 use crate::error::{Error, Result};
@@ -47,13 +47,13 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 
-/// images 파일의 영상 순서.
+/// Image order in the images file.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum ImageOrder {
-    /// 기본 동작: 등록 프레임 순서 → 프레임 내 데이터 순서.
+    /// Default behavior: registered frame order -> data order within the frame.
     #[default]
     Registration,
-    /// 영상 id 오름차순(결정적, 비교 테스트용).
+    /// Ascending by image id (deterministic, for comparison tests).
     ById,
 }
 
@@ -81,7 +81,7 @@ fn assemble(raw: RawModel) -> Result<Reconstruction> {
     let mut reg_order: Vec<FrameId> = Vec::new();
     match (raw.rigs, raw.frames) {
         (None, None) => {
-            // 구버전 모델: 카메라마다 rig, 영상마다 프레임.
+            // Old-version model: one rig per camera, one frame per image.
             let cam_ids: Vec<CameraId> = rec.cameras().keys().copied().collect();
             for c in cam_ids {
                 rec.add_rig(Rig::trivial(c))?;
@@ -105,8 +105,10 @@ fn assemble(raw: RawModel) -> Result<Reconstruction> {
                 frame_order.push(f.frame_id);
                 rec.add_frame(f)?;
             }
-            // 설계 결정: 읽은 모델의 등록 순서. images 파일에 처음 나타나는 프레임 순서를 쓰면
-            // 다시 쓸 때 images 레코드 순서가 보존된다(바이트 왕복). 나머지 프레임은 frames 파일 순서.
+            // Design decision: registration order of the loaded model. Using the order in which frames first appear in the
+            // images file
+            // preserves the order of images records when written again (byte round trip). The remaining frames follow the
+            // frames file order.
             let mut seen = std::collections::HashSet::new();
             for im in &raw.images {
                 if let Some(f) = data_to_frame.get(&SensorDataKey::image(im.camera_id, im.image_id)) {
@@ -126,7 +128,7 @@ fn assemble(raw: RawModel) -> Result<Reconstruction> {
             }
         }
         _ => {
-            // 설계 결정: rigs 와 frames 중 하나만 있는 모델은 불완전한 입력 → 오류.
+            // Design decision: a model with only one of rigs and frames is incomplete input -> error.
             return Err(Error::Format("rigs 와 frames 는 함께 있어야 함".into()));
         }
     }
@@ -136,13 +138,13 @@ fn assemble(raw: RawModel) -> Result<Reconstruction> {
         }
     }
     for (id, p) in raw.points {
-        // 트랙이 연결을 정의한다(images 의 3D 점 id 는 트랙과 일치한다고 가정).
+        // Tracks define the links (the 3D point ids in images are assumed to match the tracks).
         rec.add_point3d_with_id(id, p)?;
     }
     Ok(rec)
 }
 
-/// 모델 디렉터리 읽기: 이진(cameras/images/points3D.bin) 우선, 아니면 텍스트.
+/// Reads a model directory: binary (cameras/images/points3D.bin) first, otherwise text.
 pub fn read_model(dir: impl AsRef<Path>) -> Result<Reconstruction> {
     let d = dir.as_ref();
     let all = |ext: &str| ["cameras", "images", "points3D"].iter().all(|n| d.join(format!("{n}.{ext}")).is_file());
@@ -159,9 +161,9 @@ fn open(p: &Path) -> Result<BufReader<File>> {
     Ok(BufReader::new(File::open(p).map_err(|e| Error::Io(std::io::Error::new(e.kind(), format!("{}: {e}", p.display()))))?))
 }
 
-// ======================= 이진 =======================
+// ======================= Binary =======================
 
-/// 이진 모델 파일(`*.bin`) 읽기.
+/// Reads binary model files (`*.bin`).
 pub fn read_model_binary(dir: impl AsRef<Path>) -> Result<Reconstruction> {
     let d = dir.as_ref();
     let cameras = {
@@ -240,7 +242,7 @@ pub fn read_model_binary(dir: impl AsRef<Path>) -> Result<Reconstruction> {
             for _ in 0..np {
                 let x = r.get_f64()?;
                 let y = r.get_f64()?;
-                let _point3d_id = r.get_u64()?; // 연결은 points3D 트랙이 정의
+                let _point3d_id = r.get_u64()?; // the link is defined by the points3D tracks
                 points.push(Vec2::new(x, y));
             }
             v.push(RawImage { image_id, world_to_cam: pose, camera_id, name, points });
@@ -278,7 +280,7 @@ fn create(p: &Path) -> Result<BufWriter<File>> {
     Ok(BufWriter::new(File::create(p).map_err(|e| Error::Io(std::io::Error::new(e.kind(), format!("{}: {e}", p.display()))))?))
 }
 
-/// 쓰기 대상 영상 id(등록 영상만).
+/// Image ids to write (registered images only).
 fn images_to_write(rec: &Reconstruction, order: ImageOrder) -> Vec<ImageId> {
     let mut ids = rec.registered_images();
     if order == ImageOrder::ById {
@@ -291,7 +293,7 @@ fn posed_frames(rec: &Reconstruction) -> Vec<&Frame> {
     rec.frames().values().filter(|f| f.has_pose()).collect()
 }
 
-/// 이진 다섯 파일 쓰기(디렉터리는 존재해야 함).
+/// Writes the five binary files (the directory must exist).
 pub fn write_model_binary(rec: &Reconstruction, dir: impl AsRef<Path>, order: ImageOrder) -> Result<()> {
     let d = dir.as_ref();
     check_dir(d)?;
@@ -395,9 +397,9 @@ fn check_dir(d: &Path) -> Result<()> {
     Ok(())
 }
 
-// ======================= 텍스트 =======================
+// ======================= Text =======================
 
-/// 주석·빈 줄을 건너뛰는 줄 읽기기. images.txt 둘째 줄은 `next_raw` 로 읽는다.
+/// Line reader that skips comments and blank lines. The second line of images.txt is read with `next_raw`.
 struct Lines {
     path: PathBuf,
     lines: std::io::Lines<BufReader<File>>,
@@ -463,7 +465,7 @@ impl<'a> Toks<'a> {
     }
 }
 
-/// 텍스트 모델 파일(`*.txt`) 읽기.
+/// Reads text model files (`*.txt`).
 pub fn read_model_text(dir: impl AsRef<Path>) -> Result<Reconstruction> {
     let d = dir.as_ref();
     let mut cameras = Vec::new();
@@ -581,7 +583,7 @@ fn pose_str(p: &Rigid3) -> String {
     p.to_params().iter().map(|v| g17(*v)).collect::<Vec<_>>().join(" ")
 }
 
-/// 텍스트 다섯 파일 쓰기(디렉터리는 존재해야 함). 숫자는 %.17g.
+/// Writes the five text files (the directory must exist). Numbers use %.17g.
 pub fn write_model_text(rec: &Reconstruction, dir: impl AsRef<Path>, order: ImageOrder) -> Result<()> {
     let d = dir.as_ref();
     check_dir(d)?;
@@ -697,10 +699,11 @@ pub fn write_model_text(rec: &Reconstruction, dir: impl AsRef<Path>, order: Imag
     Ok(())
 }
 
-/// 조밀 복원 작업 폴더의 `stereo/` 하위 폴더 이름.
+/// Name of the `stereo/` subfolders of the dense reconstruction working folder.
 pub const STEREO_SUBDIRS: [&str; 3] = ["depth_maps", "normal_maps", "consistency_graphs"];
 
-/// 조밀 복원 작업 폴더의 `stereo/` 아래 하위 폴더를 만든다. `rel` 은 영상 이름의 부모 경로(없으면 빈 경로).
+/// Creates the subfolders under `stereo/` of the dense reconstruction working folder. `rel` is the parent path of the image name (empty
+/// if none).
 pub fn create_stereo_dirs(out_dir: &Path, rel: &Path) -> Result<()> {
     for sub in STEREO_SUBDIRS {
         std::fs::create_dir_all(out_dir.join("stereo").join(sub).join(rel))?;
@@ -708,8 +711,8 @@ pub fn create_stereo_dirs(out_dir: &Path, rel: &Path) -> Result<()> {
     Ok(())
 }
 
-/// 조밀 복원 작업 폴더 설정 파일(`stereo/patch-match.cfg`, `stereo/fusion.cfg`)을 쓴다.
-/// 영상마다 원천 영상 자동 선택(`__auto__, n`) 한 줄을 붙인다.
+/// Writes the dense reconstruction working folder config files (`stereo/patch-match.cfg`, `stereo/fusion.cfg`).
+/// Appends one line of automatic source image selection (`__auto__, n`) per image.
 pub fn write_stereo_configs<'a>(out_dir: &Path, names: impl IntoIterator<Item = &'a str>, num_src_images: usize) -> Result<()> {
     let mut pm = String::new();
     let mut fu = String::new();
@@ -736,7 +739,7 @@ mod tests {
         d
     }
 
-    /// 카메라 3개(OPENCV), 영상 39장, 점 n_pts 개, 일부 error = −1, 일부 2D 점 무연결.
+    /// 3 cameras (OPENCV), 39 images, n_pts points, some error = −1, some 2D points unlinked.
     pub(crate) fn random_model(n_pts: usize, seed: u64) -> Reconstruction {
         let mut rng = Pcg64::seed_from_u64(seed);
         let mut r = Reconstruction::new();
@@ -756,7 +759,7 @@ mod tests {
             let pose = if i == 39 { None } else { Some(pose) };
             r.add_image_own_frame(Image::new(i, format!("cam{cam}/{i:04}.jpg"), cam, pts), pose).unwrap();
         }
-        // 등록 순서를 섞는다(쓰기 순서 = 등록 순서 확인용). 영상 39 는 미등록.
+        // Shuffle the registration order (to check that write order = registration order). Image 39 is unregistered.
         let mut order: Vec<u32> = (1..=38).collect();
         for k in (1..order.len()).rev() {
             let j = rng.random_range(0..=k);
@@ -814,17 +817,17 @@ mod tests {
     #[test]
     fn binary_roundtrip() {
         let mut m = random_model(10000, 1);
-        // 미등록 영상의 점은 없어야 저장 후 일치(영상 39 에는 점이 없음).
+        // Points of unregistered images must be absent for a match after saving (image 39 has no points).
         m.check_invariants().unwrap();
         let d = tmpdir("bin");
         write_model_binary(&m, &d, ImageOrder::Registration).unwrap();
         let r = read_model(&d).unwrap();
         r.check_invariants().unwrap();
-        // 미등록 영상은 사라짐
+        // Unregistered images disappear
         assert_eq!(r.num_images(), 38);
         m.remove_unregistered();
         assert_models_equal(&m, &r);
-        // 다시 쓰면 바이트 동일
+        // Writing again gives identical bytes
         let d2 = tmpdir("bin2");
         write_model_binary(&r, &d2, ImageOrder::Registration).unwrap();
         for f in ["cameras.bin", "rigs.bin", "frames.bin", "images.bin", "points3D.bin"] {
@@ -837,7 +840,7 @@ mod tests {
     #[test]
     fn text_roundtrip_and_headers() {
         let mut m = random_model(2000, 2);
-        // 2D 점 0개 영상 하나 추가·등록
+        // Add and register one image with 0 2D points
         m.add_image_own_frame(Image::new(100, "cam1/empty.jpg", 1, []), Some(Rigid3::identity())).unwrap();
         m.register_image(100).unwrap();
         let d = tmpdir("txt");
@@ -889,7 +892,7 @@ mod tests {
         }
         write_model_binary(&r, &d, ImageOrder::ById).unwrap();
         assert!(d.join("rigs.bin").is_file() && d.join("frames.bin").is_file());
-        // rigs 만 있으면 오류
+        // Error if only rigs is present
         std::fs::remove_file(d.join("frames.bin")).unwrap();
         assert!(read_model(&d).is_err());
         std::fs::remove_dir_all(&d).ok();

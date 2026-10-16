@@ -29,7 +29,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 단일 자세 정제: 3D 점 고정, 자세 6자유도만, 밀집 6×6 풀이.
+//! Single-pose refinement: 3D points fixed, pose 6 DoF only, dense 6×6 solve.
 
 use crate::problem::quat_plus;
 use crate::tr::{StepInfo, TrProblem};
@@ -151,7 +151,7 @@ impl TrProblem for AbsPoseProblem<'_> {
         for q in 0..6 {
             a[(q, q)] += self.jtj[(q, q)].clamp(1e-6, 1e32) / radius;
         }
-        // 설계 결정: 정규방정식 촐레스키로 푼다(정확 산술에서 밀집 QR 과 같은 해).
+        // Design decision: solve via Cholesky on the normal equations (same solution as dense QR in exact arithmetic).
         let d = a.cholesky()?.solve(&(-self.g));
         if !d.iter().all(|x| x.is_finite()) {
             return None;

@@ -25,8 +25,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-//! 시험용 합성 장면: 레이 캐스팅으로 그린 무늬 바닥(z = 0) + 상자들, 격자 배치 카메라, 참 깊이·법선, 희소점.
-//! 정확도 시험(이 크레이트와 GPU 백엔드)이 함께 쓴다.
+//! Synthetic scene for tests: textured floor (z = 0) + boxes drawn by ray casting, cameras in a grid layout, ground-truth depth and
+//! normals, sparse points.
+//! Shared by accuracy tests (this crate and the GPU backend).
 
 use crate::image::ImageBuffer;
 use crate::scene::{gray_of, DenseScene, DenseView, ScenePoint};
@@ -64,7 +65,7 @@ fn value_noise(x: f64, y: f64, seed: u64) -> f64 {
     top + (bot - top) * sy
 }
 
-/// 고주파 무늬(평면 좌표 미터): 잡음 블록 + 부드러운 그라디언트.
+/// High-frequency texture (plane coordinates in meters): noise blocks + smooth gradient.
 pub fn texture(u: f64, v: f64, seed: u64) -> f64 {
     let blocks = hash2((u / 0.18).floor() as i64, (v / 0.18).floor() as i64, seed ^ 0x55);
     let fine = value_noise(u / 0.09, v / 0.09, seed);
@@ -72,35 +73,35 @@ pub fn texture(u: f64, v: f64, seed: u64) -> f64 {
     (0.45 * blocks + 0.3 * fine + 0.25 * coarse).clamp(0.0, 1.0)
 }
 
-/// 상자(축 정렬).
+/// Box (axis-aligned).
 #[derive(Clone, Copy, Debug)]
 pub struct SynthBox {
-    /// 최소 꼭짓점.
+    /// Minimum corner.
     pub min: V3,
-    /// 최대 꼭짓점.
+    /// Maximum corner.
     pub max: V3,
 }
 
-/// 합성 장면 설정.
+/// Synthetic scene settings.
 #[derive(Clone, Debug)]
 pub struct SynthConfig {
-    /// 영상 너비(픽셀).
+    /// Image width (pixels).
     pub width: usize,
-    /// 영상 높이(픽셀).
+    /// Image height (pixels).
     pub height: usize,
-    /// 초점 거리(픽셀).
+    /// Focal length (pixels).
     pub focal: f64,
-    /// 카메라 격자(가로 × 세로)와 간격(m), 높이(m).
+    /// Camera grid (columns × rows), spacing (m) and height (m).
     pub grid: (usize, usize),
-    /// 카메라 격자 간격(m).
+    /// Camera grid spacing (m).
     pub spacing: f64,
-    /// 카메라 높이(m).
+    /// Camera height (m).
     pub altitude: f64,
-    /// 장면의 상자들.
+    /// Boxes in the scene.
     pub boxes: Vec<SynthBox>,
-    /// 무늬·희소점 난수 시드.
+    /// Random seed for texture and sparse points.
     pub seed: u64,
-    /// 희소점 수.
+    /// Number of sparse points.
     pub num_points: usize,
 }
 
@@ -120,19 +121,19 @@ impl Default for SynthConfig {
     }
 }
 
-/// 합성 장면과 뷰별 참 깊이·법선(카메라 좌표, 카메라 쪽).
+/// Synthetic scene and per-view ground-truth depth and normals (camera coordinates, facing the camera).
 pub struct SynthScene {
-    /// 조밀화 장면.
+    /// Densification scene.
     pub scene: DenseScene,
-    /// 뷰별 참 깊이.
+    /// Ground-truth depth per view.
     pub depth: Vec<Vec<f32>>,
-    /// 뷰별 참 법선(카메라 좌표).
+    /// Ground-truth normals per view (camera coordinates).
     pub normal: Vec<Vec<[f32; 3]>>,
-    /// 만들 때 쓴 설정.
+    /// Settings used to build it.
     pub config: SynthConfig,
 }
 
-/// 광선과 장면의 첫 교점: (거리, 세계 법선, 무늬 값).
+/// First intersection of a ray with the scene: (distance, world normal, texture value).
 fn cast(o: V3, d: V3, cfg: &SynthConfig) -> Option<(f64, V3, f64)> {
     let mut best: Option<(f64, V3, f64)> = None;
     if d[2] < -1e-12 {
@@ -186,7 +187,7 @@ fn cast(o: V3, d: V3, cfg: &SynthConfig) -> Option<(f64, V3, f64)> {
     best
 }
 
-/// 장면 만들기.
+/// Builds the scene.
 pub fn make_scene(cfg: &SynthConfig) -> SynthScene {
     let (w, h, f) = (cfg.width, cfg.height, cfg.focal);
     let (cx, cy) = ((w as f64 - 1.0) / 2.0, (h as f64 - 1.0) / 2.0);
@@ -197,7 +198,7 @@ pub fn make_scene(cfg: &SynthConfig) -> SynthScene {
     for j in 0..gy {
         for i in 0..gx {
             let c = [(i as f64 - (gx as f64 - 1.0) / 2.0) * cfg.spacing, (j as f64 - (gy as f64 - 1.0) / 2.0) * cfg.spacing, cfg.altitude];
-            // 장면 중심 쪽으로 살짝 기울인 시선.
+            // Line of sight tilted slightly toward the scene center.
             let target = [c[0] * 0.5, c[1] * 0.5, 0.0];
             let zc = unit(sub(target, c));
             let xc = unit(cross(zc, [0.0, 1.0, 0.0]));
@@ -249,7 +250,8 @@ pub fn make_scene(cfg: &SynthConfig) -> SynthScene {
             normals.push(nm);
         }
     }
-    // 희소점: 첫 뷰들의 참 깊이에서 고른 점, 다른 뷰에서 참 깊이와 맞으면 관측으로 넣는다.
+    // Sparse points: points picked from the ground-truth depth of the first views; added as observations if they agree with the
+    // ground-truth depth in other views.
     let mut points = Vec::new();
     let mut s = cfg.seed ^ 0xabc;
     let mut rnd = || {
@@ -290,11 +292,11 @@ pub fn make_scene(cfg: &SynthConfig) -> SynthScene {
 }
 
 impl SynthScene {
-    /// 세계 점에서 가장 가까운 장면 표면(바닥, 상자 면)까지 거리.
+    /// Distance from a world point to the nearest scene surface (floor, box faces).
     pub fn surface_distance(&self, p: [f64; 3]) -> f64 {
         let mut best = p[2].abs();
         for b in &self.config.boxes {
-            // 상자 표면까지 거리(안쪽이면 가장 가까운 면).
+            // Distance to the box surface (nearest face if inside).
             let inside = (0..3).all(|a| p[a] >= b.min[a] && p[a] <= b.max[a]);
             let dd = if inside {
                 (0..3).map(|a| (p[a] - b.min[a]).min(b.max[a] - p[a])).fold(f64::INFINITY, f64::min)
