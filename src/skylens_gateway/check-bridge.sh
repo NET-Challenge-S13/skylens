@@ -10,6 +10,8 @@ HTTPS_PORT=443
 [ -f bridge.env ] && . ./bridge.env
 TUNNEL_PORT=20889
 PROXY_TUNNEL_PORT=20882
+RTSP_TUNNEL_PORT=20554
+WHEP_PORT=10889
 
 pass() { printf '  \033[32m✓\033[0m %s\n' "$*"; }
 fail() { printf '  \033[31m✗\033[0m %s\n' "$*"; }
@@ -57,6 +59,20 @@ if ss -tln 2>/dev/null | grep -qE "127\.0\.0\.1:$PROXY_TUNNEL_PORT\b"; then
 else
   info "127.0.0.1:$PROXY_TUNNEL_PORT 없음. 대전 키에 permitopen 8082 가 등록됐는지 확인 (register-bridge-key.sh)"
 fi
+
+echo "== 영상 (WHEP) =="
+if ss -tln 2>/dev/null | grep -qE "127\.0\.0\.1:$RTSP_TUNNEL_PORT"; then
+  pass "127.0.0.1:$RTSP_TUNNEL_PORT → 대전 RTSP(:8554) 터널 열림"
+else
+  info "127.0.0.1:$RTSP_TUNNEL_PORT 없음. relay 모드면 필요하다 — 대전에서 rtsp 를 켜고 키의 permitopen 에 8554 를 넣는다"
+fi
+# 400 means MediaMTX parsed the offer, which is as far as a fake SDP can get.
+code=$(curl -s -o /dev/null -m 6 -w '%{http_code}' -X POST -H 'Content-Type: application/sdp' --data 'v=0' "http://127.0.0.1:$HTTP_PORT/live/drone1/whep" || echo 000)
+case "$code" in
+  400) pass "/live/drone1/whep → MediaMTX 가 받는다 (HTTP $code)";;
+  404) fail "/live/drone1/whep 404 — 그 경로에 영상이 없다 (VIDEO_MODE·WHEP_SOURCE 확인)";;
+  *)   fail "/live/drone1/whep HTTP $code";;
+esac
 
 echo "== 현황판 정적 파일 =="
 if [ -f "$WEB_DIR/status.html" ]; then

@@ -3,7 +3,10 @@
 # Role: hold the SRT feed coming from the field gateway. Daejeon reaches out
 # and pulls it from here, because the gateway rides 5G with a changing address
 # and cannot enter KOREN itself.
-# This host does not distribute video; Daejeon does the WebRTC fan-out.
+# This host also serves WHEP to the operator LAN. Daejeon still does the fan-out
+# for anyone who can reach its UDP media, but that media does not cross the VPN
+# and KOREN boundary, so LAN viewers take it from here instead - see
+# mediamtx-bridge-relay.yml for the mode where Daejeon holds the video.
 #
 # setup-bridge.sh substitutes __PUBLISH_PASS__ and __SRT_PORT__ from bridge.env.
 
@@ -17,12 +20,28 @@ playback: no
 rtsp: no
 rtmp: no
 hls: no
-webrtc: no
 moq: no
 
 # ---- SRT (ingest) ----
 srt: yes
 srtAddress: :__SRT_PORT__
+
+# ---- WebRTC (egress to the operator LAN) ----
+# The media leaves from this host, so the ICE candidates must be this host's own
+# addresses; __WEBRTC_HOSTS__ carries them. nginx terminates TLS in front, and
+# only nginx on this host talks to this port.
+webrtc: yes
+webrtcAddress: :__WHEP_PORT__
+webrtcEncryption: no
+webrtcAllowOrigins: ['*']
+webrtcTrustedProxies: [127.0.0.1]
+webrtcLocalUDPAddress: :10189
+webrtcLocalTCPAddress: ''
+webrtcIPsFromInterfaces: yes
+webrtcAdditionalHosts: [__WEBRTC_HOSTS__]
+webrtcICEServers2: []
+webrtcHandshakeTimeout: 10s
+webrtcTrackGatherTimeout: 2s
 
 # ---- authentication ----
 # The gateway publishes with a password; only Daejeon may read.
