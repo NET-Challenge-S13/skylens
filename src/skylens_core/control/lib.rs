@@ -7,7 +7,8 @@
 //!   overview and chase cameras).
 //! - [`terrain`], [`buildings`]: terrain tiles and building footprints into the legacy looks.
 //! - [`planner`], [`slider`], [`modals`]: the route planner map, its altitude slider, the dialogs.
-//! - [`panels`], [`video`]: mission, fleet and settings panels; the camera panel.
+//! - [`panels`], [`video`], [`whep`]: mission, fleet and settings panels; the camera panel and its
+//!   live feed (ffmpeg on native, the browser's WebRTC on the web).
 //! - [`fleet`], [`manual`]: telemetry tracks and selection; keyboard manual control.
 //! - [`bridge`], [`http`], [`download`], [`storage`], [`settings`], [`labels`], [`glyphs`]:
 //!   mission bridge client, background HTTP, KMZ saving, persistence, wording.
@@ -30,6 +31,7 @@ pub mod storage;
 pub mod terrain;
 pub mod tower;
 pub mod video;
+pub mod whep;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod native;

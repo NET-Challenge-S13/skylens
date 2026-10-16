@@ -136,6 +136,28 @@ pub fn overlay_text(who: &str, fix: Option<(f64, f64, f64)>, has_feed: bool) -> 
     }
 }
 
+/// Where a feed read through the browser is, for the overlay line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FeedLink {
+    Connecting,
+    Live,
+    NoSignal,
+}
+
+/// The camera overlay line on the web, where the feed is connected (and lost) while the panel
+/// is open: playing it reads like [`overlay_text`] with a feed.
+pub fn overlay_text_link(who: &str, fix: Option<(f64, f64, f64)>, link: FeedLink) -> String {
+    let state = match link {
+        FeedLink::Live => return overlay_text(who, fix, true),
+        FeedLink::Connecting => "영상 연결 중",
+        FeedLink::NoSignal => "NO SIGNAL · 재연결 중",
+    };
+    match fix {
+        Some((lat, lon, alt)) => format!("{who} · {} · {state}", overlay_where(lat, lon, alt)),
+        None => format!("{who} · {state}"),
+    }
+}
+
 /// A route planner list row label (legacy `renderList`). Two spaces after the number.
 pub fn waypoint_label(index: usize, lat: f64, lon: f64, alt: f64) -> String {
     format!("#{}  {}, {} · {}m", index + 1, to_fixed(lat, 5), to_fixed(lon, 5), to_fixed(alt, 0))
@@ -231,6 +253,17 @@ mod tests {
             "중앙 드론 · 36.36872°N 127.34824°E · 149m"
         );
         assert_eq!(overlay_where(-1.0, -2.0, 3.0), "1.00000°S 2.00000°W · 3m");
+    }
+
+    #[test]
+    fn overlay_link_variants() {
+        assert_eq!(overlay_text_link("중앙 드론", None, FeedLink::Connecting), "중앙 드론 · 영상 연결 중");
+        assert_eq!(overlay_text_link("중앙 드론", None, FeedLink::NoSignal), "중앙 드론 · NO SIGNAL · 재연결 중");
+        assert_eq!(
+            overlay_text_link("중앙 드론", Some((36.36699, 127.3453, 105.0)), FeedLink::Connecting),
+            "중앙 드론 · 36.36699°N 127.34530°E · 105m · 영상 연결 중"
+        );
+        assert_eq!(overlay_text_link("중앙 드론", None, FeedLink::Live), "중앙 드론 · 수신 대기");
     }
 
     #[test]
