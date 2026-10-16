@@ -49,7 +49,7 @@ static LAST_STREAM: AtomicU32 = AtomicU32::new(0);
 pub fn next_stream_id(now: SystemTime) -> u32 {
     let want = stream_id(now);
     let mut id = want;
-    let _ = LAST_STREAM.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |last| {
+    let _ = LAST_STREAM.try_update(Ordering::SeqCst, Ordering::SeqCst, |last| {
         id = want.max(last.saturating_add(1));
         Some(id)
     });

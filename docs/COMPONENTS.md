@@ -97,7 +97,7 @@ KOREN은 등록 IP 외 인바운드를 막고, 브리지 → 대전은 SSH 하�
 
 연산 서버. **REST 엔드포인트는 `app.py`와 같다**(§7). 같은 잡 API를 gRPC `ModelService`로도 열고, 코어는 gRPC로 붙는다. 라이브 입력(`PushFrames`)과 증분 출력(`SubscribeChunks`)은 gRPC 스트림에만 있다. 계약은 `src/shared/proto/skylens/model/v1/model.proto`. 내부는 세 층이다.
 
-1. **라이브 점군(cumulus3d).** `CompositionHost`에 `ReconNode`를 하나 띄워 두고, 코어가 넘긴 프레임 묶음을 `LiveFrameSet`으로 선언해 `compose`한다. 이미 받은 묶음의 재선언은 무시되고, 빠진 카메라가 있는 묶음은 기다린다. 노드는 cumulus3d **stable display**로 돈다(기본, `SKYLENS_STABLE_DISPLAY`): 미리보기 없이 구간마다 정제본이 나오고, 한 번 보인 구간은 제자리에 있다(내부값이 안정되기 전 구간 3까지는 다시 놓일 수 있다). 노드의 파일 싱크가 실행 폴더 `<work_dir>/runs/live-<스트림 id>-<pid>/`에 live diff stream v4를 쓰고, follower(`models/skylens/slotstream.rs`)가 새 사건마다 팩에 pointblitz 슬롯 메시지 머리를 붙여 `CHUNK_KIND_POINT_SLOTS` 청크로 낸다. 점은 이 경로로만 나가고, 조밀화가 없을 때(CUDA 없음)와 조밀화가 실패한 구간만 정제 구간의 희소 점을 점 청크로 보낸다. 실행 폴더에는 run.log, 타임라인, 차분 스트림만 쓰고, 시작할 때 실행 폴더를 3개만 남긴다. 스트림 id는 앞선 실행보다 늘 크고, 청크 시퀀스도 실행마다 그 id에서 시작해 모델 서버가 다시 떠도 코어가 새 실행의 청크를 빠짐없이 받는다.
+1. **라이브 점군(cumulus3d).** `CompositionHost`에 `ReconNode`를 하나 띄워 두고, 코어가 넘긴 프레임 묶음을 `LiveFrameSet`으로 선언해 `compose`한다. 이미 받은 묶음의 재선언은 무시되고, 빠진 카메라가 있는 묶음은 기다린다. 노드는 cumulus3d **stable display**로 돈다(기본, `SKYLENS_STABLE_DISPLAY`): 미리보기 없이 구간마다 정제본이 나오고, 한 번 보인 구간은 제자리에 있다(내부값이 안정되기 전 구간 3까지는 다시 놓일 수 있다). cumulus3d가 표시 점군을 메모리에서 합성하고(`display_deltas`: 키 해시 1/6 솎기, 겹침 voxel 소유, 낮은 구간 우선) 구간 결과마다 `Event::DisplayDelta`(점 추가·이동·삭제, 조밀한 슬롯 id)를 주면, `models/skylens/slotstream.rs`의 `SlotEncoder`가 이를 pointblitz 슬롯 메시지(PBSD 머리 + v4 팩)로 써서 `CHUNK_KIND_POINT_SLOTS` 청크로 낸다. 파일 싱크도 실행 폴더도 없다. 점은 이 경로로만 나가고, 조밀화가 없을 때(CUDA 없음)와 조밀화가 실패한 구간만 정제 구간의 희소 점을 점 청크로 보낸다. 메시는 구간 점군이 아니라 합성된 표시(거울)에서 만들어 겹친 구간이 이중 면을 만들지 않는다. 스트림 id는 앞선 실행보다 늘 크고, 청크 시퀀스도 실행마다 그 id에서 시작해 모델 서버가 다시 떠도 코어가 새 실행의 청크를 빠짐없이 받는다.
 2. **UNet 훅.** 같은 노드에 `on_frame` 훅으로 UNet을 붙인다. 훅은 위치 계산 전에 디코딩된 RGB 프레임을 받아 별도 큐에서 돌므로 복원을 막지 않는다. 프레임마다 나온 위험구역 확률과 사람 점은 등록된 카메라 포즈로 점군에 투영하고, **여러 프레임의 결과를 confidence 가중으로 보간**해 최종 지도 좌표(GPS 기준 ENU)에 정렬한다.
 3. **메시 보정(deltamesh).** 구간 점군을 `ingest(segment, Preview|Refined, points)`로 넣고 `extract()`가 돌려준 **바뀐 블록만** 내보낸다. 정제본은 같은 구간의 미리보기를 정확히 대체한다. 블록마다 `version`이 있어 클라이언트는 더 새 버전만 받으면 된다. stable display에서는 아직 다시 놓일 수 있는 구간(구간 3까지)을 미리보기 수준으로 넣어 두고, 구간 4가 오면 그 구간들의 마지막 점을 정제 수준으로 넣는다(정제 수준은 구간마다 한 번만 넣을 수 있다). 구간이 4개 이하인 실행은 구간 0~3의 메시가 미리보기 수준으로 남는다.
 
@@ -244,7 +244,7 @@ pointblitz는 서버에서 헤드리스로 그려 영상으로 보내는 모드�
 - UNet 추론은 `tch` 0.24(libtorch 2.11)이다. libtorch는 빌드할 때 `download-libtorch`로 받아 오며 Python venv와 무관하다. CUDA 판은 `.cargo/config.toml`의 `TORCH_CUDA_VERSION`(cu126)이 정한다.
 - UNet 추론 정밀도는 CUDA compute capability로 정한다(8.0 이상 bf16, 7.x 즉 V100은 fp16 autocast, 그 미만 fp32, CPU fp32). `SKYLENS_PRECISION`으로 강제하고, 비교는 `cargo run --release -p skylens-model --example precision_bench`. 자세한 내용은 `src/skylens_model/models/skylensnet/README.md` §5.
 - 공용 의존성 버전은 루트 `Cargo.toml`의 `[workspace.dependencies]` 한 곳에서 정한다.
-- cumulus3d는 0.4.0 릴리스 커밋(`ef0803e`)을 `third_party/cumulus3d`에 두고 SkyLens 패치를 얹어 쓴다(`PATCHES.md`: CUDA 단계, 구성 층의 stable display·차분 스트림 연결).
+- cumulus3d는 crates.io 릴리스(0.7)를 그대로 쓴다. SkyLens의 GPU 패치(전체 GPU SIFT, CUDA BA·희소 단계)는 릴리스에 들어 있고 `.gpu()`가 고른다. 저장소에 벤더 복사본은 없다.
 - gRPC 코드 생성: Rust는 빌드 스크립트에서 protox로 컴파일하므로 protoc가 없어도 된다. Go는 `protoc-gen-go`·`protoc-gen-go-grpc`로 `src/skylens_core/gen/`에 생성한다.
 
 ---

@@ -493,12 +493,17 @@ async fn wait_stop(mut rx: watch::Receiver<bool>) {
 
 /// Run both servers until Ctrl-C.
 pub async fn serve(settings: Settings) -> anyhow::Result<()> {
+    let live = build_live(&settings).await;
+    serve_with(settings, live).await
+}
+
+/// [`serve`] with an engine built by the caller (replay tools, tests).
+pub async fn serve_with(settings: Settings, live: LiveEngine) -> anyhow::Result<()> {
     tracing::info!(
         "skylens_model api up (demo={}, manifest={})",
         settings.demo,
         if settings.demo { settings.manifest.display().to_string() } else { "-".into() }
     );
-    let live = build_live(&settings).await;
     if !settings.demo {
         spawn_gpu_watch();
     }
