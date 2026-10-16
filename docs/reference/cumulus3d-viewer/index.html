@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Progressive block stream viewer</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<script type="importmap">{"imports":{
+ "three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+ "three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
+<style>
+ html,body{margin:0;height:100%;background:#111;overflow:hidden;font:12px/1.35 system-ui,sans-serif;color:#ddd}
+ canvas{display:block}
+
+
+ :root{--cy:#00c8ff;--cy2:#3fa9ff;--dim:#3f7fa6;--txt:#9fd8f2}
+ #panel{position:fixed;top:10px;left:10px;width:350px;max-height:calc(100% - 20px);display:flex;flex-direction:column;gap:8px;z-index:10;
+  background:rgba(4,12,26,.72);backdrop-filter:blur(6px);border:1px solid rgba(0,200,255,.4);border-radius:4px;padding:10px;box-sizing:border-box;
+  box-shadow:inset 0 0 18px rgba(0,150,255,.12),0 0 14px rgba(0,120,255,.12);font:11px/1.35 ui-monospace,Menlo,"Apple SD Gothic Neo",monospace;color:var(--txt);letter-spacing:.03em}
+ #panel::before,#panel::after{content:'';position:absolute;width:14px;height:14px;border:2px solid var(--cy);pointer-events:none}
+ #panel::before{left:-1px;top:-1px;border-right:0;border-bottom:0}#panel::after{right:-1px;bottom:-1px;border-left:0;border-top:0}
+ #panel .row{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+ .lbl{font-size:9.5px;text-transform:uppercase;letter-spacing:.12em;color:var(--dim)}
+ button,select{background:rgba(0,200,255,.06);color:#bfeaff;border:1px solid rgba(0,200,255,.5);border-radius:3px;padding:3px 9px;font:inherit;cursor:pointer;outline:none;transition:background .15s,box-shadow .15s}
+ button:hover,select:hover{background:rgba(0,200,255,.18);box-shadow:0 0 8px rgba(0,200,255,.55)}
+ button:active{background:rgba(0,200,255,.35)}
+ button.ic{min-width:34px;font-size:13px;line-height:1;padding:4px 8px}
+ select{appearance:none;-webkit-appearance:none;padding-right:18px;background-image:linear-gradient(45deg,transparent 50%,#00c8ff 50%),linear-gradient(135deg,#00c8ff 50%,transparent 50%);background-position:calc(100% - 9px) 55%,calc(100% - 5px) 55%;background-size:4px 4px;background-repeat:no-repeat}
+ select option{background:#071426;color:#bfeaff}
+ label.f{display:flex;align-items:center;gap:6px}
+ input[type=range]{-webkit-appearance:none;appearance:none;width:96px;height:14px;background:transparent;cursor:pointer}
+ input[type=range]::-webkit-slider-runnable-track{height:2px;background:linear-gradient(90deg,var(--cy),rgba(0,200,255,.25));box-shadow:0 0 6px rgba(0,200,255,.6)}
+ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:10px;height:10px;margin-top:-4px;background:#071426;border:2px solid var(--cy);border-radius:50%;box-shadow:0 0 8px var(--cy)}
+ input[type=range]::-moz-range-track{height:2px;background:var(--cy)}
+ input[type=range]::-moz-range-thumb{width:8px;height:8px;background:#071426;border:2px solid var(--cy);border-radius:50%}
+ #stats{display:flex;flex-direction:column;gap:5px}
+ #stats .hud{display:flex;flex-wrap:wrap;gap:4px 14px}
+ #stats .kv{display:flex;flex-direction:column}
+ #stats .kv b{font-weight:600;font-size:13px;color:#e4f8ff;text-shadow:0 0 8px rgba(0,200,255,.45)}
+ #stats .live{color:#00e0ff;font-weight:700;letter-spacing:.15em}
+ #stats .live i{display:inline-block;width:7px;height:7px;border-radius:50%;background:#00e0ff;margin-right:5px;box-shadow:0 0 8px #00e0ff;animation:wg 1.2s infinite}
+ #stats .cnt{display:flex;gap:6px}
+ #stats .cnt span{flex:1;border:1px solid;border-radius:3px;padding:2px 6px;display:flex;justify-content:space-between;font-size:10px}
+ #stats .cnt span b{font-size:12px}
+ .c-mv{color:#ff7a4a;border-color:rgba(255,100,50,.5)!important}.c-ap{color:#4fe0ff;border-color:rgba(0,200,255,.55)!important}.c-ds{color:#ff4fb0;border-color:rgba(255,60,170,.5)!important}
+ #stats .sm{font-size:9.5px;color:var(--dim);white-space:normal}
+ .bar{position:relative;height:6px;border:1px solid rgba(0,200,255,.45);border-radius:2px;background:rgba(0,200,255,.06)}
+ .bar>i{position:absolute;left:0;top:0;bottom:0;background:linear-gradient(90deg,#0a5fd0,#00c8ff);box-shadow:0 0 8px var(--cy);transition:width .4s}
+ .barl{display:flex;justify-content:space-between}
+ #evhead{cursor:pointer;user-select:none;color:var(--cy);font-size:10px;letter-spacing:.14em}
+ #events{overflow:auto;min-height:60px;flex:1;position:relative;max-height:300px;scrollbar-width:thin;scrollbar-color:#0a5fd0 transparent}
+ #events.collapsed{display:none}
+ .ev{display:grid;grid-template-columns:14px 18px 26px 58px 40px 34px 1fr;gap:6px;align-items:center;padding:3px 4px 3px 0;cursor:pointer;white-space:nowrap;opacity:.42;position:relative}
+ .ev .dot{width:7px;height:7px;border-radius:50%;border:1px solid var(--cy);margin-left:3px;position:relative;z-index:1;background:#04101f}
+ .ev::before{content:'';position:absolute;left:6px;top:0;bottom:0;width:1px;background:rgba(0,200,255,.35)}
+ .ev:first-child::before{top:50%}.ev:last-child::before{bottom:50%}
+ .ev .z{border:1px solid rgba(0,200,255,.5);border-radius:2px;text-align:center;font-size:10px;color:#8fe6ff}
+ .ev .k{font-size:9.5px;text-transform:uppercase;letter-spacing:.06em;padding:0 4px;border-radius:2px;text-align:center}
+ .k-refined{color:#4fe0ff;background:rgba(0,200,255,.12)}.k-replace{color:#ffb04a;background:rgba(255,160,50,.13)}.k-final{color:#7dffb0;background:rgba(60,255,150,.13)}
+ .ev .p{text-align:right;color:#9fd8f2}
+ .ev .tt{color:#8fe6ff}.ev .dl{color:#ffcf6a;font-size:10px}
+ #evlegend{font-size:9.5px;color:var(--dim);margin:-4px 0 0 2px;letter-spacing:.02em}
+ #stats .tot b{font-size:18px;color:#00e0ff;text-shadow:0 0 12px rgba(0,224,255,.8)}
+ #stats .tot .lbl{color:#00c8ff}
+ .ev:hover{opacity:.85;background:rgba(0,200,255,.07)}
+ .ev.done{opacity:.8}.ev.done .dot{background:var(--cy);box-shadow:0 0 6px var(--cy)}
+ .ev.cur{opacity:1;background:rgba(0,200,255,.14);box-shadow:inset 0 0 12px rgba(0,200,255,.25);color:#fff}
+ .ev.cur .dot{background:#fff;box-shadow:0 0 10px 2px var(--cy)}
+ #wait{position:fixed;inset:0;z-index:5;pointer-events:none;font-family:system-ui,"Apple SD Gothic Neo","Malgun Gothic",sans-serif}
+ #waitGlow{position:absolute;inset:0;background:radial-gradient(ellipse 45% 40% at 50% 52%,rgba(0,150,255,.16),rgba(4,8,15,0) 70%);animation:wg 3.2s ease-in-out infinite}
+ @keyframes wg{0%,100%{opacity:.45}50%{opacity:1}}
+ #waitCap{position:absolute;left:0;right:0;bottom:11%;text-align:center}
+ #waitCap .big{font-size:30px;font-weight:600;letter-spacing:.06em;color:#cfeeff;text-shadow:0 0 18px rgba(0,200,255,.7);animation:wp 2.4s ease-in-out infinite}
+ @keyframes wp{0%,100%{opacity:.7;text-shadow:0 0 8px rgba(0,200,255,.4)}50%{opacity:1;text-shadow:0 0 24px rgba(0,200,255,.95)}}
+ #waitCap .sub{margin-top:8px;font-size:14px;color:#5fb8e8;letter-spacing:.05em;font-family:ui-monospace,Menlo,monospace}
+ #monitor{position:fixed;top:10px;right:10px;width:220px;height:140px;z-index:8;display:none;box-sizing:border-box;overflow:hidden;
+  border-radius:12px;border:1px solid rgba(0,200,255,.45);background:rgba(3,10,22,.78);box-shadow:inset 0 0 14px rgba(0,160,255,.14);transition:box-shadow .5s,border-color .5s,opacity 1s;
+  font-family:system-ui,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;pointer-events:none}
+ #monitor.flash{border-color:rgba(120,235,255,1);box-shadow:0 0 20px 4px rgba(0,200,255,.7),inset 0 0 14px rgba(0,200,255,.3);transition:none}
+ #monitor.done{border-color:rgba(0,200,255,.3)}
+ #monitor::before,#monitor::after{content:'';position:absolute;width:12px;height:12px;border:2px solid #00c8ff;z-index:2;opacity:.9}
+ #monitor::before{left:4px;top:4px;border-right:0;border-bottom:0}#monitor::after{right:4px;bottom:4px;border-left:0;border-top:0}
+ #monitor canvas{position:absolute;left:0;top:0;width:220px;height:140px}
+ #monitor .shade{position:absolute;inset:0;background:linear-gradient(rgba(2,8,18,.82) 0,rgba(2,8,18,0) 40%,rgba(2,8,18,0) 72%,rgba(2,8,18,.75) 100%)}
+ #monitor div.t{position:absolute;left:10px;right:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+ #monLabel{top:9px;left:18px;font:600 11.5px ui-monospace,Menlo,"Apple SD Gothic Neo",monospace;color:#8fe6ff;letter-spacing:.02em}
+ #monSub{top:26px;left:18px;font:10px ui-monospace,Menlo,"Apple SD Gothic Neo",monospace;color:#4fa8d8}
+ #monitor.done #monLabel{white-space:normal;overflow:visible;font-size:11px;line-height:1.3;right:10px}
+ #monitor.done #monSub{top:45px}
+ #monAge{bottom:8px;left:18px;font:9.5px ui-monospace,Menlo,"Apple SD Gothic Neo",monospace;color:#3f8fbd}
+</style></head><body>
+<div id="panel">
+ <div class="row"><button class="ic" id="prev" title="Step back">&#9198;</button><button class="ic" id="play" title="Pause / play">&#10074;&#10074;</button><button class="ic" id="next" title="Step forward">&#9197;</button>
+  <label class="f"><span class="lbl">speed</span><select id="speed"><option>1</option><option>5</option><option selected>20</option><option>60</option></select><span class="lbl">x</span></label>
+  <button id="fit">FIT VIEW</button></div>
+ <div class="row"><label class="f"><span class="lbl">size</span><input id="size" type="range" min="0.5" max="10" step="0.1" value="2"></label>
+  <label class="f"><span class="lbl">colour</span><select id="mode"><option value="0">RGB</option><option value="1">owner zone</option><option value="2">highlight changes</option></select></label></div>
+ <div id="stats">loading...</div>
+ <div id="evhead">&#9662; EVENTS</div>
+ <div id="evlegend">T+ = 재구성 시작 후 경과 &middot; &Delta; = 이전 갱신 후</div>
+ <div id="events"></div>
+</div>
+<div id="wait"><div id="waitGlow"></div><div id="waitCap"><div class="big">3D 공간 생성 중</div><div class="sub" id="waitSub"></div></div></div>
+<div id="monitor"><canvas id="monCanvas"></canvas><div class="shade"></div><div class="t" id="monLabel"></div><div class="t" id="monSub"></div><div class="t" id="monAge"></div></div>
+<script type="module" src="viewer.js"></script>
+</body></html>
