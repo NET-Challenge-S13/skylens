@@ -8,7 +8,6 @@
 
 use crate::board::Board;
 use crate::card::Card;
-use crate::delta_log::DeltaLog;
 use crate::inset::InsetScene;
 use crate::live_ui::LivePanels;
 use crate::minimap::{MapData, MinimapWidget};
@@ -130,8 +129,7 @@ pub struct StatusApp {
     site_seen: bool,
     last_poll_ms: Option<f64>,
     gpu_alert: GpuLossAlert,
-    /// The live point stream's record (the point layer drains its ops) and its panels.
-    pub delta_log: DeltaLog,
+    /// The panels of the live point stream (the log itself is `Board::live`).
     pub live: LivePanels,
 }
 
@@ -154,7 +152,6 @@ impl StatusApp {
             gpu_alert: GpuLossAlert::default(),
             site_seen: false,
             last_poll_ms: None,
-            delta_log: DeltaLog::new(),
             live: LivePanels::new(),
         }
     }
@@ -291,7 +288,7 @@ impl StatusApp {
         }
         // Ladder: one row per segment the core reports, plus one per timeline zone, so the ladder
         // and the event timeline agree (`panels_live::zone_stats`).
-        let zones = crate::panels_live::zone_stats(self.delta_log.entries());
+        let zones = crate::panels_live::zone_stats(b.live.entries());
         let mut segments: std::collections::BTreeMap<u32, u32> =
             core.map(|c| c.segments.iter().map(|s| (s.index, panels::level_number(s.level()))).collect()).unwrap_or_default();
         for z in zones.keys() {
@@ -490,7 +487,7 @@ impl ScreenApp for StatusApp {
         self.render_points(dom);
         self.size_minimap(dom);
         self.update_map();
-        self.live.poll(dom, &mut self.delta_log, now, dt);
+        self.live.poll(dom, &mut self.board.borrow_mut().live, now, dt);
 
         if let Some(l) = &mut self.loading {
             l.tick(dom, now);
@@ -503,7 +500,7 @@ impl ScreenApp for StatusApp {
     }
 
     fn input(&mut self, input: &UiInput, dom: &mut Dom<'_>) -> bool {
-        if self.live.input(input, dom, &mut self.delta_log) {
+        if self.live.input(input, dom, &mut self.board.borrow_mut().live) {
             return true;
         }
         if Card::is_confirm(input) {
