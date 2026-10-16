@@ -316,7 +316,7 @@ impl Consumer {
         let streamed = dense && self.display.is_some();
         if !streamed {
             if self.display.is_some() {
-                tracing::warn!("zone {seg}: densification failed; its sparse points go out as point chunks");
+                tracing::info!("zone {seg}: not densified; its sparse points go out as point chunks");
             }
             let generation = if level == Level::Refined {
                 let g = self.refined_generation.entry(seg).or_insert(0);

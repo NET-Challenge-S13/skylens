@@ -13,6 +13,7 @@
 //! - [`fusion`]: projection of frame detections onto the zone points and the
 //!   confidence-weighted fusion across frames (pure math).
 //! - [`chunks`]: pointblitz/MeshBlock/DetectionBatch encoding and the replay log.
+//! - [`replay`]: recorded cumulus3d display streams fed back as events (tools, no GPU).
 //! - [`slotstream`]: the display deltas of stable display as point slot chunks (pointblitz
 //!   slot messages).
 //! - [`jobs`] and [`sources`]: the REST/gRPC job API (`steps` -> level, `uri`
@@ -43,6 +44,7 @@ pub mod fusion;
 pub mod jobs;
 pub mod live;
 pub mod recon;
+pub mod replay;
 pub mod slotstream;
 pub mod sources;
 
@@ -138,6 +140,9 @@ pub struct Engine {
     poller: Mutex<Option<JoinHandle<()>>>,
     /// Stream id of this model run (see [`Engine::stream_id`]).
     stream: u32,
+    /// Sender into the consumer thread for [`Engine::inject_event`]; dropped in `Drop` so the
+    /// consumer ends with the engine.
+    inject: Mutex<Option<std::sync::mpsc::Sender<live::Msg>>>,
     /// Jobs run one at a time.
     job_lock: Mutex<()>,
 }
@@ -164,6 +169,7 @@ impl Engine {
         let mut b = ReconNode::declare()
             // The plan comes first (it replaces every setting); the builder calls below refine it.
             .plan(jobs::live_plan())
+            .settle(SETTLE_TOL, SETTLE_MAX_ZONE)
             .id(LIVE_NODE)
             .images(&live_dir)
             .cameras(cfg.cameras.clone())
@@ -204,17 +210,18 @@ impl Engine {
 
         let (tx, rx) = std::sync::mpsc::channel::<Msg>();
         let mut consumer = Consumer::new(Arc::clone(&log), cfg.anchor, cfg.gpu, detector.is_some());
-        if deltas {
-            // With densification the points leave as display deltas; without it there are none and
-            // the refined zone points go out as point chunks.
-            tracing::info!("live display: stable, 1 of {} points, slot stream {stream}", cfg.live_stride);
+        if cfg.stable_display {
+            // With densification the points leave as display deltas; without it there are none (and
+            // the refined zone points go out as point chunks). The consumer also takes deltas that
+            // `inject_event` hands it (recorded streams), so it is set up either way.
+            tracing::info!("live display: stable, 1 of {} points, slot stream {stream}, deltas {deltas}", cfg.live_stride);
             consumer = consumer.display_stream(stream);
         }
         consumer.spawn(rx)?;
         if let (Some(q), Some(det)) = (&frame_queue, &detector) {
             live::spawn_detector(Arc::clone(q), Arc::clone(det), tx.clone())?;
         }
-        live::spawn_forwarder(events, tx)?;
+        live::spawn_forwarder(events, tx.clone())?;
         let stop = Arc::new(AtomicBool::new(false));
         let poller = live::spawn_poller(node.clone(), Arc::clone(&stop))?;
 
@@ -229,6 +236,7 @@ impl Engine {
             stop,
             poller: Mutex::new(Some(poller)),
             stream,
+            inject: Mutex::new(Some(tx)),
             job_lock: Mutex::new(()),
         })
     }
@@ -237,6 +245,14 @@ impl Engine {
     /// of every chunk sequence.
     pub fn stream_id(&self) -> u32 {
         self.stream
+    }
+
+    /// Hook for replay tools and tests: hands a cumulus3d event straight to the chunk consumer, as
+    /// if the live node had emitted it (see [`replay`]). Fails once the engine is shutting down.
+    pub fn inject_event(&self, ev: cumulus3d_cli::events::Event) -> anyhow::Result<()> {
+        let guard = lock(&self.inject);
+        let tx = guard.as_ref().context("engine is shut down")?;
+        tx.send(live::Msg::Event(ev)).map_err(|_| anyhow!("chunk consumer has stopped"))
     }
 
     /// Declare one frame set (gRPC PushFrames).
@@ -355,6 +371,7 @@ impl Drop for Engine {
             q.close();
         }
         self.log.close();
+        lock(&self.inject).take();
         if let Some(h) = lock(&self.poller).take() {
             let _ = h.join();
         }
