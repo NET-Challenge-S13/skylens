@@ -15,6 +15,7 @@
 pub mod app;
 pub mod board;
 pub mod card;
+pub mod delta_log;
 pub mod follow;
 pub mod inset;
 pub mod markers;
