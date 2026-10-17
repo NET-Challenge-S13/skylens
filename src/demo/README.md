@@ -42,6 +42,7 @@ cargo run -p skylens-demo -- --native      # 네이티브 관제탑·현황판 �
 cargo run -p skylens-demo -- --auto        # 미리 계획된 경로를 런처가 배정 (사람 없이 끝까지)
 cargo run -p skylens-demo -- --no-model    # 모델 서버 없이 화면만
 cargo run -p skylens-demo -- --synthetic   # 옛 합성 영상과 합성 경로
+cargo run -p skylens-demo -- --online      # 내 컴퓨터가 아니라 실제 서버 판에 붙어서 돈다 (VPN 필요)
 ```
 
 `Ctrl+C` 한 번이면 전체가 순서대로 내려간다(두 번 누르면 즉시 종료). 어느 컴포넌트든 죽으면 런처가 나머지도 정리한다. 한쪽이 사라진 파이프라인을 멀쩡한 것처럼 두면 진단이 더 어렵기 때문이다. 네이티브 창은 예외라서, 창을 닫아도 데모는 계속 돈다.
@@ -56,6 +57,7 @@ Windows에서는 런처가 시작하자마자 자기 자신을 **kill-on-close J
 | `--board-port N` | `8090` | 현황판 서버 포트(이전 현황판 포트) |
 | `--no-model` | 끔 | 모델 서버를 띄우지 않는다. 코어의 프레임 추출도 끈다 |
 | `--model-addr H:P` | 없음 | 이미 떠 있는 모델 서버(예: GPU 노드로 가는 SSH 터널)의 gRPC 주소. 모델 서버를 띄우지 않고, 같은 호스트의 REST(8100) `/health`만 기다린다 |
+| `--online[=HOST]` | 없음 | **실제 배치 위에서 돈다.** 영상은 브리지(`HOST:10890`)로 가고 드론은 대전 코어(`HOST:8090`)를 상대한다. 양쪽 모두 아무것도 띄우지 않는다(서버는 서비스로 항상 떠 있다). 코어가 응답하지 않으면 60초 뒤 포기한다. `HOST` 기본값은 브리지 VPN 주소이고, `--auto` 와 `--full-footage` 를 포함한다. 보이는 화면은 배치된 관제탑(VPN·랜만)과 현황판(어느 망에서나)이다 |
 | `--remote-core H:P` | 없음 | 이미 떠 있는 코어(예: 대전으로 가는 SSH 터널)를 쓴다. MediaMTX·코어·모델·현황판 서버를 띄우지 않고, 영상 송출과 드론 시뮬레이터만 돈다 |
 | `--srt-addr H:P` | `127.0.0.1:10890` | 영상을 SRT로 보낼 곳(브리지나 대전 MediaMTX) |
 | `--feed-tcp H:P` | 없음 | SRT 대신 MPEG-TS를 TCP로 보낸다(드론 N은 포트+N-1). UDP가 막힌 회선용이고, 받는 쪽에서 MediaMTX로 이어 준다 |

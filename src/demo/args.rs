@@ -10,6 +10,20 @@ pub const WHEP_PORT: u16 = 10889;
 pub const SRT_PORT: u16 = 10890;
 pub const WEBRTC_UDP_PORT: u16 = 10189;
 
+// ---- the deployment, for --online ------------------------------------------------------------
+// These are the KOREN setup as it stands, not something the demo can discover: the bridge is a
+// fixed address on the VPN and the ports are the ones skylens_gateway installs. docs/DEPLOYMENT.md
+// is where they are written down and reasoned about.
+/// The bridge (the Raspberry Pi) on the VPN.
+pub const ONLINE_HOST: &str = "10.9.8.37";
+/// The core, reached through the bridge's control tower relay. Not port 80: that one serves the
+/// status board and does not carry `/control`, so the demo would have nowhere to assign a route.
+pub const ONLINE_CORE_PORT: u16 = 8090;
+/// The control tower over TLS on the bridge. Reachable from the VPN and the lab network only.
+pub const ONLINE_TOWER_TLS_PORT: u16 = 8091;
+/// The status board as everyone else reaches it: the router forwards 8443 to the bridge's 443.
+pub const ONLINE_BOARD_URL: &str = "https://175.126.98.44:8443/";
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct Options {
     /// Core HTTP/WebSocket port (production uses 8080).
@@ -22,6 +36,10 @@ pub struct Options {
     /// launcher then starts no model server of its own; it waits for the REST `/health`
     /// of the same host on the model REST port.
     pub model_addr: Option<String>,
+    /// Run against the deployment instead of this machine: the bridge host to reach it by
+    /// (`--online` for the usual one, `--online=HOST` for another). It fills in `remote_core` and
+    /// `srt_addr` and turns on `auto` and `full_footage`, so one flag is the whole live setup.
+    pub online: Option<String>,
     /// A core that already runs elsewhere (host:port, e.g. an SSH tunnel to the Daejeon VM). The
     /// launcher then starts no MediaMTX, core, model server or board; it only publishes the
     /// footage and flies the drones against that core.
@@ -78,6 +96,7 @@ pub const FOOTAGE_URL: &str =
 impl Default for Options {
     fn default() -> Self {
         Options {
+            online: None,
             core_port: 8080,
             board_port: 8090,
             no_model: false,
@@ -116,6 +135,13 @@ pub const USAGE: &str = "usage: cargo run -p skylens-demo -- [options]
   --model-addr H:P     use a model server already running at gRPC host:port (e.g. an
                        SSH tunnel to a GPU node) instead of starting one; its REST
                        /health is expected on the same host, port 8100
+  --online[=HOST]      run against the deployment, not this machine: the footage goes to
+                       the bridge, the drones fly against the Daejeon core, and the
+                       screens people watch are the deployed ones. Nothing is started
+                       here or there: the servers run as services, and the launcher
+                       waits for the core to answer and gives up if it does not.
+                       HOST is the bridge, default the usual one. Includes --auto and
+                       --full-footage. Needs the VPN
   --remote-core H:P    use a core already running at host:port (e.g. an SSH tunnel to
                        Daejeon): start only the footage feeds and the drones
   --srt-addr H:P       publish the footage over SRT to this host:port (default: the
@@ -153,6 +179,16 @@ pub const USAGE: &str = "usage: cargo run -p skylens-demo -- [options]
                        (default: release when built, else debug)
   -h, --help           this text";
 
+/// A bare host or address, with no port and nothing that would turn into one.
+fn host(name: &str, v: &str) -> Result<String, String> {
+    let v = v.trim();
+    match v {
+        "" => Err(format!("{name} needs a host")),
+        _ if v.contains(':') || v.contains('/') => Err(format!("{name}: a host without a port, not {v}")),
+        _ => Ok(v.to_string()),
+    }
+}
+
 fn host_port(name: &str, v: String) -> Result<String, String> {
     match v.rsplit_once(':') {
         Some((h, p)) if !h.is_empty() && p.parse::<u16>().is_ok_and(|p| p > 0) => Ok(v),
@@ -185,6 +221,15 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<Options, St
             "--core-port" => o.core_port = port("--core-port", &value("--core-port")?)?,
             "--board-port" => o.board_port = port("--board-port", &value("--board-port")?)?,
             "--model-addr" => o.model_addr = Some(host_port("--model-addr", value("--model-addr")?)?),
+            "--online" => {
+                // No space-separated value: `--online --auto` must not swallow the next
+                // flag as a host.
+                o.online = Some(match &inline {
+                    Some(v) if !v.trim().is_empty() => host("--online", v)?,
+                    Some(_) => return Err("--online=HOST needs a host".into()),
+                    None => ONLINE_HOST.to_string(),
+                });
+            }
             "--remote-core" => o.remote_core = Some(host_port("--remote-core", value("--remote-core")?)?),
             "--feed-tcp" => o.feed_tcp = Some(host_port("--feed-tcp", value("--feed-tcp")?)?),
             "--srt-addr" => o.srt_addr = Some(host_port("--srt-addr", value("--srt-addr")?)?),
@@ -258,6 +303,16 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<Options, St
             "-h" | "--help" => o.help = true,
             other => return Err(format!("unknown option: {other}")),
         }
+    }
+    if let Some(host) = o.online.clone() {
+        // A preset, not a mode: anything given explicitly stays as it is.
+        o.remote_core.get_or_insert_with(|| format!("{host}:{ONLINE_CORE_PORT}"));
+        o.srt_addr.get_or_insert_with(|| format!("{host}:{SRT_PORT}"));
+        // The live run is the whole flight, and it starts by itself: without these two
+        // the launcher takes everything down after the first zone and waits for someone
+        // to assign a route in the control tower.
+        o.auto = true;
+        o.full_footage = true;
     }
     let fixed = [MODEL_REST_PORT, MODEL_GRPC_PORT, WHEP_PORT, SRT_PORT];
     if o.core_port == o.board_port {
@@ -373,5 +428,30 @@ mod tests {
         assert!(parse(&["--board-port", "8100"]).is_err());
         assert!(parse(&["--core-port", "10889"]).is_err());
         assert!(parse(&["--core-port", "8081", "--board-port", "8082"]).is_ok());
+    }
+
+    #[test]
+    fn online_is_the_deployment_in_one_flag() {
+        let o = parse(&["--online"]).unwrap();
+        assert_eq!(o.online.as_deref(), Some(ONLINE_HOST));
+        assert_eq!(o.remote_core.as_deref(), Some(format!("{ONLINE_HOST}:{ONLINE_CORE_PORT}").as_str()));
+        assert_eq!(o.srt_addr.as_deref(), Some(format!("{ONLINE_HOST}:{SRT_PORT}").as_str()));
+        // The live run flies the whole flight and starts by itself.
+        assert!(o.auto && o.full_footage);
+
+        // Another bridge, same shape.
+        let o = parse(&["--online=10.0.0.9"]).unwrap();
+        assert_eq!(o.remote_core.as_deref(), Some("10.0.0.9:8090"));
+        assert_eq!(o.srt_addr.as_deref(), Some("10.0.0.9:10890"));
+
+        // What is given explicitly wins, in either order.
+        let o = parse(&["--online", "--remote-core", "127.0.0.1:9999"]).unwrap();
+        assert_eq!(o.remote_core.as_deref(), Some("127.0.0.1:9999"));
+        let o = parse(&["--srt-addr", "127.0.0.1:1", "--online"]).unwrap();
+        assert_eq!(o.srt_addr.as_deref(), Some("127.0.0.1:1"));
+
+        // A host, not an address: the ports are ours to pick.
+        assert!(parse(&["--online=10.0.0.9:8090"]).is_err());
+        assert!(parse(&["--online="]).is_err());
     }
 }

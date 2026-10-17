@@ -415,19 +415,37 @@ fn banner(plan: &Plan, o: &Options, s: &Scenario) {
     println!();
     println!("  SkyLens 데모");
     println!("{line}");
-    println!("  관제탑   http://localhost:{}/          (코어가 서빙)", o.core_port);
-    println!("  현황판   http://localhost:{}/          (게이트웨이 역할, 런처 내장 서버)", o.board_port);
+    if let Some(host) = &o.online {
+        // The deployed screens. The launcher serves neither of them in this mode, so
+        // pointing at localhost would send the operator to a port with nothing on it.
+        println!("  관제탑   https://{host}:{}/        (대전 코어가 만들고 브리지가 중계 · VPN·랜만)", args::ONLINE_TOWER_TLS_PORT);
+        println!("  현황판   {}   (어느 망에서나)", args::ONLINE_BOARD_URL);
+        println!("           https://{host}/              (VPN 안에서 같은 화면)");
+    } else {
+        println!("  관제탑   http://localhost:{}/          (코어가 서빙)", o.core_port);
+        println!("  현황판   http://localhost:{}/          (게이트웨이 역할, 런처 내장 서버)", o.board_port);
+    }
     if plan.native.is_some() {
         println!("  네이티브 관제탑 -> ws://127.0.0.1:{}/control, 현황판 -> ws://127.0.0.1:{}/viewer", o.core_port, o.board_port);
     }
-    if let Some(addr) = &o.model_addr {
+    if o.online.is_some() {
+        // The launcher starts no model here, but one is running: the Daejeon core talks
+        // to the Pangyo GPU node over its own tunnel. Saying "off" would read as "no
+        // reconstruction today", which is not what this mode does.
+        println!("  모델     대전 코어가 판교 모델 서버를 씁니다 (이 런처가 띄우지 않습니다)");
+    } else if let Some(addr) = &o.model_addr {
         println!("  모델     원격 gRPC {addr}  (REST {}번 포트 /health)", args::MODEL_REST_PORT);
     } else if plan.model.is_some() {
         println!("  모델     http://127.0.0.1:{}/health  (gRPC :{})", args::MODEL_REST_PORT, args::MODEL_GRPC_PORT);
     } else {
         println!("  모델     끔 (--no-model)");
     }
-    println!("  영상     WHEP http://localhost:{}/live/drone{{1,2,3}}/whep, SRT :{}", o.board_port, args::SRT_PORT);
+    if o.online.is_some() {
+        println!("  영상     브리지로 SRT 송출 :{} · 화면은 현황판과 같은 출처의 WHEP 으로 받습니다", args::SRT_PORT);
+        println!("  서버     대전 코어·모델·MediaMTX·터널은 서비스로 항상 떠 있습니다 (이 런처가 띄우지 않습니다)");
+    } else {
+        println!("  영상     WHEP http://localhost:{}/live/drone{{1,2,3}}/whep, SRT :{}", o.board_port, args::SRT_PORT);
+    }
     if s.track.is_some() {
         println!("  촬영본   data/demo (실제 비행 기록 재생, 이륙 지점 지면 {:.1} m)", s.ground_alt);
     } else {
