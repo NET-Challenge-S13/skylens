@@ -168,6 +168,45 @@ func TestVWorldKeyFromParentOfRepo(t *testing.T) {
 	}
 }
 
+// Keys registered to a service URL need the domain on WFS requests, or
+// VWorld answers with an XML exception instead of GeoJSON.
+func TestVWorldDomain(t *testing.T) {
+	parent := t.TempDir()
+	repo := filepath.Join(parent, "skylens")
+	sub := filepath.Join(repo, "src", "skylens_core")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(repo, "go.work"), []byte("go 1.25\n"), 0o644)
+	os.WriteFile(filepath.Join(parent, ".env.vworld"),
+		[]byte("VWORLD_KEY=secret\nVWORLD_DOMAIN=\"http://localhost:5173\"\n"), 0o600)
+
+	c, err := Load(env(nil), sub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.VWorldDomain != "http://localhost:5173" {
+		t.Fatalf("domain from file %q", c.VWorldDomain)
+	}
+
+	// The variable wins over the file, with or without a key variable.
+	c, _ = Load(env(map[string]string{"VWORLD_DOMAIN": "https://example.org"}), sub)
+	if c.VWorldKey != "secret" || c.VWorldDomain != "https://example.org" {
+		t.Fatalf("key %q domain %q", c.VWorldKey, c.VWorldDomain)
+	}
+	c, _ = Load(env(map[string]string{"VWORLD_KEY": "direct", "VWORLD_DOMAIN": "https://example.org"}), sub)
+	if c.VWorldKey != "direct" || c.VWorldDomain != "https://example.org" {
+		t.Fatalf("key %q domain %q", c.VWorldKey, c.VWorldDomain)
+	}
+
+	// A file without a domain leaves it empty.
+	os.WriteFile(filepath.Join(parent, ".env.vworld"), []byte("VWORLD_KEY=secret\n"), 0o600)
+	c, err = Load(env(nil), sub)
+	if err != nil || c.VWorldKey != "secret" || c.VWorldDomain != "" {
+		t.Fatalf("no domain line: key %q domain %q err %v", c.VWorldKey, c.VWorldDomain, err)
+	}
+}
+
 func TestPlannedRoute(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "planned-route.json")

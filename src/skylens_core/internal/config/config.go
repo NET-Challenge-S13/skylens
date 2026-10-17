@@ -59,6 +59,9 @@ type Config struct {
 	TerrainCache  string  // SKYLENS_CORE_TERRAIN_CACHE
 	VWorldKey     string  // from .env.vworld or VWORLD_KEY; never sent to clients
 	VWorldFrom    string  // where the key came from, for the log (never the key)
+	// VWorldDomain is the service URL the key is registered to (VWORLD_DOMAIN,
+	// else the key file's). VWorld's WFS refuses such a key without it.
+	VWorldDomain string
 
 	// PlannedRoute is a route prepared before the session (the demo's
 	// recorded flight line), read from the JSON file SKYLENS_CORE_PLANNED_ROUTE
@@ -276,14 +279,19 @@ func Load(getenv func(string) string, cwd string) (Config, error) {
 			}
 		}
 		if path != "" {
-			k, err := ReadVWorldKey(path)
+			vars, err := readDotenvFile(path)
 			switch {
-			case err == nil && k != "":
-				c.VWorldKey, c.VWorldFrom = k, path
+			case err == nil && vars["VWORLD_KEY"] != "":
+				// The file's domain belongs to the file's key only.
+				c.VWorldKey, c.VWorldFrom = vars["VWORLD_KEY"], path
+				c.VWorldDomain = strings.TrimSpace(vars["VWORLD_DOMAIN"])
 			case err != nil && !errors.Is(err, os.ErrNotExist):
 				errs = append(errs, fmt.Errorf("%s: %w", path, err))
 			}
 		}
+	}
+	if d := strings.TrimSpace(getenv("VWORLD_DOMAIN")); d != "" {
+		c.VWorldDomain = d
 	}
 	return c, errors.Join(errs...)
 }
@@ -402,16 +410,20 @@ func FindRepoRoot(dir string) (string, bool) {
 
 // ReadVWorldKey reads VWORLD_KEY from a dotenv file.
 func ReadVWorldKey(path string) (string, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer f.Close()
-	vars, err := ParseDotenv(f)
+	vars, err := readDotenvFile(path)
 	if err != nil {
 		return "", err
 	}
 	return vars["VWORLD_KEY"], nil
+}
+
+func readDotenvFile(path string) (map[string]string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return ParseDotenv(f)
 }
 
 // ParseDotenv reads KEY=VALUE lines. Blank lines and # comments are skipped,

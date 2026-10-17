@@ -63,10 +63,11 @@ func main() {
 	// One feed serves the base map stream and the route planner's /vworld
 	// proxy, sharing the disk cache. Its anchor is fixed for the session.
 	feed := terrain.New(terrain.Config{
-		VWorldKey:  cfg.VWorldKey,
-		Anchor:     site.Anchor,
-		CacheDir:   cfg.TerrainCache,
-		HTTPClient: &http.Client{Timeout: 30 * time.Second},
+		VWorldKey:    cfg.VWorldKey,
+		VWorldDomain: cfg.VWorldDomain,
+		Anchor:       site.Anchor,
+		CacheDir:     cfg.TerrainCache,
+		HTTPClient:   &http.Client{Timeout: 30 * time.Second},
 	})
 	if !cfg.Terrain {
 		log.Printf("[core] base map off (SKYLENS_CORE_TERRAIN)")
