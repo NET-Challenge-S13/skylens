@@ -95,12 +95,16 @@ jobs:
         if: steps.changed.outputs.board == '1'
         run: |
           bash src/skylens_client/build-web.sh
+          # A bundle that cannot start looks exactly like one that can, here and
+          # in the file size, so it is checked before anyone can deploy it.
+          python3 .github/workflows/check-wasm-exports.py src/skylens_client/dist/pkg/status_screen_bg.wasm
           tar czf client-dist.tgz -C src/skylens_client/dist .
 
       - name: Build the control tower
         if: steps.changed.outputs.tower == '1'
         run: |
           bash src/skylens_core/control/build-web.sh
+          python3 .github/workflows/check-wasm-exports.py src/skylens_core/control/dist/pkg/control_screen_bg.wasm
           tar czf control-dist.tgz -C src/skylens_core/control/dist .
 
       - name: Publish for the hosts

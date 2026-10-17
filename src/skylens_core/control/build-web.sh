@@ -55,8 +55,13 @@ mkdir -p "$DIST/pkg"
 wasm-bindgen --target web --no-typescript --out-dir "$DIST/pkg" "$WASM"
 
 if command -v wasm-opt >/dev/null 2>&1 && [ "$PROFILE" != "dev" ]; then
+  # reference-types is not optional: the bundle has an externref table, and without
+  # the feature wasm-opt renumbers the tables and leaves __wbindgen_externrefs
+  # pointing at the funcref one. The screen then dies on its first line, in
+  # Table.grow, with nothing wrong in the build log or the file size.
+  # .github/workflows/check-wasm-exports.py is what catches it.
   echo "==> wasm-opt -Oz"
-  wasm-opt -Oz --enable-bulk-memory --enable-nontrapping-float-to-int \
+  wasm-opt -Oz --enable-reference-types --enable-bulk-memory --enable-nontrapping-float-to-int \
     "$DIST/pkg/control_screen_bg.wasm" -o "$DIST/pkg/control_screen_bg.wasm"
 fi
 
