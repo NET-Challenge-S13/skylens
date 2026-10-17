@@ -148,12 +148,13 @@ if [ -n "$sum" ] && [ "$sum" != "$(installed control-dist.tgz)" ]; then
     rm -rf "$WORK/dist.new"
     mkdir -p "$WORK/dist.new"
     tar xzf "$tgz" -C "$WORK/dist.new"
-    rm -rf "$ROOT/web/dist.old"
+    # The previous build is kept, not deleted: a bad tower bundle is otherwise
+    # only recoverable by building again.
+    rm -rf "$ROOT/web/dist.previous"
     if [ -d "$ROOT/web/dist" ]; then
-      mv "$ROOT/web/dist" "$ROOT/web/dist.old"
+      mv "$ROOT/web/dist" "$ROOT/web/dist.previous"
     fi
     mv "$WORK/dist.new" "$ROOT/web/dist"
-    rm -rf "$ROOT/web/dist.old"
     log "control tower now $(commit_of manifest-screens.json)"
     remember control-dist.tgz "$sum"
     rm -f "$tgz"

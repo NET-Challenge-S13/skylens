@@ -58,7 +58,9 @@ related: "[[INTENT.md]], [[COMPONENTS.md]], [[ARCHITECTURE.md]], [[NETWORK_ARCHI
 | 잡 (코어↔모델, gRPC) | `ModelService` | `SubmitRecon` · `SubmitDetect` · `GetJob` · `Health` (REST와 같은 잡 API) |
 | 라이브 (코어↔모델, gRPC) | `ModelService` | `PushFrames`(프레임 묶음 스트림) · `SubscribeChunks`(증분 청크 스트림) |
 
-- 미션 단계는 `idle → assigned → awaiting-drone → active` 네 값이다.
+- 미션 단계는 `idle → assigned → awaiting-drone → active` 네 값이다. 마지막 드론이 끊기면 `awaiting-drone` 으로 돌아간다(`idle` 이 아니다).
+- **경로 배정이 새 미션의 시작이다.** 드론이 떠 있지 않은 동안(`active` 가 아닌 동안) 경로가 배정되면 코어는 지난 미션이 복원한 것을 먼저 버린다. 점·메시·탐지·점 슬롯 스트림이 대상이고, 바탕 지도(지형·건물)와 텔레메트리·영상·경로·링크 상태는 남는다. 모델 구독의 이어받을 지점(`after_sequence`)도 그대로 둔다. 되돌리면 모델이 방금 버린 실행을 처음부터 다시 보내 도로 채운다.
+- 화면은 자기가 받은 것을 스스로 들고 있으므로, 비우는 신호는 **화면 소켓을 끊는 것**이다. 양쪽 화면은 재접속 때 자기 사본을 비우고 리플레이를 다시 받는다(`src/shared/viewer/chunks.rs`). 버릴 것이 없으면 소켓을 끊지 않는다. 드론이 떠 있는 동안의 재배정은 비행 중 재계획이라 화면을 그대로 둔다.
 - `planned-route`는 배정이 아니다. 코어가 `SKYLENS_CORE_PLANNED_ROUTE` 파일에서 읽어, 아직 경로가 배정되지 않았으면 관제탑이 붙을 때 작전 구역 바로 다음에 보낸다. 관제탑은 경로 계획이 비어 있을 때만 그 지점을 채우고, 운용자가 배정을 눌러야 `assign-route`가 나간다.
 - 코어↔모델 계약은 `src/shared/proto/skylens/model/v1/model.proto` 하나다. Rust는 tonic/prost, Go는 같은 파일에서 생성한 코드를 쓴다.
 - 청크(`Chunk`)는 라우팅 메타데이터(종류·구간·수준·블록 id·version·세대)와 불투명한 `payload`로 되어 있다. 코어는 메타데이터만 읽고 `payload`는 그대로 보관·전달한다. `payload` 인코딩은 `shared`가 정하고 화면이 푼다.
@@ -219,6 +221,7 @@ related: "[[INTENT.md]], [[COMPONENTS.md]], [[ARCHITECTURE.md]], [[NETWORK_ARCHI
 - 프록시는 코어 선호 경로가 죽으면 대기 경로로 넘기고, 일정 시간 뒤 선호 경로를 다시 시도한다. 열린 소켓은 옮기지 않으므로 드론·화면이 재접속한다.
 - 모델 서버가 없으면 코어가 잡을 재제출한다.
 - 코어가 없으면 화면은 마지막 상태를 유지한다.
+- 코어를 다시 띄우면 들고 있던 것이 사라진다. 다만 모델 구독이 처음부터 다시 받으므로 지난 실행의 청크가 다시 쌓인다. 깨끗한 화면으로 시작하려면 코어 재시작이 아니라 **경로를 새로 배정**한다(§3).
 
 ## 15. 빌드와 테스트
 
