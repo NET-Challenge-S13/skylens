@@ -31,8 +31,8 @@ SERVICE="${SKYLENS_SERVICE:-skylens-core}"
 KEEP="${SKYLENS_KEEP_RELEASES:-5}"
 BASE="https://github.com/$REPO/releases/download/$TAG"
 
-STATE="$ROOT/agent-state"   # file name -> sha256 of what is installed
-WORK="$ROOT/run/agent"
+STATE="${SKYLENS_STATE:-$ROOT/agent-state}"   # file name -> sha256 of what is installed
+WORK="${SKYLENS_WORK:-$ROOT/run/agent}"
 mkdir -p "$ROOT/releases/core" "$ROOT/web" "$WORK" "$(dirname "$STATE")"
 touch "$STATE"
 
