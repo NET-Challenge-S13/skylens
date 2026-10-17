@@ -371,10 +371,17 @@ func (h viewerHandler) Message(p *ws.Peer, env *viewerv1.Envelope) {
 // control peer) may be nil.
 func (c *Core) AssignRoute(env *viewerv1.Envelope, from *ws.Peer) {
 	r := env.GetAssignRoute()
-	// A route assigned from idle starts a new mission. Everything the last one
-	// reconstructed is dropped first, so a second run does not paint on top of
-	// the first. Reassigning mid-mission keeps what is already on the screens.
-	fresh := c.Mission.Phase() == viewerv1.MissionPhase_MISSION_PHASE_IDLE
+	// A route assigned while no mission is being flown starts a new one, and
+	// everything the last one reconstructed is dropped first, so a second run
+	// does not paint on top of the first. Assigning while drones are up is a
+	// re-plan in flight and keeps what is on the screens.
+	//
+	// Not "idle", because that is not where a finished run leaves the core: when
+	// the last drone disconnects the phase goes to awaiting-drone, which is
+	// exactly where the next demo run assigns its route from. Re-planning before
+	// the drones arrive also lands here, and drops nothing, because by then
+	// nothing has been reconstructed.
+	fresh := c.Mission.Phase() != viewerv1.MissionPhase_MISSION_PHASE_ACTIVE
 	if len(r.GetWaypoints()) < 2 {
 		log.Printf("[core] assign_route ignored: %d waypoint(s)", len(r.GetWaypoints()))
 		if from != nil {

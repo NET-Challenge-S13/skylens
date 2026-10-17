@@ -678,26 +678,57 @@ func TestPointSlotMessagesAreForwardedInOrderAndReplayed(t *testing.T) {
 
 // A second mission starts from an empty world: the first one's reconstruction is
 // dropped and the screens are made to reconnect, which is how they clear their
-// own copy. The first mission after a start has nothing to drop and no blip.
+// own copy. A re-plan while drones are flying keeps what is on the screens, and
+// the first mission after a start has nothing to drop and no blip.
 func TestNewMissionDropsTheLastReconstruction(t *testing.T) {
-	c := New(Options{Config: testConfig(t), Clock: &manualClock{}, Terrain: &fakeTerrain{}})
+	clk := &manualClock{}
+	c := New(Options{Config: testConfig(t), Clock: clk, Terrain: &fakeTerrain{}})
 	defer c.Close()
 	control := attach(c.Controls, c.ControlHandler())
 	viewer := attach(c.Viewers, c.ViewerHandler())
 	drain(t, control)
 	drain(t, viewer)
 
-	// First mission: nothing stored yet, so the sockets stay.
+	cloud := func() {
+		c.PutChunk(&modelv1.Chunk{Sequence: 1, Kind: modelv1.ChunkKind_CHUNK_KIND_POINTS, Segment: 0, Level: modelv1.Level_LEVEL_REFINED, Payload: []byte("cloud")})
+		if len(c.Store.ModelChunks()) != 1 {
+			t.Fatal("the chunk was not stored")
+		}
+	}
+
+	// First mission: nothing reconstructed yet, so the screens keep their socket.
 	c.ControlHandler().Message(control, route())
 	if control.Closed() || viewer.Closed() {
 		t.Fatal("the first assignment dropped the screens")
 	}
 
-	c.PutChunk(&modelv1.Chunk{Sequence: 1, Kind: modelv1.ChunkKind_CHUNK_KIND_POINTS, Segment: 0, Level: modelv1.Level_LEVEL_REFINED, Payload: []byte("cloud")})
-	if len(c.Store.ModelChunks()) != 1 {
-		t.Fatal("the chunk was not stored")
+	// The assignment hold elapses, a drone arrives, and the reconstruction starts.
+	clk.fire()
+	c.Mission.Hello(1, modelv1.DroneStation_DRONE_STATION_CENTER)
+	if c.Mission.Phase() != viewerv1.MissionPhase_MISSION_PHASE_ACTIVE {
+		t.Fatalf("phase with a drone up: %v", c.Mission.Phase())
 	}
-	c.Mission.Reset()
+	cloud()
+	drain(t, control)
+	drain(t, viewer)
+
+	// Re-planning in flight is not a new mission: the world stays.
+	c.ControlHandler().Message(control, route())
+	if got := len(c.Store.ModelChunks()); got != 1 {
+		t.Fatalf("a re-plan in flight dropped the world (%d chunks left)", got)
+	}
+	if control.Closed() || viewer.Closed() {
+		t.Fatal("a re-plan in flight dropped the screens")
+	}
+
+	// The run ends. This leaves the core awaiting a drone, not idle, and it is
+	// where the next demo run assigns its route from. (The re-plan above put the
+	// mission back in its assignment hold, so that elapses first.)
+	clk.fire()
+	c.Mission.Gone(1)
+	if c.Mission.Phase() != viewerv1.MissionPhase_MISSION_PHASE_AWAITING_DRONE {
+		t.Fatalf("phase after the last drone left: %v", c.Mission.Phase())
+	}
 	drain(t, control)
 	drain(t, viewer)
 
