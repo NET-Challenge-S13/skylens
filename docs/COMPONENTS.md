@@ -95,7 +95,7 @@ KOREN은 등록 IP 외 인바운드를 막고, 브리지 → 대전은 SSH 하�
 
 ### 3.5 `skylens_model` (Rust 서버 · 판교)
 
-연산 서버. **REST 엔드포인트는 `app.py`와 같다**(§7). 같은 잡 API를 gRPC `ModelService`로도 열고, 코어는 gRPC로 붙는다. 라이브 입력(`PushFrames`)과 증분 출력(`SubscribeChunks`)은 gRPC 스트림에만 있다. 계약은 `src/shared/proto/skylens/model/v1/model.proto`. 내부는 세 층이다.
+연산 서버. **REST 엔드포인트는 `app.py`와 같다**(§7). 같은 잡 API를 gRPC `ModelService`로도 열고, 코어는 gRPC로 붙는다. 라이브 입력(`PushFrames`)과 증분 출력(`SubscribeChunks`)은 gRPC 스트림에만 있다. `StartMission` 은 새 미션이 시작될 때 코어가 부르는 리셋으로, 엔진을 새로 만들어 라이브 디스플레이를 1번 메시지부터 다시 시작한다(`SPEC.md` §3). 계약은 `src/shared/proto/skylens/model/v1/model.proto`. 내부는 세 층이다.
 
 1. **라이브 점군(cumulus3d).** `CompositionHost`에 `ReconNode`를 하나 띄워 두고, 코어가 넘긴 프레임 묶음을 `LiveFrameSet`으로 선언해 `compose`한다. 이미 받은 묶음의 재선언은 무시되고, 빠진 카메라가 있는 묶음은 기다린다. 노드는 cumulus3d **stable display**로 돈다(기본, `SKYLENS_STABLE_DISPLAY`): 미리보기 없이 구간마다 정제본이 나오고, 한 번 보인 구간은 제자리에 있다(내부값이 안정되기 전 구간 3까지는 다시 놓일 수 있다). cumulus3d가 표시 점군을 메모리에서 합성하고(`display_deltas`: 키 해시 1/6 솎기, 겹침 voxel 소유, 낮은 구간 우선) 구간 결과마다 `Event::DisplayDelta`(점 추가·이동·삭제, 조밀한 슬롯 id)를 주면, `models/skylens/slotstream.rs`의 `SlotEncoder`가 이를 pointblitz 슬롯 메시지(PBSD 머리 + v4 팩)로 써서 `CHUNK_KIND_POINT_SLOTS` 청크로 낸다. 파일 싱크도 실행 폴더도 없다. 점은 이 경로로만 나가고, 조밀화가 없을 때(CUDA 없음)와 조밀화가 실패한 구간만 정제 구간의 희소 점을 점 청크로 보낸다. 메시는 구간 점군이 아니라 합성된 표시(거울)에서 만들어 겹친 구간이 이중 면을 만들지 않는다. 스트림 id는 앞선 실행보다 늘 크고, 청크 시퀀스도 실행마다 그 id에서 시작해 모델 서버가 다시 떠도 코어가 새 실행의 청크를 빠짐없이 받는다.
 2. **UNet 훅.** 같은 노드에 `on_frame` 훅으로 UNet을 붙인다. 훅은 위치 계산 전에 디코딩된 RGB 프레임을 받아 별도 큐에서 돌므로 복원을 막지 않는다. 프레임마다 나온 위험구역 확률과 사람 점은 등록된 카메라 포즈로 점군에 투영하고, **여러 프레임의 결과를 confidence 가중으로 보간**해 최종 지도 좌표(GPS 기준 ENU)에 정렬한다.
@@ -222,7 +222,7 @@ pointblitz는 서버에서 헤드리스로 그려 영상으로 보내는 모드�
 | `skylens_core` MediaMTX | 대전 | 10889 · 10189/udp | WHEP 시그널링 · WebRTC 미디어 |
 | `skylens_drone` | 현장 PC | 8091 | `/health` · `/missions` · `/formation` · `/cloud/*` |
 | `skylens_model` | 판교 | 8100 | REST: `POST /recon/jobs` · `POST /detect/jobs` · `GET /jobs/{id}` · `GET /health` |
-| `skylens_model` | 판교 | 8101 | gRPC `skylens.model.v1.ModelService` (위 네 개 + `PushFrames` · `SubscribeChunks`) |
+| `skylens_model` | 판교 | 8101 | gRPC `skylens.model.v1.ModelService` (위 네 개 + `PushFrames` · `SubscribeChunks` · `StartMission`) |
 
 `skylens_model`의 REST 경로와 요청·응답 스키마는 `app.py`와 같게 유지한다(`src/skylens_model/API.md`). 코어는 8101 gRPC만 쓴다.
 
