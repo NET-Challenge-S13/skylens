@@ -15,11 +15,11 @@ name: release apps
 # default branch, which is how GitHub registers the button; a tag push works
 # from any branch. scripts/sync-main.sh is what carries it to main.
 #
-# What the downloads are not: signed by anyone. The macOS binaries carry an
-# ad-hoc signature (codesign -s -, no certificate), which Apple Silicon needs
-# before it runs a binary at all, and come zipped so the execute bit survives;
+# What the downloads are not: signed by anyone. On macOS both screens come as
+# .app bundles in one dmg (macos-dmg.sh), with an ad-hoc signature (codesign
+# -s -, no certificate), which Apple Silicon needs before it runs anything;
 # Gatekeeper still asks, so the first start is right-click > Open, or
-# `xattr -dr com.apple.quarantine <file>`. The Linux binaries are unsigned and
+# `xattr -dr com.apple.quarantine <app>`. The Linux binaries are unsigned and
 # the APK is signed with the Android debug key. The APK has not been checked on
 # a real device yet.
 
@@ -91,21 +91,9 @@ jobs:
           done
           ls -l out
 
-      - name: Ad-hoc sign and zip (macOS)
+      - name: App bundles, ad-hoc signature and dmg (macOS)
         if: runner.os == 'macOS'
-        shell: bash
-        run: |
-          # No certificate: "-" is the ad-hoc identity. --force replaces the
-          # linker's own ad-hoc signature with a complete one. ditto keeps the
-          # mode bits and the signature in the zip, which a bare download loses.
-          cd out
-          for f in skylens-*-${{ matrix.suffix }}; do
-            codesign --force --sign - --timestamp=none "$f"
-            codesign --verify --verbose=2 "$f"
-            ditto -c -k --keepParent "$f" "$f.zip"
-            rm "$f"
-          done
-          ls -l
+        run: bash .github/workflows/macos-dmg.sh out ${{ matrix.suffix }}
 
       - uses: actions/upload-artifact@v4
         with:
