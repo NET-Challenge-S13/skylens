@@ -8,6 +8,10 @@
 #                                 re-send it as WebRTC on the operator LAN;
 #                                 the UDP media from Daejeon does not cross the
 #                                 VPN boundary)
+# and one in the other direction, which is what permitlisten allows:
+#   Daejeon 18554 -> the bridge's RTSP 8554  (so this host can pull the drone
+#                                 video from the bridge without the home router
+#                                 opening any inbound port)
 # The key carries command="/bin/false" plus restrict and two permitopen entries,
 # so it cannot run a command, get a shell, forward another port, or reach the
 # agent or X11.
@@ -36,7 +40,7 @@ KEYBODY="$(printf '%s' "$KEY" | awk '{print $2}')"
 
 # restrict alone does not block command execution (checked), so command= makes the
 # session useless. autossh runs with -N, so the forced command never runs anyway.
-OPTS='command="/bin/false",restrict,port-forwarding,permitopen="127.0.0.1:10889",permitopen="127.0.0.1:8082",permitopen="127.0.0.1:8554"'
+OPTS='command="/bin/false",restrict,port-forwarding,permitopen="127.0.0.1:10889",permitopen="127.0.0.1:8082",permitopen="127.0.0.1:8554",permitlisten="127.0.0.1:18554"'
 
 CUR="$(grep -F "$KEYBODY" "$AK" || true)"
 if [ -n "$CUR" ]; then
