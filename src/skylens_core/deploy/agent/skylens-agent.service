@@ -2,9 +2,13 @@
 # and installs what changed. The timer starts it; it exits within seconds
 # unless there is something to install.
 #
-#   sudo cp skylens-agent.* /etc/systemd/system/
+#   git clone https://github.com/NET-Challenge-S13/skylens.git ~/skylens
+#   sudo cp ~/skylens/src/skylens_core/deploy/agent/skylens-agent.* /etc/systemd/system/
 #   sudo systemctl daemon-reload
 #   sudo systemctl enable --now skylens-agent.timer
+#
+# ExecStart points into the clone, which is how the agent updates itself: it
+# checks the clone out first, so the next tick runs the new script.
 #
 # Runs as the user that owns ~/skylens_online, and uses sudo -n for the one
 # thing it cannot do itself: restarting the core.
@@ -17,7 +21,7 @@ Wants=network-online.target
 Type=oneshot
 User=ubuntu
 WorkingDirectory=/home/ubuntu
-ExecStart=/home/ubuntu/skylens_online/agent/pull.sh
+ExecStart=/home/ubuntu/skylens/src/skylens_core/deploy/agent/pull.sh
 # A hung download must not hold the lock until the next tick finds it.
 TimeoutStartSec=900
 Nice=10

@@ -523,14 +523,21 @@ https://github.com/NET-Challenge-S13/skylens/releases/download/deploy-develop/sk
 `src/skylens_core/deploy/agent/` 의 `pull.sh` 와 systemd 유닛 두 개.
 
 ```bash
-mkdir -p ~/skylens_online/agent
-cp ~/skylens/src/skylens_core/deploy/agent/pull.sh ~/skylens_online/agent/
+git clone https://github.com/NET-Challenge-S13/skylens.git ~/skylens
 sudo cp ~/skylens/src/skylens_core/deploy/agent/skylens-agent.{service,timer} /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now skylens-agent.timer
 ```
 
-하는 일은 둘이다.
+클론을 두는 이유는 **에이전트가 자기 자신을 갱신**해야 하기 때문이다. systemd 가 클론
+안의 스크립트를 가리키고, 에이전트는 먼저 클론을 체크아웃하므로 다음 틱이 새 스크립트를
+실행한다. 그러지 않으면 pull.sh 를 고쳐도 아무도 호스트에 가져다 놓지 않는다.
+
+`src/skylens_core/deploy/` 아래의 호스트 파일(MediaMTX 설정, 서비스 유닛)은 **가져만
+오고 적용하지 않는다.** 적용은 MediaMTX 나 터널 재시작을 뜻하고, 그건 타이머가 아니라
+사람이 정할 일이다. 바뀌면 로그에 그렇게 남는다.
+
+그다음 하는 일은 둘이다.
 
 - **코어 바이너리**: `releases/core/<시각>-<커밋>/` 에 풀고 `bin/skylens-core` 심링크를
   갈아 끼운 다음 서비스를 재시작한다. 30초 안에 `/health` 가 답하지 않으면 **심링크를

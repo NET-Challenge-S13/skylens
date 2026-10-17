@@ -23,6 +23,8 @@ set -euo pipefail
 REPO="${SKYLENS_REPO:-NET-Challenge-S13/skylens}"
 TAG="${SKYLENS_RELEASE_TAG:-deploy-develop}"
 ROOT="${SKYLENS_ROOT:-$HOME/skylens_online}"
+REPO_DIR="${SKYLENS_REPO_DIR:-$HOME/skylens}"
+BRANCH="${SKYLENS_BRANCH:-develop}"
 HOLD="${SKYLENS_HOLD:-/etc/skylens/hold}"
 HEALTH="${SKYLENS_HEALTH:-http://127.0.0.1:8080/health}"
 SERVICE="${SKYLENS_SERVICE:-skylens-core}"
@@ -75,6 +77,32 @@ commit_of() {
   curl -fsSL -m 20 "$BASE/$1" 2>/dev/null |
     python3 -c 'import json,sys; print(json.load(sys.stdin)["commit"][:12])' 2>/dev/null || echo unknown
 }
+
+# ---- the checkout ----------------------------------------------------------
+# This is how the agent updates itself: systemd points at the script inside the
+# clone, so the next tick runs whatever was just checked out. The host files
+# under deploy/ are only brought in, never applied: applying them means
+# restarting MediaMTX or the tunnels, which is a decision for a person at a
+# keyboard, not for a timer.
+if [ -d "$REPO_DIR/.git" ]; then
+  git -C "$REPO_DIR" fetch -q origin "$BRANCH" || log "fetch failed"
+  old_head="$(git -C "$REPO_DIR" rev-parse HEAD)"
+  new_head="$(git -C "$REPO_DIR" rev-parse "origin/$BRANCH")"
+  if [ "$old_head" != "$new_head" ]; then
+    if [ -n "$(git -C "$REPO_DIR" status --porcelain --untracked-files=no)" ]; then
+      log "$REPO_DIR has uncommitted changes; not moving to ${new_head:0:12}"
+    else
+      git -C "$REPO_DIR" reset -q --hard "$new_head"
+      log "checkout now ${new_head:0:12}"
+      changed="$(git -C "$REPO_DIR" diff --name-only "$old_head" "$new_head" -- src/skylens_core/deploy/ |
+        grep -v '^src/skylens_core/deploy/agent/' || true)"
+      if [ -n "$changed" ]; then
+        log "host files changed and were NOT applied; apply by hand: $(tr '
+' ' ' <<<"$changed")"
+      fi
+    fi
+  fi
+fi
 
 # ---- the core binary -------------------------------------------------------
 sum="$(want manifest-core.json skylens-core)"
