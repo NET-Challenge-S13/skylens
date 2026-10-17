@@ -25,7 +25,7 @@ The servers do not use these: Daejeon and the bridge take the web builds from ci
 
 The status board connects to the bridge (wss://175.126.98.44:8443) first and to a core on the same machine (127.0.0.1:8080) when the bridge does not answer. The control tower connects to 127.0.0.1:8080. Either takes another core with \`--core <host:port>\`.
 
-None of this is signed for distribution. The macOS apps carry an ad-hoc signature only, so the first start is right-click > Open (or \`xattr -dr com.apple.quarantine <app>\`); the Linux binaries are unsigned; the APK carries the Android debug key, so install it with \`adb install -r\` or allow unknown sources. The APK has not been checked on a real device yet." || true
+None of this is signed for distribution. The macOS apps carry an ad-hoc signature only, so the first start is right-click > Open (or \`xattr -dr com.apple.quarantine <app>\`); the Linux binaries are unsigned; the APK is signed with the project's own key, not a store key, so allow unknown sources (or \`adb install -r\`); later releases install over it. The APK has not been checked on a real device yet." || true
 fi
 
 gh release upload "$tag" "$@" --clobber
