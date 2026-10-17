@@ -397,3 +397,52 @@ func TestResetModelKeepsTheSiteAndTheResumePoint(t *testing.T) {
 		t.Fatalf("resume point moved to %d, want %d", got, seqBefore)
 	}
 }
+
+// After a new mission the model keeps sending the stream it was already on, and
+// the messages we dropped are never sent again. The stream has to continue from
+// wherever it is, or the live points stall for the rest of the model run (which
+// is what happened on 2026-10-17: every message after a reset was held waiting
+// for a start that could not come).
+func TestPointSlotsContinueAfterANewMission(t *testing.T) {
+	s := New(Options{})
+	for i := 1; i <= 3; i++ {
+		if got := s.PutAll(slot(uint64(i), 7, uint32(i), 0, string(rune('a'+i-1)))); len(got) != 1 {
+			t.Fatalf("message %d was not forwarded", i)
+		}
+	}
+
+	s.ResetModel()
+	if n, _ := s.SlotMessages(); n != 0 {
+		t.Fatalf("%d slot message(s) survived the reset", n)
+	}
+
+	// The next message of the same stream is message 4, and it is the new start.
+	got := s.PutAll(slot(4, 7, 4, 0, "d"))
+	if len(got) != 1 || tags(got)[0] != "d" {
+		t.Fatalf("the stream did not continue: %v", tags(got))
+	}
+	if got := s.PutAll(slot(5, 7, 5, 1, "e")); len(got) != 1 {
+		t.Fatalf("message 5 was not forwarded after the rebase")
+	}
+
+	// A gap is still a gap: 7 waits for 6.
+	if got := s.PutAll(slot(7, 7, 7, 1, "g")); len(got) != 0 {
+		t.Fatalf("message 7 was forwarded before 6: %v", tags(got))
+	}
+	if got := s.PutAll(slot(6, 7, 6, 1, "f")); len(got) != 2 || tags(got)[0] != "f" || tags(got)[1] != "g" {
+		t.Fatalf("filling the gap did not release the held message: %v", tags(got))
+	}
+
+	// A screen that connects now gets the stream as the core has it, from 4.
+	replay := s.ModelChunks()
+	if len(replay) != 4 || replay[0].GetVersion() != 4 {
+		t.Fatalf("replay starts at %d with %d message(s)", replay[0].GetVersion(), len(replay))
+	}
+
+	// Only the first message after a reset rebases: a later mid-stream start is
+	// still a gap in a stream we hold from its beginning.
+	s2 := New(Options{})
+	if got := s2.PutAll(slot(1, 9, 9, 0, "late")); len(got) != 0 {
+		t.Fatal("a stream that starts at message 9 without a reset should wait")
+	}
+}

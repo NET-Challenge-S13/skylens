@@ -196,7 +196,9 @@ enum ChunkKind {
   // moves write slots, removes hide them. Not compacted: a viewer applies every message of a
   // stream in order. segment = the zone that triggered the event, level = refined,
   // version = the message seq (1, 2, ...), generation = the stream id (one per model run; a new
-  // id starts a new stream at seq 1).
+  // id starts a new stream at seq 1). A reader that joins a stream after its start, which is what
+  // a new mission leaves behind, starts at the first message it is given: the ones before it are
+  // never sent again, so it shows the slots written from there on.
   CHUNK_KIND_POINT_SLOTS = 6;
 }
 

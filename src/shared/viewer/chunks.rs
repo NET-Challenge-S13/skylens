@@ -552,6 +552,14 @@ impl ChunkStore {
             let epoch = self.stamp();
             self.slots = SlotPoints { stream, epoch, ..Default::default() };
         }
+        if self.slots.seq == 0 && header.seq > 1 {
+            // The stream does not start at message 1. Either the core dropped
+            // its earlier part with the last mission, or its start was missed
+            // before we connected; either way those messages are never sent
+            // again, so this one is the start. We then hold what we are given:
+            // the slots written from here on, and none of the earlier ones.
+            self.slots.seq = header.seq - 1;
+        }
         let seq = header.seq;
         if seq <= self.slots.seq || self.slots.held.contains_key(&seq) {
             return Applied::of(Change::Stale);
@@ -1075,6 +1083,30 @@ mod tests {
     }
 
     #[test]
+    fn a_stream_that_does_not_start_at_one_starts_where_it_is() {
+        // The core drops the earlier part of a running stream when a new
+        // mission starts, and the model never sends those messages again. A
+        // screen that waited for message 1 would show no live points for the
+        // rest of the model run.
+        let mut s = ChunkStore::new();
+        let a = s.apply(&slot_chunk(5, 0, slot_msg(221, 3, &[(0, 1.0, 0), (1, 2.0, 0)], &[], &[])));
+        assert!(
+            matches!(a.change, Change::SlotsApplied { .. }),
+            "message 221 was not applied: {:?}",
+            a.change
+        );
+        assert_eq!(s.slots().points(), 2);
+
+        // From there it is an ordinary stream: 222 follows, and a gap holds.
+        let b = s.apply(&slot_chunk(5, 0, slot_msg(222, 3, &[(2, 3.0, 0)], &[], &[])));
+        assert!(matches!(b.change, Change::SlotsApplied { .. }));
+        let c = s.apply(&slot_chunk(5, 0, slot_msg(224, 3, &[], &[(0, 9.0)], &[])));
+        assert!(matches!(c.change, Change::SlotsHeld { seq: 224 }), "{:?}", c.change);
+        let d = s.apply(&slot_chunk(5, 0, slot_msg(223, 3, &[], &[(1, 8.0)], &[])));
+        assert!(matches!(d.change, Change::SlotsApplied { .. }), "{:?}", d.change);
+    }
+
+    #[test]
     fn slot_messages_build_one_state_with_zones_that_arrive_refined() {
         use payload::DetectionCategory::Person;
         let mut s = ChunkStore::new();
@@ -1180,12 +1212,16 @@ mod tests {
     #[test]
     fn held_slot_messages_are_bounded() {
         let mut s = ChunkStore::new();
-        // A stream whose start was missed: nothing can be applied, and the held ones stay bounded.
-        for seq in 2..2 + MAX_HELD_SLOT_MESSAGES as u32 {
+        // A stream we hold from its start, then a gap: the messages after the
+        // gap are held, and the held ones stay bounded. (A stream whose first
+        // message is not 1 starts there instead; see
+        // a_stream_that_does_not_start_at_one_starts_where_it_is.)
+        s.apply(&slot_chunk(1, 0, slot_msg(1, 1, &[], &[], &[])));
+        for seq in 3..3 + MAX_HELD_SLOT_MESSAGES as u32 {
             assert_eq!(s.apply(&slot_chunk(1, 0, slot_msg(seq, 1, &[], &[], &[]))).change, Change::SlotsHeld { seq });
         }
         assert_eq!(s.slots().held(), MAX_HELD_SLOT_MESSAGES);
-        let over = 2 + MAX_HELD_SLOT_MESSAGES as u32;
+        let over = 3 + MAX_HELD_SLOT_MESSAGES as u32;
         assert!(matches!(s.apply(&slot_chunk(1, 0, slot_msg(over, 1, &[], &[], &[]))).change, Change::Invalid(_)));
         assert_eq!(s.slots().held(), 0);
         // A newer stream from seq 1 shows normally.

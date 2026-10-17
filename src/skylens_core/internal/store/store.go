@@ -63,10 +63,18 @@ type segmentPoints struct {
 	hasRefined bool
 }
 
-// slotStream holds one point slot stream: messages seq 1..len(msgs) in order,
-// and the messages that arrived ahead of a gap.
+// slotStream holds one point slot stream: messages base+1..base+len(msgs) in
+// order, and the messages that arrived ahead of a gap.
+//
+// base is 0 for a stream we have from its start. It is only other than 0 after
+// a new mission dropped the earlier part of a stream that is still running: the
+// first message that arrives then becomes the new start, and the screens rebase
+// on it the same way (src/shared/viewer/chunks.rs). Without that the stream
+// would stall for the rest of the model run, because the messages we dropped
+// are never sent again.
 type slotStream struct {
 	id        uint32
+	base      uint32
 	msgs      []*modelv1.Chunk
 	held      map[uint32]*modelv1.Chunk
 	heldBytes int
@@ -119,6 +127,10 @@ type Store struct {
 	detPerSeg  map[uint32]int
 	terrain    *ordered // terrain and buildings
 	slots      *slotStream
+	// Set by ResetModel: the next slot message of a stream that is still
+	// running starts a new one where it is, instead of waiting for a start that
+	// will never be sent again.
+	rebaseSlots bool
 	segLevel   map[uint32]modelv1.Level
 	counters   Counters
 
@@ -243,17 +255,26 @@ func (s *Store) putSlotsLocked(c *modelv1.Chunk) ([]*modelv1.Chunk, bool) {
 	}
 	if s.slots == nil || id > s.slots.id {
 		// A new stream (a new model run) starts over at seq 1.
-		if seq != 1 {
+		base := uint32(0)
+		switch {
+		case s.rebaseSlots && seq > 1:
+			// A new mission dropped the earlier part of a stream that is still
+			// running. Start here: what we dropped is not sent again, so waiting
+			// for message 1 would stall the live points for the rest of the run.
+			base = seq - 1
+			log.Printf("[store] point slot stream %d continues from message %d: the earlier part went with the last mission", id, seq)
+		case seq != 1:
 			log.Printf("[store] point slot stream %d starts at message %d, not 1: its start was missed; "+
 				"the screens show nothing of it until messages 1..%d arrive", id, seq, seq-1)
 		}
-		s.slots = &slotStream{id: id, held: map[uint32]*modelv1.Chunk{}}
+		s.slots = &slotStream{id: id, base: base, held: map[uint32]*modelv1.Chunk{}}
 	}
+	s.rebaseSlots = false
 	st := s.slots
 	if id < st.id {
 		return nil, false
 	}
-	next := uint32(len(st.msgs)) + 1
+	next := st.base + uint32(len(st.msgs)) + 1
 	switch {
 	case seq < next:
 		return nil, false
@@ -278,7 +299,7 @@ func (s *Store) putSlotsLocked(c *modelv1.Chunk) ([]*modelv1.Chunk, bool) {
 	out := []*modelv1.Chunk{c}
 	st.msgs = append(st.msgs, c)
 	for {
-		h, ok := st.held[uint32(len(st.msgs))+1]
+		h, ok := st.held[st.base+uint32(len(st.msgs))+1]
 		if !ok {
 			break
 		}
@@ -462,6 +483,7 @@ func (s *Store) ResetModel() (dropped int) {
 	s.detections = nil
 	s.detPerSeg = map[uint32]int{}
 	s.slots = nil
+	s.rebaseSlots = true
 	s.segLevel = map[uint32]modelv1.Level{}
 	s.counters.Model = 0
 	s.counters.Detections = 0
