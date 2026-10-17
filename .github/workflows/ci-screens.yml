@@ -24,6 +24,7 @@ on:
       - 'Cargo.toml'
       - 'Cargo.lock'
       - '.github/workflows/ci-screens.yml'
+      - '.github/workflows/publish-artifact.sh'
   workflow_dispatch:
 
 permissions:

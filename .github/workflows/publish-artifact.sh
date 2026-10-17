@@ -38,13 +38,21 @@ fi
   printf '  "built_at": "%s",\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   printf '  "run": "%s",\n' "${GITHUB_RUN_ID:-local}"
   printf '  "files": {\n'
-  sep=""
+  first=1
   for f in "$@"; do
-    printf '%s    "%s": "%s"' "$sep" "$(basename "$f")" "$(sha256sum "$f" | cut -d' ' -f1)"
-    sep=",\n"
+    # The separator is printed as a format string, never passed as an argument:
+    # printf expands escapes in the format only, so a ",\n" argument lands in
+    # the file as those two characters and the JSON stops parsing.
+    if [ "$first" = 0 ]; then printf ',\n'; fi
+    printf '    "%s": "%s"' "$(basename "$f")" "$(sha256sum "$f" | cut -d' ' -f1)"
+    first=0
   done
   printf '\n  }\n}\n'
 } > "$MANIFEST"
+
+# A manifest that does not parse stops every host from deploying, and does it
+# quietly. Fail the build here instead.
+python3 -I -c 'import json,sys; json.load(open(sys.argv[1]))' "$MANIFEST"
 
 cat "$MANIFEST"
 gh release upload "$TAG" "$@" "$MANIFEST" --clobber

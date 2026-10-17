@@ -20,6 +20,7 @@ on:
       - 'src/shared/proto/**'
       - 'go.work'
       - '.github/workflows/ci-core.yml'
+      - '.github/workflows/publish-artifact.sh'
   workflow_dispatch:
 
 permissions:
