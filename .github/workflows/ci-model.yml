@@ -5,9 +5,12 @@ name: ci model
 # found there, during a session that holds the GPU for eight hours, by someone
 # who wanted to deploy and not to debug.
 #
-# This only checks. The binary that runs is still built on the node, against
-# CUDA libtorch (TORCH_CUDA_VERSION=cu126 in .cargo/config.toml); here the CPU
-# build is enough to compile every line and is a tenth of the download.
+# This only checks; the binary that runs is still built on the node. It builds
+# against the same CUDA libtorch the node uses (TORCH_CUDA_VERSION=cu126 in
+# .cargo/config.toml), which tch downloads during the build. No GPU is needed to
+# compile against it. A CPU libtorch would be a smaller download, but tch takes
+# the flavour from that one variable and there is no value for "none" that the
+# repository's config does not already set.
 
 on:
   push:
@@ -30,8 +33,6 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
-    env:
-      TORCH_CUDA_VERSION: cpu # overrides .cargo/config.toml for this check
     steps:
       - uses: actions/checkout@v4
 
@@ -42,7 +43,10 @@ jobs:
           key: model-cpu
 
       - name: Check
-        run: cargo check -p skylens-model --all-targets
+        # The libtorch download is about 2 GB, so give it room and time.
+        run: |
+          df -h / | tail -1
+          cargo check -p skylens-model --all-targets
 
       - name: Test what runs without a GPU
         # The slot stream and the chunk rules need no libtorch and no device.
