@@ -59,7 +59,7 @@ jobs:
           # No && chains here: this step runs under -e, where a grep that finds
           # nothing would end the step instead of leaving the flag at 0.
           shared=0; board=0; tower=0
-          if grep -qE '^(src/shared/|Cargo\.(toml|lock)|\.github/workflows/ci-screens\.yml)' <<<"$files"; then shared=1; fi
+          if grep -qE '^(src/shared/|Cargo\.(toml|lock)|\.github/workflows/(ci-screens\.yml|publish-artifact\.sh))' <<<"$files"; then shared=1; fi
           if grep -qE '^src/skylens_client/' <<<"$files"; then board=1; fi
           if grep -qE '^src/skylens_core/control/' <<<"$files"; then tower=1; fi
           # A manual run has nothing to diff against: build both.
