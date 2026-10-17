@@ -13,6 +13,10 @@ name: release apps
 # produced an APK would be publishing something nobody has run. It belongs here
 # once that changes: the toolchain is cargo-apk plus an NDK, and the script is
 # src/skylens_client/build-android.sh.
+#
+# A manual run (workflow_dispatch) is only offered once this file is on the
+# default branch, which is how GitHub registers the button; a tag push works
+# from any branch. scripts/sync-main.sh is what carries it to main.
 
 on:
   push:
