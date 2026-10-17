@@ -28,6 +28,7 @@ pub struct Options {
     pub remote_core: Option<String>,
     /// SRT ingest (host:port) the footage is published to; default the local MediaMTX.
     pub srt_addr: Option<String>,
+    pub srt_pkt_size: u32,
     /// Publish the footage as MPEG-TS over plain TCP instead (host:port, drone N goes to
     /// port+N-1), for links that block SRT's UDP; something on the far side feeds MediaMTX.
     pub feed_tcp: Option<String>,
@@ -83,6 +84,7 @@ impl Default for Options {
             model_addr: None,
             remote_core: None,
             srt_addr: None,
+            srt_pkt_size: crate::paths::SRT_PKT_SIZE,
             feed_tcp: None,
             fps: 2.0,
             frame_width: 1920,
@@ -118,6 +120,10 @@ pub const USAGE: &str = "usage: cargo run -p skylens-demo -- [options]
                        Daejeon): start only the footage feeds and the drones
   --srt-addr H:P       publish the footage over SRT to this host:port (default: the
                        local MediaMTX, 127.0.0.1:10890)
+  --srt-pkt-size N     SRT payload in bytes (default 1128, six MPEG-TS packets).
+                       Raise it to 1316 on a plain LAN; anything crossing a
+                       VPN needs the smaller one or the data packets exceed the
+                       path MTU and the stream never publishes
   --feed-tcp H:P       publish the footage as MPEG-TS over TCP to host:port (drone N to
                        port+N-1) instead of SRT, for links that block UDP
   --fps X              frames per second extracted per drone (default 2)
@@ -182,6 +188,10 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<Options, St
             "--remote-core" => o.remote_core = Some(host_port("--remote-core", value("--remote-core")?)?),
             "--feed-tcp" => o.feed_tcp = Some(host_port("--feed-tcp", value("--feed-tcp")?)?),
             "--srt-addr" => o.srt_addr = Some(host_port("--srt-addr", value("--srt-addr")?)?),
+            "--srt-pkt-size" => {
+                let v = value("--srt-pkt-size")?;
+                o.srt_pkt_size = v.parse().map_err(|_| format!("--srt-pkt-size 는 숫자여야 합니다: {v}"))?;
+            }
             "--publish-delay" => {
                 let v = value("--publish-delay")?;
                 o.publish_delay = match v.parse::<f64>() {

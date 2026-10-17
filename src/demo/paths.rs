@@ -91,8 +91,19 @@ pub fn stream_path(drone: &Drone) -> String {
 }
 
 /// SRT publish URL for one drone's footage.
-pub fn srt_publish_url(srt_addr: &str, drone: &Drone) -> String {
-    format!("srt://{srt_addr}?streamid=publish:{}&pkt_size=1316", stream_path(drone))
+/// Default SRT payload, six MPEG-TS packets (6 x 188).
+///
+/// The obvious value is 1316 (7 x 188), which is what fills a 1500-byte frame
+/// once SRT, UDP and IP headers are on. It fails the moment the footage crosses
+/// a VPN: the tunnel adds its own header, the data packets exceed the path MTU
+/// and are dropped, while the small handshake packets still get through. The
+/// stream then looks connected and never publishes, and MediaMTX answers every
+/// reader with "no stream is available". One packet less leaves room for the
+/// tunnel and costs about 15% more packets, which is nothing for three feeds.
+pub const SRT_PKT_SIZE: u32 = 1128;
+
+pub fn srt_publish_url(srt_addr: &str, drone: &Drone, pkt_size: u32) -> String {
+    format!("srt://{srt_addr}?streamid=publish:{}&pkt_size={pkt_size}", stream_path(drone))
 }
 
 /// TCP publish URL for one drone's footage (`--feed-tcp`): the base port plus the drone index.
@@ -270,18 +281,18 @@ paths:
         assert_eq!(planned_route_file(Path::new("/repo/target/demo")), Path::new("/repo/target/demo/planned-route.json"));
         assert_eq!(stream_path(&FORMATION[1]), "drone2");
         assert_eq!(
-            srt_publish_url("127.0.0.1:10890", &FORMATION[2]),
-            "srt://127.0.0.1:10890?streamid=publish:drone3&pkt_size=1316"
+            srt_publish_url("127.0.0.1:10890", &FORMATION[2], SRT_PKT_SIZE),
+            "srt://127.0.0.1:10890?streamid=publish:drone3&pkt_size=1128"
         );
     }
 
     #[test]
     fn publisher_copies_video_in_a_real_time_loop() {
-        let args = publisher_args(Path::new("demo_left.mp4"), &srt_publish_url("127.0.0.1:10890", &FORMATION[0]), true, None);
+        let args = publisher_args(Path::new("demo_left.mp4"), &srt_publish_url("127.0.0.1:10890", &FORMATION[0], SRT_PKT_SIZE), true, None);
         let joined = args.join(" ");
         assert!(joined.contains("-re -stream_loop -1 -i demo_left.mp4"));
         assert!(joined.contains("-an -c:v copy -f mpegts"));
-        assert_eq!(args.last().unwrap(), "srt://127.0.0.1:10890?streamid=publish:drone1&pkt_size=1316");
+        assert_eq!(args.last().unwrap(), "srt://127.0.0.1:10890?streamid=publish:drone1&pkt_size=1128");
     }
 
     #[test]

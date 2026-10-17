@@ -305,7 +305,7 @@ async fn start_all(
         let name = format!("송출 drone{} ({})", drone.id, drone.name);
         let url = match &o.feed_tcp {
             Some(base) => paths::tcp_publish_url(base, drone),
-            None => paths::srt_publish_url(&srt_addr, drone),
+            None => paths::srt_publish_url(&srt_addr, drone, o.srt_pkt_size),
         };
         let argv = paths::publisher_args(file, &url, !o.no_loop, if o.full_footage { None } else { s.track.as_ref().map(|t| t.views()[i].duration) });
         let mut publisher = spec(plan, &name, &tag, &plan.ffmpeg, argv, vec![]);
