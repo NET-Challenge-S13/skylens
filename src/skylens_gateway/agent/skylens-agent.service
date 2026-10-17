@@ -1,0 +1,26 @@
+# Deployment agent for the bridge host: fetches the current build of develop
+# and installs what changed (the status board bundle, and the host config from
+# git). The timer starts it; it exits within seconds unless there is something
+# to install.
+#
+#   sudo cp ~/skylens/src/skylens_gateway/agent/skylens-agent.* /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now skylens-agent.timer
+#
+# Runs as the user that owns the clone, and uses sudo -n for the parts that
+# need root: the web directory and the installer.
+[Unit]
+Description=SkyLens deployment agent (bridge)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=madang
+WorkingDirectory=/home/madang
+ExecStart=/home/madang/skylens/src/skylens_gateway/agent/pull.sh
+TimeoutStartSec=900
+Nice=10
+
+[Install]
+WantedBy=multi-user.target

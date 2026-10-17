@@ -235,6 +235,11 @@ func plannedEnv(p *viewerv1.PlannedRoute) *viewerv1.Envelope {
 // publish runs mutate once and sends what it returns to both screen sockets.
 // It holds both hub locks (control first, always), so a screen attaching on
 // either socket sees the update exactly once, in its replay or live.
+// Commit is the commit this binary was built from. The release workflow sets it
+// with -ldflags "-X ...core.Commit=<sha>"; a local build leaves it unset. It is
+// in /health so one request answers "which version is actually running here".
+var Commit = "dev"
+
 func (c *Core) publish(mutate func() []*viewerv1.Envelope) {
 	c.Controls.Publish(func() []*viewerv1.Envelope {
 		var envs []*viewerv1.Envelope
@@ -703,6 +708,7 @@ func (c *Core) HealthHandler() http.Handler {
 		body := map[string]any{
 			"ok":         true,
 			"component":  "skylens_core",
+			"commit":     Commit,
 			"uptime_sec": int(time.Since(c.start).Seconds()),
 			"site":       siteJSON(site, c.cfg.Site.Source),
 			"mission": map[string]any{

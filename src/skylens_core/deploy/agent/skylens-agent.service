@@ -1,0 +1,23 @@
+# Deployment agent for the Daejeon host: fetches the current build of develop
+# and installs what changed. The timer starts it; it exits within seconds
+# unless there is something to install.
+#
+#   sudo cp skylens-agent.* /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now skylens-agent.timer
+#
+# Runs as the user that owns ~/skylens_online, and uses sudo -n for the one
+# thing it cannot do itself: restarting the core.
+[Unit]
+Description=SkyLens deployment agent (Daejeon)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu
+ExecStart=/home/ubuntu/skylens_online/agent/pull.sh
+# A hung download must not hold the lock until the next tick finds it.
+TimeoutStartSec=900
+Nice=10

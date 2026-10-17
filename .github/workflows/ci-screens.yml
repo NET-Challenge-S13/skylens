@@ -1,0 +1,115 @@
+name: ci screens
+
+# Builds the two web screens and publishes them for the hosts to pull: the
+# control tower (served by the core in Daejeon) and the status board (served by
+# nginx on the bridge).
+#
+# Both in one job on purpose. They share almost every dependency - blitz, wgpu,
+# pointblitz, skylens-viewer, the proto crate - so two jobs would compile the
+# same graph twice and warm two caches. Inside the job only the screen that
+# changed is rebuilt; a shared change builds both.
+#
+# Desktop and Android are not built here. They are not deployed to any server,
+# nobody downloads them today, and Android has never been checked on a device.
+# When that changes, they belong in a release workflow driven by a version tag,
+# not in the path from a push to a running server.
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'src/skylens_client/**'
+      - 'src/skylens_core/control/**'
+      - 'src/shared/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/ci-screens.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ci-screens
+  cancel-in-progress: true
+
+env:
+  RELEASE_TAG: deploy-develop
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2 # the diff below needs the parent commit
+
+      - name: What changed
+        id: changed
+        run: |
+          # A push can carry several commits; compare against the push base when
+          # there is one. Anything shared, and both screens are stale.
+          base="${{ github.event.before }}"
+          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then
+            base="$(git rev-parse HEAD~1 2>/dev/null || git rev-parse HEAD)"
+          fi
+          files="$(git diff --name-only "$base" HEAD || true)"
+          echo "$files"
+          # No && chains here: this step runs under -e, where a grep that finds
+          # nothing would end the step instead of leaving the flag at 0.
+          shared=0; board=0; tower=0
+          if grep -qE '^(src/shared/|Cargo\.(toml|lock)|\.github/workflows/ci-screens\.yml)' <<<"$files"; then shared=1; fi
+          if grep -qE '^src/skylens_client/' <<<"$files"; then board=1; fi
+          if grep -qE '^src/skylens_core/control/' <<<"$files"; then tower=1; fi
+          # A manual run has nothing to diff against: build both.
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then shared=1; fi
+          if [ "$shared" = 1 ]; then board=1; tower=1; fi
+          echo "board=$board" >> "$GITHUB_OUTPUT"
+          echo "tower=$tower" >> "$GITHUB_OUTPUT"
+          echo "board=$board tower=$tower"
+
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.changed.outputs.board == '1' || steps.changed.outputs.tower == '1'
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+        if: steps.changed.outputs.board == '1' || steps.changed.outputs.tower == '1'
+        with:
+          key: wasm-screens
+
+      - name: Tools
+        if: steps.changed.outputs.board == '1' || steps.changed.outputs.tower == '1'
+        run: |
+          # wasm-bindgen-cli has to match the wasm-bindgen crate exactly; the
+          # build scripts refuse to run otherwise, which is the failure we want.
+          ver="$(awk '/^name = "wasm-bindgen"$/ { getline; gsub(/version = |"/, ""); print; exit }' Cargo.lock)"
+          echo "wasm-bindgen $ver"
+          if [ "$(wasm-bindgen --version 2>/dev/null | awk '{print $2}')" != "$ver" ]; then
+            cargo install wasm-bindgen-cli --version "$ver" --locked
+          fi
+          sudo apt-get update -qq && sudo apt-get install -y -qq binaryen # wasm-opt
+
+      - name: Build the status board
+        if: steps.changed.outputs.board == '1'
+        run: |
+          bash src/skylens_client/build-web.sh
+          tar czf client-dist.tgz -C src/skylens_client/dist .
+
+      - name: Build the control tower
+        if: steps.changed.outputs.tower == '1'
+        run: |
+          bash src/skylens_core/control/build-web.sh
+          tar czf control-dist.tgz -C src/skylens_core/control/dist .
+
+      - name: Publish for the hosts
+        if: steps.changed.outputs.board == '1' || steps.changed.outputs.tower == '1'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Only what was rebuilt goes up. The manifest then names only those
+          # files, and a host leaves the rest at the version it already has.
+          files=""
+          if [ -f client-dist.tgz ]; then files="$files client-dist.tgz"; fi
+          if [ -f control-dist.tgz ]; then files="$files control-dist.tgz"; fi
+          bash .github/workflows/publish-artifact.sh manifest-screens.json $files

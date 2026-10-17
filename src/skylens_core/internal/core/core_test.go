@@ -714,3 +714,25 @@ func TestNewMissionDropsTheLastReconstruction(t *testing.T) {
 		t.Fatal("the new route was dropped with the old world")
 	}
 }
+
+// The deployment agent reads this field to tell which build is running, and so
+// does anyone debugging the Daejeon host, so it has to be in the body.
+func TestHealthCarriesTheCommit(t *testing.T) {
+	c := New(Options{Config: testConfig(t), Clock: &manualClock{}, Terrain: &fakeTerrain{}})
+	defer c.Close()
+
+	rec := httptest.NewRecorder()
+	c.HealthHandler().ServeHTTP(rec, httptest.NewRequest("GET", "/health", nil))
+	if rec.Code != 200 {
+		t.Fatalf("status %d", rec.Code)
+	}
+	var body struct {
+		Commit string `json:"commit"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Commit != Commit {
+		t.Fatalf("commit %q, want %q", body.Commit, Commit)
+	}
+}
