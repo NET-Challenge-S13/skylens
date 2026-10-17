@@ -97,7 +97,7 @@ if [ -d "$REPO_DIR/.git" ]; then
       # them where they are.
       if [ -n "$(git -C "$REPO_DIR" diff --name-only "$old" "$new" -- src/skylens_gateway/ | grep -v '^src/skylens_gateway/agent/' || true)" ]; then
         log "bridge files changed: running the installer"
-        if (cd "$REPO_DIR/src/skylens_gateway" && sudo -n ./setup-bridge.sh >"$WORK/setup.log" 2>&1); then
+        if (cd "$REPO_DIR/src/skylens_gateway" && sudo -n bash ./setup-bridge.sh >"$WORK/setup.log" 2>&1); then
           log "installer ok"
         else
           log "installer failed; see $WORK/setup.log"
