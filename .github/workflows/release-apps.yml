@@ -1,22 +1,23 @@
 name: release apps
 
-# Builds the native screens: the status board and the control tower as desktop
-# binaries. Nothing here is part of the path from a push to a running server;
-# the servers take the web builds from ci-screens. This exists so a version tag
-# produces something a person can download and run without a toolchain.
+# Builds the native screens for people, not for the servers: the status board
+# and the control tower as desktop binaries for Linux, Windows and macOS, and
+# the status board as an Android APK.
+#
+# Nothing here is part of the path from a push to a running server. Daejeon and
+# the bridge take the web builds from ci-screens; these are for someone who
+# wants to run a screen on their own machine without a toolchain.
 #
 # Not on push, by design. A desktop build is minutes of Rust per platform and
 # nobody is waiting on it, so it runs on a tag or when someone asks for it.
 #
-# Android is not built here. The board has an android/ directory and a build
-# script, but it has never been checked on a device, so a workflow that
-# produced an APK would be publishing something nobody has run. It belongs here
-# once that changes: the toolchain is cargo-apk plus an NDK, and the script is
-# src/skylens_client/build-android.sh.
-#
 # A manual run (workflow_dispatch) is only offered once this file is on the
 # default branch, which is how GitHub registers the button; a tag push works
 # from any branch. scripts/sync-main.sh is what carries it to main.
+#
+# What the downloads are not: the macOS and Linux binaries are unsigned, and
+# the APK is signed with the Android debug key, so each platform asks the person
+# to allow it. The APK has not been checked on a real device yet.
 
 on:
   push:
@@ -45,6 +46,8 @@ jobs:
             suffix: linux-x86_64
           - os: windows-latest
             suffix: windows-x86_64
+          - os: macos-latest
+            suffix: macos-arm64 # the runner is Apple Silicon; Intel would be a second entry
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -59,10 +62,14 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: |
           # What a windowed wgpu application needs to link on a bare runner.
+          # fontconfig and freetype are for the text layout in blitz, which is
+          # what the first build of this workflow tripped over.
           sudo apt-get update -qq
           sudo apt-get install -y -qq \
-            libx11-dev libxkbcommon-dev libwayland-dev libxcb1-dev \
-            libgl1-mesa-dev libasound2-dev pkg-config
+            pkg-config libfontconfig1-dev libfreetype6-dev \
+            libx11-dev libxkbcommon-dev libxcb1-dev libwayland-dev \
+            libxrandr-dev libxi-dev libxcursor-dev libxinerama-dev \
+            libgl1-mesa-dev libasound2-dev libudev-dev
 
       - name: Build
         run: cargo build --release -p skylens-client -p skylens-control
@@ -90,9 +97,52 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+        run: bash .github/workflows/release-attach.sh out/*
+
+  android:
+    # The status board only: the control tower has no Android build.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,x86_64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: android
+
+      - name: Tools
         run: |
-          tag="${GITHUB_REF_NAME}"
-          if ! gh release view "$tag" >/dev/null 2>&1; then
-            gh release create "$tag" --title "$tag" --notes "Desktop builds of the two screens. The servers do not use these; they take the web builds from ci-screens."
-          fi
-          gh release upload "$tag" out/* --clobber
+          # cargo-apk drives the NDK and signs the APK. It is not pinned: it is
+          # a build tool, not a dependency of the artifact, and the lock file
+          # does not cover it.
+          cargo install cargo-apk --locked
+          # The script finds the SDK itself and takes the newest NDK; say which
+          # one that is in the log, so a broken runner image is obvious.
+          ls -1 "$ANDROID_HOME/ndk" || true
+          ls -1 "$ANDROID_HOME/platforms" || true
+
+      - name: Build the APK
+        # aarch64 for phones and x86_64 for an emulator, in one APK.
+        run: bash src/skylens_client/build-android.sh all
+
+      - name: Collect
+        run: |
+          mkdir -p out
+          apk="$(find target -name 'skylens-board.apk' -print -quit)"
+          [ -n "$apk" ] || { echo "no APK was produced" >&2; exit 1; }
+          cp "$apk" out/skylens-board-android.apk
+          ls -l out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: skylens-board-android
+          path: out/*
+
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/') || inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/workflows/release-attach.sh out/*
