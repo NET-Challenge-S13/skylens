@@ -35,6 +35,9 @@ SkyLens는 **멀티드론 영상을 실시간 3D(점군·메시)로 복원하고
 | `docs/INTENT.md` | **의도(왜)**. ResearchTree 인텐트 문서. 문제 정의(소방드론 현황·홍제동 사례·각주 출처), 목표, **주장 N1~N7**(실험이 검증하는 단위), 제약, 하지 않는 것, 열린 결정, KOREN 활용 논거 |
 | `docs/SPEC.md` | **현재 설계의 단일 출처**. ResearchTree 스펙 문서. 파이프라인·컴포넌트 경계·프로토콜·좌표계·점진적 복원·두 화면·AI 모델·투영과 프레임 간 보간·3D 복원(cumulus3d·deltamesh)·데모·KOREN 배포·포트·빌드·브랜치까지 16절. 각 절은 한 줄 요약(`>`)으로 시작한다. **지금 상태만 적고 역사는 적지 않는다** |
 | `docs/ARCHITECTURE.md` | **통합 아키텍처(무엇을)**. 3대 설계 원칙, 4-Tier 구성(캡처/전송/Core HPC/Edge·클라이언트), 데이터 플로우, **§3-A AI 모델·융합 파이프라인**(UNet 4채널, Depth Map 레이캐스팅, Hybrid Fusion, 기술 선택 배제 근거) |
+| `docs/KOREN_MEASUREMENT.md` | **KOREN 사용 근거 실측(최종 보고)**. 2026-10 아홉 날·표본 3,519. 국내 대역(상용 441 Mbps 상한 vs KOREN 상한 없음), 연결 수에 따른 포화점(1,121 vs 450 Mbps), 연결 재사용이 작은 전송 비용의 70%라는 발견, 우리에게 불리한 숫자(해외·지연·인제스트), 주장별 판정표, 측정 오류와 정정 기록. **발표에 쓸 수치의 단일 출처**(갱신판은 `src/skylens_core/deploy/lab/RESULTS.md` — 열하루·표본 4,897) |
+| `docs/DEPLOYMENT.md` | **실제 KOREN 회선 위 배치의 설계 근거**. 어느 컴포넌트가 어느 호스트에 올라가고 왜 그렇게밖에 할 수 없는지. 경로별 프로토콜·개시자·버린 대안, 터널 선택지 비교, §11에 실측 반영 |
+| `src/skylens_core/deploy/lab/REPORT.md` · `RESULTS.md` | **회선 실측 랩의 장치 보고와 인사이트**. 열하루·표본 4,897 (2026-10-05 ~ 10-16). 수집 구성·주장별 판정·한계(REPORT), 441이 천장이라는 근거·두 회선 독립·작은 전송의 범인(RESULTS) |
 | `docs/DATASETS.md` | **학습 데이터셋 조사**. "RGB+열 페어 + 재난 + 사람 + 위험구역"을 모두 가진 공개 데이터는 없다는 결론과, A(4채널 정합)/B(위험구역 세그)/C(사람 인스턴스) 3축 조합 권장. FLAME 3, RescueNet, SARD, AIResQ, LLVIP, VisDrone 등 |
 | `src/skylens_model/README.md` | **AI 모델 설계 철학의 단일 출처(어떻게)**. 레이어 분리 원칙(탐지/투영/랜드마크 융합/소리 보정), UNet 채택·TransUNet 보류 근거, 단일 백본+이중 헤드, modality dropout, 점 검출 헤드, 헤드별 분리 학습, 배제한 대안 표. **결정과 그 근거**를 기록 |
 | `src/skylens_model/models/skylens/README.md` | **이전 3DGS 복원 설계 기록**(cumulus3d 기반 Rust 구현으로 대체 중, 새 설계는 `docs/SPEC.md` §10). 촬영 가이드는 계속 유효. 파이프라인 3단계(프레임 추출 → COLMAP SfM → gsplat 학습), 특징점을 ALIKED로 정한 근거, 전수매칭이 필요한 이유, 내부 파라미터 명시 + 자기보정 조합, 점진적 출력(30초 첫 화면), PLY 경량판. **촬영 가이드**(포즈 정확도 요구·편대 배치·드론 자동비행 가능 범위)와 증분 복원 가능 여부 결론 |
