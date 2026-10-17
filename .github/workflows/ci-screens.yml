@@ -89,7 +89,15 @@ jobs:
           if [ "$(wasm-bindgen --version 2>/dev/null | awk '{print $2}')" != "$ver" ]; then
             cargo install wasm-bindgen-cli --version "$ver" --locked
           fi
-          sudo apt-get update -qq && sudo apt-get install -y -qq binaryen # wasm-opt
+          # No binaryen here, on purpose. wasm-opt -Oz shrinks the bundle by about
+          # 15% before gzip, and the build scripts use it when it is installed, but
+          # the version in Ubuntu renumbers the module's tables and leaves
+          # __wbindgen_externrefs pointing at the funcref table. The screen then
+          # cannot start at all (Table.grow throws on its first line), which is how
+          # the status board shipped broken on 2026-10-18. Passing
+          # --enable-reference-types did not help. Install it again only with a
+          # wasm-opt that keeps the export right; check-wasm-exports.py below is
+          # what tells you.
 
       - name: Build the status board
         if: steps.changed.outputs.board == '1'
