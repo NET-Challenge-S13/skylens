@@ -36,7 +36,7 @@ pub use app::{Options, StatusApp, options_from_settings, parse_args};
 /// Opens the board in a native window and runs until it closes.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn run_native(opts: &Options) -> anyhow::Result<()> {
-    skylens_viewer::log(&format!("[skylens-client] 현황판 · core {}", opts.core_url));
+    skylens_viewer::log(&format!("[skylens-client] 현황판 · core {}", opts.core_label()));
     let doc = StatusApp::document(opts);
     skylens_viewer::shell::run_native(doc, skylens_viewer::WindowOptions::new(app::WINDOW_TITLE).with_icon(include_bytes!("../../res/icon/status/skylens-status-256.png")))
 }
@@ -53,7 +53,7 @@ fn android_main(activity: skylens_viewer::shell::AndroidApp) {
         let core = setting(activity, "core");
         let points = setting(activity, "points");
         let opts = app::options_from_settings(core.as_deref(), points.as_deref());
-        skylens_viewer::log(&format!("[skylens-client] 현황판 · core {}", opts.core_url));
+        skylens_viewer::log(&format!("[skylens-client] 현황판 · core {}", opts.core_label()));
         StatusApp::document(&opts)
     })
 }
@@ -65,8 +65,9 @@ fn android_main(activity: skylens_viewer::shell::AndroidApp) {
 pub fn start() -> Result<(), wasm_bindgen::JsValue> {
     let opts = Options {
         core_url: skylens_viewer::shell::page_core_url(skylens_viewer::link::VIEWER_PATH),
+        fallback_core: None,
         points_on: skylens_viewer::shell::query_param("points").as_deref() != Some("off"),
     };
-    skylens_viewer::log(&format!("[skylens] 현황판 · core {}", opts.core_url));
+    skylens_viewer::log(&format!("[skylens] 현황판 · core {}", opts.core_label()));
     skylens_viewer::shell::run_web(StatusApp::document(&opts), "skylens")
 }

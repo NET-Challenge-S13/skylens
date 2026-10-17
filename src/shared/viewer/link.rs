@@ -7,6 +7,11 @@
 //! [`crate::config::link::CONNECT_TIMEOUT_MS`] and on a silent connection after
 //! [`crate::config::link::IDLE_TIMEOUT_MS`], so a half-open socket cannot stall the screen.
 //!
+//! A native link can be given several addresses ([`CoreLink::start_any`]): every round tries them
+//! in order and stays on the first that answers, so a screen can prefer the bridge and fall back
+//! to a core on this machine. `wss` runs on rustls with the web roots plus [`PINNED_CERTS`], the
+//! bridge's self-signed board certificate, trusted as exactly that certificate.
+//!
 //! Native runs tokio-tungstenite on a background thread; web uses the browser WebSocket. Both
 //! queue events for [`CoreLink::drain`] and wake the Blitz window with the waker given to
 //! [`CoreLink::set_waker`] (from `Document::poll`). A ticker wakes it every [`TICK_MS`] too, for
@@ -24,6 +29,12 @@ pub const TICK_MS: u64 = 100;
 /// Default socket paths on the core.
 pub const CONTROL_PATH: &str = "/control";
 pub const VIEWER_PATH: &str = "/viewer";
+
+/// Server certificates a native `wss` link accepts as they are, whatever name it dialled: the
+/// self-signed certificate `setup-bridge.sh` made for the bridge board (CN skylens-board, valid to
+/// 2031). If the bridge makes a new one, replace this file, or that address stops answering and
+/// the link falls through to the next one.
+pub const PINNED_CERTS: &[&str] = &[include_str!("bridge-cert.pem")];
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum LinkEvent {
@@ -229,17 +240,29 @@ pub struct CoreLink {
 impl CoreLink {
     /// Opens the socket in the background and keeps it open until dropped.
     pub fn start(url: impl Into<String>) -> CoreLink {
-        let url = url.into();
+        CoreLink::start_any(vec![url.into()])
+    }
+
+    /// Like [`Self::start`], trying `urls` in order on every round (the web build, which always
+    /// talks to its own origin, uses only the first).
+    pub fn start_any(urls: Vec<String>) -> CoreLink {
+        assert!(!urls.is_empty(), "CoreLink needs an address");
         CoreLink {
-            transport: Transport::start(url.clone()),
+            url: urls[0].clone(),
+            transport: Transport::start(urls),
             outbox: Outbox::new(),
-            url,
             status: LinkStatus::default(),
         }
     }
 
+    /// The first (preferred) address.
     pub fn url(&self) -> &str {
         &self.url
+    }
+
+    /// The address the link is on or trying now.
+    pub fn current_url(&self) -> String {
+        self.transport.current_url()
     }
 
     /// Wakes this waker when an event arrives (pass the one from `Document::poll`).
@@ -301,6 +324,8 @@ mod native {
     struct Shared {
         waker: Mutex<Option<Waker>>,
         connected: AtomicBool,
+        /// The address being tried or held.
+        current: Mutex<String>,
     }
 
     impl Shared {
@@ -320,10 +345,10 @@ mod native {
     }
 
     impl Transport {
-        pub fn start(url: String) -> Transport {
+        pub fn start(urls: Vec<String>) -> Transport {
             let (ev_tx, ev_rx) = mpsc::channel();
             let (out_tx, out_rx) = tokio::sync::mpsc::unbounded_channel();
-            let shared = Arc::new(Shared::default());
+            let shared = Arc::new(Shared { current: Mutex::new(urls[0].clone()), ..Shared::default() });
 
             let net_shared = shared.clone();
             std::thread::Builder::new()
@@ -336,7 +361,7 @@ mod native {
                             return;
                         }
                     };
-                    rt.block_on(run(url, ev_tx, out_rx, net_shared));
+                    rt.block_on(run(urls, ev_tx, out_rx, net_shared));
                 })
                 .expect("spawn link thread");
 
@@ -376,10 +401,26 @@ mod native {
         pub fn connected(&self) -> bool {
             self.shared.connected.load(Ordering::SeqCst)
         }
+
+        pub fn current_url(&self) -> String {
+            self.shared.current.lock().map(|u| u.clone()).unwrap_or_default()
+        }
+    }
+
+    /// One client config for every `wss` address: the web roots, plus [`super::PINNED_CERTS`]
+    /// accepted byte for byte. None (plain `ws` only) if the config cannot be built.
+    fn tls_connector() -> Option<tokio_tungstenite::Connector> {
+        match tls::client_config(super::PINNED_CERTS) {
+            Ok(config) => Some(tokio_tungstenite::Connector::Rustls(Arc::new(config))),
+            Err(e) => {
+                crate::log(&format!("[link] TLS 설정 실패, wss 주소는 연결할 수 없습니다: {e}"));
+                None
+            }
+        }
     }
 
     async fn run(
-        url: String,
+        urls: Vec<String>,
         events: mpsc::Sender<RawEvent>,
         mut outgoing: tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>,
         shared: Arc<Shared>,
@@ -390,76 +431,198 @@ mod native {
             ok
         };
         let mut backoff = Backoff::default();
+        let tls = tls_connector();
         loop {
-            if !emit(RawEvent::Connecting) {
-                return;
-            }
-            let attempt = tokio::time::timeout(
-                Duration::from_millis(CONNECT_TIMEOUT_MS),
-                tokio_tungstenite::connect_async_with_config(url.as_str(), Some(ws_config()), false),
-            );
-            match attempt.await {
-                Ok(Ok((ws, _))) => {
-                    backoff.reset();
-                    // Drop anything queued while disconnected.
-                    while outgoing.try_recv().is_ok() {}
-                    shared.connected.store(true, Ordering::SeqCst);
-                    if !emit(RawEvent::Connected) {
-                        return;
-                    }
-                    let (mut sink, mut stream) = ws.split();
-                    let idle_for = Duration::from_millis(IDLE_TIMEOUT_MS);
-                    let idle = tokio::time::sleep(idle_for);
-                    tokio::pin!(idle);
-                    let reason = loop {
-                        tokio::select! {
-                            // Any frame, pings included, proves the connection is alive.
-                            () = &mut idle => break "코어 응답 없음 (수신 끊김)".to_string(),
-                            msg = stream.next() => match msg {
-                                Some(Ok(WsMessage::Binary(b))) => {
-                                    idle.as_mut().reset(tokio::time::Instant::now() + idle_for);
-                                    if !emit(RawEvent::Frame(b.to_vec())) {
-                                        return;
-                                    }
-                                }
-                                Some(Ok(WsMessage::Close(frame))) => {
-                                    break frame.map_or_else(
-                                        || "코어가 연결을 닫았습니다".to_string(),
-                                        |f| format!("코어가 연결을 닫았습니다 ({})", u16::from(f.code)),
-                                    );
-                                }
-                                Some(Ok(_)) => idle.as_mut().reset(tokio::time::Instant::now() + idle_for),
-                                Some(Err(e)) => break e.to_string(),
-                                None => break "연결이 끊어졌습니다".to_string(),
-                            },
-                            out = outgoing.recv() => match out {
-                                Some(bytes) => {
-                                    if let Err(e) = sink.send(WsMessage::binary(bytes)).await {
-                                        break e.to_string();
-                                    }
-                                }
-                                // The CoreLink was dropped.
-                                None => return,
-                            },
-                        }
-                    };
-                    shared.connected.store(false, Ordering::SeqCst);
-                    if !emit(RawEvent::Disconnected(reason)) {
-                        return;
-                    }
+            // One round: the addresses in order, until one answers and its connection ends.
+            for url in &urls {
+                if let Ok(mut current) = shared.current.lock() {
+                    current.clone_from(url);
                 }
-                Ok(Err(e)) => {
-                    if !emit(RawEvent::Disconnected(e.to_string())) {
-                        return;
-                    }
-                }
-                Err(_) => {
-                    if !emit(RawEvent::Disconnected("코어 응답 없음 (연결 시간 초과)".to_string())) {
-                        return;
+                match session(url, tls.clone(), &emit, &mut outgoing, &shared).await {
+                    Session::Stop => return,
+                    Session::Unreachable => continue,
+                    Session::Ended => {
+                        backoff.reset();
+                        break;
                     }
                 }
             }
+            // Back off, then start over from the preferred address.
             tokio::time::sleep(Duration::from_millis(backoff.next_delay_ms())).await;
+        }
+    }
+
+    enum Session {
+        /// The screen is gone.
+        Stop,
+        /// The handshake failed or timed out.
+        Unreachable,
+        /// Connected, then the connection ended.
+        Ended,
+    }
+
+    async fn session(
+        url: &str,
+        tls: Option<tokio_tungstenite::Connector>,
+        emit: &impl Fn(RawEvent) -> bool,
+        outgoing: &mut tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>,
+        shared: &Shared,
+    ) -> Session {
+        if !emit(RawEvent::Connecting) {
+            return Session::Stop;
+        }
+        let attempt = tokio::time::timeout(
+            Duration::from_millis(CONNECT_TIMEOUT_MS),
+            tokio_tungstenite::connect_async_tls_with_config(url, Some(ws_config()), false, tls),
+        );
+        match attempt.await {
+            Ok(Ok((ws, _))) => {
+                // Drop anything queued while disconnected.
+                while outgoing.try_recv().is_ok() {}
+                shared.connected.store(true, Ordering::SeqCst);
+                if !emit(RawEvent::Connected) {
+                    return Session::Stop;
+                }
+                let (mut sink, mut stream) = ws.split();
+                let idle_for = Duration::from_millis(IDLE_TIMEOUT_MS);
+                let idle = tokio::time::sleep(idle_for);
+                tokio::pin!(idle);
+                let reason = loop {
+                    tokio::select! {
+                        // Any frame, pings included, proves the connection is alive.
+                        () = &mut idle => break "코어 응답 없음 (수신 끊김)".to_string(),
+                        msg = stream.next() => match msg {
+                            Some(Ok(WsMessage::Binary(b))) => {
+                                idle.as_mut().reset(tokio::time::Instant::now() + idle_for);
+                                if !emit(RawEvent::Frame(b.to_vec())) {
+                                    return Session::Stop;
+                                }
+                            }
+                            Some(Ok(WsMessage::Close(frame))) => {
+                                break frame.map_or_else(
+                                    || "코어가 연결을 닫았습니다".to_string(),
+                                    |f| format!("코어가 연결을 닫았습니다 ({})", u16::from(f.code)),
+                                );
+                            }
+                            Some(Ok(_)) => idle.as_mut().reset(tokio::time::Instant::now() + idle_for),
+                            Some(Err(e)) => break e.to_string(),
+                            None => break "연결이 끊어졌습니다".to_string(),
+                        },
+                        out = outgoing.recv() => match out {
+                            Some(bytes) => {
+                                if let Err(e) = sink.send(WsMessage::binary(bytes)).await {
+                                    break e.to_string();
+                                }
+                            }
+                            // The CoreLink was dropped.
+                            None => return Session::Stop,
+                        },
+                    }
+                };
+                shared.connected.store(false, Ordering::SeqCst);
+                if !emit(RawEvent::Disconnected(reason)) {
+                    return Session::Stop;
+                }
+                Session::Ended
+            }
+            Ok(Err(e)) => {
+                if !emit(RawEvent::Disconnected(format!("{url}: {e}"))) {
+                    return Session::Stop;
+                }
+                Session::Unreachable
+            }
+            Err(_) => {
+                if !emit(RawEvent::Disconnected(format!("{url}: 코어 응답 없음 (연결 시간 초과)"))) {
+                    return Session::Stop;
+                }
+                Session::Unreachable
+            }
+        }
+    }
+
+    mod tls {
+        use rustls::client::WebPkiServerVerifier;
+        use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
+        use rustls::crypto::{CryptoProvider, verify_tls12_signature, verify_tls13_signature};
+        use rustls::pki_types::pem::PemObject as _;
+        use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
+        use rustls::{ClientConfig, DigitallySignedStruct, Error, RootCertStore, SignatureScheme};
+        use std::sync::Arc;
+
+        /// rustls client config: web PKI, except that a server presenting one of `pinned` (PEM)
+        /// is accepted without a chain or a name check.
+        pub fn client_config(pinned: &[&str]) -> Result<ClientConfig, String> {
+            let provider = Arc::new(rustls::crypto::ring::default_provider());
+            let pinned = pinned
+                .iter()
+                .map(|pem| CertificateDer::from_pem_slice(pem.as_bytes()).map_err(|e| format!("pinned certificate: {e}")))
+                .collect::<Result<Vec<_>, _>>()?;
+            let roots = RootCertStore { roots: webpki_roots::TLS_SERVER_ROOTS.to_vec() };
+            let webpki = WebPkiServerVerifier::builder_with_provider(Arc::new(roots), provider.clone())
+                .build()
+                .map_err(|e| e.to_string())?;
+            let verifier = Pinned { pinned, webpki, provider: provider.clone() };
+            Ok(ClientConfig::builder_with_provider(provider)
+                .with_safe_default_protocol_versions()
+                .map_err(|e| e.to_string())?
+                .dangerous()
+                .with_custom_certificate_verifier(Arc::new(verifier))
+                .with_no_client_auth())
+        }
+
+        #[derive(Debug)]
+        struct Pinned {
+            pinned: Vec<CertificateDer<'static>>,
+            webpki: Arc<WebPkiServerVerifier>,
+            provider: Arc<CryptoProvider>,
+        }
+
+        impl ServerCertVerifier for Pinned {
+            fn verify_server_cert(
+                &self,
+                end_entity: &CertificateDer<'_>,
+                intermediates: &[CertificateDer<'_>],
+                server_name: &ServerName<'_>,
+                ocsp_response: &[u8],
+                now: UnixTime,
+            ) -> Result<ServerCertVerified, Error> {
+                if self.pinned.iter().any(|p| p.as_ref() == end_entity.as_ref()) {
+                    return Ok(ServerCertVerified::assertion());
+                }
+                self.webpki.verify_server_cert(end_entity, intermediates, server_name, ocsp_response, now)
+            }
+
+            // The handshake signatures are still checked against the presented key, so a copy
+            // of the certificate is no use without its private key.
+            fn verify_tls12_signature(
+                &self,
+                message: &[u8],
+                cert: &CertificateDer<'_>,
+                dss: &DigitallySignedStruct,
+            ) -> Result<HandshakeSignatureValid, Error> {
+                verify_tls12_signature(message, cert, dss, &self.provider.signature_verification_algorithms)
+            }
+
+            fn verify_tls13_signature(
+                &self,
+                message: &[u8],
+                cert: &CertificateDer<'_>,
+                dss: &DigitallySignedStruct,
+            ) -> Result<HandshakeSignatureValid, Error> {
+                verify_tls13_signature(message, cert, dss, &self.provider.signature_verification_algorithms)
+            }
+
+            fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+                self.provider.signature_verification_algorithms.supported_schemes()
+            }
+        }
+
+        #[cfg(test)]
+        mod tests {
+            #[test]
+            fn the_pinned_bridge_certificate_parses() {
+                super::client_config(crate::link::PINNED_CERTS).expect("client config");
+            }
         }
     }
 }
@@ -567,9 +730,13 @@ mod web {
     }
 
     impl Transport {
-        pub fn start(url: String) -> Transport {
+        pub fn current_url(&self) -> String {
+            self.inner.borrow().url.clone()
+        }
+
+        pub fn start(urls: Vec<String>) -> Transport {
             let inner = Rc::new(RefCell::new(Inner {
-                url,
+                url: urls.into_iter().next().unwrap_or_default(),
                 ws: None,
                 queue: VecDeque::new(),
                 waker: None,

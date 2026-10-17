@@ -33,7 +33,13 @@ pub const LIVE_PANELS_CSS: &str = include_str!("ui/live-panels.css");
 
 pub const LOADING_TITLE: &str = "현황판 · 3D 복원 데이터 로딩";
 pub const WINDOW_TITLE: &str = "SkyLens · 현황판 - 실시간 3D 복원";
-pub const DEFAULT_CORE: &str = "ws://127.0.0.1:8080/viewer";
+/// Where a board with no `--core` goes first: the bridge (Raspberry Pi) on its TLS board port,
+/// which relays `/viewer` to the Daejeon core. Its self-signed certificate is pinned in
+/// `skylens_viewer::link::PINNED_CERTS`.
+pub const DEFAULT_CORE: &str = "wss://175.126.98.44:8443/viewer";
+/// Where it goes when the bridge does not answer: a core on this machine (the demo, or
+/// `adb reverse tcp:8080 tcp:8080` on an emulator).
+pub const LOCAL_CORE: &str = "ws://127.0.0.1:8080/viewer";
 /// The loading overlay's title while the core is not reachable and the link keeps retrying.
 pub const WAITING_TITLE: &str = "코어 연결 대기 중";
 
@@ -53,13 +59,16 @@ pub fn page() -> Page {
 pub struct Options {
     /// `ws://host:port/viewer`.
     pub core_url: String,
+    /// Tried when `core_url` does not answer. Only the default has one: an explicit core is the
+    /// only one tried.
+    pub fallback_core: Option<String>,
     /// The point panel starts open (legacy `?points=off` starts it closed).
     pub points_on: bool,
 }
 
 impl Default for Options {
     fn default() -> Self {
-        Options { core_url: DEFAULT_CORE.to_string(), points_on: true }
+        Options { core_url: DEFAULT_CORE.to_string(), fallback_core: Some(LOCAL_CORE.to_string()), points_on: true }
     }
 }
 
@@ -75,7 +84,7 @@ pub fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Options, Str
         };
         let mut value = |name: &str| inline.clone().or_else(|| it.next()).ok_or(format!("{name} needs a value"));
         match key.as_str() {
-            "--core" => o.core_url = skylens_viewer::link::normalize_core_url(&value("--core")?, VIEWER_PATH),
+            "--core" => o.set_core(&value("--core")?),
             "--points" => {
                 o.points_on = match value("--points")?.as_str() {
                     "on" => true,
@@ -90,6 +99,24 @@ pub fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Options, Str
     Ok(o)
 }
 
+impl Options {
+    /// One explicit core (`--core` or a setting), normalised like `--core`, with no fallback.
+    pub fn set_core(&mut self, core: &str) {
+        self.core_url = skylens_viewer::link::normalize_core_url(core, VIEWER_PATH);
+        self.fallback_core = None;
+    }
+
+    /// The addresses the link tries, in order.
+    pub fn core_urls(&self) -> Vec<String> {
+        std::iter::once(self.core_url.clone()).chain(self.fallback_core.clone()).collect()
+    }
+
+    /// For the log line: `a` or `a -> b`.
+    pub fn core_label(&self) -> String {
+        self.core_urls().join(" -> ")
+    }
+}
+
 pub const USAGE: &str = "usage: skylens-client [--core ws://host:8080/viewer] [--points on|off]";
 
 /// Options from loose settings that may be missing (Android has no command line and reads them
@@ -98,7 +125,7 @@ pub const USAGE: &str = "usage: skylens-client [--core ws://host:8080/viewer] [-
 pub fn options_from_settings(core: Option<&str>, points: Option<&str>) -> Options {
     let mut o = Options::default();
     if let Some(c) = core.map(str::trim).filter(|c| !c.is_empty()) {
-        o.core_url = skylens_viewer::link::normalize_core_url(c, VIEWER_PATH);
+        o.set_core(c);
     }
     if let Some(p) = points.map(str::trim).filter(|p| !p.is_empty()) {
         o.points_on = !p.eq_ignore_ascii_case("off");
@@ -138,7 +165,7 @@ impl StatusApp {
         let board = Rc::new(RefCell::new(Board::new(opts.points_on)));
         let settings = board.borrow().settings.clone();
         StatusApp {
-            link: CoreLink::start(opts.core_url.clone()),
+            link: CoreLink::start_any(opts.core_urls()),
             scene: Rc::new(RefCell::new(StatusScene::new(board.clone()))),
             board,
             inset: None,
@@ -222,7 +249,7 @@ impl StatusApp {
         }
         let Some(l) = &mut self.loading else { return };
         if start || l.is_waiting() {
-            l.wait(dom, WAITING_TITLE, &waiting_text(self.link.url(), self.link.status.attempts));
+            l.wait(dom, WAITING_TITLE, &waiting_text(&self.link.current_url(), self.link.status.attempts));
         }
     }
 
@@ -550,12 +577,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn arguments_default_to_the_local_core() {
+    fn arguments_default_to_the_bridge_then_the_local_core() {
         let o = parse_args(Vec::<String>::new()).unwrap();
         assert_eq!(o, Options::default());
-        assert_eq!(o.core_url, "ws://127.0.0.1:8080/viewer");
+        assert_eq!(o.core_urls(), ["wss://175.126.98.44:8443/viewer", "ws://127.0.0.1:8080/viewer"]);
+        assert_eq!(o.core_label(), "wss://175.126.98.44:8443/viewer -> ws://127.0.0.1:8080/viewer");
         let o = parse_args(["--core".to_string(), "core.local:8080".to_string()]).unwrap();
         assert_eq!(o.core_url, "ws://core.local:8080/viewer");
+        assert_eq!(o.core_urls(), ["ws://core.local:8080/viewer"]);
         let o = parse_args(["--core=http://10.0.0.2:8080".to_string(), "--points".to_string(), "off".to_string()]).unwrap();
         assert_eq!(o.core_url, "ws://10.0.0.2:8080/viewer");
         assert!(!o.points_on);
@@ -566,7 +595,7 @@ mod tests {
 
     #[test]
     fn waiting_text_names_the_core_and_the_attempt() {
-        assert_eq!(waiting_text(DEFAULT_CORE, 0), "ws://127.0.0.1:8080/viewer");
+        assert_eq!(waiting_text(LOCAL_CORE, 0), "ws://127.0.0.1:8080/viewer");
         assert_eq!(waiting_text("ws://10.0.0.2:8080/viewer", 3), "ws://10.0.0.2:8080/viewer · 시도 3회");
     }
 
@@ -576,6 +605,7 @@ mod tests {
         assert_eq!(options_from_settings(Some("  "), Some("")), Options::default());
         let o = options_from_settings(Some(" 192.168.0.10:8080\n"), Some("OFF"));
         assert_eq!(o.core_url, "ws://192.168.0.10:8080/viewer");
+        assert_eq!(o.fallback_core, None);
         assert!(!o.points_on);
         let o = options_from_settings(Some("wss://bridge.example/viewer"), Some("on"));
         assert_eq!(o.core_url, "wss://bridge.example/viewer");
