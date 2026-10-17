@@ -330,22 +330,24 @@ mod tests {
         for e in &events {
             engine.inject_event(to_event(e, ORIGIN)).unwrap();
         }
-        // Wait until the three messages are published (the consumer runs on its own thread).
+        // Wait until the three messages are published (the consumer runs on its own thread). One
+        // subscription for the whole wait: its thread copies the log into the channel, so a fresh
+        // subscription read at once can come up short however long the log has been complete.
         let t0 = std::time::Instant::now();
-        let chunks = loop {
-            let mut rx = engine.subscribe(0);
-            let mut slots = Vec::new();
-            while let Ok(c) = rx.try_recv() {
-                if c.kind == ChunkKind::PointSlots as i32 {
-                    slots.push(c);
+        let mut rx = engine.subscribe(0);
+        let mut chunks = Vec::new();
+        while chunks.len() < events.len() {
+            match rx.try_recv() {
+                Ok(c) if c.kind == ChunkKind::PointSlots as i32 => chunks.push(c),
+                Ok(_) => {}
+                Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
+                    assert!(t0.elapsed().as_secs() < 20, "timed out; got {} slot chunks", chunks.len());
+                    std::thread::sleep(std::time::Duration::from_millis(10));
                 }
+                Err(e) => panic!("chunk subscription ended after {} slot chunks: {e}", chunks.len()),
             }
-            if slots.len() == events.len() {
-                break slots;
-            }
-            assert!(t0.elapsed().as_secs() < 20, "timed out; got {} slot chunks", slots.len());
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        };
+        }
+        drop(rx);
         let mut fold = Fold::new();
         for (c, i) in chunks.iter().zip(1u32..) {
             assert_eq!((c.version, c.generation), (i, engine.stream_id()));
