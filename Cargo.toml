@@ -61,7 +61,7 @@ tch = { version = "0.24", features = ["download-libtorch"] }
 # slot scenes for the live diff stream (SlotScene, slots messages, decision 0052).
 pointblitz = "0.3.0"
 pointblitz-io = "0.3.0"
-# Blitz from git: the 0.3.0-beta.2 release renders with wgpu 29, pointblitz 0.2 needs wgpu 30.
+# Blitz from git: the 0.3.0-beta.2 release renders with wgpu 29, pointblitz 0.3 needs wgpu 30.
 blitz-dom = { git = "https://github.com/DioxusLabs/blitz", rev = "45496d9288b063719ebeae4e0761273f7881b3d7" }
 blitz-html = { git = "https://github.com/DioxusLabs/blitz", rev = "45496d9288b063719ebeae4e0761273f7881b3d7" }
 blitz-paint = { git = "https://github.com/DioxusLabs/blitz", rev = "45496d9288b063719ebeae4e0761273f7881b3d7" }
