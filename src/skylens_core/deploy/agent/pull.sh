@@ -36,7 +36,8 @@ WORK="$ROOT/run/agent"
 mkdir -p "$ROOT/releases/core" "$ROOT/web" "$WORK" "$(dirname "$STATE")"
 touch "$STATE"
 
-log() { printf '%s %s\n' "$(date -Is)" "$*"; }
+# To stderr, because a helper's stdout is its return value. systemd keeps both.
+log() { printf '%s %s\n' "$(date -Is)" "$*" >&2; }
 
 if [ -e "$HOLD" ]; then
   exit 0   # held on purpose: a demo is running, or someone is working on the host

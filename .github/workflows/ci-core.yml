@@ -56,7 +56,8 @@ jobs:
           GOOS: linux
           GOARCH: amd64
         run: |
-          go build -trimpath \n            -ldflags "-s -w -X github.com/NET-Challenge-S13/skylens/src/skylens_core/internal/core.Commit=${GITHUB_SHA}" \n            -o "$GITHUB_WORKSPACE/skylens-core" .
+          LDFLAGS="-s -w -X github.com/NET-Challenge-S13/skylens/src/skylens_core/internal/core.Commit=${GITHUB_SHA}"
+          go build -trimpath -ldflags "$LDFLAGS" -o "$GITHUB_WORKSPACE/skylens-core" .
           file "$GITHUB_WORKSPACE/skylens-core" || true
 
       - name: Publish for the hosts
