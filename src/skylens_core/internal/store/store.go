@@ -435,6 +435,40 @@ func (s *Store) Counters() Counters {
 	return s.counters
 }
 
+// ResetModel drops everything the model produced for the mission that just
+// ended: points, mesh blocks, detections and the point slot stream. A new
+// mission starts from an empty world, so the screens never mix two runs.
+//
+// What it keeps, and why:
+//   - the base map (terrain and buildings): it belongs to the site, not the run
+//   - the live state (telemetry, camera feeds, route, links): still true
+//   - LastModelSeq: it is the SubscribeChunks resume point. Rewinding it would
+//     make the subscriber replay the run we just dropped straight back in.
+//
+// The screens learn about this when their socket drops: they clear their own
+// copy on reconnect and take the replay again (src/shared/viewer/chunks.rs).
+func (s *Store) ResetModel() (dropped int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, seg := range s.points {
+		dropped += len(seg.preview) + len(seg.refined)
+	}
+	dropped += len(s.mesh.keys) + len(s.detections)
+	if s.slots != nil {
+		dropped += len(s.slots.msgs) + len(s.slots.held)
+	}
+	s.points = map[uint32]*segmentPoints{}
+	s.mesh = newOrdered()
+	s.detections = nil
+	s.detPerSeg = map[uint32]int{}
+	s.slots = nil
+	s.segLevel = map[uint32]modelv1.Level{}
+	s.counters.Model = 0
+	s.counters.Detections = 0
+	s.counters.Rejected = 0
+	return dropped
+}
+
 // LastModelSequence is the SubscribeChunks resume point.
 func (s *Store) LastModelSequence() uint64 {
 	s.mu.RLock()

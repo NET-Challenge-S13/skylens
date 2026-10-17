@@ -366,6 +366,10 @@ func (h viewerHandler) Message(p *ws.Peer, env *viewerv1.Envelope) {
 // control peer) may be nil.
 func (c *Core) AssignRoute(env *viewerv1.Envelope, from *ws.Peer) {
 	r := env.GetAssignRoute()
+	// A route assigned from idle starts a new mission. Everything the last one
+	// reconstructed is dropped first, so a second run does not paint on top of
+	// the first. Reassigning mid-mission keeps what is already on the screens.
+	fresh := c.Mission.Phase() == viewerv1.MissionPhase_MISSION_PHASE_IDLE
 	if len(r.GetWaypoints()) < 2 {
 		log.Printf("[core] assign_route ignored: %d waypoint(s)", len(r.GetWaypoints()))
 		if from != nil {
@@ -386,7 +390,35 @@ func (c *Core) AssignRoute(env *viewerv1.Envelope, from *ws.Peer) {
 		c.Uplinks.Broadcast(env)
 	}
 	c.Mission.RouteAssigned()
+	if fresh {
+		c.resetReconstruction()
+	}
 	c.extendBaseMap(r.GetWaypoints())
+}
+
+// resetReconstruction empties the store of the last mission's reconstruction.
+//
+// A screen holds its own copy of what it was sent, so clearing the store is not
+// enough: the sockets are dropped too. Each screen clears on reconnect and takes
+// the replay again (skylens_client/board.rs reconnected, control/app.rs
+// LinkEvent::Connected), which now carries the same site with an empty world.
+// They are back in under a second.
+//
+// Nothing is dropped when there was nothing to drop, so the first mission after
+// the core starts runs without a blip: the screens that watched the assignment
+// stay on the socket that delivered it.
+func (c *Core) resetReconstruction() {
+	dropped := c.Store.ResetModel()
+	if dropped == 0 {
+		return
+	}
+	for _, p := range c.Viewers.Peers() {
+		p.Close()
+	}
+	for _, p := range c.Controls.Peers() {
+		p.Close()
+	}
+	log.Printf("[core] new mission: dropped %d reconstruction chunk(s); screens reconnect to an empty world", dropped)
 }
 
 // ---- uplink side ---------------------------------------------------------------

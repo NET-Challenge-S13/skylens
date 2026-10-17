@@ -367,3 +367,33 @@ func TestPointSlotsHeldBytesAreBounded(t *testing.T) {
 	sameTags(t, s.PutAll(slot(4, 3, 2, 0, "b")), "b")
 	sameTags(t, s.ModelChunks(), "a", "b")
 }
+
+func TestResetModelKeepsTheSiteAndTheResumePoint(t *testing.T) {
+	s := New(Options{})
+	s.PutAll(pt(1, 0, preview, 0, "a"))
+	s.PutAll(pt(2, 1, refined, 0, "b"))
+	s.PutAll(&modelv1.Chunk{Sequence: 3, Kind: terrain, Payload: []byte("ground")})
+	s.SetRoute(&viewerv1.AssignRoute{DroneId: 1})
+	seqBefore := s.LastModelSequence()
+	if seqBefore == 0 {
+		t.Fatal("nothing was stored")
+	}
+
+	if dropped := s.ResetModel(); dropped != 2 {
+		t.Fatalf("dropped %d chunk(s), want the two point chunks", dropped)
+	}
+
+	if got := s.ModelChunks(); len(got) != 0 {
+		t.Fatalf("reconstruction survived: %v", tags(got))
+	}
+	if got := len(s.Chunks()); got != 1 {
+		t.Fatalf("%d chunk(s) left, want the base map alone", got)
+	}
+	if s.Route().GetDroneId() != 1 {
+		t.Fatal("the assigned route was dropped")
+	}
+	// Rewinding this would make the subscriber replay the run we just dropped.
+	if got := s.LastModelSequence(); got != seqBefore {
+		t.Fatalf("resume point moved to %d, want %d", got, seqBefore)
+	}
+}
