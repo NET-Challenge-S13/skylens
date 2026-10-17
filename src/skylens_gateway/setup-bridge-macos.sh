@@ -72,6 +72,7 @@ BASE=/opt/skylens
 TUNNEL_PORT=20889
 PROXY_TUNNEL_PORT=20882
 RTSP_TUNNEL_PORT=20554
+RTSP_BACK_PORT=18554
 TUNNEL_KEY="$BASE/tunnel/tunnel_key"
 LOGS="$BASE/logs"
 TLS_DIR="$BASE/tls"
@@ -126,6 +127,7 @@ cat > /Library/LaunchDaemons/com.skylens.daejeon-tunnel.plist <<PLIST
     <string>-L</string><string>127.0.0.1:$TUNNEL_PORT:127.0.0.1:10889</string>
     <string>-L</string><string>127.0.0.1:$PROXY_TUNNEL_PORT:127.0.0.1:8082</string>
     <string>-L</string><string>127.0.0.1:$RTSP_TUNNEL_PORT:127.0.0.1:8554</string>
+    <string>-R</string><string>127.0.0.1:$RTSP_BACK_PORT:127.0.0.1:8554</string>
     <string>-p</string><string>$DAEJEON_PORT</string>
     <string>$DAEJEON_USER@$DAEJEON_HOST</string>
   </array>

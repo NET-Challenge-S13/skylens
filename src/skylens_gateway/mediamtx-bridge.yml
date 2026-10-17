@@ -17,7 +17,12 @@ api: no
 metrics: no
 pprof: no
 playback: no
-rtsp: no
+# RTSP on loopback only. Daejeon pulls the video from here through a reverse
+# forward in the same SSH tunnel (its localhost:18554 -> this host's 8554), so
+# the home router needs no inbound port for the ingest path. TCP is what the
+# tunnel carries; the SRT ingest below stays UDP and local.
+rtsp: yes
+rtspAddress: 127.0.0.1:8554
 rtmp: no
 hls: no
 moq: no
@@ -60,6 +65,14 @@ authInternalUsers:
         path: drone2
       - action: publish
         path: drone3
+  # The demo launcher publishes without credentials (streamid=publish:droneN),
+  # so the operator LAN and the VPN may publish anonymously. Reachable only from
+  # inside those ranges: the SRT port is not forwarded at the router.
+  - user: any
+    pass:
+    ips: ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16']
+    permissions:
+      - action: publish
   - user: any
     pass:
     # viewers behind nginx /live/ reach MediaMTX with their real IP (webrtcTrustedProxies + X-Forwarded-For), so LAN/VPN ranges must be allowed for anonymous WHEP read

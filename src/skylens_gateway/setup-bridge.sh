@@ -62,6 +62,7 @@ TUNNEL_USER=skytunnel
 TUNNEL_PORT=20889
 PROXY_TUNNEL_PORT=20882
 RTSP_TUNNEL_PORT=20554
+RTSP_BACK_PORT=18554
 TUNNEL_DIR=/etc/skylens
 TUNNEL_KEY="$TUNNEL_DIR/tunnel_key"
 TLS_DIR=/etc/skylens/tls
@@ -81,7 +82,7 @@ apt-get install -y -qq nginx curl ca-certificates autossh openssh-client >/dev/n
 ok "nginx, curl, autossh"
 
 # ---------- 1. the tunnel to Daejeon ----------
-step "대전 터널 ($TUNNEL_USER: 로컬 :$TUNNEL_PORT → :10889, :$PROXY_TUNNEL_PORT → :8082, :$RTSP_TUNNEL_PORT → :8554)"
+step "대전 터널 ($TUNNEL_USER: ← :10889 · :8082 · :8554, → 대전 :$RTSP_BACK_PORT 로 이 호스트 RTSP)"
 id "$TUNNEL_USER" >/dev/null 2>&1 || useradd -r -M -s /usr/sbin/nologin "$TUNNEL_USER"
 install -d -m 0750 -o "$TUNNEL_USER" -g "$TUNNEL_USER" "$TUNNEL_DIR"
 if [ ! -f "$TUNNEL_KEY" ]; then
@@ -113,6 +114,7 @@ ExecStart=/usr/bin/autossh -M 0 -N \\
   -L 127.0.0.1:$TUNNEL_PORT:127.0.0.1:10889 \\
   -L 127.0.0.1:$PROXY_TUNNEL_PORT:127.0.0.1:8082 \\
   -L 127.0.0.1:$RTSP_TUNNEL_PORT:127.0.0.1:8554 \\
+  -R 127.0.0.1:$RTSP_BACK_PORT:127.0.0.1:8554 \\
   -p $DAEJEON_PORT $DAEJEON_USER@$DAEJEON_HOST
 Restart=always
 RestartSec=10
