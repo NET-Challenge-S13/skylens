@@ -1,0 +1,94 @@
+name: release apps
+
+# Builds the native screens: the status board and the control tower as desktop
+# binaries. Nothing here is part of the path from a push to a running server;
+# the servers take the web builds from ci-screens. This exists so a version tag
+# produces something a person can download and run without a toolchain.
+#
+# Not on push, by design. A desktop build is minutes of Rust per platform and
+# nobody is waiting on it, so it runs on a tag or when someone asks for it.
+#
+# Android is not built here. The board has an android/ directory and a build
+# script, but it has never been checked on a device, so a workflow that
+# produced an APK would be publishing something nobody has run. It belongs here
+# once that changes: the toolchain is cargo-apk plus an NDK, and the script is
+# src/skylens_client/build-android.sh.
+
+on:
+  push:
+    tags: ['v*', 'develop/v*']
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Attach the binaries to a release (off: build only)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-apps-${{ github.ref }}
+  cancel-in-progress: false # a release build is not worth cancelling
+
+jobs:
+  desktop:
+    strategy:
+      fail-fast: false # one platform failing should not hide the others
+      matrix:
+        include:
+          - os: ubuntu-latest
+            suffix: linux-x86_64
+          - os: windows-latest
+            suffix: windows-x86_64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: desktop-${{ matrix.suffix }}
+
+      - name: Linux build dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          # What a windowed wgpu application needs to link on a bare runner.
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            libx11-dev libxkbcommon-dev libwayland-dev libxcb1-dev \
+            libgl1-mesa-dev libasound2-dev pkg-config
+
+      - name: Build
+        run: cargo build --release -p skylens-client -p skylens-control
+
+      - name: Collect
+        shell: bash
+        run: |
+          mkdir -p out
+          for n in skylens-client skylens-control; do
+            if [ -f "target/release/$n.exe" ]; then
+              cp "target/release/$n.exe" "out/$n-${{ matrix.suffix }}.exe"
+            else
+              cp "target/release/$n" "out/$n-${{ matrix.suffix }}"
+            fi
+          done
+          ls -l out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: screens-${{ matrix.suffix }}
+          path: out/*
+
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/') || inputs.publish
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" --title "$tag" --notes "Desktop builds of the two screens. The servers do not use these; they take the web builds from ci-screens."
+          fi
+          gh release upload "$tag" out/* --clobber
