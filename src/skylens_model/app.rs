@@ -367,11 +367,14 @@ impl ModelService for ModelGrpc {
         &self,
         request: tonic::Request<Streaming<pb::FrameSet>>,
     ) -> Result<tonic::Response<pb::PushFramesSummary>, Status> {
-        let engine = engine_status(&self.state)?;
         let mut stream = request.into_inner();
         let mut summary = pb::PushFramesSummary::default();
         while let Some(set) = stream.message().await? {
-            let engine = engine.clone();
+            // Per set, not once for the stream: the core holds this stream open for
+            // the whole run, and an engine kept alive by it would still hold the
+            // live node after a new mission replaced it. Taking it per set also
+            // means the frames after a new mission go to the new engine.
+            let engine = engine_status(&self.state)?;
             let started = std::time::Instant::now();
             let outcome = tokio::task::spawn_blocking(move || engine.push(set))
                 .await
@@ -405,6 +408,23 @@ impl ModelService for ModelGrpc {
             .map_err(|e| Status::internal(format!("subscribe panicked: {e}")))?;
         let stream = ReceiverStream::new(rx).map(Ok::<pb::Chunk, Status>);
         Ok(tonic::Response::new(Box::pin(stream) as Self::SubscribeChunksStream))
+    }
+
+    async fn start_mission(
+        &self,
+        _request: tonic::Request<pb::StartMissionRequest>,
+    ) -> Result<tonic::Response<pb::StartMissionResponse>, Status> {
+        let state = self.state.clone();
+        // Building an engine takes the GPU and a moment; it must not run on the
+        // async runtime's thread.
+        let engine = tokio::task::spawn_blocking(move || state.pipeline.restart_engine(build_engine))
+            .await
+            .map_err(|e| Status::internal(format!("starting a mission panicked: {e}")))?
+            .map_err(|e| Status::unavailable(e.to_string()))?;
+        let stream_id = engine.stream_id();
+        let sequence_base = crate::models::skylens::slotstream::sequence_base(stream_id);
+        tracing::info!("new mission: slot stream {stream_id}, chunks above {sequence_base}");
+        Ok(tonic::Response::new(pb::StartMissionResponse { stream_id, sequence_base }))
     }
 }
 

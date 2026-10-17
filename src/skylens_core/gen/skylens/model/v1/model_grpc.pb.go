@@ -35,6 +35,7 @@ const (
 	ModelService_Health_FullMethodName          = "/skylens.model.v1.ModelService/Health"
 	ModelService_PushFrames_FullMethodName      = "/skylens.model.v1.ModelService/PushFrames"
 	ModelService_SubscribeChunks_FullMethodName = "/skylens.model.v1.ModelService/SubscribeChunks"
+	ModelService_StartMission_FullMethodName    = "/skylens.model.v1.ModelService/StartMission"
 )
 
 // ModelServiceClient is the client API for ModelService service.
@@ -54,6 +55,20 @@ type ModelServiceClient interface {
 	PushFrames(ctx context.Context, opts ...grpc.CallOption) (grpc.ClientStreamingClient[FrameSet, PushFramesSummary], error)
 	// Incremental output: point chunks, mesh blocks and detections as they are produced.
 	SubscribeChunks(ctx context.Context, in *SubscribeRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[Chunk], error)
+	// A new mission starts: drop what was reconstructed and begin a new run.
+	//
+	// The live display is a stream of differences that a viewer has to apply from
+	// its first message, and the model never sends a message twice. So a core that
+	// empties its own store cannot empty the screens' live points by itself: what
+	// it drops is gone, and what arrives afterwards only moves points that the
+	// screens no longer have. Only the model can start the world over, by doing
+	// here what it does when the process starts: a new engine, a new stream id,
+	// and messages from seq 1 again.
+	//
+	// It is a reset, not a configuration change: the mission's route, cameras and
+	// settings are unaffected. In-flight subscriptions end; the core resubscribes
+	// and receives the new run from its beginning.
+	StartMission(ctx context.Context, in *StartMissionRequest, opts ...grpc.CallOption) (*StartMissionResponse, error)
 }
 
 type modelServiceClient struct {
@@ -136,6 +151,16 @@ func (c *modelServiceClient) SubscribeChunks(ctx context.Context, in *SubscribeR
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type ModelService_SubscribeChunksClient = grpc.ServerStreamingClient[Chunk]
 
+func (c *modelServiceClient) StartMission(ctx context.Context, in *StartMissionRequest, opts ...grpc.CallOption) (*StartMissionResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(StartMissionResponse)
+	err := c.cc.Invoke(ctx, ModelService_StartMission_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ModelServiceServer is the server API for ModelService service.
 // All implementations must embed UnimplementedModelServiceServer
 // for forward compatibility.
@@ -153,6 +178,20 @@ type ModelServiceServer interface {
 	PushFrames(grpc.ClientStreamingServer[FrameSet, PushFramesSummary]) error
 	// Incremental output: point chunks, mesh blocks and detections as they are produced.
 	SubscribeChunks(*SubscribeRequest, grpc.ServerStreamingServer[Chunk]) error
+	// A new mission starts: drop what was reconstructed and begin a new run.
+	//
+	// The live display is a stream of differences that a viewer has to apply from
+	// its first message, and the model never sends a message twice. So a core that
+	// empties its own store cannot empty the screens' live points by itself: what
+	// it drops is gone, and what arrives afterwards only moves points that the
+	// screens no longer have. Only the model can start the world over, by doing
+	// here what it does when the process starts: a new engine, a new stream id,
+	// and messages from seq 1 again.
+	//
+	// It is a reset, not a configuration change: the mission's route, cameras and
+	// settings are unaffected. In-flight subscriptions end; the core resubscribes
+	// and receives the new run from its beginning.
+	StartMission(context.Context, *StartMissionRequest) (*StartMissionResponse, error)
 	mustEmbedUnimplementedModelServiceServer()
 }
 
@@ -180,6 +219,9 @@ func (UnimplementedModelServiceServer) PushFrames(grpc.ClientStreamingServer[Fra
 }
 func (UnimplementedModelServiceServer) SubscribeChunks(*SubscribeRequest, grpc.ServerStreamingServer[Chunk]) error {
 	return status.Error(codes.Unimplemented, "method SubscribeChunks not implemented")
+}
+func (UnimplementedModelServiceServer) StartMission(context.Context, *StartMissionRequest) (*StartMissionResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method StartMission not implemented")
 }
 func (UnimplementedModelServiceServer) mustEmbedUnimplementedModelServiceServer() {}
 func (UnimplementedModelServiceServer) testEmbeddedByValue()                      {}
@@ -292,6 +334,24 @@ func _ModelService_SubscribeChunks_Handler(srv interface{}, stream grpc.ServerSt
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type ModelService_SubscribeChunksServer = grpc.ServerStreamingServer[Chunk]
 
+func _ModelService_StartMission_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(StartMissionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ModelServiceServer).StartMission(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ModelService_StartMission_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ModelServiceServer).StartMission(ctx, req.(*StartMissionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ModelService_ServiceDesc is the grpc.ServiceDesc for ModelService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -314,6 +374,10 @@ var ModelService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Health",
 			Handler:    _ModelService_Health_Handler,
+		},
+		{
+			MethodName: "StartMission",
+			Handler:    _ModelService_StartMission_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

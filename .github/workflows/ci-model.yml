@@ -1,0 +1,49 @@
+name: ci model
+
+# Type-checks the model server. It is the one component nothing checked: it is
+# built by hand on the Pangyo GPU node, so a change that does not compile is
+# found there, during a session that holds the GPU for eight hours, by someone
+# who wanted to deploy and not to debug.
+#
+# This only checks. The binary that runs is still built on the node, against
+# CUDA libtorch (TORCH_CUDA_VERSION=cu126 in .cargo/config.toml); here the CPU
+# build is enough to compile every line and is a tenth of the download.
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'src/skylens_model/**'
+      - 'src/shared/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/ci-model.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-model
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    env:
+      TORCH_CUDA_VERSION: cpu # overrides .cargo/config.toml for this check
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: model-cpu
+
+      - name: Check
+        run: cargo check -p skylens-model --all-targets
+
+      - name: Test what runs without a GPU
+        # The slot stream and the chunk rules need no libtorch and no device.
+        run: cargo test -p skylens-model --lib -- models::skylens::slotstream models::skylens::chunks

@@ -42,6 +42,7 @@ type API interface {
 	SubscribeChunks(ctx context.Context, after uint64) (ChunkStream, error)
 	PushFrames(ctx context.Context) (FrameStream, error)
 	Health(ctx context.Context) (*modelv1.HealthResponse, error)
+	StartMission(ctx context.Context) (*modelv1.StartMissionResponse, error)
 }
 
 type grpcAPI struct {
@@ -63,6 +64,10 @@ func (g grpcAPI) PushFrames(ctx context.Context) (FrameStream, error) {
 
 func (g grpcAPI) Health(ctx context.Context) (*modelv1.HealthResponse, error) {
 	return g.c.Health(ctx, &modelv1.HealthRequest{})
+}
+
+func (g grpcAPI) StartMission(ctx context.Context) (*modelv1.StartMissionResponse, error) {
+	return g.c.StartMission(ctx, &modelv1.StartMissionRequest{})
 }
 
 // Dial opens a lazy client connection to the model server. It does not block;

@@ -385,17 +385,23 @@ pub struct Pipeline {
     /// Placement of the CURRENT flight's scene, kept from the first recon job so
     /// detections land on the geometry the board actually draws.
     flight_align: Mutex<Option<SplatAlign>>,
-    live: LiveEngine,
+    /// Behind a lock because a new mission replaces it: see [`Pipeline::restart_engine`].
+    live: Mutex<LiveEngine>,
 }
 
 impl Pipeline {
     pub fn new(settings: Settings, live: LiveEngine) -> Self {
-        Pipeline { settings, frames: FrameStore::default(), flight_align: Mutex::new(None), live }
+        Pipeline {
+            settings,
+            frames: FrameStore::default(),
+            flight_align: Mutex::new(None),
+            live: Mutex::new(live),
+        }
     }
 
     /// The live engine, or why there is none.
     pub fn engine(&self) -> Result<Arc<Engine>, PipelineUnavailable> {
-        match &self.live {
+        match &*lock(&self.live) {
             LiveEngine::Ready(engine) => Ok(engine.clone()),
             LiveEngine::Disabled => Err(PipelineUnavailable(
                 "the live engine is not built in demo mode (SKYLENS_DEMO=1)".into(),
@@ -403,6 +409,60 @@ impl Pipeline {
             LiveEngine::Failed(reason) => Err(PipelineUnavailable(format!(
                 "the live reconstruction engine failed to start: {reason}"
             ))),
+        }
+    }
+
+    /// Starts a new mission: the engine is replaced by a freshly built one.
+    ///
+    /// This is what the process does at startup, without the process. The new
+    /// engine takes a new slot stream id and writes its messages from seq 1, which
+    /// is the only way the screens can be emptied: the live display is a stream of
+    /// differences nobody can replay, so a core that drops its own copy can never
+    /// show an empty world again on the stream that is already running.
+    ///
+    /// The old engine is dropped first, before the new one is built. Two engines
+    /// would hold the same live node at once, and the old one's threads are only
+    /// stopped by its `Drop`. A caller that is still using it (a frame being
+    /// pushed) keeps it alive for that moment, which is why the handlers take the
+    /// engine for one call at a time rather than for the length of a stream.
+    ///
+    /// If the build fails there is no engine left: the reason is kept and every
+    /// caller gets it, the same as a server that could not build one at startup.
+    pub fn restart_engine(
+        &self,
+        build: impl FnOnce(&Settings) -> anyhow::Result<Engine>,
+    ) -> Result<Arc<Engine>, PipelineUnavailable> {
+        let mut live = lock(&self.live);
+        if matches!(*live, LiveEngine::Disabled) {
+            return Err(PipelineUnavailable(
+                "the live engine is not built in demo mode (SKYLENS_DEMO=1)".into(),
+            ));
+        }
+        let previous = std::mem::replace(&mut *live, LiveEngine::Failed("starting a new mission".into()));
+        if let LiveEngine::Ready(engine) = previous {
+            let stream = engine.stream_id();
+            match Arc::into_inner(engine) {
+                Some(engine) => drop(engine),
+                None => tracing::warn!(
+                    "stream {stream}: the engine is still in use elsewhere; its threads stop when that call ends"
+                ),
+            }
+        }
+        // The placement belongs to the flight that just ended.
+        *lock(&self.flight_align) = None;
+        match build(&self.settings) {
+            Ok(engine) => {
+                let engine = Arc::new(engine);
+                *live = LiveEngine::Ready(Arc::clone(&engine));
+                Ok(engine)
+            }
+            Err(e) => {
+                let reason = format!("{e:#}");
+                *live = LiveEngine::Failed(reason.clone());
+                Err(PipelineUnavailable(format!(
+                    "the live reconstruction engine failed to start: {reason}"
+                )))
+            }
         }
     }
 

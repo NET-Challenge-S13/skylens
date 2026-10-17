@@ -111,6 +111,15 @@ func (m *fakeModel) PushFrames(context.Context) (FrameStream, error) {
 	return &fakeFrameStream{m: m}, nil
 }
 
+func (m *fakeModel) StartMission(context.Context) (*modelv1.StartMissionResponse, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if !m.up {
+		return nil, errDown
+	}
+	return &modelv1.StartMissionResponse{StreamId: 7, SequenceBase: 7 << 32}, nil
+}
+
 func (m *fakeModel) Health(context.Context) (*modelv1.HealthResponse, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

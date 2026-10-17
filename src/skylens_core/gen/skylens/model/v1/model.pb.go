@@ -253,7 +253,9 @@ const (
 	// moves write slots, removes hide them. Not compacted: a viewer applies every message of a
 	// stream in order. segment = the zone that triggered the event, level = refined,
 	// version = the message seq (1, 2, ...), generation = the stream id (one per model run; a new
-	// id starts a new stream at seq 1).
+	// id starts a new stream at seq 1). A reader that joins a stream after its start, which is what
+	// a new mission leaves behind, starts at the first message it is given: the ones before it are
+	// never sent again, so it shows the slots written from there on.
 	ChunkKind_CHUNK_KIND_POINT_SLOTS ChunkKind = 6
 )
 
@@ -1054,6 +1056,97 @@ func (*JobStatus_Recon) isJobStatus_Result() {}
 
 func (*JobStatus_Detect) isJobStatus_Result() {}
 
+type StartMissionRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StartMissionRequest) Reset() {
+	*x = StartMissionRequest{}
+	mi := &file_skylens_model_v1_model_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StartMissionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StartMissionRequest) ProtoMessage() {}
+
+func (x *StartMissionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_skylens_model_v1_model_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StartMissionRequest.ProtoReflect.Descriptor instead.
+func (*StartMissionRequest) Descriptor() ([]byte, []int) {
+	return file_skylens_model_v1_model_proto_rawDescGZIP(), []int{11}
+}
+
+type StartMissionResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The point slot stream the new run writes: higher than every id this process
+	// handed out, so the core and the screens know to start over on it.
+	StreamId uint32 `protobuf:"varint,1,opt,name=stream_id,json=streamId,proto3" json:"stream_id,omitempty"`
+	// Every chunk of the new run has a sequence above this one.
+	SequenceBase  uint64 `protobuf:"varint,2,opt,name=sequence_base,json=sequenceBase,proto3" json:"sequence_base,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StartMissionResponse) Reset() {
+	*x = StartMissionResponse{}
+	mi := &file_skylens_model_v1_model_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StartMissionResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StartMissionResponse) ProtoMessage() {}
+
+func (x *StartMissionResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_skylens_model_v1_model_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StartMissionResponse.ProtoReflect.Descriptor instead.
+func (*StartMissionResponse) Descriptor() ([]byte, []int) {
+	return file_skylens_model_v1_model_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *StartMissionResponse) GetStreamId() uint32 {
+	if x != nil {
+		return x.StreamId
+	}
+	return 0
+}
+
+func (x *StartMissionResponse) GetSequenceBase() uint64 {
+	if x != nil {
+		return x.SequenceBase
+	}
+	return 0
+}
+
 type HealthRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -1062,7 +1155,7 @@ type HealthRequest struct {
 
 func (x *HealthRequest) Reset() {
 	*x = HealthRequest{}
-	mi := &file_skylens_model_v1_model_proto_msgTypes[11]
+	mi := &file_skylens_model_v1_model_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1074,7 +1167,7 @@ func (x *HealthRequest) String() string {
 func (*HealthRequest) ProtoMessage() {}
 
 func (x *HealthRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_skylens_model_v1_model_proto_msgTypes[11]
+	mi := &file_skylens_model_v1_model_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1087,7 +1180,7 @@ func (x *HealthRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthRequest.ProtoReflect.Descriptor instead.
 func (*HealthRequest) Descriptor() ([]byte, []int) {
-	return file_skylens_model_v1_model_proto_rawDescGZIP(), []int{11}
+	return file_skylens_model_v1_model_proto_rawDescGZIP(), []int{13}
 }
 
 type HealthResponse struct {
@@ -1104,7 +1197,7 @@ type HealthResponse struct {
 
 func (x *HealthResponse) Reset() {
 	*x = HealthResponse{}
-	mi := &file_skylens_model_v1_model_proto_msgTypes[12]
+	mi := &file_skylens_model_v1_model_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1116,7 +1209,7 @@ func (x *HealthResponse) String() string {
 func (*HealthResponse) ProtoMessage() {}
 
 func (x *HealthResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_skylens_model_v1_model_proto_msgTypes[12]
+	mi := &file_skylens_model_v1_model_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1129,7 +1222,7 @@ func (x *HealthResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthResponse.ProtoReflect.Descriptor instead.
 func (*HealthResponse) Descriptor() ([]byte, []int) {
-	return file_skylens_model_v1_model_proto_rawDescGZIP(), []int{12}
+	return file_skylens_model_v1_model_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *HealthResponse) GetOk() bool {
@@ -1171,7 +1264,7 @@ type FrameKey struct {
 
 func (x *FrameKey) Reset() {
 	*x = FrameKey{}
-	mi := &file_skylens_model_v1_model_proto_msgTypes[13]
+	mi := &file_skylens_model_v1_model_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1183,7 +1276,7 @@ func (x *FrameKey) String() string {
 func (*FrameKey) ProtoMessage() {}
 
 func (x *FrameKey) ProtoReflect() protoreflect.Message {
-	mi := &file_skylens_model_v1_model_proto_msgTypes[13]
+	mi := &file_skylens_model_v1_model_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1196,7 +1289,7 @@ func (x *FrameKey) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FrameKey.ProtoReflect.Descriptor instead.
 func (*FrameKey) Descriptor() ([]byte, []int) {
-	return file_skylens_model_v1_model_proto_rawDescGZIP(), []int{13}
+	return file_skylens_model_v1_model_proto_rawDescGZIP(), []int{15}
 }
 
 func (x *FrameKey) GetSourceId() string {
@@ -1234,7 +1327,7 @@ type LiveImage struct {
 
 func (x *LiveImage) Reset() {
 	*x = LiveImage{}
-	mi := &file_skylens_model_v1_model_proto_msgTypes[14]
+	mi := &file_skylens_model_v1_model_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1246,7 +1339,7 @@ func (x *LiveImage) String() string {
 func (*LiveImage) ProtoMessage() {}
 
 func (x *LiveImage) ProtoReflect() protoreflect.Message {
-	mi := &file_skylens_model_v1_model_proto_msgTypes[14]
+	mi := &file_skylens_model_v1_model_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1259,7 +1352,7 @@ func (x *LiveImage) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use LiveImage.ProtoReflect.Descriptor instead.
 func (*LiveImage) Descriptor() ([]byte, []int) {
-	return file_skylens_model_v1_model_proto_rawDescGZIP(), []int{14}
+	return file_skylens_model_v1_model_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *LiveImage) GetCamera() string {
@@ -1315,7 +1408,7 @@ type FrameSet struct {
 
 func (x *FrameSet) Reset() {
 	*x = FrameSet{}
-	mi := &file_skylens_model_v1_model_proto_msgTypes[15]
+	mi := &file_skylens_model_v1_model_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1327,7 +1420,7 @@ func (x *FrameSet) String() string {
 func (*FrameSet) ProtoMessage() {}
 
 func (x *FrameSet) ProtoReflect() protoreflect.Message {
-	mi := &file_skylens_model_v1_model_proto_msgTypes[15]
+	mi := &file_skylens_model_v1_model_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1340,7 +1433,7 @@ func (x *FrameSet) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FrameSet.ProtoReflect.Descriptor instead.
 func (*FrameSet) Descriptor() ([]byte, []int) {
-	return file_skylens_model_v1_model_proto_rawDescGZIP(), []int{15}
+	return file_skylens_model_v1_model_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *FrameSet) GetKey() *FrameKey {
@@ -1375,7 +1468,7 @@ type PushFramesSummary struct {
 
 func (x *PushFramesSummary) Reset() {
 	*x = PushFramesSummary{}
-	mi := &file_skylens_model_v1_model_proto_msgTypes[16]
+	mi := &file_skylens_model_v1_model_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1387,7 +1480,7 @@ func (x *PushFramesSummary) String() string {
 func (*PushFramesSummary) ProtoMessage() {}
 
 func (x *PushFramesSummary) ProtoReflect() protoreflect.Message {
-	mi := &file_skylens_model_v1_model_proto_msgTypes[16]
+	mi := &file_skylens_model_v1_model_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1400,7 +1493,7 @@ func (x *PushFramesSummary) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PushFramesSummary.ProtoReflect.Descriptor instead.
 func (*PushFramesSummary) Descriptor() ([]byte, []int) {
-	return file_skylens_model_v1_model_proto_rawDescGZIP(), []int{16}
+	return file_skylens_model_v1_model_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *PushFramesSummary) GetIngested() uint64 {
@@ -1434,7 +1527,7 @@ type SubscribeRequest struct {
 
 func (x *SubscribeRequest) Reset() {
 	*x = SubscribeRequest{}
-	mi := &file_skylens_model_v1_model_proto_msgTypes[17]
+	mi := &file_skylens_model_v1_model_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1446,7 +1539,7 @@ func (x *SubscribeRequest) String() string {
 func (*SubscribeRequest) ProtoMessage() {}
 
 func (x *SubscribeRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_skylens_model_v1_model_proto_msgTypes[17]
+	mi := &file_skylens_model_v1_model_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1459,7 +1552,7 @@ func (x *SubscribeRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SubscribeRequest.ProtoReflect.Descriptor instead.
 func (*SubscribeRequest) Descriptor() ([]byte, []int) {
-	return file_skylens_model_v1_model_proto_rawDescGZIP(), []int{17}
+	return file_skylens_model_v1_model_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *SubscribeRequest) GetAfterSequence() uint64 {
@@ -1482,7 +1575,7 @@ type Chunk struct {
 	Payload    []byte                 `protobuf:"bytes,8,opt,name=payload,proto3" json:"payload,omitempty"`
 	// Point slots only (CHUNK_KIND_POINT_SLOTS; 0 and 0 for every other kind). Metadata about the
 	// slot message in payload; the PBSD/v4 bytes carry none of it. The core never reads them.
-	SlotKind      uint32 `protobuf:"varint,9,opt,name=slot_kind,json=slotKind,proto3" json:"slot_kind,omitempty"` // why the message was emitted: 1 refined, 2 replace, 3 final (empty message, last of the run)
+	SlotKind      uint32 `protobuf:"varint,9,opt,name=slot_kind,json=slotKind,proto3" json:"slot_kind,omitempty"` // why the message was emitted: 1 refined, 2 replace, 3 final (empty message, last of the run), 4 preview (sparse zone preview, replaced by that zone's refined delta)
 	SlotTMs       uint32 `protobuf:"varint,10,opt,name=slot_t_ms,json=slotTMs,proto3" json:"slot_t_ms,omitempty"` // cumulus3d session time of the delta, milliseconds since the run's start
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -1490,7 +1583,7 @@ type Chunk struct {
 
 func (x *Chunk) Reset() {
 	*x = Chunk{}
-	mi := &file_skylens_model_v1_model_proto_msgTypes[18]
+	mi := &file_skylens_model_v1_model_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1502,7 +1595,7 @@ func (x *Chunk) String() string {
 func (*Chunk) ProtoMessage() {}
 
 func (x *Chunk) ProtoReflect() protoreflect.Message {
-	mi := &file_skylens_model_v1_model_proto_msgTypes[18]
+	mi := &file_skylens_model_v1_model_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1515,7 +1608,7 @@ func (x *Chunk) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Chunk.ProtoReflect.Descriptor instead.
 func (*Chunk) Descriptor() ([]byte, []int) {
-	return file_skylens_model_v1_model_proto_rawDescGZIP(), []int{18}
+	return file_skylens_model_v1_model_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *Chunk) GetSequence() uint64 {
@@ -1651,7 +1744,11 @@ const file_skylens_model_v1_model_proto_rawDesc = "" +
 	"\x06detect\x18\x05 \x01(\v2!.skylens.model.v1.DetectJobResultH\x00R\x06detect\x12\x19\n" +
 	"\x05error\x18\x06 \x01(\tH\x01R\x05error\x88\x01\x01B\b\n" +
 	"\x06resultB\b\n" +
-	"\x06_error\"\x0f\n" +
+	"\x06_error\"\x15\n" +
+	"\x13StartMissionRequest\"X\n" +
+	"\x14StartMissionResponse\x12\x1b\n" +
+	"\tstream_id\x18\x01 \x01(\rR\bstreamId\x12#\n" +
+	"\rsequence_base\x18\x02 \x01(\x04R\fsequenceBase\"\x0f\n" +
 	"\rHealthRequest\"i\n" +
 	"\x0eHealthResponse\x12\x0e\n" +
 	"\x02ok\x18\x01 \x01(\bR\x02ok\x12\x10\n" +
@@ -1721,7 +1818,7 @@ const file_skylens_model_v1_model_proto_rawDesc = "" +
 	"\x15CHUNK_KIND_DETECTIONS\x10\x03\x12\x16\n" +
 	"\x12CHUNK_KIND_TERRAIN\x10\x04\x12\x18\n" +
 	"\x14CHUNK_KIND_BUILDINGS\x10\x05\x12\x1a\n" +
-	"\x16CHUNK_KIND_POINT_SLOTS\x10\x062\xea\x03\n" +
+	"\x16CHUNK_KIND_POINT_SLOTS\x10\x062\xc9\x04\n" +
 	"\fModelService\x12O\n" +
 	"\vSubmitRecon\x12!.skylens.model.v1.ReconJobRequest\x1a\x1d.skylens.model.v1.JobAccepted\x12Q\n" +
 	"\fSubmitDetect\x12\".skylens.model.v1.DetectJobRequest\x1a\x1d.skylens.model.v1.JobAccepted\x12F\n" +
@@ -1729,7 +1826,8 @@ const file_skylens_model_v1_model_proto_rawDesc = "" +
 	"\x06Health\x12\x1f.skylens.model.v1.HealthRequest\x1a .skylens.model.v1.HealthResponse\x12O\n" +
 	"\n" +
 	"PushFrames\x12\x1a.skylens.model.v1.FrameSet\x1a#.skylens.model.v1.PushFramesSummary(\x01\x12P\n" +
-	"\x0fSubscribeChunks\x12\".skylens.model.v1.SubscribeRequest\x1a\x17.skylens.model.v1.Chunk0\x01BTZRgithub.com/NET-Challenge-S13/skylens/src/skylens_core/gen/skylens/model/v1;modelv1b\x06proto3"
+	"\x0fSubscribeChunks\x12\".skylens.model.v1.SubscribeRequest\x1a\x17.skylens.model.v1.Chunk0\x01\x12]\n" +
+	"\fStartMission\x12%.skylens.model.v1.StartMissionRequest\x1a&.skylens.model.v1.StartMissionResponseBTZRgithub.com/NET-Challenge-S13/skylens/src/skylens_core/gen/skylens/model/v1;modelv1b\x06proto3"
 
 var (
 	file_skylens_model_v1_model_proto_rawDescOnce sync.Once
@@ -1744,32 +1842,34 @@ func file_skylens_model_v1_model_proto_rawDescGZIP() []byte {
 }
 
 var file_skylens_model_v1_model_proto_enumTypes = make([]protoimpl.EnumInfo, 5)
-var file_skylens_model_v1_model_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
+var file_skylens_model_v1_model_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
 var file_skylens_model_v1_model_proto_goTypes = []any{
-	(DroneStation)(0),         // 0: skylens.model.v1.DroneStation
-	(Level)(0),                // 1: skylens.model.v1.Level
-	(JobState)(0),             // 2: skylens.model.v1.JobState
-	(ImageFormat)(0),          // 3: skylens.model.v1.ImageFormat
-	(ChunkKind)(0),            // 4: skylens.model.v1.ChunkKind
-	(*Gps)(nil),               // 5: skylens.model.v1.Gps
-	(*DroneTelemetry)(nil),    // 6: skylens.model.v1.DroneTelemetry
-	(*Source)(nil),            // 7: skylens.model.v1.Source
-	(*ReconJobRequest)(nil),   // 8: skylens.model.v1.ReconJobRequest
-	(*DetectJobRequest)(nil),  // 9: skylens.model.v1.DetectJobRequest
-	(*JobAccepted)(nil),       // 10: skylens.model.v1.JobAccepted
-	(*GetJobRequest)(nil),     // 11: skylens.model.v1.GetJobRequest
-	(*Align)(nil),             // 12: skylens.model.v1.Align
-	(*ReconJobResult)(nil),    // 13: skylens.model.v1.ReconJobResult
-	(*DetectJobResult)(nil),   // 14: skylens.model.v1.DetectJobResult
-	(*JobStatus)(nil),         // 15: skylens.model.v1.JobStatus
-	(*HealthRequest)(nil),     // 16: skylens.model.v1.HealthRequest
-	(*HealthResponse)(nil),    // 17: skylens.model.v1.HealthResponse
-	(*FrameKey)(nil),          // 18: skylens.model.v1.FrameKey
-	(*LiveImage)(nil),         // 19: skylens.model.v1.LiveImage
-	(*FrameSet)(nil),          // 20: skylens.model.v1.FrameSet
-	(*PushFramesSummary)(nil), // 21: skylens.model.v1.PushFramesSummary
-	(*SubscribeRequest)(nil),  // 22: skylens.model.v1.SubscribeRequest
-	(*Chunk)(nil),             // 23: skylens.model.v1.Chunk
+	(DroneStation)(0),            // 0: skylens.model.v1.DroneStation
+	(Level)(0),                   // 1: skylens.model.v1.Level
+	(JobState)(0),                // 2: skylens.model.v1.JobState
+	(ImageFormat)(0),             // 3: skylens.model.v1.ImageFormat
+	(ChunkKind)(0),               // 4: skylens.model.v1.ChunkKind
+	(*Gps)(nil),                  // 5: skylens.model.v1.Gps
+	(*DroneTelemetry)(nil),       // 6: skylens.model.v1.DroneTelemetry
+	(*Source)(nil),               // 7: skylens.model.v1.Source
+	(*ReconJobRequest)(nil),      // 8: skylens.model.v1.ReconJobRequest
+	(*DetectJobRequest)(nil),     // 9: skylens.model.v1.DetectJobRequest
+	(*JobAccepted)(nil),          // 10: skylens.model.v1.JobAccepted
+	(*GetJobRequest)(nil),        // 11: skylens.model.v1.GetJobRequest
+	(*Align)(nil),                // 12: skylens.model.v1.Align
+	(*ReconJobResult)(nil),       // 13: skylens.model.v1.ReconJobResult
+	(*DetectJobResult)(nil),      // 14: skylens.model.v1.DetectJobResult
+	(*JobStatus)(nil),            // 15: skylens.model.v1.JobStatus
+	(*StartMissionRequest)(nil),  // 16: skylens.model.v1.StartMissionRequest
+	(*StartMissionResponse)(nil), // 17: skylens.model.v1.StartMissionResponse
+	(*HealthRequest)(nil),        // 18: skylens.model.v1.HealthRequest
+	(*HealthResponse)(nil),       // 19: skylens.model.v1.HealthResponse
+	(*FrameKey)(nil),             // 20: skylens.model.v1.FrameKey
+	(*LiveImage)(nil),            // 21: skylens.model.v1.LiveImage
+	(*FrameSet)(nil),             // 22: skylens.model.v1.FrameSet
+	(*PushFramesSummary)(nil),    // 23: skylens.model.v1.PushFramesSummary
+	(*SubscribeRequest)(nil),     // 24: skylens.model.v1.SubscribeRequest
+	(*Chunk)(nil),                // 25: skylens.model.v1.Chunk
 }
 var file_skylens_model_v1_model_proto_depIdxs = []int32{
 	0,  // 0: skylens.model.v1.DroneTelemetry.station:type_name -> skylens.model.v1.DroneStation
@@ -1785,24 +1885,26 @@ var file_skylens_model_v1_model_proto_depIdxs = []int32{
 	14, // 10: skylens.model.v1.JobStatus.detect:type_name -> skylens.model.v1.DetectJobResult
 	3,  // 11: skylens.model.v1.LiveImage.format:type_name -> skylens.model.v1.ImageFormat
 	5,  // 12: skylens.model.v1.LiveImage.gps:type_name -> skylens.model.v1.Gps
-	18, // 13: skylens.model.v1.FrameSet.key:type_name -> skylens.model.v1.FrameKey
-	19, // 14: skylens.model.v1.FrameSet.images:type_name -> skylens.model.v1.LiveImage
+	20, // 13: skylens.model.v1.FrameSet.key:type_name -> skylens.model.v1.FrameKey
+	21, // 14: skylens.model.v1.FrameSet.images:type_name -> skylens.model.v1.LiveImage
 	4,  // 15: skylens.model.v1.Chunk.kind:type_name -> skylens.model.v1.ChunkKind
 	1,  // 16: skylens.model.v1.Chunk.level:type_name -> skylens.model.v1.Level
 	8,  // 17: skylens.model.v1.ModelService.SubmitRecon:input_type -> skylens.model.v1.ReconJobRequest
 	9,  // 18: skylens.model.v1.ModelService.SubmitDetect:input_type -> skylens.model.v1.DetectJobRequest
 	11, // 19: skylens.model.v1.ModelService.GetJob:input_type -> skylens.model.v1.GetJobRequest
-	16, // 20: skylens.model.v1.ModelService.Health:input_type -> skylens.model.v1.HealthRequest
-	20, // 21: skylens.model.v1.ModelService.PushFrames:input_type -> skylens.model.v1.FrameSet
-	22, // 22: skylens.model.v1.ModelService.SubscribeChunks:input_type -> skylens.model.v1.SubscribeRequest
-	10, // 23: skylens.model.v1.ModelService.SubmitRecon:output_type -> skylens.model.v1.JobAccepted
-	10, // 24: skylens.model.v1.ModelService.SubmitDetect:output_type -> skylens.model.v1.JobAccepted
-	15, // 25: skylens.model.v1.ModelService.GetJob:output_type -> skylens.model.v1.JobStatus
-	17, // 26: skylens.model.v1.ModelService.Health:output_type -> skylens.model.v1.HealthResponse
-	21, // 27: skylens.model.v1.ModelService.PushFrames:output_type -> skylens.model.v1.PushFramesSummary
-	23, // 28: skylens.model.v1.ModelService.SubscribeChunks:output_type -> skylens.model.v1.Chunk
-	23, // [23:29] is the sub-list for method output_type
-	17, // [17:23] is the sub-list for method input_type
+	18, // 20: skylens.model.v1.ModelService.Health:input_type -> skylens.model.v1.HealthRequest
+	22, // 21: skylens.model.v1.ModelService.PushFrames:input_type -> skylens.model.v1.FrameSet
+	24, // 22: skylens.model.v1.ModelService.SubscribeChunks:input_type -> skylens.model.v1.SubscribeRequest
+	16, // 23: skylens.model.v1.ModelService.StartMission:input_type -> skylens.model.v1.StartMissionRequest
+	10, // 24: skylens.model.v1.ModelService.SubmitRecon:output_type -> skylens.model.v1.JobAccepted
+	10, // 25: skylens.model.v1.ModelService.SubmitDetect:output_type -> skylens.model.v1.JobAccepted
+	15, // 26: skylens.model.v1.ModelService.GetJob:output_type -> skylens.model.v1.JobStatus
+	19, // 27: skylens.model.v1.ModelService.Health:output_type -> skylens.model.v1.HealthResponse
+	23, // 28: skylens.model.v1.ModelService.PushFrames:output_type -> skylens.model.v1.PushFramesSummary
+	25, // 29: skylens.model.v1.ModelService.SubscribeChunks:output_type -> skylens.model.v1.Chunk
+	17, // 30: skylens.model.v1.ModelService.StartMission:output_type -> skylens.model.v1.StartMissionResponse
+	24, // [24:31] is the sub-list for method output_type
+	17, // [17:24] is the sub-list for method input_type
 	17, // [17:17] is the sub-list for extension type_name
 	17, // [17:17] is the sub-list for extension extendee
 	0,  // [0:17] is the sub-list for field type_name
@@ -1819,14 +1921,14 @@ func file_skylens_model_v1_model_proto_init() {
 		(*JobStatus_Recon)(nil),
 		(*JobStatus_Detect)(nil),
 	}
-	file_skylens_model_v1_model_proto_msgTypes[14].OneofWrappers = []any{}
+	file_skylens_model_v1_model_proto_msgTypes[16].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_skylens_model_v1_model_proto_rawDesc), len(file_skylens_model_v1_model_proto_rawDesc)),
 			NumEnums:      5,
-			NumMessages:   19,
+			NumMessages:   21,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

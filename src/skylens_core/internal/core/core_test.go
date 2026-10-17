@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http/httptest"
 	"strings"
 	"sync"
@@ -16,6 +17,7 @@ import (
 	"github.com/NET-Challenge-S13/skylens/src/skylens_core/internal/config"
 	"github.com/NET-Challenge-S13/skylens/src/skylens_core/internal/frames"
 	"github.com/NET-Challenge-S13/skylens/src/skylens_core/internal/mission"
+	"github.com/NET-Challenge-S13/skylens/src/skylens_core/internal/modelclient"
 	"github.com/NET-Challenge-S13/skylens/src/skylens_core/internal/ws"
 	"github.com/NET-Challenge-S13/skylens/src/skylens_core/terrain"
 )
@@ -765,5 +767,65 @@ func TestHealthCarriesTheCommit(t *testing.T) {
 	}
 	if body.Commit != Commit {
 		t.Fatalf("commit %q, want %q", body.Commit, Commit)
+	}
+}
+
+// Only the model can empty the screens' live points, so a new mission asks it to
+// start one. A model that cannot is not fatal: the demo keeps its video and its
+// drones, and the core says in the log that the points will not come back yet.
+type missionModel struct {
+	modelclient.API
+	mu    sync.Mutex
+	calls int
+	fails bool
+}
+
+func (m *missionModel) StartMission(context.Context) (*modelv1.StartMissionResponse, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.calls++
+	if m.fails {
+		return nil, errors.New("model is down")
+	}
+	return &modelv1.StartMissionResponse{StreamId: 11, SequenceBase: 11 << 32}, nil
+}
+
+func (m *missionModel) count() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.calls
+}
+
+func TestNewMissionAsksTheModelToStartOne(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		fails bool
+	}{{"model answers", false}, {"model is down", true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			model := &missionModel{fails: tc.fails}
+			clk := &manualClock{}
+			c := New(Options{Config: testConfig(t), Clock: clk, Terrain: &fakeTerrain{}, Model: model})
+			defer c.Close()
+			control := attach(c.Controls, c.ControlHandler())
+			drain(t, control)
+
+			c.ControlHandler().Message(control, route())
+			// The call does not block the screen that assigned the route, so wait for it.
+			waitUntil(t, "the model was asked to start a mission", func() bool { return model.count() == 1 })
+			if c.Mission.Phase() != viewerv1.MissionPhase_MISSION_PHASE_ASSIGNED {
+				t.Fatalf("phase %v: a model that is down must not stop the mission", c.Mission.Phase())
+			}
+
+			// Re-planning while drones are up is not a new mission.
+			clk.fire()
+			c.Mission.Hello(1, modelv1.DroneStation_DRONE_STATION_CENTER)
+			c.ControlHandler().Message(control, route())
+			if got := model.count(); got != 1 {
+				t.Fatalf("a re-plan in flight asked the model again (%d calls)", got)
+			}
+			if c.Mission.Phase() != viewerv1.MissionPhase_MISSION_PHASE_ASSIGNED {
+				t.Fatalf("phase after the re-plan: %v", c.Mission.Phase())
+			}
+		})
 	}
 }

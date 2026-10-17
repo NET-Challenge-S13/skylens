@@ -420,6 +420,32 @@ func (c *Core) AssignRoute(env *viewerv1.Envelope, from *ws.Peer) {
 // the core starts runs without a blip: the screens that watched the assignment
 // stay on the socket that delivered it.
 func (c *Core) resetReconstruction() {
+	// The model goes first, because only it can empty the screens' live points.
+	// Its display is a stream of differences that a viewer applies from the first
+	// message and that is never sent again, so dropping our own copy would leave
+	// the screens with points we can no longer change: the messages that follow
+	// only move points they would have to have received. Asked for a new mission,
+	// the model starts a new stream the screens take from its beginning.
+	//
+	// A model that is down or too old to know the call is not a reason to stop: the
+	// demo keeps its video and its drones, and the world fills again when the model
+	// comes back. Say so in the log, because the screens will stay empty until then.
+	if c.model != nil {
+		// Not on this goroutine: the call builds an engine on a GPU and the caller
+		// is the control socket, which has a screen waiting on it. Nothing here
+		// depends on the answer either, because the new stream arrives on the chunk
+		// subscription whenever it is ready.
+		go func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer cancel()
+			started, err := c.model.StartMission(ctx)
+			if err != nil {
+				log.Printf("[core] new mission: the model did not start one (%v); live points stay empty until it does", err)
+				return
+			}
+			log.Printf("[core] new mission: model slot stream %d, chunks above %d", started.GetStreamId(), started.GetSequenceBase())
+		}()
+	}
 	dropped := c.Store.ResetModel()
 	if dropped == 0 {
 		return
