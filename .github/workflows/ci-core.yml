@@ -1,0 +1,65 @@
+name: ci core
+
+# Builds the Go core and publishes it for the Daejeon host to pull.
+#
+# Only the core: the screens are a separate workflow because their build is
+# minutes of Rust and wasm while this one is under a minute, and most commits
+# touch one side or the other. See docs/DEPLOYMENT.md for the whole path from a
+# push to a running server.
+#
+# The binary is static (CGO_ENABLED=0). The core imports no C, and a static
+# binary does not care whether the runner and the server ship the same glibc.
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'src/skylens_core/**'
+      - '!src/skylens_core/control/**' # the tower screen; ci-screens builds it
+      - '!src/skylens_core/deploy/**' # host files, pulled straight from git
+      - 'src/shared/proto/**'
+      - 'go.work'
+      - '.github/workflows/ci-core.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write # the release the hosts pull from
+
+concurrency:
+  group: ci-core
+  cancel-in-progress: true # a newer push makes this build pointless
+
+env:
+  RELEASE_TAG: deploy-develop
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: src/skylens_core/go.mod
+          cache-dependency-path: src/skylens_core/go.sum
+
+      - name: Test
+        working-directory: src/skylens_core
+        run: |
+          go vet ./...
+          go test ./...
+
+      - name: Build
+        working-directory: src/skylens_core
+        env:
+          CGO_ENABLED: '0'
+          GOOS: linux
+          GOARCH: amd64
+        run: |
+          go build -trimpath \n            -ldflags "-s -w -X github.com/NET-Challenge-S13/skylens/src/skylens_core/internal/core.Commit=${GITHUB_SHA}" \n            -o "$GITHUB_WORKSPACE/skylens-core" .
+          file "$GITHUB_WORKSPACE/skylens-core" || true
+
+      - name: Publish for the hosts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/workflows/publish-artifact.sh manifest-core.json skylens-core

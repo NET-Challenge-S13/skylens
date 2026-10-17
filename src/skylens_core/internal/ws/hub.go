@@ -126,6 +126,13 @@ func (p *Peer) Close() {
 	p.wake()
 }
 
+// Closed reports whether the peer is finished, by Close or by an earlier error.
+func (p *Peer) Closed() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.err != nil
+}
+
 // Next blocks until a frame is ready and returns it with the peer's sequence
 // number prepended, or returns the error that ended the peer. done aborts the
 // wait.

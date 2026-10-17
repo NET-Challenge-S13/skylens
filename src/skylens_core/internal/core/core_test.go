@@ -675,3 +675,64 @@ func TestPointSlotMessagesAreForwardedInOrderAndReplayed(t *testing.T) {
 		t.Fatalf("server status %+v", st)
 	}
 }
+
+// A second mission starts from an empty world: the first one's reconstruction is
+// dropped and the screens are made to reconnect, which is how they clear their
+// own copy. The first mission after a start has nothing to drop and no blip.
+func TestNewMissionDropsTheLastReconstruction(t *testing.T) {
+	c := New(Options{Config: testConfig(t), Clock: &manualClock{}, Terrain: &fakeTerrain{}})
+	defer c.Close()
+	control := attach(c.Controls, c.ControlHandler())
+	viewer := attach(c.Viewers, c.ViewerHandler())
+	drain(t, control)
+	drain(t, viewer)
+
+	// First mission: nothing stored yet, so the sockets stay.
+	c.ControlHandler().Message(control, route())
+	if control.Closed() || viewer.Closed() {
+		t.Fatal("the first assignment dropped the screens")
+	}
+
+	c.PutChunk(&modelv1.Chunk{Sequence: 1, Kind: modelv1.ChunkKind_CHUNK_KIND_POINTS, Segment: 0, Level: modelv1.Level_LEVEL_REFINED, Payload: []byte("cloud")})
+	if len(c.Store.ModelChunks()) != 1 {
+		t.Fatal("the chunk was not stored")
+	}
+	c.Mission.Reset()
+	drain(t, control)
+	drain(t, viewer)
+
+	// Second mission: the first one's cloud goes, and both screens are dropped
+	// so they clear and take the replay again.
+	c.ControlHandler().Message(control, route())
+	if got := len(c.Store.ModelChunks()); got != 0 {
+		t.Fatalf("%d reconstruction chunk(s) survived the new mission", got)
+	}
+	if !control.Closed() || !viewer.Closed() {
+		t.Fatalf("screens not dropped (control closed=%v viewer closed=%v)", control.Closed(), viewer.Closed())
+	}
+	if c.Store.Route() == nil {
+		t.Fatal("the new route was dropped with the old world")
+	}
+}
+
+// The deployment agent reads this field to tell which build is running, and so
+// does anyone debugging the Daejeon host, so it has to be in the body.
+func TestHealthCarriesTheCommit(t *testing.T) {
+	c := New(Options{Config: testConfig(t), Clock: &manualClock{}, Terrain: &fakeTerrain{}})
+	defer c.Close()
+
+	rec := httptest.NewRecorder()
+	c.HealthHandler().ServeHTTP(rec, httptest.NewRequest("GET", "/health", nil))
+	if rec.Code != 200 {
+		t.Fatalf("status %d", rec.Code)
+	}
+	var body struct {
+		Commit string `json:"commit"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.Commit != Commit {
+		t.Fatalf("commit %q, want %q", body.Commit, Commit)
+	}
+}

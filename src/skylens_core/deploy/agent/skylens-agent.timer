@@ -1,0 +1,13 @@
+# Every minute, a little off the minute so the two hosts do not ask at once.
+[Unit]
+Description=Pull the current SkyLens build every minute
+
+[Timer]
+OnBootSec=90
+OnUnitActiveSec=60
+AccuracySec=5s
+RandomizedDelaySec=15
+Unit=skylens-agent.service
+
+[Install]
+WantedBy=timers.target
