@@ -10,7 +10,8 @@
 //! A native link can be given several addresses ([`CoreLink::start_any`]): every round tries them
 //! in order and stays on the first that answers, so a screen can prefer the bridge and fall back
 //! to a core on this machine. `wss` runs on rustls with the web roots plus [`PINNED_CERTS`], the
-//! bridge's self-signed board certificate, trusted as exactly that certificate.
+//! bridge's self-signed board certificate as the build fetched it, trusted as exactly that
+//! certificate.
 //!
 //! Native runs tokio-tungstenite on a background thread; web uses the browser WebSocket. Both
 //! queue events for [`CoreLink::drain`] and wake the Blitz window with the waker given to
@@ -30,11 +31,11 @@ pub const TICK_MS: u64 = 100;
 pub const CONTROL_PATH: &str = "/control";
 pub const VIEWER_PATH: &str = "/viewer";
 
-/// Server certificates a native `wss` link accepts as they are, whatever name it dialled: the
-/// self-signed certificate `setup-bridge.sh` made for the bridge board (CN skylens-board, valid to
-/// 2031). If the bridge makes a new one, replace this file, or that address stops answering and
-/// the link falls through to the next one.
-pub const PINNED_CERTS: &[&str] = &[include_str!("bridge-cert.pem")];
+/// Server certificates (DER) a native `wss` link accepts as they are, whatever name it dialled:
+/// the bridge's self-signed board certificate, which `build.rs` asks the bridge for at build time
+/// (empty when the bridge did not answer). If the bridge makes a new one, rebuild, or that address
+/// stops answering and the link falls through to the next one.
+pub const PINNED_CERTS: &[&[u8]] = include!(concat!(env!("OUT_DIR"), "/pinned_certs.rs"));
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum LinkEvent {
@@ -544,19 +545,15 @@ mod native {
         use rustls::client::WebPkiServerVerifier;
         use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
         use rustls::crypto::{CryptoProvider, verify_tls12_signature, verify_tls13_signature};
-        use rustls::pki_types::pem::PemObject as _;
         use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
         use rustls::{ClientConfig, DigitallySignedStruct, Error, RootCertStore, SignatureScheme};
         use std::sync::Arc;
 
-        /// rustls client config: web PKI, except that a server presenting one of `pinned` (PEM)
+        /// rustls client config: web PKI, except that a server presenting one of `pinned` (DER)
         /// is accepted without a chain or a name check.
-        pub fn client_config(pinned: &[&str]) -> Result<ClientConfig, String> {
+        pub fn client_config(pinned: &[&[u8]]) -> Result<ClientConfig, String> {
             let provider = Arc::new(rustls::crypto::ring::default_provider());
-            let pinned = pinned
-                .iter()
-                .map(|pem| CertificateDer::from_pem_slice(pem.as_bytes()).map_err(|e| format!("pinned certificate: {e}")))
-                .collect::<Result<Vec<_>, _>>()?;
+            let pinned = pinned.iter().map(|der| CertificateDer::from(der.to_vec())).collect();
             let roots = RootCertStore { roots: webpki_roots::TLS_SERVER_ROOTS.to_vec() };
             let webpki = WebPkiServerVerifier::builder_with_provider(Arc::new(roots), provider.clone())
                 .build()
@@ -620,7 +617,7 @@ mod native {
         #[cfg(test)]
         mod tests {
             #[test]
-            fn the_pinned_bridge_certificate_parses() {
+            fn the_client_config_takes_the_pinned_certificates() {
                 super::client_config(crate::link::PINNED_CERTS).expect("client config");
             }
         }

@@ -116,7 +116,7 @@ adb logcat -s skylens RustStdoutStderr AndroidRuntime
 | 3 | 내부 파일 폴더의 같은 파일 | `adb shell run-as kr.skylens.board sh -c 'echo ws://… > files/core.txt'` | 디버그(`PROFILE=dev`) 빌드만 |
 | 4 | 기본값 | 없음 | 브리지 `wss://175.126.98.44:8443/viewer`를 먼저, 닿지 않으면 `ws://127.0.0.1:8080/viewer`. 점 패널 열림 |
 
-기본값은 매 연결마다 브리지를 먼저 시도하고(연결 제한 5초), 응답이 없을 때만 이 기기의 8080으로 간다. 브리지는 자체 서명 인증서라서 그 인증서를 `src/shared/viewer/bridge-cert.pem`에 고정해 두었다. 브리지가 인증서를 새로 만들면 이 파일을 바꿔야 하고, 바꾸기 전까지는 로컬 코어로만 붙는다. 로컬 코어를 쓰려면 `adb reverse tcp:8080 tcp:8080`으로 기기의 8080을 개발 PC의 코어(또는 게이트웨이)로 돌린다. 실기기와 에뮬레이터 모두 된다. 에뮬레이터에서는 `ws://10.0.2.2:8080/viewer`도 개발 PC다. 설정을 바꾼 뒤에는 앱을 다시 시작한다(`adb shell am force-stop kr.skylens.board` 후 실행).
+기본값은 매 연결마다 브리지를 먼저 시도하고(연결 제한 5초), 응답이 없을 때만 이 기기의 8080으로 간다. 브리지는 자체 서명 인증서라서, 빌드할 때 `skylens-viewer`의 `build.rs`가 브리지에 TLS로 붙어 그 인증서를 받아 앱에 고정한다(`SKYLENS_BRIDGE_TLS`로 다른 `host:port`, `off`면 고정하지 않음, `SKYLENS_BRIDGE_CERT`로 PEM 파일을 대신 지정). 빌드 때 브리지가 응답하지 않으면 경고만 남기고 고정 없이 빌드되며, 그 앱은 로컬 코어로만 붙는다. 브리지가 인증서를 새로 만들면 다시 빌드한다(`cargo clean -p skylens-viewer`). 로컬 코어를 쓰려면 `adb reverse tcp:8080 tcp:8080`으로 기기의 8080을 개발 PC의 코어(또는 게이트웨이)로 돌린다. 실기기와 에뮬레이터 모두 된다. 에뮬레이터에서는 `ws://10.0.2.2:8080/viewer`도 개발 PC다. 설정을 바꾼 뒤에는 앱을 다시 시작한다(`adb shell am force-stop kr.skylens.board` 후 실행).
 
 ### 터치
 

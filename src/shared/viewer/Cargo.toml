@@ -26,6 +26,10 @@ wgpu_context = "0.10"
 keyboard-types = "0.7"
 winit = "=0.31.0-beta.3"
 
+# build.rs fetches the bridge certificate to pin (see link::PINNED_CERTS).
+[build-dependencies]
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+
 # Native: Blitz with its default features, tokio-tungstenite for the core link.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # Decodes the embedded window icon (res/icon/skylens-256.png).
