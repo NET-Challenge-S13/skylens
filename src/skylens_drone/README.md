@@ -70,15 +70,22 @@ RC 2는 USB-C로 PC에 직접 연결한다. RC-N3는 휴대폰의 USB-C가 조�
 
 ## 3. Bridge 실행
 
-저장소 루트에서:
+설정은 저장소 루트의 `.env.mission`에 둔다. VWorld 키(`.env.vworld`)와 같은 방식이다.
 
 ```bash
+cp .env.mission.example .env.mission   # 처음 한 번. 필요한 값만 채운다 (gitignore 대상)
 cargo run -p skylens-drone
 ```
+
+- 파일이 없으면 기본값으로 뜬다(아래 기본 경로, `127.0.0.1:8091`, 다운로드 전용 모드).
+- 셸에 같은 이름의 변수를 비어 있지 않게 주면 파일보다 우선한다.
+- 다른 위치의 파일을 쓰려면 `SKYLENS_MISSION_ENV=<경로>`를 준다.
+- 시작할 때 어느 파일을 읽었는지(또는 없었는지) 첫 줄에 찍는다. 값은 찍지 않는다.
 
 정상이면 다음과 비슷하게 표시된다.
 
 ```text
+[mission-bridge] settings file: .../.env.mission (4 entries)
 [mission-bridge] listening on http://127.0.0.1:8091
 [mission-bridge] Lito template: .../config/lito-x1-template.kmz (ready)
 [mission-bridge] output: .../output/missions
@@ -96,10 +103,9 @@ curl http://127.0.0.1:8091/health
 
 기본 경로(`config/lito-x1-template.kmz`, `output/missions`)는 저장소 루트 기준이다.
 `SKYLENS_DJI_TEMPLATE_KMZ`, `SKYLENS_MISSION_OUTPUT`, `SKYLENS_MISSION_HOST`,
-`SKYLENS_MISSION_PORT`로 바꿀 수 있다(`config/mission-bridge.env.example` 참조).
+`SKYLENS_MISSION_PORT`로 바꿀 수 있다(`.env.mission.example` 참조).
 
-예전 Windows 실행 스크립트(`scripts/run-mission-bridge.ps1`)가 해 주던 기본값은 Bridge가 직접
-적용한다. `SKYLENS_DJI_WK_KEY`가 없으면 `config/.dji_wk_key`에서 서명 키를 읽고,
+키와 토큰 파일의 기본 위치는 Bridge가 직접 정한다. `SKYLENS_DJI_WK_KEY`가 없으면 `config/.dji_wk_key`에서 서명 키를 읽고,
 `SKYLENS_DJI_TOKEN_FILE`이 없으면 `output/.dji_token`을 토큰 파일로 쓴다. 두 파일 모두
 gitignore 대상이고, 키와 토큰 값은 로그에 남기지 않는다.
 
@@ -174,7 +180,7 @@ macOS의 MTP 장치는 일반 파일시스템처럼 마운트되지 않는 경�
 PC와 조종기가 USB로 붙어 있지 않아도, DJI Fly 계정 클라우드에 임무를 올려 원격의 RC 2가
 Wi-Fi로 받아가게 할 수 있다. 조종기에 임무가 내려오면 조종사가 열어 확인하고 비행한다.
 
-설정은 `config/mission-bridge.env.example`의 DJI 클라우드 항목 두 개를 로컬 환경에만 넣는다.
+설정은 `.env.mission.example`의 DJI 클라우드 항목 두 개를 `.env.mission`(gitignore 대상)이나 셸 환경에만 넣는다.
 둘 다 계정/앱 비밀값이라 **저장소에 커밋하지 않는다**. 둘 중 하나라도 없으면 이 경로는
 자동으로 꺼지고 다운로드/설치 모드만 동작한다.
 
@@ -201,10 +207,11 @@ DJI Fly가 연다. Bridge가 자동으로 감싸므로 여기서 신경 쓸 것�
 
 ```bash
 # 로그인된 DJI Fly가 떠 있는 WSA(또는 루팅 안드로이드) + frida-server + pip install frida 필요
-python scripts/dji_token_refresh.py            # 실행 중인 앱에서 토큰을 읽어 파일에 기록
+python src/skylens_drone/tools/dji_token_refresh.py   # 실행 중인 앱에서 토큰을 읽어 파일에 기록
 ```
 
-`scripts/dji_token_refresh.py`는 bridge의 일부가 아니라 추출 리그 도구다(frida 사용). 앱이
+`src/skylens_drone/tools/dji_token_refresh.py`는 bridge의 일부가 아니라 추출 리그 도구다(frida 사용).
+토큰 파일 위치는 Bridge와 같은 규칙(셸 환경 → `.env.mission` → `output/.dji_token`)으로 정한다. 앱이
 스스로 갱신하는 살아있는 토큰을 메모리에서 읽어 파일에 쓴다. 한 번 실행하거나, 작업
 스케줄러/cron으로 주기 실행하면 Bridge가 자동으로 새 토큰을 집어쓴다. DJI Fly가 **로그인·활성
 상태**여야 토큰이 메모리에 올라온다(로그아웃 상태면 추출 실패).
@@ -216,7 +223,7 @@ KMZ 생성·다운로드·로컬 전달, 그리고 **클라우드 업로드 자�
 토큰을 한 곳에서 공급한다.
 
 ```text
-[WSA 있는 리그 1대]  python scripts/dji_token_refresh.py --serve 8077
+[WSA 있는 리그 1대]  python src/skylens_drone/tools/dji_token_refresh.py --serve 8077
         │  (주기적으로 토큰 추출 → HTTP 로 publish)
         ▼
 [WSA 없는 현장 PC들]  SKYLENS_DJI_TOKEN_URL=http://<리그IP>:8077/  + SKYLENS_DJI_WK_KEY
@@ -326,7 +333,7 @@ DJI Fly가 임무를 읽지 못하거나 값이 다르면 비행하지 않는다
 - `POST /cloud/delete` 본문 `{"missionUuid": "..."}` 로 해당 임무를 삭제.
 - `GET /health`의 `cloudConfigured`로 클라우드 설정 여부를 확인한다.
 - 토큰 만료 대비: `SKYLENS_DJI_TOKEN_FILE`에 토큰 파일을 두면 매 요청 재로딩하고 인증
-  오류 시 1회 재시도한다. 파일은 `scripts/dji_token_refresh.py`가 갱신한다(위 §5 참조).
+  오류 시 1회 재시도한다. 파일은 `src/skylens_drone/tools/dji_token_refresh.py`가 갱신한다(위 §5 참조).
 
 `POST /missions`
 

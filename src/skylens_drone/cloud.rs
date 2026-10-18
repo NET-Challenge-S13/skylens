@@ -146,8 +146,8 @@ impl CloudConfig {
         Some(Self { token, wk_key, secret_id, app_info, token_file, token_url })
     }
 
-    /// [`from_lookup`](Self::from_lookup) plus the defaults
-    /// `scripts/run-mission-bridge.ps1` applied before starting the Python bridge:
+    /// [`from_lookup`](Self::from_lookup) plus the fallbacks the old Windows launcher
+    /// (`run-mission-bridge.ps1`, removed) applied before starting the Python bridge:
     ///
     /// - no `SKYLENS_DJI_WK_KEY` -> read it from `<root>/config/.dji_wk_key`
     /// - no `SKYLENS_DJI_TOKEN_FILE` -> `<root>/output/.dji_token`
