@@ -129,7 +129,6 @@ struct Shown {
     play: String,
     size: String,
     speed: u32,
-    mesh: Option<bool>,
     mode: Option<ColorMode>,
     wait_opacity: Option<i64>,
     timeline_open: Option<bool>,
@@ -221,7 +220,6 @@ impl LivePanels {
             "size-" => s.point_size = pl::step_size(s.point_size, -1),
             "size+" => s.point_size = pl::step_size(s.point_size, 1),
             "fit" => s.fit_requested = true,
-            "mesh" => s.show_mesh = !s.show_mesh,
             "mode" => {
                 if let Some((_, key)) = input.closest_data("mode")
                     && let Some(m) = ColorMode::from_key(key)
@@ -242,10 +240,6 @@ impl LivePanels {
         if self.shown.size != size {
             dom.set_text("live-size", &size);
             self.shown.size = size;
-        }
-        if self.shown.mesh != Some(s.show_mesh) {
-            dom.toggle_class("live-mesh", "is-on", s.show_mesh);
-            self.shown.mesh = Some(s.show_mesh);
         }
         if self.shown.speed != s.speed {
             dom.set_text("live-speed", &format!("{}x", s.speed));
