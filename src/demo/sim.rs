@@ -237,34 +237,95 @@ fn arrival_targets(flight: &Flight, arrival: Instant) -> [(Gps, f64); 3] {
     })
 }
 
-/// Run the three drones until an uplink fails (returned as an error).
+/// Connect one drone's uplink and spawn its reader (keeps the socket answering pings, picks up
+/// routes, and reports `(index, reason)` when the socket ends).
+async fn attach(
+    url: &str,
+    index: usize,
+    drone: Drone,
+    route_tx: &watch::Sender<Option<viewer::AssignRoute>>,
+    dead_tx: &mpsc::UnboundedSender<(usize, String)>,
+) -> anyhow::Result<Uplink> {
+    let ws = connect(url).await?;
+    let (sink, mut stream) = ws.split();
+    let (route_tx, dead_tx) = (route_tx.clone(), dead_tx.clone());
+    tokio::spawn(async move {
+        let reason = loop {
+            match stream.next().await {
+                Some(Ok(WsMessage::Binary(b))) => {
+                    if let Some(r) = route_of(&b) {
+                        route_tx.send_replace(Some(r));
+                    }
+                }
+                Some(Ok(WsMessage::Close(_))) | None => break "closed by the core".to_string(),
+                Some(Ok(_)) => {}
+                Some(Err(e)) => break e.to_string(),
+            }
+        };
+        let _ = dead_tx.send((index, reason));
+    });
+    Ok(Uplink { drone, sink, seq: 0 })
+}
+
+/// Everything the flight loops need to keep the three uplinks alive: a dropped socket (a lossy
+/// VPN, a tunnel restart, the core restarting) is reconnected with a growing pause, and the
+/// drone says hello again if it had already arrived. Nothing here ends the demo.
+struct Fleet {
+    url: String,
+    uplinks: Vec<Uplink>,
+    route_tx: watch::Sender<Option<viewer::AssignRoute>>,
+    dead_tx: mpsc::UnboundedSender<(usize, String)>,
+    /// Set once the drones have arrived and said hello.
+    arrived: bool,
+}
+
+impl Fleet {
+    async fn reconnect(&mut self, index: usize, reason: &str) {
+        let drone = self.uplinks[index].drone;
+        log("drone", &format!("drone {} 업링크 끊김 ({reason}), 다시 연결합니다", drone.id));
+        let mut pause = Duration::from_millis(500);
+        loop {
+            match attach(&self.url, index, drone, &self.route_tx, &self.dead_tx).await {
+                Ok(mut u) => {
+                    if self.arrived {
+                        if let Err(e) = u.send(|seq| hello(seq, &drone)).await {
+                            log("drone", &format!("{e}; 다시 시도"));
+                            continue;
+                        }
+                    }
+                    self.uplinks[index] = u;
+                    log("drone", &format!("drone {} 업링크 다시 연결됨", drone.id));
+                    return;
+                }
+                Err(e) => log("drone", &format!("drone {} 재연결 실패: {e}", drone.id)),
+            }
+            tokio::time::sleep(pause).await;
+            pause = (pause * 2).min(Duration::from_secs(10));
+        }
+    }
+
+    /// Send one telemetry fix per drone; a failed send reconnects that drone and drops the fix.
+    async fn send_all(&mut self, fixes: [Fix; 3], flight_secs: f64) {
+        for i in 0..self.uplinks.len() {
+            let drone = self.uplinks[i].drone;
+            let fix = &fixes[i];
+            if let Err(e) = self.uplinks[i].send(|seq| telemetry(seq, &drone, fix, flight_secs, now_ms())).await {
+                self.reconnect(i, &e.to_string()).await;
+            }
+        }
+    }
+}
+
+/// Run the three drones; uplink drops are reconnected, so this only returns on a fatal error.
 pub async fn run_drones(core: String, follow_route: bool, flight: Flight) -> anyhow::Result<()> {
     let url = format!("ws://{core}/uplink");
     let (route_tx, mut route_rx) = watch::channel::<Option<viewer::AssignRoute>>(None);
-    let (dead_tx, mut dead_rx) = mpsc::unbounded_channel::<String>();
+    let (dead_tx, mut dead_rx) = mpsc::unbounded_channel::<(usize, String)>();
     let mut uplinks = Vec::new();
-    for drone in FORMATION {
-        let ws = connect(&url).await?;
-        let (sink, mut stream) = ws.split();
-        let (route_tx, dead_tx) = (route_tx.clone(), dead_tx.clone());
-        // Reader: keeps the socket answering pings and picks up routes.
-        tokio::spawn(async move {
-            let reason = loop {
-                match stream.next().await {
-                    Some(Ok(WsMessage::Binary(b))) => {
-                        if let Some(r) = route_of(&b) {
-                            route_tx.send_replace(Some(r));
-                        }
-                    }
-                    Some(Ok(WsMessage::Close(_))) | None => break "closed by the core".to_string(),
-                    Some(Ok(_)) => {}
-                    Some(Err(e)) => break e.to_string(),
-                }
-            };
-            let _ = dead_tx.send(format!("drone {} uplink: {reason}", drone.id));
-        });
-        uplinks.push(Uplink { drone, sink, seq: 0 });
+    for (i, drone) in FORMATION.into_iter().enumerate() {
+        uplinks.push(attach(&url, i, drone, &route_tx, &dead_tx).await?);
     }
+    let mut fleet = Fleet { url, uplinks, route_tx, dead_tx, arrived: false };
     log("drone", "드론 3대 업링크 연결, 대기 중 (관제탑에서 경로를 배정하면 출발)");
 
     // ---- idle: wait for a route ----
@@ -274,7 +335,7 @@ pub async fn run_drones(core: String, follow_route: bool, flight: Flight) -> any
                 changed.map_err(|_| anyhow::anyhow!("route channel closed"))?;
                 if let Some(r) = route_rx.borrow_and_update().clone() { break r; }
             }
-            Some(reason) = dead_rx.recv() => anyhow::bail!(reason),
+            Some((i, reason)) = dead_rx.recv() => fleet.reconnect(i, &reason).await,
         }
     };
     let mut mode = choose_mode(&first, follow_route, &flight);
@@ -291,23 +352,23 @@ pub async fn run_drones(core: String, follow_route: bool, flight: Flight) -> any
     loop {
         tokio::select! {
             _ = tick.tick() => {}
-            Some(reason) = dead_rx.recv() => anyhow::bail!(reason),
+            Some((i, reason)) = dead_rx.recv() => { fleet.reconnect(i, &reason).await; continue; }
         }
         let t = started.elapsed().as_secs_f64();
         let fixes = approach_fixes(&mode, &targets, t);
-        for (u, fix) in uplinks.iter_mut().zip(fixes) {
-            let drone = u.drone;
-            u.send(|seq| telemetry(seq, &drone, &fix, t, now_ms())).await?;
-        }
+        fleet.send_all(fixes, t).await;
         if t >= ETA_SECS {
             break;
         }
     }
 
     // ---- arrival ----
-    for u in &mut uplinks {
-        let drone = u.drone;
-        u.send(|seq| hello(seq, &drone)).await?;
+    fleet.arrived = true;
+    for i in 0..fleet.uplinks.len() {
+        let drone = fleet.uplinks[i].drone;
+        if let Err(e) = fleet.uplinks[i].send(|seq| hello(seq, &drone)).await {
+            fleet.reconnect(i, &e.to_string()).await; // says hello itself, `arrived` is set
+        }
     }
     match mode {
         Mode::Recorded => log("drone", "현장 도착: drone_hello 전송, 드론마다 자기 영상의 비행 기록을 재생"),
@@ -332,14 +393,11 @@ pub async fn run_drones(core: String, follow_route: bool, flight: Flight) -> any
                 }
                 continue;
             }
-            Some(reason) = dead_rx.recv() => anyhow::bail!(reason),
+            Some((i, reason)) = dead_rx.recv() => { fleet.reconnect(i, &reason).await; continue; }
         }
         let flight_secs = started.elapsed().as_secs_f64();
         let fixes = flight_fixes(&mode, &flight, leg_start.elapsed().as_secs_f64(), Instant::now());
-        for (u, fix) in uplinks.iter_mut().zip(fixes) {
-            let drone = u.drone;
-            u.send(|seq| telemetry(seq, &drone, &fix, flight_secs, now_ms())).await?;
-        }
+        fleet.send_all(fixes, flight_secs).await;
     }
 }
 

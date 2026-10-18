@@ -47,6 +47,10 @@ pub struct Options {
     /// SRT ingest (host:port) the footage is published to; default the local MediaMTX.
     pub srt_addr: Option<String>,
     pub srt_pkt_size: u32,
+    /// Re-encode each feed to this many kbit/s (0 copies the clip as it is). The clips are
+    /// ~10 Mbit/s each; over the VPN that saturates the uplink and starves the drones' sockets,
+    /// so `--online` defaults to 2500.
+    pub video_kbps: Option<u32>,
     /// Publish the footage as MPEG-TS over plain TCP instead (host:port, drone N goes to
     /// port+N-1), for links that block SRT's UDP; something on the far side feeds MediaMTX.
     pub feed_tcp: Option<String>,
@@ -104,6 +108,7 @@ impl Default for Options {
             remote_core: None,
             srt_addr: None,
             srt_pkt_size: crate::paths::SRT_PKT_SIZE,
+            video_kbps: None,
             feed_tcp: None,
             fps: 2.0,
             frame_width: 1920,
@@ -127,6 +132,9 @@ impl Default for Options {
     }
 }
 
+/// Per-feed video bitrate for `--online` (kbit/s).
+pub const ONLINE_VIDEO_KBPS: u32 = 2500;
+
 pub const USAGE: &str = "usage: cargo run -p skylens-demo -- [options]
 
   --core-port N        core port (default 8080; the control tower is served here)
@@ -146,6 +154,9 @@ pub const USAGE: &str = "usage: cargo run -p skylens-demo -- [options]
                        Daejeon): start only the footage feeds and the drones
   --srt-addr H:P       publish the footage over SRT to this host:port (default: the
                        local MediaMTX, 127.0.0.1:10890)
+  --video-kbps N       re-encode each footage feed to N kbit/s (0 = send the clip as it is;
+                       --online defaults to 2500, the clips' own ~10 Mbit/s each would
+                       saturate the VPN uplink and drop the drones' sockets)
   --srt-pkt-size N     SRT payload in bytes (default 1128, six MPEG-TS packets).
                        Raise it to 1316 on a plain LAN; anything crossing a
                        VPN needs the smaller one or the data packets exceed the
@@ -237,6 +248,10 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<Options, St
                 let v = value("--srt-pkt-size")?;
                 o.srt_pkt_size = v.parse().map_err(|_| format!("--srt-pkt-size 는 숫자여야 합니다: {v}"))?;
             }
+            "--video-kbps" => {
+                let v = value("--video-kbps")?;
+                o.video_kbps = Some(v.parse().map_err(|_| format!("--video-kbps 는 숫자여야 합니다: {v}"))?);
+            }
             "--publish-delay" => {
                 let v = value("--publish-delay")?;
                 o.publish_delay = match v.parse::<f64>() {
@@ -313,6 +328,7 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<Options, St
         // to assign a route in the control tower.
         o.auto = true;
         o.full_footage = true;
+        o.video_kbps.get_or_insert(ONLINE_VIDEO_KBPS);
     }
     let fixed = [MODEL_REST_PORT, MODEL_GRPC_PORT, WHEP_PORT, SRT_PORT];
     if o.core_port == o.board_port {
@@ -434,6 +450,7 @@ mod tests {
     fn online_is_the_deployment_in_one_flag() {
         let o = parse(&["--online"]).unwrap();
         assert_eq!(o.online.as_deref(), Some(ONLINE_HOST));
+        assert_eq!(o.video_kbps, Some(ONLINE_VIDEO_KBPS));
         assert_eq!(o.remote_core.as_deref(), Some(format!("{ONLINE_HOST}:{ONLINE_CORE_PORT}").as_str()));
         assert_eq!(o.srt_addr.as_deref(), Some(format!("{ONLINE_HOST}:{SRT_PORT}").as_str()));
         // The live run flies the whole flight and starts by itself.
