@@ -245,6 +245,7 @@ pointblitz는 서버에서 헤드리스로 그려 영상으로 보내는 모드�
 - UNet 추론 정밀도는 CUDA compute capability로 정한다(8.0 이상 bf16, 7.x 즉 V100은 fp16 autocast, 그 미만 fp32, CPU fp32). `SKYLENS_PRECISION`으로 강제하고, 비교는 `cargo run --release -p skylens-model --example precision_bench`. 자세한 내용은 `src/skylens_model/models/skylensnet/README.md` §5.
 - 공용 의존성 버전은 루트 `Cargo.toml`의 `[workspace.dependencies]` 한 곳에서 정한다.
 - cumulus3d는 crates.io 릴리스(0.11)를 그대로 쓴다. SkyLens의 GPU 패치(전체 GPU SIFT, CUDA BA·희소 단계)는 릴리스에 들어 있고 `.gpu()`가 고른다. 저장소에 벤더 복사본은 없다.
+- deltamesh도 crates.io 릴리스(0.1.1)를 그대로 쓴다. 정렬값 64바이트 GPU(RTX 4050 등)용 유니폼 간격 수정이 릴리스에 들어 있다. 저장소에 벤더 복사본은 없다.
 - cumulus3d 새 릴리스는 `.github/workflows/cumulus3d-sync.yml`이 따라간다. 버전 요구를 올리고 `skylens-model` 검사를 돌려 `deps/cumulus3d-v<버전>` PR을 연다. 흐름과 시크릿은 `docs/CUMULUS3D_SYNC.md`.
 - gRPC 코드 생성: Rust는 빌드 스크립트에서 protox로 컴파일하므로 protoc가 없어도 된다. Go는 `protoc-gen-go`·`protoc-gen-go-grpc`로 `src/skylens_core/gen/`에 생성한다.
 
@@ -296,6 +297,7 @@ pointblitz는 서버에서 헤드리스로 그려 영상으로 보내는 모드�
 | 3 | `skylens_drone`: Mission Bridge Rust 포팅 + 코어 업링크 | 코드 완료 (테스트 57개 통과, 실기체 미검증) |
 | 4 | `skylens_core`: Go 서버 + gRPC 클라이언트 + 지형·건물 pointblitz 청크 | 코드 완료 (go test 통과) |
 | 5 | `skylens_model`: REST·gRPC + cumulus3d 라이브 복원 + deltamesh + UNet(tch) 훅·보간 | 코드 완료 (테스트 179개 통과, 실데이터 미검증) |
+| 5' | deltamesh GPU 유니폼 간격 수정(정렬값 64바이트 GPU, 예: RTX 4050 Vulkan에서 첫 구간 메시 생성이 멈추던 문제): deltamesh 0.1.1 에 들어가 crates.io 에서 바로 받는다(`third_party/deltamesh` 패치 제거) | 완료 |
 | 6 | 화면: 1차 이식은 이전 화면과 달라 다시 한다. 관제탑은 `skylens_core/control`, 현황판은 `skylens_client`, 공용 층은 `shared/viewer`로 나누고 이전 HTML/CSS·DOM을 그대로 쓴다(§3.10). 현황판 Android APK(cargo-apk, 한 손가락 회전·두 손가락 확대) 코드 추가 | 재작업 중 (Android는 기기 미검증) |
 | 6' | pointblitz 레이어(패스 안 그리기 · 메시 · 텍스처 · 선 · 안개 · 배경색): pointblitz 0.2.1 에 들어가 crates.io 에서 바로 받는다(`third_party/pointblitz` 패치 제거) | 완료 |
 | 7 | 게이트웨이 nginx 경로·터널 8082 | 완료 |
