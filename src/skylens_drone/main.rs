@@ -5,6 +5,7 @@
 //! when `SKYLENS_CORE_UPLINK` is set, also connects to the core's `ws /uplink`.
 
 mod cloud;
+mod envfile;
 mod formation;
 mod kmz;
 mod mission;
@@ -18,6 +19,7 @@ use anyhow::Context as _;
 use tracing_subscriber::EnvFilter;
 
 use crate::cloud::{CloudClient, CloudConfig};
+use crate::envfile::EnvFile;
 use crate::server::{App, Settings};
 use crate::uplink::UplinkConfig;
 
@@ -28,12 +30,23 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let root = paths::repo_root();
-    let env = |k: &str| std::env::var(k).ok();
-    let settings = Settings::from_lookup(&root, env)?;
-    // Includes the defaults scripts/run-mission-bridge.ps1 used to set:
-    // config/.dji_wk_key and output/.dji_token under the repository root.
-    let cloud = CloudConfig::from_lookup_with_launcher_defaults(&root, env).map(CloudClient::new);
-    let uplink = UplinkConfig::from_lookup(env)?;
+    let process_env = |k: &str| std::env::var(k).ok();
+    // Settings file at the repository root (`.env.mission`, like the core's `.env.vworld`).
+    // A non-empty process variable still wins over the file.
+    let file_path = EnvFile::location(&root, process_env);
+    let file = EnvFile::load(&file_path)?;
+    match &file.path {
+        Some(p) => tracing::info!("[mission-bridge] settings file: {} ({} entries)", p.display(), file.len()),
+        None => tracing::info!(
+            "[mission-bridge] settings file: {} not found (environment and defaults only; see .env.mission.example)",
+            file_path.display()
+        ),
+    }
+    let env = file.lookup(process_env);
+    let settings = Settings::from_lookup(&root, &env)?;
+    // Also falls back to config/.dji_wk_key and output/.dji_token under the repository root.
+    let cloud = CloudConfig::from_lookup_with_launcher_defaults(&root, &env).map(CloudClient::new);
+    let uplink = UplinkConfig::from_lookup(&env)?;
 
     std::fs::create_dir_all(&settings.output)
         .with_context(|| format!("creating {}", settings.output.display()))?;

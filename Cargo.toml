@@ -10,8 +10,6 @@ members = [
     "src/demo",
     "src/test",
 ]
-# Vendored crates keep their own workspace (third_party/*/Cargo.toml).
-exclude = ["third_party"]
 
 [workspace.package]
 version = "0.1.0"
@@ -50,7 +48,8 @@ protox = "0.10" # pure-Rust protobuf compiler, so builds do not need protoc
 
 # reconstruction: 0.8 has the live CompositionHost input, the in-memory display deltas and the SkyLens GPU stages
 cumulus3d-cli = "0.11"
-deltamesh = "0.1"
+# 0.1.1 rounds the GPU uniform stride up to the device alignment (fixes the first-segment stall on 64-byte-alignment GPUs such as the RTX 4050).
+deltamesh = "0.1.1"
 
 # UNet inference links libtorch 2.13, downloaded at build time (CUDA flavour from
 # TORCH_CUDA_VERSION in .cargo/config.toml). Independent of the Python venv.
@@ -74,6 +73,3 @@ wgpu = "30"
 [profile.release]
 codegen-units = 1
 lto = "thin"
-
-[patch.crates-io]
-deltamesh = { path = "third_party/deltamesh" }

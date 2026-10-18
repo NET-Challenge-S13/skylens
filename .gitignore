@@ -14,6 +14,7 @@ pkg/
 .env.*
 !.env.example
 !.env.vworld.example
+!.env.mission.example
 
 dist
 *.local
@@ -67,9 +68,9 @@ res/static/video/h265/
 # metadata and generated routes contain real operating coordinates.
 /config/lito-x1-template.kmz
 /output/missions/
-# Refreshed DJI account token written by scripts/dji_token_refresh.py.
+# Refreshed DJI account token written by src/skylens_drone/tools/dji_token_refresh.py.
 /output/.dji_token
-# DJI cloud signing key read by scripts/run-mission-bridge.ps1.
+# DJI cloud signing key the mission bridge falls back to (see .env.mission.example).
 /config/.dji_wk_key
 
 # Point-layer demo assets staged from the capture drive (~110 MB)

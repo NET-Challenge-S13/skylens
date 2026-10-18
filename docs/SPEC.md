@@ -166,6 +166,7 @@ related: "[[INTENT.md]], [[COMPONENTS.md]], [[ARCHITECTURE.md]], [[NETWORK_ARCHI
 - 늦게 오거나 고쳐진 프레임은 노드의 reconcile 정책(append-only / replay window / zone invalidation / strict)을 따른다.
 - 구간은 `zones(span, overlap)`으로 나눈다. 같은 구간 번호는 항상 같은 공간 조각을 가리킨다.
 - 메시는 deltamesh `SdfMesher`(GPU는 `GpuMesher`, 프로세스당 장치 하나)다. 기본 0.2 m 복셀, 32³ 블록. 경계 정점이 이웃 블록과 비트 단위로 같아 균열 없이 이어진다.
+- deltamesh는 crates.io 릴리스(0.1.1)를 쓴다. 유니폼 간격을 GPU 정렬값의 배수로 맞추는 수정(정렬값 64바이트 GPU에서 첫 구간이 멈추던 문제)이 릴리스에 들어 있다. 벤더 복사본은 없다.
 - 렌더링은 pointblitz(0.3)다. 점 청크는 16비트 위치(포맷 v2)이고 파싱은 메인 스레드 밖에서 한다. 점 슬롯은 `SlotScene` 하나(칸 = 슬롯 id, 칸당 16바이트)에 쌓고, 같은 패스에서 점 청크 장면들과 함께 그린다. 메시 블록은 pointblitz에 더한 메시 렌더 경로가 그리고, 법선은 클라이언트에서 계산한다.
 - cumulus3d는 crates.io 릴리스(0.11)를 쓴다. 전체 GPU SIFT, CUDA BA·희소 단계는 릴리스에 들어 있고 `.gpu()`가 고른다. 벤더 복사본은 없다. 새 릴리스는 `cumulus3d-sync.yml`이 `deps/cumulus3d-v<버전>` PR로 따라간다(`docs/CUMULUS3D_SYNC.md`).
 - 라이브 노드 기본값: 특징 선행(lookahead) 4, 백로그 묶음(`SKYLENS_BACKLOG_BATCH`) 1 = 끔, 구간 미리보기(`SKYLENS_ZONE_PREVIEW`) 끔, 표시 솎기(`SKYLENS_LIVE_STRIDE`) 2. 묶음을 끈 이유: cumulus3d 0.11.0에서 batch > 1이면 V100 라이브의 표시 축척이 약 30배 줄었다(원인 미확인. cumulus3d 0.11.1이 노드 기본값을 1로 바꾸고 축척 회귀 테스트를 더했지만, 이 저장소의 락은 0.11.0이라 `SKYLENS_BACKLOG_BATCH` 기본값으로 직접 1을 준다). 카메라 내부값은 `SKYLENS_CAMERA_JSON`이 없으면 내장 DJI FC9589 1920×1080(fx 1505 · fy 1510 · cx 960 · cy 540)이다.

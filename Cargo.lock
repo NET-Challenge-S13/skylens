@@ -1303,7 +1303,9 @@ checksum = "930c7171c8df9fb1782bdf9b918ed9ed2d33d1d22300abb754f9085bc48bf8e8"
 
 [[package]]
 name = "deltamesh"
-version = "0.1.0"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9155effec2d8771d4a0ad34063581b68e9c50d75bf08df270f16ad171142809d"
 dependencies = [
  "bytemuck",
  "meshopt",

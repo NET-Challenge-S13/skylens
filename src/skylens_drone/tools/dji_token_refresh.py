@@ -20,10 +20,14 @@ purpose: DJI Fly minifies OkHttp method names and ships anti-frida guards, so
 hooking Java methods by name is brittle, while the token sits in memory as plain
 UTF-8. Run it once, or on a schedule (Task Scheduler / cron) to keep it fresh.
 
-Usage:
-  python scripts/dji_token_refresh.py                 # write to default file
-  python scripts/dji_token_refresh.py --out path.txt  # explicit output
-  SKYLENS_ADB=C:\\platform-tools\\adb.exe python scripts/dji_token_refresh.py
+Settings come from the same place as the bridge: the process environment first,
+then ``.env.mission`` at the repository root (or the file ``SKYLENS_MISSION_ENV``
+names). Without ``SKYLENS_DJI_TOKEN_FILE`` the token goes to ``output/.dji_token``.
+
+Usage (from the repository root):
+  python src/skylens_drone/tools/dji_token_refresh.py                 # write to default file
+  python src/skylens_drone/tools/dji_token_refresh.py --out path.txt  # explicit output
+  SKYLENS_ADB=C:\\platform-tools\\adb.exe python src/skylens_drone/tools/dji_token_refresh.py
 """
 
 from __future__ import annotations
@@ -35,6 +39,9 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+
+# Repository root: this file is src/skylens_drone/tools/dji_token_refresh.py.
+REPO_ROOT = Path(__file__).resolve().parents[3]
 
 PACKAGE = "dji.go.v5"
 # Opening the mission library makes the app issue an authenticated cloud call,
@@ -229,11 +236,44 @@ def _serve(port: int, interval: int, out_path: Path) -> int:
     return 0
 
 
+def mission_env_file() -> dict[str, str]:
+    """``KEY=VALUE`` pairs of the bridge's settings file, parsed like the bridge does.
+
+    Blank lines and ``#`` comments are skipped, ``export `` is allowed, and one pair of
+    matching quotes around a value is removed. A missing file gives an empty dict.
+    """
+    override = (os.getenv("SKYLENS_MISSION_ENV") or "").strip()
+    path = Path(override).expanduser() if override else REPO_ROOT / ".env.mission"
+    try:
+        text = path.read_text(encoding="utf-8-sig")
+    except FileNotFoundError:
+        return {}
+    pairs: dict[str, str] = {}
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        line = line.removeprefix("export ")
+        key, sep, value = line.partition("=")
+        key = key.strip()
+        if not sep or not key or any(c.isspace() for c in key):
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        pairs[key] = value
+    return pairs
+
+
+def setting(name: str) -> str | None:
+    """The process environment first (non-empty), then ``.env.mission``."""
+    value = (os.getenv(name) or "").strip()
+    return value or mission_env_file().get(name) or None
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Refresh the DJI Fly cloud token.")
-    default_out = os.getenv("SKYLENS_DJI_TOKEN_FILE") or str(
-        Path(__file__).resolve().parents[1] / "output" / ".dji_token"
-    )
+    default_out = setting("SKYLENS_DJI_TOKEN_FILE") or str(REPO_ROOT / "output" / ".dji_token")
     parser.add_argument("--out", default=default_out, help="token output file")
     parser.add_argument(
         "--serve", type=int, metavar="PORT",
