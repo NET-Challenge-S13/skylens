@@ -307,7 +307,7 @@ async fn start_all(
             Some(base) => paths::tcp_publish_url(base, drone),
             None => paths::srt_publish_url(&srt_addr, drone, o.srt_pkt_size),
         };
-        let argv = paths::publisher_args(file, &url, !o.no_loop, if o.full_footage { None } else { s.track.as_ref().map(|t| t.views()[i].duration) });
+        let argv = paths::publisher_args(file, &url, !o.no_loop, if o.full_footage { None } else { s.track.as_ref().map(|t| t.views()[i].duration) }, o.video_kbps.unwrap_or(0));
         let mut publisher = spec(plan, &name, &tag, &plan.ffmpeg, argv, vec![]);
         // A clip that plays once ends on its own; that is not a failure.
         publisher.critical = !o.no_loop;

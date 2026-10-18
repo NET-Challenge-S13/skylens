@@ -114,10 +114,20 @@ pub fn tcp_publish_url(base: &str, drone: &Drone) -> String {
     }
 }
 
-/// ffmpeg arguments that publish a file to MediaMTX at real time, without re-encoding;
+/// ffmpeg arguments that publish a file to MediaMTX at real time, without re-encoding unless `kbps` is set;
 /// in a loop unless `looped` is false (then it plays once).
 /// `limit` stops the feed after that many seconds of the clip (`-t`, before the input).
-pub fn publisher_args(file: &Path, url: &str, looped: bool, limit: Option<f64>) -> Vec<String> {
+pub fn publisher_args(file: &Path, url: &str, looped: bool, limit: Option<f64>, kbps: u32) -> Vec<String> {
+    let codec: Vec<String> = if kbps == 0 {
+        vec!["-c:v".into(), "copy".into()]
+    } else {
+        // Closed GOP of one second so a reader can join anywhere; CBR-ish so a feed never bursts.
+        ["-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency", "-g", "30", "-pix_fmt", "yuv420p"]
+            .iter()
+            .map(|s| s.to_string())
+            .chain(["-b:v".to_string(), format!("{kbps}k"), "-maxrate".to_string(), format!("{kbps}k"), "-bufsize".to_string(), format!("{}k", kbps * 2)])
+            .collect()
+    };
     let loop_args: &[&str] = if looped { &["-stream_loop", "-1"] } else { &[] };
     let limit_args: Vec<String> = limit.map(|d| vec!["-t".to_string(), format!("{d:.3}")]).unwrap_or_default();
     ["-hide_banner", "-nostats", "-loglevel", "warning", "-re"]
@@ -127,7 +137,9 @@ pub fn publisher_args(file: &Path, url: &str, looped: bool, limit: Option<f64>) 
     .chain(limit_args)
     .chain(["-i".to_string()])
     .chain([file.display().to_string()])
-    .chain(["-an", "-c:v", "copy", "-f", "mpegts"].iter().map(|s| s.to_string()))
+    .chain(["-an".to_string()])
+    .chain(codec)
+    .chain(["-f", "mpegts"].iter().map(|s| s.to_string()))
     .chain([url.to_string()])
     .collect()
 }
@@ -288,7 +300,7 @@ paths:
 
     #[test]
     fn publisher_copies_video_in_a_real_time_loop() {
-        let args = publisher_args(Path::new("demo_left.mp4"), &srt_publish_url("127.0.0.1:10890", &FORMATION[0], SRT_PKT_SIZE), true, None);
+        let args = publisher_args(Path::new("demo_left.mp4"), &srt_publish_url("127.0.0.1:10890", &FORMATION[0], SRT_PKT_SIZE), true, None, 0);
         let joined = args.join(" ");
         assert!(joined.contains("-re -stream_loop -1 -i demo_left.mp4"));
         assert!(joined.contains("-an -c:v copy -f mpegts"));
@@ -296,8 +308,15 @@ paths:
     }
 
     #[test]
+    fn publisher_can_cap_the_bitrate() {
+        let joined = publisher_args(Path::new("a.mp4"), "srt://h:1", true, None, 2500).join(" ");
+        assert!(joined.contains("-c:v libx264") && joined.contains("-b:v 2500k -maxrate 2500k -bufsize 5000k"));
+        assert!(!joined.contains("copy"));
+    }
+
+    #[test]
     fn publisher_plays_once_without_looping() {
-        let args = publisher_args(Path::new("demo_left.mp4"), "tcp://127.0.0.1:19101", false, None);
+        let args = publisher_args(Path::new("demo_left.mp4"), "tcp://127.0.0.1:19101", false, None, 0);
         assert!(!args.contains(&"-t".to_string()));
         let joined = args.join(" ");
         assert!(joined.contains("-re -i demo_left.mp4"));
@@ -306,7 +325,7 @@ paths:
 
     #[test]
     fn publisher_limit_stops_the_feed() {
-        let args = publisher_args(Path::new("left.mp4"), "tcp://127.0.0.1:19101", false, Some(52.3));
+        let args = publisher_args(Path::new("left.mp4"), "tcp://127.0.0.1:19101", false, Some(52.3), 0);
         assert!(args.join(" ").contains("-re -t 52.300 -i left.mp4"));
     }
 
