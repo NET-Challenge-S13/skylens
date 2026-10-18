@@ -40,7 +40,7 @@ SkyLens는 **멀티드론 영상을 실시간 3D(점군·메시)로 복원하고
 | `src/skylens_core/deploy/lab/REPORT.md` · `RESULTS.md` | **회선 실측 랩의 장치 보고와 인사이트**. 열하루·표본 4,897 (2026-10-05 ~ 10-16). 수집 구성·주장별 판정·한계(REPORT), 441이 천장이라는 근거·두 회선 독립·작은 전송의 범인(RESULTS) |
 | `docs/DATASETS.md` | **학습 데이터셋 조사**. "RGB+열 페어 + 재난 + 사람 + 위험구역"을 모두 가진 공개 데이터는 없다는 결론과, A(4채널 정합)/B(위험구역 세그)/C(사람 인스턴스) 3축 조합 권장. FLAME 3, RescueNet, SARD, AIResQ, LLVIP, VisDrone 등 |
 | `src/skylens_model/README.md` | **AI 모델 설계 철학의 단일 출처(어떻게)**. 레이어 분리 원칙(탐지/투영/랜드마크 융합/소리 보정), UNet 채택·TransUNet 보류 근거, 단일 백본+이중 헤드, modality dropout, 점 검출 헤드, 헤드별 분리 학습, 배제한 대안 표. **결정과 그 근거**를 기록 |
-| `src/skylens_model/models/skylens/README.md` | **이전 3DGS 복원 설계 기록**(cumulus3d 기반 Rust 구현으로 대체 중, 새 설계는 `docs/SPEC.md` §10). 촬영 가이드는 계속 유효. 파이프라인 3단계(프레임 추출 → COLMAP SfM → gsplat 학습), 특징점을 ALIKED로 정한 근거, 전수매칭이 필요한 이유, 내부 파라미터 명시 + 자기보정 조합, 점진적 출력(30초 첫 화면), PLY 경량판. **촬영 가이드**(포즈 정확도 요구·편대 배치·드론 자동비행 가능 범위)와 증분 복원 가능 여부 결론 |
+| `src/skylens_model/models/skylens/README.md` | **이전 3DGS 복원 설계 기록**(cumulus3d 기반 Rust 구현으로 대체됨, 현재 설계는 `docs/SPEC.md` §10). 촬영 가이드는 계속 유효. 파이프라인 3단계(프레임 추출 → COLMAP SfM → gsplat 학습), 특징점을 ALIKED로 정한 근거, 전수매칭이 필요한 이유, 내부 파라미터 명시 + 자기보정 조합, 점진적 출력(30초 첫 화면), PLY 경량판. **촬영 가이드**(포즈 정확도 요구·편대 배치·드론 자동비행 가능 범위)와 증분 복원 가능 여부 결론 |
 | `src/skylens_model/models/skylens/RESULTS.md` | 위 결정들의 **측정 근거**. 실험 5건 · 학습 조건 28개 수치 전체. 판정이 보류된 실험은 그 이유까지 명시 |
 | `src/skylens_model/models/skylens/INSTALL.md` | COLMAP(CUDA 빌드)·gsplat 설치 절차, `recon` 의존성 그룹에서 뺀 항목과 이유, **밟았던 함정 10건** |
 | `src/skylens_model/datasets/README.md` | 데이터셋 **API 계약**(`__getitem__` 반환 dict, `None`은 정상값), 통합 클래스 스키마(0 normal / 1 fire / 2 collapse / 3 road_blocked / 255 ignore), RescueNet·VisDrone 매핑, 자동 다운로드 가능 여부 판정 |
@@ -130,7 +130,8 @@ scripts/         # sync-main.sh (develop → main 동기화) · 학습 평가 �
 - Rust 1.99 이상 stable(pointblitz 0.3 요구, `rust-version`이 강제). 웹 빌드는 `wasm32-unknown-unknown` 타깃. 버전을 올려도 된다.
 - UNet 추론은 `tch` 0.24(libtorch 2.11). libtorch는 빌드 때 내려받는다(`download-libtorch`, CUDA 판은 `.cargo/config.toml`의 `TORCH_CUDA_VERSION`). Python venv와 무관하다.
 - 프로토콜 계약은 `src/shared/proto/`(model · viewer · payload). `skylens-shared`가 protox로 컴파일하므로 protoc가 없어도 된다.
-- cumulus3d는 crates.io 릴리스(0.10)를 쓴다(벤더 복사본 없음). 라이브 점은 stable display의 메모리 표시 델타(`Event::DisplayDelta`)를 점 슬롯 청크로 내보낸다.
+- cumulus3d는 crates.io 릴리스(0.11)를 쓴다(벤더 복사본 없음, 새 릴리스는 `.github/workflows/cumulus3d-sync.yml`이 PR로 따라간다). 라이브 점은 stable display의 메모리 표시 델타(`Event::DisplayDelta`)를 점 슬롯 청크로 내보낸다(`slot_kind` 1 refined · 2 replace · 3 final · 4 preview).
+- 모델 서버 기본값: live stride 2 · zone preview 끔 · backlog batch 1(끔) · lookahead 4 · 내장 카메라 DJI FC9589(fx 1505 · fy 1510). 환경변수 표는 `src/skylens_model/utils/serving_config.rs` 머리에 있다.
 
 **Go** (`src/skylens_core`, 루트 `go.work`)
 
