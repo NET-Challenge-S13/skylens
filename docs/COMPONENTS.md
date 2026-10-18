@@ -97,7 +97,7 @@ KOREN은 등록 IP 외 인바운드를 막고, 브리지 → 대전은 SSH 하�
 
 연산 서버. **REST 엔드포인트는 `app.py`와 같다**(§7). 같은 잡 API를 gRPC `ModelService`로도 열고, 코어는 gRPC로 붙는다. 라이브 입력(`PushFrames`)과 증분 출력(`SubscribeChunks`)은 gRPC 스트림에만 있다. `StartMission` 은 새 미션이 시작될 때 코어가 부르는 리셋으로, 엔진을 새로 만들어 라이브 디스플레이를 1번 메시지부터 다시 시작한다(`SPEC.md` §3). 계약은 `src/shared/proto/skylens/model/v1/model.proto`. 내부는 세 층이다.
 
-1. **라이브 점군(cumulus3d).** `CompositionHost`에 `ReconNode`를 하나 띄워 두고, 코어가 넘긴 프레임 묶음을 `LiveFrameSet`으로 선언해 `compose`한다. 이미 받은 묶음의 재선언은 무시되고, 빠진 카메라가 있는 묶음은 기다린다. 노드는 cumulus3d **stable display**로 돈다(기본, `SKYLENS_STABLE_DISPLAY`): 미리보기 없이 구간마다 정제본이 나오고, 한 번 보인 구간은 제자리에 있다(내부값이 안정되기 전 구간 3까지는 다시 놓일 수 있다). cumulus3d가 표시 점군을 메모리에서 합성하고(`display_deltas`: 키 해시 1/6 솎기, 겹침 voxel 소유, 낮은 구간 우선) 구간 결과마다 `Event::DisplayDelta`(점 추가·이동·삭제, 조밀한 슬롯 id)를 주면, `models/skylens/slotstream.rs`의 `SlotEncoder`가 이를 pointblitz 슬롯 메시지(PBSD 머리 + v4 팩)로 써서 `CHUNK_KIND_POINT_SLOTS` 청크로 낸다. 파일 싱크도 실행 폴더도 없다. 점은 이 경로로만 나가고, 조밀화가 없을 때(CUDA 없음)와 조밀화가 실패한 구간만 정제 구간의 희소 점을 점 청크로 보낸다. 메시는 구간 점군이 아니라 합성된 표시(거울)에서 만들어 겹친 구간이 이중 면을 만들지 않는다. 스트림 id는 앞선 실행보다 늘 크고, 청크 시퀀스도 실행마다 그 id에서 시작해 모델 서버가 다시 떠도 코어가 새 실행의 청크를 빠짐없이 받는다.
+1. **라이브 점군(cumulus3d).** `CompositionHost`에 `ReconNode`를 하나 띄워 두고, 코어가 넘긴 프레임 묶음을 `LiveFrameSet`으로 선언해 `compose`한다. 이미 받은 묶음의 재선언은 무시되고, 빠진 카메라가 있는 묶음은 기다린다. 노드는 cumulus3d **stable display**로 돈다(기본, `SKYLENS_STABLE_DISPLAY`): 기본은 미리보기 없이 구간마다 정제본이 나오고(`SKYLENS_ZONE_PREVIEW=1`이면 구간이 닫히는 즉시 희소 미리보기가 먼저 나가고 정제본이 대체한다), 한 번 보인 구간은 제자리에 있다(내부값이 안정되기 전, 늦어도 `SKYLENS_SETTLE_MAX_ZONE` 구간까지(기본 1)는 다시 놓일 수 있다). cumulus3d가 표시 점군을 메모리에서 합성하고(`display_deltas`: 키 해시 솎기 `SKYLENS_LIVE_STRIDE` 기본 2, 겹침 voxel 소유, 낮은 구간 우선) 구간 결과마다 `Event::DisplayDelta`(점 추가·이동·삭제, 조밀한 슬롯 id)를 주면, `models/skylens/slotstream.rs`의 `SlotEncoder`가 이를 pointblitz 슬롯 메시지(PBSD 머리 + v4 팩)로 써서 `CHUNK_KIND_POINT_SLOTS` 청크로 낸다. 청크의 `slot_kind`(1 refined · 2 replace · 3 final · 4 preview)와 `slot_t_ms`는 메시지가 왜·언제 나왔는지를 말하고, 코어는 읽지 않는다. 노드 기본값은 lookahead 4, backlog batch 1(끔: cumulus3d 0.11.0에서 batch > 1이 V100 라이브 축척을 약 30배 줄였다), 카메라 사전값은 내장 DJI FC9589(`SKYLENS_CAMERA_JSON`으로 바꾼다). 파일 싱크도 실행 폴더도 없다. 점은 이 경로로만 나가고, 조밀화가 없을 때(CUDA 없음)와 조밀화가 실패한 구간만 정제 구간의 희소 점을 점 청크로 보낸다. 메시는 구간 점군이 아니라 합성된 표시(거울)에서 만들어 겹친 구간이 이중 면을 만들지 않는다. 스트림 id는 앞선 실행보다 늘 크고, 청크 시퀀스도 실행마다 그 id에서 시작해 모델 서버가 다시 떠도 코어가 새 실행의 청크를 빠짐없이 받는다.
 2. **UNet 훅.** 같은 노드에 `on_frame` 훅으로 UNet을 붙인다. 훅은 위치 계산 전에 디코딩된 RGB 프레임을 받아 별도 큐에서 돌므로 복원을 막지 않는다. 프레임마다 나온 위험구역 확률과 사람 점은 등록된 카메라 포즈로 점군에 투영하고, **여러 프레임의 결과를 confidence 가중으로 보간**해 최종 지도 좌표(GPS 기준 ENU)에 정렬한다.
 3. **메시 보정(deltamesh).** 구간 점군을 `ingest(segment, Preview|Refined, points)`로 넣고 `extract()`가 돌려준 **바뀐 블록만** 내보낸다. 정제본은 같은 구간의 미리보기를 정확히 대체한다. 블록마다 `version`이 있어 클라이언트는 더 새 버전만 받으면 된다. stable display에서는 아직 다시 놓일 수 있는 구간(구간 3까지)을 미리보기 수준으로 넣어 두고, 구간 4가 오면 그 구간들의 마지막 점을 정제 수준으로 넣는다(정제 수준은 구간마다 한 번만 넣을 수 있다). 구간이 4개 이하인 실행은 구간 0~3의 메시가 미리보기 수준으로 남는다.
 
@@ -295,11 +295,11 @@ pointblitz는 서버에서 헤드리스로 그려 영상으로 보내는 모드�
 | 2 | `shared`: proto 계약(model · viewer · payload) + 좌표계 Rust 포팅 | 완료 |
 | 3 | `skylens_drone`: Mission Bridge Rust 포팅 + 코어 업링크 | 코드 완료 (테스트 57개 통과, 실기체 미검증) |
 | 4 | `skylens_core`: Go 서버 + gRPC 클라이언트 + 지형·건물 pointblitz 청크 | 코드 완료 (go test 통과) |
-| 5 | `skylens_model`: REST·gRPC + cumulus3d 라이브 복원 + deltamesh + UNet(tch) 훅·보간 | 코드 완료 (테스트 179개 통과, 실데이터 미검증) |
+| 5 | `skylens_model`: REST·gRPC + cumulus3d 라이브 복원 + deltamesh + UNet(tch) 훅·보간 | 완료 (실제 촬영본으로 V100 라이브 확인, 2026-10-18) |
 | 6 | 화면: 1차 이식은 이전 화면과 달라 다시 한다. 관제탑은 `skylens_core/control`, 현황판은 `skylens_client`, 공용 층은 `shared/viewer`로 나누고 이전 HTML/CSS·DOM을 그대로 쓴다(§3.10). 현황판 Android APK(cargo-apk, 한 손가락 회전·두 손가락 확대) 코드 추가 | 재작업 중 (Android는 기기 미검증) |
 | 6' | pointblitz 레이어(패스 안 그리기 · 메시 · 텍스처 · 선 · 안개 · 배경색): pointblitz 0.2.1 에 들어가 crates.io 에서 바로 받는다(`third_party/pointblitz` 패치 제거) | 완료 |
 | 7 | 게이트웨이 nginx 경로·터널 8082 | 완료 |
-| 8 | `demo`: 엔드 투 엔드 런처 | 대기 |
+| 8 | `demo`: 엔드 투 엔드 런처 | 완료 (`--online`으로 실배치 위에서도 돈다, 2026-10-18 실측) |
 | 9 | `legacy/` 전부 삭제 | 대기 |
 
 ---

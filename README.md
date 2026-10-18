@@ -8,12 +8,11 @@
 
 <br/>
 
-![status](https://img.shields.io/badge/status-prototype-9fe8ff)
-![stack](https://img.shields.io/badge/Three.js%20+%20TS-c8c2b8)
-![sync](https://img.shields.io/badge/WebRTC-PeerJS%20%2B%20STUN-ff9a4d)
-![splat](https://img.shields.io/badge/Gaussian%20Splatting-real-c084fc)
+![status](https://img.shields.io/badge/status-KOREN%20live-9fe8ff)
+![stack](https://img.shields.io/badge/Rust%20%2B%20Go-c8c2b8)
+![recon](https://img.shields.io/badge/cumulus3d-live%20points-c084fc)
+![video](https://img.shields.io/badge/SRT%20%E2%86%92%20WebRTC-MediaMTX-ff9a4d)
 ![coords](https://img.shields.io/badge/coords-GPS%20%2F%20ENU-4ade80)
-![tests](https://img.shields.io/badge/e2e-Playwright%209%2F9-39d98a)
 
 </div>
 
@@ -21,14 +20,14 @@
 
 ## 개요
 
-SkyLens는 여러 대의 드론이 재난 현장을 분할 탐색하며 보낸 영상을 고속망으로 모아 **현장을 실시간 3D(Gaussian Splatting)로 복원**하고, 같은 영상에 **AI를 돌려 위험구역·사람을 감지**해 3D 현장 위에 마커로 얹는 재난 대응 시스템입니다.
+SkyLens는 여러 대의 드론이 재난 현장을 분할 탐색하며 보낸 영상을 고속망으로 모아 **현장을 실시간 3D 점군·메시로 복원**하고([cumulus3d](https://github.com/AH100-1/cumulus3d) 라이브 복원 + [deltamesh](https://crates.io/crates/deltamesh) 증분 메시), 같은 영상에 **AI를 돌려 위험구역·사람을 감지**해 3D 현장 위에 마커로 얹는 재난 대응 시스템입니다.
 
 이 저장소는 파이프라인 전체를 컴포넌트로 나눠 담고 있습니다. 드론 → 게이트웨이 → 프록시 → 코어 → (모델 API · 관제탑 · 현황판). 구성과 각 컴포넌트의 책임은 **[COMPONENTS.md](docs/COMPONENTS.md)가 단일 출처**입니다.
 
 운영자가 보는 화면은 둘이고, **서로 직접 연결되지 않습니다.** 둘 사이에는 파이프라인 전체가 놓입니다:
 
 - **관제탑**: 오퍼레이터가 **실제 GPS로 드론 경로를 지정**하는 화면. VWorld 실지형 위에 드론의 실제 텔레메트리를 그리며, 건물 표시를 점·검정 텍스처·실사 항공뷰 중에서 고를 수 있습니다. 코어가 서빙합니다.
-- **현황판**: 드론이 지나간 **구간부터** 서버가 복원 결과를 보내옵니다. 한 구간을 최종 품질까지 한 번에 처리하지 않고 **낮은 수준을 먼저 확정해 띄운 뒤 정제**하며, 앞 구간이 정제되는 동안 다음 구간의 낮은 수준이 도착합니다(**딜레이 패턴**). **서버의 인간 탐지 모델 결과(GPS)**가 도착하면 3D 위에 마커로 표시됩니다.
+- **현황판**: 드론이 지나간 **구간부터** 서버가 복원 결과를 보내옵니다. 구간은 정제본으로 한 번 보이면 제자리에 있고(stable display), 점은 바뀐 것만(추가·이동·제거) 점 슬롯 차분으로 흘러옵니다. 앞 구간이 정제되는 동안 다음 구간의 프레임이 쌓이므로 비행을 따라 지도가 자라납니다. 브리지(파이) nginx가 서빙합니다.
 
 > 📄 기획·설계: [INTENT.md](docs/INTENT.md) · [ARCHITECTURE.md](docs/ARCHITECTURE.md) · [PROJECT.md](PROJECT.md)
 
@@ -36,30 +35,31 @@ SkyLens는 여러 대의 드론이 재난 현장을 분할 탐색하며 보낸 �
 
 ## 데모 모드 vs 실운영
 
-데모에서도 **컴포넌트는 전부 실제 코드**입니다. 한 대의 머신에서 재현할 수 없는 두 가지만 바뀝니다.
+데모에서도 **컴포넌트는 전부 실제 코드**입니다. 한 대의 머신에서 재현할 수 없는 기체 쪽(촬영·비행·경로)만 바뀝니다.
 
 | | 실운영 | 데모 |
 |---|---|---|
-| 드론 촬영 | 기체 카메라 → H.265 실시간 인코딩 | `res/static/video/h265`의 사전 인코딩 영상 |
-| 3D 복원 | Core HPC에서 gsplat 학습 | 미리 만들어 둔 구간×수준 자산 |
+| 촬영 | 기체 카메라 → SRT | 실제 촬영본(DJI FC9589, 릴리스 `demo-footage-v1`에서 자동으로 받음)을 SRT로 송출. 기본은 첫 비행 약 53초, `--full-footage`면 2차까지 |
+| 비행 | DJI Fly 웨이포인트 | 촬영본에 기록된 GPS·고도·방위를 영상과 맞춰 재생 |
+| 경로 계획 | 운용자가 지도에서 지정 | 촬영 경로가 관제탑 경로 계획에 미리 들어가 있고, 운용자는 배정만 누름 |
 
-나머지는 전부 실제 경로입니다. 드론이 게이트웨이에 붙고, 프록시가 코어로 중계하고, 코어가 모델 API에 잡을 발행하고, 현황판이 릴레이를 통해 받습니다. 화면은 도착한 것만 그리며, 파이프라인이 없으면 **없다고 표시**합니다(시뮬레이션으로 메우지 않습니다).
+복원·탐지·메시·배포는 데모에서도 실제 경로입니다. 영상 → 코어 프레임 추출 → 모델 서버(gRPC, V100) → 점·메시·탐지 청크 → 코어 → 관제탑·현황판. 파이프라인이 없으면 **없다고 표시**하고(`PipelineUnavailable`) 시뮬레이션으로 메우지 않습니다.
+
+`cargo run -p skylens-demo -- --online`은 같은 런처를 **KOREN 실배치 위에서** 돌립니다. 영상은 브리지(파이) MediaMTX로, 드론 시뮬레이터는 대전 코어로 붙고 이 머신에서는 아무것도 띄우지 않습니다(VPN 필요). 영상은 피드마다 2500 kbps로 재인코딩해 VPN 상행을 아낍니다. 자세한 옵션은 [`src/demo/README.md`](src/demo/README.md).
 
 ---
 
 ## 좌표계 (GPS ↔ ENU ↔ 씬)
 
-실세계 GPS를 1급 좌표계로 씁니다([geo.ts](src/skylens_core/geo.ts)):
+실세계 GPS를 1급 좌표계로 씁니다([`src/shared/geo.rs`](src/shared/geo.rs), 파이썬 짝은 `src/skylens_model/utils/geo.py`):
 
-- **GeoAnchor**(기준 GPS, `CONFIG.geo.anchor`)를 원점으로 하는 **로컬 ENU(동/북/상) 미터** 프레임이고 1 unit = 1 m 입니다.
+- 작전 구역의 기준 GPS(`SKYLENS_CORE_SITE`)를 원점으로 하는 **로컬 ENU(동/북/상) 미터** 프레임이고 1 unit = 1 m 입니다.
 - 드론 경로는 **GPS로 지정** → ENU → 씬으로 변환. 탐지 결과도 **GPS로 수신** → 씬 좌표로 변환해 마커 배치.
-- 각 스플랫 청크는 **명시적 align transform**(pos/rot/scale, 선택적 GPS anchor)을 가져 공통 ENU 프레임에 정렬됩니다.
+- 복원 구간은 cumulus3d가 GPS 위치 제약으로 ENU에 놓습니다. 같은 구간 번호는 항상 같은 공간 조각이고, 한 번 보인 구간은 움직이지 않습니다.
 
 ---
 
 ## 빠른 시작
-
-> **스택 전환 중.** TypeScript 프로토타입을 Rust(드론·모델 서버·클라이언트·데모)와 Go(코어)로 다시 짓고 있습니다. 게이트웨이·프록시는 nginx 설정만 남습니다. 컴포넌트별 진행 상태는 [COMPONENTS.md §10](docs/COMPONENTS.md)에 있고, 옮겨지기 전 코드는 각 컴포넌트의 `legacy/`에 참고용으로만 남아 있습니다. 아래 쿼리 옵션·조작법은 TS 프로토타입 기준입니다.
 
 ```bash
 cargo build --workspace                 # Rust: shared · drone · model · client · demo · test
@@ -69,74 +69,32 @@ uv sync && uv run pytest                # Python: UNet 학습 코드
 
 | 명령어 | 설명 |
 |---|---|
-| `cargo test --workspace` | Rust 테스트 |
-| `cargo clippy --workspace --all-targets` | Rust 린트 |
-| `cargo run -p skylens-demo` | 데모 런처 (이행 중) |
+| `cargo run -p skylens-demo` | 전 컴포넌트를 이 머신에서 띄우는 데모 런처 |
+| `cargo run -p skylens-demo -- --online` | 실배치(브리지·대전·판교) 위에서 데모 |
+| `cargo test --workspace` / `cargo clippy --workspace --all-targets` | Rust 테스트 / 린트 |
 | `go test ./...` (`src/skylens_core`) | Go 테스트 |
 
-### 주요 쿼리 옵션
-`?demo` 자동 데모 · `?room=<이름>` P2P 방 · `?splat=off|demo|cdn|light|<url>` 스플랫 자산 · `?delay=off` 딜레이 패턴 끄고 단일 장면으로 · `?reveal=on/off` 스플랫 reveal 마스크 · `?spin=off` 카메라 자동회전 끔 · `?up=<preset|euler>` 스플랫 방향 · `?level=on` PCA 자동 레벨링.
-
-**실지형 지도 옵션** (`?map` 사용 시)
-- `?map`: 실지형 지도 씬 활성화; `?map=uljin|gangneung|서,남,동,북` 으로 씬/영역 선택 가능
-- `?tex=sat|off`: 위성 드레이프 (sat: VWorld 위성영상, off: 없음)
-- `?drone=<n>`: 드론 뷰 스케일 (기본값 0.15)
-- `?ring=off`: 배경 지형 링 비활성화
-- `?bld=off`: 3D 건물 렌더링 비활성화
+Rust 1.99 이상, 웹 화면은 `wasm32-unknown-unknown` 타깃. 모델 서버의 UNet은 `tch`(libtorch, 빌드 때 내려받음)이고 cumulus3d는 crates.io 릴리스(0.11)를 그대로 씁니다.
 
 ---
 
-## 딜레이 패턴 3D 복원 (현황판)
+## 라이브 복원 (현황판)
 
-복원은 촬영이 끝난 뒤 한 번에 처리하는 방식이 아니라, 드론이 지나간 **구간**마다 낮은 학습 스텝의 결과를 먼저 확정해 내보내고 뒤이어 정제합니다. 앞 구간이 정제되는 동안 다음 구간의 첫 수준이 도착하므로 화면에는 여러 구간이 서로 다른 수준으로 동시에 올라옵니다 (중간보고서 Ⅱ-3-다).
+복원은 촬영이 끝난 뒤 한 번에 처리하는 방식이 아니라, 드론이 지나간 **구간**(zone)에 프레임이 차면 그 구간을 정제해 내보냅니다. 트리거는 시간이 아니라 들어온 프레임입니다.
 
-| 수준 | 학습 스텝 | 지휘관이 확인 가능한 것 |
-|---|---:|---|
-| 1 | 250 | 형상 윤곽만 식별 |
-| 2 | 1,000 | 공간 구조 식별 가능 |
-| 3 | 3,500 | 표면 형성 |
-| 4 | 7,000 | 진입 동선 판단이 가능한 실용 품질 |
+- **점**은 cumulus3d stable display의 표시 델타를 점 슬롯 차분(`slot_kind` 1 refined · 2 replace · 3 final · 4 preview)으로 보냅니다. 화면용으로 둘에 하나만 남기고(`SKYLENS_LIVE_STRIDE` 2), 구간 겹침은 지웁니다.
+- **메시**는 deltamesh가 합성된 표시에서 바뀐 블록만 내보냅니다.
+- **탐지**(UNet, 위험구역·사람)는 프레임마다 돌고 카메라 포즈로 점군에 투영해 GPS 기준 ENU 마커로 나갑니다.
+- 모델 기본값: stride 2, 구간 미리보기 끔, 백로그 묶음 끔(batch 1), 특징 선행 4, 내장 카메라 DJI FC9589(fx 1505 · fy 1510). 묶음을 끈 이유는 cumulus3d 0.11.0에서 batch > 1이 V100 라이브 축척을 약 30배 줄였기 때문입니다(원인 미확인, cumulus3d 0.11.1이 노드 기본값을 1로 바꿈).
 
-새 수준이 도착하면 같은 구간의 낮은 수준을 **교체**하고(누적되지 않음), 처리가 밀려 이미 추월당한 수준은 아예 건너뜁니다. 좌측 상단 서버 패널에 구간별 현재 수준이 표시됩니다.
-
-**데모 자산 만들기**: `res/static/demo/`에 학습 스텝별 경량 PLY(`step00250_light.ply` …)를 두고 구간으로 자릅니다. 자산은 커밋하지 않으며, 없으면 현황판은 단일 장면 스트림으로 자동 폴백합니다.
-
-```bash
-uv run python -m skylens_model.models.skylens.split_segments res/static/demo/step*_light.ply --segments 4
-```
-
-구간 경계는 장면의 주축(복도 촬영이면 드론 진행 방향)을 기준 파일의 분위수로 잘라 모든 수준에 동일하게 적용하므로, 같은 구간 번호는 항상 같은 공간 조각을 가리킵니다. 타이밍은 `CONFIG.delayPattern`(구간 주기·수준별 지연)에서 조정합니다.
+2026-10-18 `--online` 실측: 2분에 드론 3대 ACTIVE, 프레임 431, 구간 5, 탐지 6. 첫 구간은 약 38초, 다음 구간은 17~24초 간격, 53초 비행은 약 5분에 완성. 처리량은 아직 영상보다 느립니다([DEPLOYMENT.md §12.9](docs/DEPLOYMENT.md)).
 
 ---
 
 ## 조작법 (관제탑)
-- **경로 계획 모달**: 툴바 `경로 계획 · ROUTE` → GPS 웨이포인트 추가 → **배정**하면 리더가 그 경로를 비행.
-- **방향키 ↑↓←→** 수동 조향(전/후진 + 좌/우 점진 회전), **Q/E** 고도, **1/2/3·Tab** 드론 전환, **Space** 일시정지.
-
-### 실지형 지도 씬 (`?map`)
-
-지형 메시와 건물 3D 모델을 실제 고도·영상·위치 데이터로 렌더하여 현장을 사실적으로 재구성합니다.
-
-- **지형 메시**: AWS Terrain Tiles DEM(한국 약 30m급) 기반 고도 데이터
-- **위성 드레이프**: VWorld WMTS 위성 이미지를 지형 위에 매핑
-- **3D 건물**: VWorld 건물 폴리곤 데이터(WFS lt_c_bldginfo)를 지붕까지 입체 프리즘으로 렌더
-- **월드 스트리밍**: 드론 반경 내 미로드 셀을 가까운 순으로 실시간 로드 · 씬 주변 3배 저해상 배경 지형 링
-
-**기준 씬**: 대전(충남대~카이스트 일대, ~3km, 약 6,191동)
-
-#### VWorld 키 설정
-
-VWorld 위성/건물 데이터는 API 인증 키가 필요합니다. 저장소 **부모 폴더**에 다음 파일을 생성하세요:
-
-```bash
-# 저장소 바로 바깥 디렉터리에서:
-cat > .env.vworld << EOF
-VWORLD_KEY=<vworld.kr에서 발급한 인증키>
-VWORLD_DOMAIN=http://localhost:5173
-EOF
-```
-
-키가 없으면 지형·건물 렌더링 없이 기존 씬만 동작합니다(graceful degradation). Vite dev 프록시에서만 서버측에서 키를 주입하며, 프론트엔드 번들에는 절대 노출되지 않습니다.
+- **경로 계획**: 툴바 `경로 계획 · ROUTE` → GPS 웨이포인트 추가 → **배정**하면 드론이 그 경로를 비행합니다. 데모에서는 촬영 경로가 미리 들어가 있습니다(`planned-route`).
+- **경로 배정이 새 미션의 시작**입니다. 드론이 떠 있지 않을 때 배정하면 코어가 지난 미션의 점·메시·탐지를 버리고 모델에 `StartMission`을 보내 라이브 점을 처음부터 다시 씁니다. 화면을 비우는 길은 이것뿐이고, 코어 재시작은 아닙니다.
+- 관제탑 지형·건물은 VWorld 데이터입니다. 코어가 `VWORLD_KEY`(없으면 `SKYLENS_VWORLD_ENV`가 가리키는 파일, 그것도 없으면 저장소 부모 폴더의 `.env.vworld`)에서 키를 읽어 `/vworld/*`로 대신 요청하므로 키는 화면에 나가지 않습니다. 키가 없으면 지형·건물 없이 동작합니다.
 
 ---
 
@@ -148,14 +106,14 @@ EOF
 Cargo.toml                         # Rust 워크스페이스 (1.99 이상)
 go.work                            # Go 워크스페이스
 pyproject.toml                     # Python (UNet 학습 · 데이터셋)
-res/static/                        # 데모 자산 (영상 · 이미지 · 구간 자산)
+data/demo/                         # 데모 촬영본 (릴리스에서 자동으로 받음, 커밋 안 함)
 src/
 ├─ shared/            # Rust 공통 계약: 프로토콜 · 좌표계
 ├─ skylens_drone/     # Rust Mission Bridge: GPS 경로 → DJI Fly KMZ · 편대 · 클라우드 업로드
-├─ skylens_gateway/   # 브리지 nginx · MediaMTX SRT 수신 · 설치 스크립트
+├─ skylens_gateway/   # 브리지(파이 5) nginx · MediaMTX SRT 수신 · 설치 스크립트 · 배포 에이전트
 ├─ skylens_proxy/     # 대전 nginx: KOREN 내부망 다중 경로
 ├─ skylens_core/      # Go 코어(보관 · 오케스트레이션 · 배포) + control/(관제탑 화면)
-│  └─ deploy/         # 대전 MediaMTX · KOREN 배치 문서
+│  └─ deploy/         # 대전 MediaMTX · 배포 에이전트 · KOREN 배치 문서
 ├─ skylens_model/     # Rust 연산 서버(cumulus3d · deltamesh · UNet 추론) + Python 학습 코드
 ├─ skylens_client/    # 현황판 화면: 이전 HTML/CSS를 Blitz로 + pointblitz (웹 · 네이티브)
 ├─ test/              # 컴포넌트 경계 테스트 + pytest
@@ -174,23 +132,20 @@ src/
 
 ## 현재 상태 & 로드맵
 
-**동작 확인됨** (전부 실제 실행으로 검증)
-- ✅ **파이프라인 전 구간**: 드론 → 게이트웨이 → 프록시 → 코어 → 모델 API → 현황판
-- ✅ **딜레이 패턴**: 구간이 드론의 **이동량**으로 닫히고, 앞 구간이 정제되는 동안 다음 구간의 수준 1이 도착
-- ✅ **미션 단계**: 대기 → 태스크 지정 완료 → 드론 연결 대기(10초) → 주행
-- ✅ **경로 이중화**: 프록시가 코어 장애 시 대기 경로로 전환, 복구 시 복귀
-- ✅ **관제탑**: VWorld 실지형 + 점·검정 텍스처·실사 항공뷰 3옵션, GPS 좌표계
-- ✅ **현황판**: 구간이 도착해야 보이고, 마커도 해당 구간이 복원돼야 표시
-- ✅ 모델 API 부재 시 잡 재제출로 복구, 코어 부재 시 마지막 상태 유지
+**동작 확인됨** (2026-10-18, KOREN 실배치 위에서 `--online`으로 검증)
+- ✅ **파이프라인 전 구간**: 촬영본 SRT → 브리지(파이) MediaMTX → 대전 코어 프레임 추출 → 판교 V100 모델 → 점 슬롯·메시·탐지 청크 → 관제탑·현황판
+- ✅ **라이브 복원**: 구간 5개, 첫 구간 약 38초, 53초 비행이 약 5분에 완성
+- ✅ **미션**: 경로 배정 = 새 미션(`StartMission`), 드론 연결 대기 → 주행, 모든 드론이 끊기면 연결 대기로
+- ✅ **배포**: GitHub 빌드 → 대전·파이의 `skylens-agent`가 1분마다 당겨 설치. 모델 서버(판교)만 손으로 올림
+- ✅ **영상**: 파이 SRT 수신 → 대전이 터널로 당겨 감. LAN·VPN 화면은 파이 MediaMTX가 직접 WHEP로 방송(`WHEP_SOURCE=local`, 대전 IP·LAN·VPN 대역은 익명 읽기)
+- ✅ 모델 서버 부재 시 미션은 진행하고 라이브 점만 비어 있음, 코어 부재 시 화면은 마지막 상태 유지
 
-**다음 단계**
-- ⏳ 실제 복원·추론 연결 (현재 데모 자산으로 대체, 연결 지점은 `PipelineUnavailable`로 명시)
-- ⏳ 2D 탐지 → 3D 좌표 변환(Depth 레이캐스팅) 모듈
-- ⏳ 증분 복원의 좌표계 고정
-- ⏳ `.spz` 전환 (전송량 약 10배 감소)
-- ⏳ KOREN 회선 위 실배치 · 클라이언트 간 P2P 재분배
-
----
+**열린 문제**
+- ⏳ 드론이 모두 끊겨도 코어가 모델 입력을 닫지 않아 FINAL("생성 완료")이 뜨지 않음
+- ⏳ 나중에 붙은 현황판에 첫 구간만 재전송됨(코어 리플레이)
+- ⏳ 실시간 처리량이 영상보다 느림
+- ⏳ 맥 Homebrew ffmpeg에 SRT 없음(로컬 UDP→`srt-live-transmit` 중계로 우회)
+- ⏳ 관제탑 VWorld 키 설정
 
 ## 기술 스택
 **Rust** · **Go** · **nginx** · **MediaMTX** · [cumulus3d](https://github.com/AH100-1/cumulus3d)(라이브 점군) · [deltamesh](https://crates.io/crates/deltamesh)(증분 메시) · [pointblitz](https://github.com/i3months/pointblitz)(렌더링) · [Blitz](https://github.com/DioxusLabs/blitz)(네이티브 UI) · **Python**(UNet 학습) · **AWS Terrain Tiles** · **VWorld**(위성/건물)
