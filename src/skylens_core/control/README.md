@@ -54,3 +54,4 @@ bash src/skylens_core/control/build-web.sh
 - 웹 빌드는 영상을 재생하지 않는다(WHEP 디코더가 없다). 영상 패널은 대기 화면과 위치 문구만 보여 준다.
 - 점 표시의 가산 혼합(AdditiveBlending)은 pointblitz 점 파이프라인에 없어 불투명도 0.92의 일반 혼합으로 그린다.
 - 경로 계획 지도의 글자는 시스템 글꼴 대신 번들 Barlow로 그린다.
+- 이전 페이지는 `color-scheme: dark`로 브라우저가 어두운 입력 컨트롤을 그렸지만 Blitz는 이 속성을 쓰지 않는다. 경로 계획의 체크박스는 투명한 원래 입력 위에 `.route-modal__check` 상자를 따로 그리고(상태는 `modals.rs`가 라벨의 `is-checked`로 옮긴다), 고도 슬라이더와 간격 입력칸은 `panels.css`에서 어두운 모양을 직접 준다.

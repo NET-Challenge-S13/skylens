@@ -192,6 +192,77 @@
   opacity: 0.45;
 }
 
+/* --- Planner form controls ---
+   The legacy page got dark form controls from `color-scheme: dark` (style.css), which Chrome
+   honours and Blitz does not: Blitz drew white checkboxes, a white box behind the range widget
+   and a light number field. These rules give the controls the look Chrome drew. */
+
+/* Checkbox: the native input stays on top for clicks but is invisible; the box after it in the
+   label (.route-modal__check, added by modals.rs and moved first with `order`) shows the state
+   from the label's `is-checked`, which modals.rs mirrors from the input every frame. */
+.route-modal__loop {
+  position: relative;
+}
+.route-modal__loop input[type='checkbox'] {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 0;
+  opacity: 0;
+  z-index: 1;
+  cursor: pointer;
+}
+.route-modal__check {
+  order: -1;
+  position: relative;
+  flex: 0 0 auto;
+  box-sizing: border-box;
+  width: 14px;
+  height: 14px;
+  border: 1px solid #858585;
+  border-radius: 3px;
+  background: #3b3b3b;
+}
+.route-modal__check::after {
+  content: '';
+  display: none;
+  position: absolute;
+  left: 4px;
+  top: 1px;
+  width: 4px;
+  height: 8px;
+  border: solid #1d2633;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+.route-modal__loop.is-checked .route-modal__check {
+  background: #99c8ff;
+  border-color: #99c8ff;
+}
+.route-modal__loop.is-checked .route-modal__check::after {
+  display: block;
+}
+
+/* Range: the widget draws track and thumb; the input box itself must not show. */
+.route-modal__alt input[type='range'] {
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+/* Number field: Chrome's dark text field. */
+.route-modal__spacing {
+  box-sizing: border-box;
+  border: 1px solid #858585;
+  border-radius: 3px;
+  background: #3b3b3b;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  line-height: 16px;
+}
+
 /* --- Mission panel (phases + core link) --- */
 
 /* Placement only — the look comes from .sl-surface--panel. Clears the pane

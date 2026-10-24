@@ -146,11 +146,14 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
-  /* Reserve one row so the first waypoint does not resize the dialog either.
-     Beyond that the list scrolls rather than pushing the buttons off-screen. */
-  min-height: 34px;
+  /* The list scrolls rather than pushing the buttons off-screen. No reserved empty row: the
+     dialog is pinned to the top, so the first waypoint only moves the buttons, never the map,
+     and the reserved row left a wide empty gap between the map and the buttons. */
   max-height: 220px;
   overflow: auto;
+}
+.route-modal__list:empty {
+  display: none;
 }
 
 .route-modal__item {

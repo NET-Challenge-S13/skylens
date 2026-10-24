@@ -47,6 +47,8 @@ pub struct RouteModal {
     pub list: Option<NodeId>,
     pub clear: Option<NodeId>,
     pub assign: Option<NodeId>,
+    /// Each checkbox and its label, for [`RouteModal::sync_checks`].
+    checks: Vec<(NodeId, NodeId)>,
 }
 
 fn nth(v: &[NodeId], i: usize) -> Option<NodeId> {
@@ -105,7 +107,17 @@ impl RouteModal {
             list: find(dom, ".route-modal__list"),
             clear: find(dom, ".route-modal__btn--ghost"),
             assign: find(dom, ".route-modal__btn--primary"),
+            checks: [(nth(&loop_children, 0), nth(&toolbar, 2)), (nth(&form_children, 0), nth(&toolbar, 3)), (nth(&cloud_children, 0), nth(&toolbar, 4))]
+                .into_iter()
+                .filter_map(|(i, l)| Some((i?, l?)))
+                .collect(),
         };
+        // Each checkbox gets the box that draws it (see `.route-modal__check` in panels.css):
+        // Blitz paints native checkboxes white whatever the colour scheme. Appended last so the
+        // child indices above stay those of the template; CSS moves it first.
+        for &(_, label) in &m.checks {
+            dom.append_html(label, "<span class=\"route-modal__check\"></span>");
+        }
         // Initial properties (legacy sets them as properties; the attributes are how Blitz
         // takes them).
         if let Some(i) = m.loop_input {
@@ -116,7 +128,7 @@ impl RouteModal {
             // Blitz builds a text editor for type=number but leaves it out of the intrinsic
             // sizing it gives text inputs, so the box collapses and clips the value. Give it the
             // browser's single-line height (the width comes from the legacy CSS).
-            dom.set_style(i, "height", "18px");
+            dom.set_style(i, "height", "22px");
             dom.set_style(i, "display", "inline-block");
         }
         m
@@ -212,6 +224,22 @@ impl RouteModal {
 
     pub fn is_open(&self, dom: &Dom<'_>) -> bool {
         self.overlay.is_some_and(|o| !dom.has_class(o, "is-hidden"))
+    }
+
+    /// Mirrors each checkbox's state onto its label (`is-checked`), which `.route-modal__check`
+    /// draws from. A `:checked ~` rule did not follow the state in Blitz.
+    pub fn sync_checks(&self, dom: &mut Dom<'_>) {
+        for &(input, label) in &self.checks {
+            let on = dom
+                .doc_ref()
+                .get_node(input)
+                .and_then(|n| n.element_data())
+                .and_then(|el| el.checkbox_input_checked())
+                .unwrap_or(false);
+            if dom.has_class(label, "is-checked") != on {
+                dom.toggle_class(label, "is-checked", on);
+            }
+        }
     }
 }
 

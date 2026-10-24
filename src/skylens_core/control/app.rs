@@ -951,6 +951,9 @@ impl ScreenApp for ControlApp {
         }
         let now = cx.now_ms;
         self.handle_link(dom, now);
+        if let Some(r) = self.route.as_ref().filter(|r| r.is_open(dom)) {
+            r.sync_checks(dom);
+        }
         if let Some(m) = self.mission.as_mut() {
             m.tick(dom, now);
         }
