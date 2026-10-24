@@ -219,7 +219,8 @@ impl Board {
                 self.geometry_failed = false;
                 self.local_chunks += 1;
             }
-            (C::Detections { ids }, _) => self.local_detections += ids.len() as u64,
+            // Batches replace each other, so the count is what the store holds now.
+            (C::Detections { .. }, _) => self.local_detections = self.store.detections().count() as u64,
             _ => {}
         }
         applied
@@ -447,12 +448,18 @@ impl Board {
         Some(DVec3::from(self.site.as_ref()?.enu_of(d.gps.as_ref()?)))
     }
 
-    /// Detections that just became revealable (final level in, placeable), in arrival order;
-    /// each is reported once for the board's lifetime.
+    /// Whether a detection is confident enough to show: persons need the settings' threshold
+    /// (default 80 %); hazard zones are shown as delivered.
+    pub fn confident(&self, d: &payload::Detection) -> bool {
+        d.category() != payload::DetectionCategory::Person || d.confidence as f32 + 1e-6 >= self.settings.borrow().person_min_conf
+    }
+
+    /// Detections that just became revealable (final level in, placeable, confident enough), in
+    /// arrival order; each is reported once for the board's lifetime.
     pub fn reveal_new(&mut self) -> Vec<payload::Detection> {
         let mut out = Vec::new();
         for d in self.store.detections() {
-            if self.revealed.contains(&d.id) || !self.segment_final(d.segment) || self.detection_pos(d).is_none() {
+            if self.revealed.contains(&d.id) || !self.segment_final(d.segment) || self.detection_pos(d).is_none() || !self.confident(d) {
                 continue;
             }
             out.push(d.clone());
@@ -465,7 +472,7 @@ impl Board {
     pub fn markers(&self) -> Vec<(String, DVec3, bool)> {
         self.store
             .detections()
-            .filter(|d| self.revealed.contains(&d.id) && self.segment_final(d.segment))
+            .filter(|d| self.revealed.contains(&d.id) && self.segment_final(d.segment) && self.confident(d))
             .filter_map(|d| {
                 let person = d.category() == payload::DetectionCategory::Person;
                 Some((d.id.clone(), self.detection_pos(d)?, person))
@@ -478,7 +485,7 @@ impl Board {
         let sightings: Vec<markers::Sighting> = self
             .store
             .detections()
-            .filter(|d| self.revealed.contains(&d.id) && self.segment_final(d.segment))
+            .filter(|d| self.revealed.contains(&d.id) && self.segment_final(d.segment) && self.confident(d))
             .filter_map(|d| {
                 let person = d.category() == payload::DetectionCategory::Person;
                 Some((d.id.clone(), self.detection_pos(d)?, person, d.confidence))

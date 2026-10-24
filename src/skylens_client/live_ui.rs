@@ -199,6 +199,7 @@ struct Shown {
     size: String,
     mode: Option<ColorMode>,
     display: Option<Display>,
+    conf: Option<u32>,
     wait_opacity: Option<i64>,
     monitor_width: Option<i64>,
 }
@@ -323,6 +324,14 @@ impl LivePanels {
                 self.set_settings_open(dom, false);
                 return true;
             }
+            "conf" => {
+                if let Some((_, key)) = input.closest_data("conf")
+                    && let Ok(p) = key.parse::<u32>()
+                    && pl::PERSON_CONF_STEPS.contains(&p)
+                {
+                    s.person_min_conf = p as f32 / 100.0;
+                }
+            }
             "size-" | "size+" | "mode" => {}
             _ => return false,
         }
@@ -344,6 +353,14 @@ impl LivePanels {
                 dom.toggle_class(b, "is-on", on);
             }
             self.shown.mode = Some(s.color_mode);
+        }
+        if self.shown.conf != Some(pl::conf_step(s.person_min_conf)) {
+            let step = pl::conf_step(s.person_min_conf).to_string();
+            for b in dom.find_all("[data-live=conf]") {
+                let on = dom.attr(b, "data-conf").as_deref() == Some(step.as_str());
+                dom.toggle_class(b, "is-on", on);
+            }
+            self.shown.conf = Some(pl::conf_step(s.person_min_conf));
         }
         if self.shown.display != Some(s.display) {
             for b in dom.find_all("[data-live=display]") {

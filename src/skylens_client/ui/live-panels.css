@@ -374,6 +374,10 @@
   font-size: var(--text-xs);
   color: var(--text-tertiary);
 }
+.board-settings__note--row {
+  display: block;
+  margin-top: 4px;
+}
 
 .board-seg {
   padding: 6px 12px;

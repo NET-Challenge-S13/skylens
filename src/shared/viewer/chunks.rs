@@ -377,8 +377,9 @@ pub enum Change {
     PointsPending { segment: u32 },
     MeshUpserted { id: [i32; 3] },
     MeshRemoved { id: [i32; 3] },
-    /// Detection ids received (new or updated), visible or not yet.
-    Detections { ids: Vec<String> },
+    /// Detection ids received (new or updated), visible or not yet, and the ids the batch
+    /// withdrew (in the batch it replaces, not in this one).
+    Detections { ids: Vec<String>, removed: Vec<String> },
     Terrain { cell: [i32; 2] },
     Buildings { cell: [i32; 2] },
     /// Older than what is stored; dropped.
@@ -418,6 +419,10 @@ pub struct ChunkStore {
     mesh_removed: HashMap<[i32; 3], u32>,
     detections: BTreeMap<String, payload::Detection>,
     detection_order: Vec<String>,
+    /// Per batch (`Chunk.segment`): the version and ids of the batch last applied. A batch is
+    /// the model's whole current state for its segment, so a newer one replaces it: ids it no
+    /// longer carries were withdrawn (confidence fell, merged into another, ...).
+    detection_batches: BTreeMap<u32, (u32, Vec<String>)>,
     revealed: BTreeSet<String>,
     terrain: BTreeMap<[i32; 2], TerrainEntry>,
     buildings: BTreeMap<[i32; 2], BuildingEntry>,
@@ -649,6 +654,9 @@ impl ChunkStore {
             Ok(b) => b,
             Err(e) => return Applied::of(Change::Invalid(e.to_string())),
         };
+        if self.detection_batches.get(&chunk.segment).is_some_and(|(v, _)| *v > chunk.version) {
+            return Applied::of(Change::Stale);
+        }
         let mut ids = Vec::new();
         let mut revealed = Vec::new();
         for d in batch.detections {
@@ -666,7 +674,17 @@ impl ChunkStore {
             }
             ids.push(id);
         }
-        let mut out = Applied::of(Change::Detections { ids });
+        // What the batch this one replaces carried and this one does not is withdrawn.
+        let before = self.detection_batches.insert(chunk.segment, (chunk.version, ids.clone())).map(|(_, b)| b).unwrap_or_default();
+        let removed: Vec<String> = before.into_iter().filter(|id| !ids.contains(id)).collect();
+        for id in &removed {
+            self.detections.remove(id);
+            self.revealed.remove(id);
+        }
+        if !removed.is_empty() {
+            self.detection_order.retain(|id| self.detections.contains_key(id));
+        }
+        let mut out = Applied::of(Change::Detections { ids, removed });
         out.revealed = revealed;
         out
     }
@@ -980,11 +998,38 @@ mod tests {
     }
 
     #[test]
+    fn a_newer_detection_batch_replaces_the_one_before() {
+        use payload::DetectionCategory::{Fire, Person};
+        let mut s = ChunkStore::new();
+        let batch = |list: &[(&str, u32, payload::DetectionCategory)], version: u32| {
+            let mut c = detections(list);
+            c.segment = 7;
+            c.version = version;
+            c
+        };
+        s.apply(&batch(&[("p1", 3, Person), ("f1", 3, Fire)], 1));
+        // Version 2 no longer carries p1: it is withdrawn.
+        let a = s.apply(&batch(&[("f1", 3, Fire), ("p2", 3, Person)], 2));
+        assert_eq!(a.change, Change::Detections { ids: vec!["f1".into(), "p2".into()], removed: vec!["p1".into()] });
+        assert!(s.detection("p1").is_none());
+        assert_eq!(s.detections().map(|d| d.id.as_str()).collect::<Vec<_>>(), ["f1", "p2"]);
+        // An older batch arriving late changes nothing.
+        assert_eq!(s.apply(&batch(&[("p1", 3, Person)], 1)).change, Change::Stale);
+        assert!(s.detection("p1").is_none());
+        // Another batch (segment) keeps its own ids.
+        let mut other = detections(&[("p9", 4, Person)]);
+        other.segment = 8;
+        other.version = 1;
+        s.apply(&other);
+        assert!(s.detection("f1").is_some() && s.detection("p9").is_some());
+    }
+
+    #[test]
     fn detections_show_only_for_arrived_segments_and_reveal_once() {
         use payload::DetectionCategory::{Fire, Person};
         let mut s = ChunkStore::new();
         let a = s.apply(&detections(&[("p1", 3, Person), ("f1", 3, Fire), ("p2", 5, Person)]));
-        assert_eq!(a.change, Change::Detections { ids: vec!["p1".into(), "f1".into(), "p2".into()] });
+        assert_eq!(a.change, Change::Detections { ids: vec!["p1".into(), "f1".into(), "p2".into()], removed: vec![] });
         assert!(a.revealed.is_empty());
         assert_eq!(s.visible_detections().count(), 0);
         assert!(!s.has_arrived(3));
@@ -996,13 +1041,14 @@ mod tests {
         assert!(s.is_detection_visible("p1"));
         assert!(!s.is_detection_visible("p2"));
 
-        // An update of a visible detection replaces it without revealing it again.
-        let a = s.apply(&detections(&[("p1", 3, Person)]));
+        // An update of a visible detection replaces it without revealing it again (a batch is
+        // the whole current state, so it carries the others too).
+        let a = s.apply(&detections(&[("p1", 3, Person), ("f1", 3, Fire), ("p2", 5, Person)]));
         assert!(a.revealed.is_empty());
         assert_eq!(s.detections().count(), 3);
 
         // A detection for an arrived segment is revealed on arrival.
-        let a = s.apply(&detections(&[("p3", 3, Person)]));
+        let a = s.apply(&detections(&[("p1", 3, Person), ("f1", 3, Fire), ("p2", 5, Person), ("p3", 3, Person)]));
         assert_eq!(a.revealed, vec!["p3".to_string()]);
         let visible: Vec<&str> = s.visible_detections().map(|d| d.id.as_str()).collect();
         assert_eq!(visible, vec!["p1", "f1", "p3"]);

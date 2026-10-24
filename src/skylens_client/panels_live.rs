@@ -252,11 +252,23 @@ pub struct LiveSettings {
     pub point_size: f32,
     pub color_mode: ColorMode,
     pub fit_requested: bool,
+    /// Person detections below this confidence (0..1) are not shown (markers, pins, alerts).
+    pub person_min_conf: f32,
 }
+
+/// The person-confidence thresholds the settings offer (percent), and the default.
+pub const PERSON_CONF_STEPS: [u32; 5] = [50, 60, 70, 80, 90];
+pub const PERSON_CONF_DEFAULT: u32 = 80;
 
 impl Default for LiveSettings {
     fn default() -> Self {
-        LiveSettings { display: Display::Mesh, point_size: 2.0, color_mode: ColorMode::Rgb, fit_requested: false }
+        LiveSettings {
+            display: Display::Mesh,
+            point_size: 2.0,
+            color_mode: ColorMode::Rgb,
+            fit_requested: false,
+            person_min_conf: PERSON_CONF_DEFAULT as f32 / 100.0,
+        }
     }
 }
 
@@ -305,6 +317,9 @@ pub fn settings_markup(s: &LiveSettings) -> String {
             "<button type=\"button\" class=\"board-seg board-seg--ic\" data-live=\"size+\">+</button></div>",
             "<div class=\"board-settings__row\"><span class=\"board-settings__lbl\">색</span>{modes}</div>",
             "</div>",
+            "<div class=\"board-settings__section\">탐지</div>",
+            "<div class=\"board-settings__row\"><span class=\"board-settings__lbl\">사람 신뢰도</span>{confs}</div>",
+            "<div class=\"board-settings__note board-settings__note--row\">이 값보다 확신도가 낮은 사람 탐지는 표시하지 않습니다</div>",
             "<div class=\"board-settings__section\">카메라</div>",
             "<div class=\"board-settings__row\"><button type=\"button\" class=\"board-seg\" data-live=\"fit\">전체 보기</button>",
             "<span class=\"board-settings__note\">복원된 범위 전체가 보이게 맞춥니다</span></div>",
@@ -314,7 +329,26 @@ pub fn settings_markup(s: &LiveSettings) -> String {
         points_off = if s.display == Display::Points { "" } else { " is-off" },
         size = size_text(s.point_size),
         modes = modes,
+        confs = conf_buttons(s.person_min_conf),
     )
+}
+
+/// The person-confidence buttons (`data-live="conf"`), the current one on.
+pub fn conf_buttons(min_conf: f32) -> String {
+    PERSON_CONF_STEPS
+        .iter()
+        .map(|p| {
+            format!(
+                "<button type=\"button\" class=\"board-seg{}\" data-live=\"conf\" data-conf=\"{p}\">{p}%</button>",
+                if conf_step(min_conf) == *p { " is-on" } else { "" },
+            )
+        })
+        .collect()
+}
+
+/// The step (percent) a threshold shows as.
+pub fn conf_step(min_conf: f32) -> u32 {
+    (min_conf * 100.0).round() as u32
 }
 
 /// A mouse with one part lit, for the controls guide.
@@ -688,6 +722,17 @@ mod tests {
             assert!(m.contains(&format!("id=\"{id}\"")), "{id}");
         }
         assert!(m.contains("3D 공간 생성 중") && m.contains("sl-surface--panel live-monitor"));
+    }
+
+    #[test]
+    fn person_confidence_defaults_to_80_and_the_settings_offer_the_steps() {
+        let s = LiveSettings::default();
+        assert_eq!(conf_step(s.person_min_conf), 80);
+        let m = settings_markup(&s);
+        for p in PERSON_CONF_STEPS {
+            assert!(m.contains(&format!("data-conf=\"{p}\"")), "{p}");
+        }
+        assert!(m.contains("is-on\" data-live=\"conf\" data-conf=\"80\""));
     }
 
     #[test]

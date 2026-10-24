@@ -271,6 +271,7 @@ impl InsetScene {
         let sightings: Vec<markers::Sighting> = board
             .store
             .visible_detections()
+            .filter(|d| board.confident(d))
             .filter_map(|d| {
                 let person = d.category() == payload::DetectionCategory::Person;
                 Some((d.id.clone(), board.detection_pos(d)?, person, d.confidence))
