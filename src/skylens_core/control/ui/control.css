@@ -56,6 +56,12 @@
   overflow: auto;
 }
 
+/* A dialog without a map (the cloud mission list) sits in the middle like the settings panel. */
+.route-modal-overlay--center {
+  align-items: center;
+  padding: 0;
+}
+
 .route-modal-overlay.is-hidden {
   display: none;
 }
@@ -88,19 +94,24 @@
   color: var(--control-ink);
 }
 
+/* Same button as the settings panel's close (.settings-panel__close). */
 .route-modal__close {
   position: absolute;
-  top: 14px;
-  right: 16px;
-  background: none;
-  border: none;
+  top: 12px;
+  right: 14px;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
   color: var(--text-tertiary);
-  font-size: 22px;
+  font-size: 20px;
   line-height: 1;
   cursor: pointer;
-  transition: color 0.15s ease;
+  transition: color 0.15s ease, background 0.15s ease;
 }
 .route-modal__close:hover {
+  background: var(--surface-inset);
   color: var(--text-primary);
 }
 
