@@ -353,4 +353,7 @@
 #overlay-status .detect-card {
   right: 16px;
   bottom: 16px;
+  /* An alert: on a short screen (a phone) where it meets the minimap (6) or the side panels
+     (.sl-surface, 20), it comes out on top. Below the toolbar (30), dialogs and toasts. */
+  z-index: 25;
 }
