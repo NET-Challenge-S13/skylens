@@ -245,26 +245,17 @@
 .delay__cell.is-new[data-hue='6'] { border-color: #a3acc9; box-shadow: 0 0 6px rgba(163, 172, 201, 0.35); }
 .delay__cell.is-new[data-hue='7'] { border-color: #bfbf94; box-shadow: 0 0 6px rgba(191, 191, 148, 0.35); }
 
-/* A stage still being made (an upper stage of its step arrived first): its zone's hue, faint and
-   pulsing, until it lands. */
+/* A stage still being made (an upper stage of its step arrived first): its zone's hue, dashed,
+   blinking until it lands. app.rs toggles `is-dim` every 600 ms (Blitz runs no CSS keyframes). */
 .delay__cell.is-pending {
   border-style: dashed;
-  animation: delay-pending 1.2s ease-in-out infinite;
 }
-@keyframes delay-pending {
-  0%,
-  100% {
-    opacity: 0.25;
-  }
-  50% {
-    opacity: 0.85;
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .delay__cell.is-pending {
-    animation: none;
-    opacity: 0.5;
-  }
+/* The off phase blanks the cell to an empty slot (colours, not opacity: Blitz did not repaint an
+   opacity change made by a class toggle). */
+.delay__cell.is-pending.is-dim {
+  border-color: var(--divider);
+  background: transparent;
+  color: transparent;
 }
 
 /* Older steps scrolled off to the left. */

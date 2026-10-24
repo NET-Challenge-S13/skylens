@@ -140,6 +140,8 @@ pub struct StatusApp {
     card: Option<Card>,
     /// The delay pattern's markup as last written.
     delay: String,
+    /// The in-progress delay cell's blink phase as last written.
+    pending_dim: Option<bool>,
     /// The point panel's inline placement last written (outer None: not written yet).
     inset_place: Option<Option<[f64; 4]>>,
     /// Whether the minimap is shown unfolded, as last written to the DOM.
@@ -163,6 +165,7 @@ impl StatusApp {
             loading: None,
             toasts: Toasts::new(),
             card: None,
+            pending_dim: None,
             delay: String::new(),
             inset_place: None,
             inset_open: None,
@@ -318,6 +321,16 @@ impl StatusApp {
         if markup != self.delay {
             dom.replace_children(q(".server-status__ladder"), &markup);
             self.delay = markup;
+            self.pending_dim = None;
+        }
+        // The in-progress cell blinks. Blitz does not run CSS keyframe animations, so the board
+        // toggles its dim class itself.
+        let dim = (skylens_viewer::now_ms() / crate::panels_live::PENDING_BLINK_MS) as u64 % 2 == 1;
+        if self.pending_dim != Some(dim) {
+            for n in dom.find_all(".delay__cell.is-pending") {
+                dom.toggle_class(n, "is-dim", dim);
+            }
+            self.pending_dim = Some(dim);
         }
     }
 

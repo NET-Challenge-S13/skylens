@@ -495,6 +495,9 @@ pub fn monitor_markup() -> String {
 // Delay pattern (server panel)
 // ---------------------------------------------------------------------------------------------
 
+/// Half period of the in-progress cell's blink (ms).
+pub const PENDING_BLINK_MS: f64 = 600.0;
+
 /// Refinement rows the pattern shows; later refinements of a zone stay in the top row.
 pub const DELAY_ROWS: u32 = 3;
 /// Column slots the pattern shows at most. Past that the steps scroll left one per new step and
