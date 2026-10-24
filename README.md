@@ -87,7 +87,7 @@ Rust 1.99 이상, 웹 화면은 `wasm32-unknown-unknown` 타깃. 모델 서버�
 - **탐지**(UNet, 위험구역·사람)는 프레임마다 돌고 카메라 포즈로 점군에 투영해 GPS 기준 ENU 마커로 나갑니다.
 - 모델 기본값: stride 2, 구간 미리보기 끔, 백로그 묶음 끔(batch 1), 특징 선행 4, 내장 카메라 DJI FC9589(fx 1505 · fy 1510). 묶음을 끈 이유는 cumulus3d 0.11.0에서 batch > 1이 V100 라이브 축척을 약 30배 줄였기 때문입니다(원인 미확인, cumulus3d 0.11.1이 노드 기본값을 1로 바꿈).
 
-2026-10-18 `--online` 실측: 2분에 드론 3대 ACTIVE, 프레임 431, 구간 5, 탐지 6. 첫 구간은 약 38초, 다음 구간은 17~24초 간격, 53초 비행은 약 5분에 완성. 처리량은 아직 영상보다 느립니다([DEPLOYMENT.md §12.9](docs/DEPLOYMENT.md)).
+2026-10-18 `--online` 실측: 2분에 드론 3대 ACTIVE, 프레임 431, 구간 5, 탐지 6. 첫 구간은 약 38초, 다음 구간은 17~24초 간격, 53초 비행은 약 5분에 완성. 처리량은 아직 영상보다 느립니다([DEPLOYMENT.md §12.9](https://github.com/NET-Challenge-S13/skylens/blob/develop/docs/DEPLOYMENT.md)).
 
 ---
 

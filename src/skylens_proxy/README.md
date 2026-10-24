@@ -1,6 +1,6 @@
 # skylens_proxy: KOREN 내부망 다중 경로
 
-프록시가 존재하는 이유는 하나다. **재난 상황에서 코어로 가는 한 경로가 죽어도 서비스가 유지되어야 한다** ([COMPONENTS.md](../../docs/COMPONENTS.md) §3.3). 이 컴포넌트는 코드가 없고 **nginx 설정 파일**이 전부다.
+프록시가 존재하는 이유는 하나다. **재난 상황에서 코어로 가는 한 경로가 죽어도 서비스가 유지되어야 한다** ([COMPONENTS.md](https://github.com/NET-Challenge-S13/skylens/blob/develop/docs/COMPONENTS.md) §3.3). 이 컴포넌트는 코드가 없고 **nginx 설정 파일**이 전부다.
 
 ```
 게이트웨이(브리지) ──SSH 터널──> 프록시 :8082 ─┬─> 코어 경로 #0 :8080 (선호)
