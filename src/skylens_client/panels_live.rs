@@ -323,7 +323,7 @@ pub fn live_markup() -> String {
         concat!(
             "<div id=\"live-wait\" class=\"live-wait\"><canvas id=\"live-wait-wave\" class=\"live-wait__wave\"></canvas><div class=\"live-wait__cap\"><div class=\"live-wait__big\">{title}</div><div class=\"live-wait__sub\" id=\"live-wait-sub\"></div></div></div>",
             "<div id=\"live-monitor\" class=\"sl-surface sl-surface--panel live-monitor\">",
-            "<div class=\"live-monitor__head\"><span class=\"live-monitor__dot\"></span><div class=\"live-monitor__body\">",
+            "<div class=\"live-monitor__head\"><div class=\"live-monitor__body\">",
             "<span class=\"live-monitor__label\" id=\"live-mon-label\"></span>",
             "<span class=\"live-monitor__detail\" id=\"live-mon-sub\"></span>",
             "<span class=\"live-monitor__detail\" id=\"live-mon-age\"></span>",

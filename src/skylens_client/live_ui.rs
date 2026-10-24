@@ -28,10 +28,11 @@ pub struct WaveCfg {
     pub calm: bool,
 }
 
-/// A grid of dots on a travelling wave, seen from a slowly orbiting camera: the SF-blue
-/// "3D 공간 생성 중" field. `cols`/`rows` pick the density.
+/// A grid of dots on a travelling wave, seen from a slowly orbiting camera, coloured by its
+/// [`WavePalette`]: the "3D 공간 생성 중" field. `cols`/`rows` pick the density.
 pub struct WaveWidget {
     cfg: Rc<Cell<WaveCfg>>,
+    palette: WavePalette,
     cols: usize,
     rows: usize,
     /// Dot size in CSS px at unit perspective.
@@ -40,8 +41,8 @@ pub struct WaveWidget {
 }
 
 impl WaveWidget {
-    pub fn boxed(cfg: Rc<Cell<WaveCfg>>, cols: usize, rows: usize, dot: f64) -> Box<dyn Widget> {
-        Box::new(WaveWidget { cfg, cols, rows, dot, t0: skylens_viewer::now_ms() })
+    pub fn boxed(cfg: Rc<Cell<WaveCfg>>, palette: WavePalette, cols: usize, rows: usize, dot: f64) -> Box<dyn Widget> {
+        Box::new(WaveWidget { cfg, palette, cols, rows, dot, t0: skylens_viewer::now_ms() })
     }
 }
 
@@ -58,11 +59,27 @@ pub fn wave_k(h: f64) -> f64 {
     (h * 4.5 + 0.45).clamp(0.0, 1.0)
 }
 
-/// Deep blue to SkyLens cyan to near white.
-pub fn wave_rgb(k: f64) -> [f32; 3] {
-    let lo = [0.05, 0.28, 0.85];
-    let mid = [0.37, 0.78, 1.0];
-    let hi = [0.85, 1.0, 1.0];
+/// Colour ramp of a wave along its height (trough, middle, crest; sRGB 0..1) and its opacity.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct WavePalette {
+    pub lo: [f64; 3],
+    pub mid: [f64; 3],
+    pub hi: [f64; 3],
+    pub alpha: f32,
+}
+
+impl WavePalette {
+    /// Deep blue to SkyLens cyan to near white: the waiting screen.
+    pub const CYAN: WavePalette = WavePalette { lo: [0.05, 0.28, 0.85], mid: [0.37, 0.78, 1.0], hi: [0.85, 1.0, 1.0], alpha: 1.0 };
+    /// Slate (#33405a, #8fb3c9, #e2ecf3): the monitor, in the delay pattern's palette so the two
+    /// progress read-outs share one tone.
+    pub const SLATE: WavePalette =
+        WavePalette { lo: [0.2, 0.251, 0.353], mid: [0.561, 0.702, 0.788], hi: [0.886, 0.925, 0.953], alpha: 0.9 };
+}
+
+/// The palette colour at height position `k` (0 trough, 1 crest).
+pub fn wave_rgb(p: &WavePalette, k: f64) -> [f32; 3] {
+    let (lo, mid, hi) = (p.lo, p.mid, p.hi);
     let mix = |a: [f64; 3], b: [f64; 3], f: f64| [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f];
     let c = if k < 0.6 { mix(lo, mid, k / 0.6) } else { mix(mid, hi, (k - 0.6) / 0.4) };
     [c[0] as f32, c[1] as f32, c[2] as f32]
@@ -98,8 +115,8 @@ impl WaveWidget {
                 if sx < 0.0 || sx > w || sy < 0.0 || sy > h {
                     continue;
                 }
-                let [r, g, b] = wave_rgb(k);
-                let a = (0.35 + 0.65 * k as f32) * cfg.opacity;
+                let [r, g, b] = wave_rgb(&self.palette, k);
+                let a = (0.35 + 0.65 * k as f32) * cfg.opacity * self.palette.alpha;
                 scene.fill(Fill::NonZero, tf, Color::new([r, g, b, a]), None, &Rect::new(sx - size / 2.0, sy - size / 2.0, sx + size / 2.0, sy + size / 2.0));
             }
         }
@@ -178,10 +195,10 @@ impl LivePanels {
         dom.append_html(q("section.pane"), &pl::live_markup());
         dom.append_html(q("section.pane"), &pl::settings_markup(&self.settings.borrow()));
         if let Some(c) = dom.find("live-wait-wave") {
-            dom.mount_widget(c, WaveWidget::boxed(self.wait_cfg.clone(), 84, 52, 2.4));
+            dom.mount_widget(c, WaveWidget::boxed(self.wait_cfg.clone(), WavePalette::CYAN, 84, 52, 2.4));
         }
         if let Some(c) = dom.find("live-monitor-wave") {
-            dom.mount_widget(c, WaveWidget::boxed(self.mon_cfg.clone(), 46, 18, 1.6));
+            dom.mount_widget(c, WaveWidget::boxed(self.mon_cfg.clone(), WavePalette::SLATE, 46, 18, 1.6));
         }
         self.mounted = true;
     }

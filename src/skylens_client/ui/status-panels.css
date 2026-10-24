@@ -361,4 +361,6 @@
   /* An alert: on a short screen (a phone) where it meets the minimap (6) or the side panels
      (.sl-surface, 20), it comes out on top. Below the toolbar (30), dialogs and toasts. */
   z-index: 25;
+  /* A toast of its own kind: the same glass as the toasts (style.css .toast). */
+  background: var(--surface-glass);
 }
