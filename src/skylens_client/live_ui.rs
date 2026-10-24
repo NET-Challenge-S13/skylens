@@ -1,14 +1,12 @@
 //! DOM glue of the live-reconstruction panels (`panels_live.rs` holds every rule): mounts the
-//! waiting screen, monitor, timeline and controls bar on the board, keeps them in step with the
-//! [`DeltaLog`], and turns clicks into log commands.
+//! waiting screen, the monitor and the settings panel on the board, keeps them in step with the
+//! [`DeltaLog`], and applies the settings clicks.
 //!
 //! The waiting wave and the monitor's dots are Blitz canvas widgets ([`WaveWidget`]).
 
 use crate::anyrender::{self, PaintScene as _};
 use crate::delta_log::DeltaLog;
-use crate::panels_live::{
-    self as pl, Cmd, ColorMode, Control, LiveSettings, Phase, Replay, Snapshot,
-};
+use crate::panels_live::{self as pl, ColorMode, Display, LiveSettings, Phase, Snapshot};
 use crate::peniko::kurbo::{Affine, Rect};
 use crate::peniko::{Color, Fill};
 use blitz_dom::node::ComputedStyles;
@@ -78,7 +76,10 @@ impl WaveWidget {
         }
         let t = (skylens_viewer::now_ms() - self.t0) / 1000.0;
         let (ca, sa) = ((t * 0.18).cos(), (t * 0.18).sin());
-        let (cx, cy) = (w / 2.0, h * 0.64);
+        // A wide strip (the monitor) gets the field's depth from its width, not its few pixels of
+        // height, centred so the crests stay inside it.
+        let vh = h.max(w * 0.3);
+        let (cx, cy) = (w / 2.0, if vh > h { h * 0.5 + vh * 0.08 } else { h * 0.64 });
         let tf = Affine::scale(scale);
         for i in 0..self.cols {
             for j in 0..self.rows {
@@ -89,8 +90,12 @@ impl WaveWidget {
                 let (xr, yr) = (x * ca - y * sa, x * sa + y * ca);
                 let sc = 1.0 / (1.0 + yr * 0.22);
                 let sx = cx + xr * sc * w * 0.47;
-                let sy = cy + yr * sc * h * 0.2 - hh * sc * h * 0.62;
+                let sy = cy + yr * sc * vh * 0.2 - hh * sc * vh * 0.62;
                 let size = self.dot * sc + 0.3;
+                // A strip (the monitor) is narrower than the wave: dots past its edges are not drawn.
+                if sx < 0.0 || sx > w || sy < 0.0 || sy > h {
+                    continue;
+                }
                 let [r, g, b] = wave_rgb(k);
                 let a = (0.35 + 0.65 * k as f32) * cfg.opacity;
                 scene.fill(Fill::NonZero, tf, Color::new([r, g, b, a]), None, &Rect::new(sx - size / 2.0, sy - size / 2.0, sx + size / 2.0, sy + size / 2.0));
@@ -121,22 +126,19 @@ impl Widget for WaveWidget {
 
 const FLASH_MS: f64 = 1200.0;
 
-/// Remembered DOM text, so a frame without change writes nothing.
+/// Remembered DOM state, so a frame without change writes nothing.
 #[derive(Default)]
 struct Shown {
     wait_sub: String,
     mon: Option<pl::MonitorText>,
-    play: String,
     size: String,
-    speed: u32,
     mode: Option<ColorMode>,
+    display: Option<Display>,
     wait_opacity: Option<i64>,
-    timeline_open: Option<bool>,
 }
 
 pub struct LivePanels {
     pub settings: Rc<RefCell<LiveSettings>>,
-    replay: Replay,
     wait_cfg: Rc<Cell<WaveCfg>>,
     mon_cfg: Rc<Cell<WaveCfg>>,
     wait_fade: f64,
@@ -144,16 +146,16 @@ pub struct LivePanels {
     last_sig: (usize, usize, Option<u32>),
     last_change_ms: f64,
     flash_until: f64,
+    settings_open: bool,
     shown: Shown,
     mounted: bool,
 }
 
 impl LivePanels {
-    /// `settings` is shared with the board, whose point layers read it.
+    /// `settings` is shared with the board, whose views read it.
     pub fn new(settings: Rc<RefCell<LiveSettings>>) -> LivePanels {
         LivePanels {
             settings,
-            replay: Replay::default(),
             wait_cfg: Rc::new(Cell::new(WaveCfg { opacity: 1.0, calm: false })),
             mon_cfg: Rc::new(Cell::new(WaveCfg { opacity: 1.0, calm: false })),
             wait_fade: 1.0,
@@ -161,72 +163,82 @@ impl LivePanels {
             last_sig: (0, 0, None),
             last_change_ms: skylens_viewer::now_ms(),
             flash_until: 0.0,
+            settings_open: false,
             shown: Shown::default(),
             mounted: false,
         }
     }
 
-    /// Appends the panels to the board's pane and mounts the wave widgets.
+    /// Appends the panels and the settings overlay to the board's pane and mounts the wave
+    /// widgets. The settings button is in the template's toolbar (`#board-settings-btn`).
     pub fn mount(&mut self, dom: &mut Dom<'_>) {
-        let markup = pl::live_markup(&self.settings.borrow());
-        dom.append_html(q("section.pane"), &markup);
+        dom.append_html(q("section.pane"), &pl::live_markup());
+        dom.append_html(q("section.pane"), &pl::settings_markup(&self.settings.borrow()));
         if let Some(c) = dom.find("live-wait-wave") {
             dom.mount_widget(c, WaveWidget::boxed(self.wait_cfg.clone(), 84, 52, 2.4));
         }
         if let Some(c) = dom.find("live-monitor-wave") {
-            dom.mount_widget(c, WaveWidget::boxed(self.mon_cfg.clone(), 50, 30, 1.7));
+            dom.mount_widget(c, WaveWidget::boxed(self.mon_cfg.clone(), 46, 18, 1.6));
         }
         self.mounted = true;
     }
 
-    /// Applies panel commands to the log.
-    pub fn apply(log: &mut DeltaLog, cmds: &[Cmd]) {
-        for c in cmds {
-            match *c {
-                Cmd::Seek(seq) => log.seek(seq),
-                Cmd::StepBack => log.step_back(),
-                Cmd::StepForward => log.step_forward(),
-                Cmd::FollowLive => log.follow_live(),
-                Cmd::Unfollow => log.unfollow(),
-            }
-        }
+    fn set_settings_open(&mut self, dom: &mut Dom<'_>, open: bool) {
+        self.settings_open = open;
+        dom.toggle_class("board-settings", "is-hidden", !open);
     }
 
-    fn snapshot(log: &DeltaLog) -> Snapshot<'_> {
-        Snapshot { entries: log.entries(), applied: log.applied(), live: log.is_live() }
-    }
-
-    /// A click or key on the board. True when it was one of ours.
-    pub fn input(&mut self, input: &UiInput, dom: &mut Dom<'_>, log: &mut DeltaLog) -> bool {
+    /// A click on the board. True when it was one of ours.
+    pub fn input(&mut self, input: &UiInput, dom: &mut Dom<'_>) -> bool {
         if !input.is_click() || !self.mounted {
             return false;
         }
         let Some((_, what)) = input.closest_data("live") else { return false };
-        let control = match what {
-            "prev" => Some(Control::Prev),
-            "next" => Some(Control::Next),
-            "play" => Some(Control::PlayPause),
-            "golive" => Some(Control::GoLive),
-            _ => None,
-        };
-        if let Some(c) = control {
-            let cmds = self.replay.control(c, &Self::snapshot(log));
-            Self::apply(log, &cmds);
-            return true;
+        match what {
+            "settings" => {
+                let open = !self.settings_open;
+                self.set_settings_open(dom, open);
+                return true;
+            }
+            "settings-close" => {
+                self.set_settings_open(dom, false);
+                return true;
+            }
+            // Only a click on the dimmed backdrop itself closes; one inside the panel does nothing.
+            "settings-backdrop" => {
+                if input.target().map(|t| t.node) == dom.find("board-settings") {
+                    self.set_settings_open(dom, false);
+                }
+                return true;
+            }
+            _ => {}
         }
         let mut s = self.settings.borrow_mut();
+        let points = s.display == Display::Points;
         match what {
-            "speed" => s.speed = pl::next_speed(s.speed),
-            "size-" => s.point_size = pl::step_size(s.point_size, -1),
-            "size+" => s.point_size = pl::step_size(s.point_size, 1),
-            "fit" => s.fit_requested = true,
-            "mode" => {
+            "display" => {
+                if let Some((_, key)) = input.closest_data("display")
+                    && let Some(d) = Display::from_key(key)
+                {
+                    s.display = d;
+                }
+            }
+            "size-" if points => s.point_size = pl::step_size(s.point_size, -1),
+            "size+" if points => s.point_size = pl::step_size(s.point_size, 1),
+            "mode" if points => {
                 if let Some((_, key)) = input.closest_data("mode")
                     && let Some(m) = ColorMode::from_key(key)
                 {
                     s.color_mode = m;
                 }
             }
+            "fit" => {
+                s.fit_requested = true;
+                drop(s);
+                self.set_settings_open(dom, false);
+                return true;
+            }
+            "size-" | "size+" | "mode" => {}
             _ => return false,
         }
         drop(s);
@@ -238,12 +250,8 @@ impl LivePanels {
         let s = self.settings.borrow().clone();
         let size = pl::size_text(s.point_size);
         if self.shown.size != size {
-            dom.set_text("live-size", &size);
+            dom.set_text("board-size", &size);
             self.shown.size = size;
-        }
-        if self.shown.speed != s.speed {
-            dom.set_text("live-speed", &format!("{}x", s.speed));
-            self.shown.speed = s.speed;
         }
         if self.shown.mode != Some(s.color_mode) {
             for b in dom.find_all("[data-live=mode]") {
@@ -252,34 +260,34 @@ impl LivePanels {
             }
             self.shown.mode = Some(s.color_mode);
         }
+        if self.shown.display != Some(s.display) {
+            for b in dom.find_all("[data-live=display]") {
+                let on = dom.attr(b, "data-display").as_deref() == Some(s.display.key());
+                dom.toggle_class(b, "is-active", on);
+                dom.set_attr(b, "aria-checked", if on { "true" } else { "false" });
+            }
+            dom.toggle_class("board-settings-points", "is-off", s.display != Display::Points);
+            self.shown.display = Some(s.display);
+        }
     }
 
     /// Once per frame. `dt` seconds since the last call, `now` in ms.
-    pub fn poll(&mut self, dom: &mut Dom<'_>, log: &mut DeltaLog, now: f64, dt: f64) {
+    pub fn poll(&mut self, dom: &mut Dom<'_>, log: &DeltaLog, now: f64, dt: f64) {
         if !self.mounted {
             return;
         }
-        // 1. The log moved by itself: a new run, a growing list.
+        // The log moved: a new event flashes the monitor (not a new run, which starts empty).
         let sig = (log.len(), log.applied(), log.run_id());
         if sig != self.last_sig {
-            if sig.2 != self.last_sig.2 || sig.0 < self.last_sig.0 {
-                self.replay.reset();
-            }
             if sig.1 > self.last_sig.1 && sig.2 == self.last_sig.2 {
                 self.flash_until = now + FLASH_MS;
             }
             self.last_change_ms = now;
             self.last_sig = sig;
         }
-        // 2. A running replay.
-        let speed = self.settings.borrow().speed;
-        let cmds = self.replay.tick(dt, speed, &Self::snapshot(log));
-        Self::apply(log, &cmds);
-        let snap = Self::snapshot(log);
-
+        let snap = Snapshot { entries: log.entries(), applied: log.applied(), live: log.is_live() };
         self.render_wait(dom, &snap, now, dt);
         self.render_monitor(dom, &snap, now);
-        self.render_timeline(dom, &snap);
         self.render_settings(dom);
     }
 
@@ -316,7 +324,7 @@ impl LivePanels {
                 Some(m) => {
                     dom.set_style("live-monitor", "display", "block");
                     dom.set_text("live-mon-label", &m.label);
-                    dom.set_text("live-mon-sub", &m.sub);
+                    dom.set_text("live-mon-sub", &m.detail);
                     dom.set_text("live-mon-age", &m.age);
                     dom.toggle_class("live-monitor", "is-done", m.done);
                     self.mon_cfg.set(WaveCfg { opacity: 1.0, calm: m.done });
@@ -329,19 +337,4 @@ impl LivePanels {
         }
         dom.toggle_class("live-monitor", "is-flash", now < self.flash_until);
     }
-
-    /// The controls bar opens with the first event; there is no event list on the board.
-    fn render_timeline(&mut self, dom: &mut Dom<'_>, snap: &Snapshot<'_>) {
-        let open = !snap.entries.is_empty();
-        if self.shown.timeline_open != Some(open) {
-            dom.toggle_class("live-controls", "is-open", open);
-            self.shown.timeline_open = Some(open);
-        }
-        let glyph = pl::play_glyph(self.replay.shows_pause(snap));
-        if self.shown.play != glyph {
-            dom.set_text("live-play", glyph);
-            self.shown.play = glyph.to_string();
-        }
-    }
 }
-

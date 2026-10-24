@@ -10,25 +10,22 @@ use crate::board::Board;
 use crate::card::Card;
 use crate::inset::InsetScene;
 use crate::live_ui::LivePanels;
-use crate::minimap::{MapData, MinimapWidget};
 use crate::panels::{self, BannerInput, PanelState};
 use crate::scene::StatusScene;
 use skylens_shared::proto::model::v1 as model;
-use skylens_shared::proto::payload::v1 as payload;
 use skylens_viewer::camera::{SyncEvent, SyncState};
 use skylens_viewer::link::VIEWER_PATH;
 use skylens_viewer::protocol::{Body, GpuLossAlert};
 use skylens_viewer::widgets::{CardKind, LoadingScreen, NetBadge, ToastKind, Toasts};
 use skylens_viewer::widgets::detection_card::detection_label;
-use skylens_viewer::{CoreLink, Dom, LinkEvent, NodeId, Page, PollCx, ScreenApp, ScreenDocument, SiteFrame, UiInput, View3d, q};
+use skylens_viewer::{CoreLink, Dom, LinkEvent, Page, PollCx, ScreenApp, ScreenDocument, SiteFrame, UiInput, View3d, q};
 use std::cell::RefCell;
-use std::collections::BTreeMap;
 use std::rc::Rc;
 
 /// The legacy template and the board's own stylesheet, both unmodified.
 pub const STATUS_HTML: &str = include_str!("ui/status.html");
 pub const STATUS_PANELS_CSS: &str = include_str!("ui/status-panels.css");
-/// Waiting screen, monitor, timeline and controls bar of the live reconstruction.
+/// Toolbar, monitor, settings panel, delay pattern and minimap of the live reconstruction.
 pub const LIVE_PANELS_CSS: &str = include_str!("ui/live-panels.css");
 
 pub const LOADING_TITLE: &str = "현황판 · 3D 복원 데이터 로딩";
@@ -133,24 +130,17 @@ pub fn options_from_settings(core: Option<&str>, points: Option<&str>) -> Option
     o
 }
 
-/// Ladder row nodes, by segment index, in first-seen order.
-struct LadderRow {
-    pips: Vec<NodeId>,
-    note: NodeId,
-}
-
 pub struct StatusApp {
     link: CoreLink,
     board: Rc<RefCell<Board>>,
     scene: Rc<RefCell<StatusScene>>,
     inset: Option<Rc<RefCell<InsetScene>>>,
-    map: Rc<RefCell<MapData>>,
     loading: Option<LoadingScreen>,
     toasts: Toasts,
     badge: Option<NetBadge>,
     card: Option<Card>,
-    ladder: BTreeMap<u32, LadderRow>,
-    minimap_size: Option<(i64, i64, u32, u32)>,
+    /// The delay pattern's markup as last written.
+    delay: String,
     /// The point panel's inline placement last written (outer None: not written yet).
     inset_place: Option<Option<[f64; 4]>>,
     site_seen: bool,
@@ -169,13 +159,11 @@ impl StatusApp {
             scene: Rc::new(RefCell::new(StatusScene::new(board.clone()))),
             board,
             inset: None,
-            map: Rc::new(RefCell::new(MapData::default())),
             loading: None,
             toasts: Toasts::new(),
             badge: None,
             card: None,
-            ladder: BTreeMap::new(),
-            minimap_size: None,
+            delay: String::new(),
             inset_place: None,
             gpu_alert: GpuLossAlert::default(),
             site_seen: false,
@@ -314,49 +302,19 @@ impl StatusApp {
             let mission = b.mission.as_ref().map(|m| (m.message.as_str(), m.drones_online));
             dom.set_text(*line, &panels::link_line(state, mission, status.badge_text()));
         }
-        // Ladder: in live slot mode one row per zone (the slot events name zones, and the core's
-        // video segments are more numerous than the zones, so rows past the last zone had no
-        // zone/kind to show); otherwise one row per segment the core reports.
-        let zones = crate::panels_live::zone_stats(b.live.entries());
-        let mut segments: std::collections::BTreeMap<u32, u32> = if zones.is_empty() {
-            core.map(|c| c.segments.iter().map(|s| (s.index, panels::level_number(s.level()))).collect()).unwrap_or_default()
+        // Delay pattern: the live stream's zones when there is one, else the core's segments.
+        let grid = if b.live.entries().is_empty() {
+            let segments: Vec<(u32, u32)> =
+                core.map(|c| c.segments.iter().map(|s| (s.index, panels::level_number(s.level()))).collect()).unwrap_or_default();
+            crate::panels_live::delay_grid_segments(&segments)
         } else {
-            zones.keys().map(|z| (*z, 0)).collect()
+            crate::panels_live::delay_grid_live(b.live.entries())
         };
         drop(b);
-        if !zones.is_empty() && self.ladder.keys().any(|k| !zones.contains_key(k)) {
-            dom.replace_children(q(".server-status__ladder"), "");
-            self.ladder.clear();
-        }
-        // Stuck to the newest row unless the operator scrolled up (read before rows are added).
-        let list = dom.find(q(".server-status__ladder"));
-        let stuck = list.is_none_or(|n| {
-            dom.doc_ref().get_node(n).is_none_or(|node| {
-                let max = f64::from((node.scroll_height() - node.client_height()).max(0.0));
-                node.scroll_offset().y >= max - 4.0
-            })
-        });
-        let before = self.ladder.len();
-        for (index, core_level) in std::mem::take(&mut segments) {
-            let zone = zones.get(&index);
-            let level = crate::panels_live::ladder_level(core_level, zone);
-            if !self.ladder.contains_key(&index) {
-                let added = dom.append_html(q(".server-status__ladder"), &panels::ladder_row_markup(index, level));
-                let Some(row) = added.first().copied() else { continue };
-                let pips = dom.find_in(row, ".segment-row__bar").map(|bar| dom.children(bar)).unwrap_or_default();
-                let Some(note) = dom.find_in(row, ".segment-row__note") else { continue };
-                self.ladder.insert(index, LadderRow { pips, note });
-            }
-            let row = &self.ladder[&index];
-            for (i, pip) in row.pips.iter().enumerate() {
-                dom.set_attr(*pip, "data-on", if (i as u32) < level { "1" } else { "0" });
-            }
-            dom.set_text(row.note, &crate::panels_live::ladder_note_zone(level, zone));
-            dom.set_attr(row.note, "data-refining", panels::ladder_refining(level));
-        }
-        if stuck && self.ladder.len() != before && let Some(n) = list {
-            dom.doc().scroll_to(n, 0.0, 1.0e9, blitz_dom::ScrollBehavior::Instant);
-            dom.mark_changed();
+        let markup = crate::panels_live::delay_markup(&grid);
+        if markup != self.delay {
+            dom.replace_children(q(".server-status__ladder"), &markup);
+            self.delay = markup;
         }
     }
 
@@ -410,8 +368,8 @@ impl StatusApp {
     }
 
     /// On a short viewport (a phone on its side) the point panel moves beside the server panel
-    /// instead of under it; see [`panels::inset_placement`]. Inline styles, like the minimap's
-    /// move in `mount`, so `status-panels.css` stays the legacy file.
+    /// instead of under it; see [`panels::inset_placement`]. Inline styles, so the stylesheet keeps
+    /// one placement.
     fn place_inset(&mut self, dom: &mut Dom<'_>) {
         let place = {
             let vp = dom.doc_ref().viewport();
@@ -430,79 +388,20 @@ impl StatusApp {
                 dom.set_style("point-inset", "bottom", "auto");
                 dom.set_style("point-inset", "width", &format!("{width}px"));
                 dom.set_style("point-inset", "height", &format!("{height}px"));
-                // The ladder's `flex: 1 0 100%` only wraps under the dot and body when the panel
-                // has a definite width; shrink-to-fit leaves it beside the body, squeezed to one
-                // glyph per line. 340px is the stylesheet's max-width.
-                dom.set_style("server-status", "width", "400px");
             }
             None => {
                 for prop in ["left", "top", "bottom", "width", "height"] {
                     dom.remove_style("point-inset", prop);
                 }
-                dom.remove_style("server-status", "width");
             }
         }
-    }
-
-    /// The minimap canvas takes the host's inner size, like the legacy `resize`.
-    fn size_minimap(&mut self, dom: &mut Dom<'_>) {
-        let Some(host) = dom.find("minimap") else { return };
-        let Some(canvas) = dom.find(q("#minimap .minimap__canvas")) else { return };
-        let (w, h) = {
-            let doc = dom.doc_ref();
-            let Some(node) = doc.get_node(host) else { return };
-            let l = node.final_layout();
-            let w = (l.size.width - l.border.left - l.border.right).round() as i64;
-            let h = (l.size.height - l.border.top - l.border.bottom).round() as i64;
-            (if w > 0 { w } else { 160 }, if h > 0 { h } else { 160 })
-        };
-        let scale = dom.doc_ref().viewport().scale_f64();
-        let dpr = if scale > 0.0 { scale.min(2.0) } else { 1.0 };
-        let (pw, ph) = (((w as f64) * dpr).round().max(1.0) as u32, ((h as f64) * dpr).round().max(1.0) as u32);
-        if self.minimap_size == Some((w, h, pw, ph)) {
-            return;
-        }
-        self.minimap_size = Some((w, h, pw, ph));
-        dom.set_attr(canvas, "width", &pw.to_string());
-        dom.set_attr(canvas, "height", &ph.to_string());
-        dom.set_style(canvas, "width", &format!("{w}px"));
-        dom.set_style(canvas, "height", &format!("{h}px"));
-    }
-
-    fn update_map(&mut self) {
-        let b = self.board.borrow();
-        let active = b.active_drone;
-        let mut m = self.map.borrow_mut();
-        m.drones = b.drones.iter().map(|d| ([d.pos.x, d.pos.y], Some(d.id) == active)).collect();
-        m.detections = b
-            .store
-            .visible_detections()
-            .filter_map(|d| {
-                let p = b.detection_pos(d)?;
-                Some(([p.x, p.y], d.category() == payload::DetectionCategory::Person))
-            })
-            .collect();
-        m.route = b.route.as_ref().map(|r| r.iter().map(|p| [p.x, p.y]).collect()).unwrap_or_default();
-        m.chunks = b.segment_centers().into_iter().map(|(_, c)| [c.x, c.y]).collect();
     }
 }
 
 impl ScreenApp for StatusApp {
     fn mount(&mut self, dom: &mut Dom<'_>) {
         dom.mount_widget("status-view", View3d::boxed(self.scene.clone()));
-        if let Some(canvas) = dom.find(q("#minimap .minimap__canvas")) {
-            dom.mount_widget(canvas, MinimapWidget::boxed(self.map.clone()));
-        }
         self.badge = NetBadge::mount(dom, "net-status");
-        if dom.find("minimap").is_some() {
-            // The legacy CSS put the minimap top-right, where it hid the link badge (both are
-            // `right: 16px`), after it had been moved there from bottom-right because the
-            // detection card covered it. Keep it bottom-right and stack the card above it:
-            // 16 px margin + 200 px minimap + 12 px gap.
-            dom.set_style("minimap", "top", "auto");
-            dom.set_style("minimap", "bottom", "16px");
-            dom.set_style(q("#overlay-status .detect-card"), "bottom", "228px");
-        }
         self.card = Card::bind(dom);
         self.live.mount(dom);
         self.loading = LoadingScreen::mount(dom, LOADING_TITLE);
@@ -531,9 +430,7 @@ impl ScreenApp for StatusApp {
         self.render_server_panel(dom);
         self.render_banner(dom);
         self.render_points(dom);
-        self.size_minimap(dom);
-        self.update_map();
-        self.live.poll(dom, &mut self.board.borrow_mut().live, now, dt);
+        self.live.poll(dom, &self.board.borrow().live, now, dt);
 
         if let Some(l) = &mut self.loading {
             l.tick(dom, now);
@@ -546,7 +443,7 @@ impl ScreenApp for StatusApp {
     }
 
     fn input(&mut self, input: &UiInput, dom: &mut Dom<'_>) -> bool {
-        if self.live.input(input, dom, &mut self.board.borrow_mut().live) {
+        if self.live.input(input, dom) {
             return true;
         }
         if Card::is_confirm(input) {
@@ -619,7 +516,7 @@ mod tests {
         assert_eq!(p.stylesheets.last().map(String::as_str), Some(LIVE_PANELS_CSS));
         assert!(p.stylesheets.iter().any(|c| c == STATUS_PANELS_CSS));
         let html = p.html();
-        for id in ["status-view", "overlay-status", "net-status", "server-status", "minimap", "board-waiting", "point-toggle", "toast-root"] {
+        for id in ["status-view", "overlay-status", "board-toolbar", "board-settings-btn", "net-status", "server-status", "board-waiting", "point-toggle", "toast-root"] {
             assert!(html.contains(&format!("id=\"{id}\"")), "{id}");
         }
     }

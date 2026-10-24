@@ -160,7 +160,7 @@ pub fn point_meta(on: bool, delivered: usize, refined: usize, points: u64) -> St
 /// The point panel's markup (legacy `PointInset` constructor), open or closed.
 pub fn inset_markup(open: bool) -> String {
     format!(
-        "<div class=\"{}\" id=\"point-inset\"><div class=\"point-inset__title\">점 · 고도색</div><div class=\"point-inset__view\" title=\"드래그: 회전 · 휠: 확대 · 더블클릭: 전체 보기\"><div class=\"point-inset__empty\">불러오는 중</div></div><div class=\"point-inset__legend\"><span class=\"point-inset__tick point-inset__tick--high\"></span><div class=\"point-inset__bar\" style=\"background: {};\"></div><span class=\"point-inset__tick point-inset__tick--low\"></span><span class=\"point-inset__caption\">하위 1% 높이 기준</span></div></div>",
+        "<div class=\"{}\" id=\"point-inset\"><div class=\"point-inset__title\">미니맵 · 고도</div><div class=\"point-inset__view\" title=\"드래그: 회전 · 휠: 확대 · 더블클릭: 처음 시점\"><div class=\"point-inset__empty\">불러오는 중</div></div><div class=\"point-inset__legend\"><span class=\"point-inset__tick point-inset__tick--high\"></span><div class=\"point-inset__bar\" style=\"background: {};\"></div><span class=\"point-inset__tick point-inset__tick--low\"></span><span class=\"point-inset__caption\">하위 1% 높이 기준</span></div></div>",
         if open { "point-inset is-open" } else { "point-inset" },
         crate::points::legend_gradient(),
     )
@@ -174,8 +174,9 @@ pub const SHORT_VIEWPORT_PX: f64 = 600.0;
 /// `status-panels.css` stacks the server panel down from the top-left (`top: 54px`) and the
 /// point panel up from the bottom-left (`bottom: 58px`, 250 px tall). On a phone on its side
 /// (about 410 px tall) the server panel's ladder ran into the point panel. There the panel moves
-/// beside the server panel's column (16 px + 340 px max-width + 16 px gap) and stays clear of the
-/// bottom-right minimap (16 px + 200 px + 16 px). None keeps the stylesheet's placement.
+/// beside the server panel's column (16 px + 340 px max-width + 16 px gap) and leaves a 232 px
+/// column on the right for the detection card in the bottom-right corner. None keeps the
+/// stylesheet's placement.
 pub fn inset_placement(viewport_w: f64, viewport_h: f64) -> Option<[f64; 4]> {
     if !(viewport_h > 0.0 && viewport_h <= SHORT_VIEWPORT_PX) {
         return None;
@@ -252,6 +253,7 @@ mod tests {
         let m = inset_markup(true);
         assert!(m.starts_with("<div class=\"point-inset is-open\" id=\"point-inset\">"));
         assert!(m.contains("하위 1% 높이 기준"));
+        assert!(m.contains("미니맵 · 고도") && m.contains("더블클릭: 처음 시점"));
         assert!(inset_markup(false).starts_with("<div class=\"point-inset\" id=\"point-inset\">"));
     }
 
@@ -261,7 +263,7 @@ mod tests {
         assert_eq!(inset_placement(1920.0, 1080.0), None);
         assert_eq!(inset_placement(411.0, 914.0), None);
         assert_eq!(inset_placement(0.0, 0.0), None);
-        // Pixel 7 landscape (2400 x 1080 at 2.625): beside the server column, above the minimap.
+        // Pixel 7 landscape (2400 x 1080 at 2.625): beside the server column, clear of the right edge.
         assert_eq!(inset_placement(914.0, 411.0), Some([372.0, 54.0, 310.0, 250.0]));
         // Shorter still: the panel shrinks to fit under the top row.
         assert_eq!(inset_placement(1200.0, 300.0), Some([372.0, 54.0, 380.0, 230.0]));

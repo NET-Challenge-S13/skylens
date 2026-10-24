@@ -13,6 +13,7 @@
 
 use crate::board::{Board, LiveView};
 use crate::live_layer::{LiveLayer, Paint};
+use crate::panels_live::Display;
 use crate::follow::{self, FollowInput, Follower};
 use crate::glam::DVec3;
 use crate::markers;
@@ -37,6 +38,12 @@ const BG_RGB: [u8; 3] = [0x0d, 0x0f, 0x14];
 /// The legacy scene light on a mesh: `AmbientLight(0xffe8cf, 0.35)` (a hemisphere light with the
 /// same sky and ground colour is the same thing) and `DirectionalLight(0xfff1d8, 0.5)` at
 /// three.js (10, 20, 8), i.e. ENU (10, -8, 20). Opaque at `alpha` 1, blended below.
+/// Mesh opacity for a segment whose reveal fade is at `fade`: the fade itself under the points,
+/// or, with the mesh shown alone, scaled so a first delivery's fade ends fully opaque.
+pub fn mesh_opacity(fade: f32, mesh_only: bool) -> f32 {
+    if mesh_only { (fade / crate::reveal::alpha_for_level(skylens_shared::proto::model::v1::Level::Preview)).min(1.0) } else { fade }
+}
+
 pub fn lambert(alpha: f32) -> Material {
     let ambient = config::rgb(0xffe8cf);
     let d = DVec3::new(10.0, -8.0, 20.0).normalize();
@@ -256,13 +263,16 @@ impl ViewScreen for StatusScene {
         // Points: one scene per segment, faded in on arrival; the slot stream as the animated
         // live layer (fade and glide per point), coloured as the controls bar says.
         gpu.sync_segments(&board.store, 0.0);
-        let (mode, scale, fit) = {
+        let (mode, scale, fit, display) = {
             let mut st = board.settings.borrow_mut();
             let fit = std::mem::take(&mut st.fit_requested);
-            (st.color_mode, st.point_size, fit)
+            (st.color_mode, st.point_size, fit, st.display)
         };
+        // The mesh display hides the points, but only once there is a mesh to show instead.
+        let mesh_only = display == Display::Mesh && board.store.mesh_block_count() > 0;
         let paint = Paint::of(mode, board.height_range());
         self.layer.pump(gpu, &mut board, paint, BG_RGB, info.now_ms / 1000.0);
+        gpu.clouds.set_live_visible(!mesh_only);
         if fit {
             self.fit_view(&board, info);
         }
@@ -272,15 +282,18 @@ impl ViewScreen for StatusScene {
         self.fade.update(info.dt);
         board.first_progress = self.fade.first_progress();
         for (seg, a) in self.fade.segments() {
-            gpu.clouds.set_alpha(segment_cloud(seg), a);
+            gpu.clouds.set_alpha(segment_cloud(seg), if mesh_only { 0.0 } else { a });
         }
 
-        // Mesh blocks, lit like the legacy scene, faded with their segment.
+        // Mesh blocks, lit like the legacy scene, faded with their segment. Shown alone, the mesh
+        // is the surface itself and goes opaque once its fade is through (a first delivery is
+        // otherwise translucent under its points).
         let fade = &self.fade;
-        gpu.sync_mesh_blocks(&board.store, |e| lambert(fade.alpha(e.segment)));
-        let alphas: BTreeMap<u32, f32> = fade.segments().collect();
+        let mesh_alpha = |seg: u32| mesh_opacity(fade.alpha(seg), mesh_only);
+        gpu.sync_mesh_blocks(&board.store, |e| lambert(mesh_alpha(e.segment)));
+        let alphas: BTreeMap<u32, f32> = fade.segments().map(|(s, _)| (s, mesh_alpha(s))).collect();
         if alphas != self.mesh_alpha {
-            gpu.restyle_mesh_blocks(&board.store, |e| lambert(fade.alpha(e.segment)));
+            gpu.restyle_mesh_blocks(&board.store, |e| lambert(mesh_alpha(e.segment)));
             self.mesh_alpha = alphas;
         }
 
@@ -329,6 +342,15 @@ impl ViewScreen for StatusScene {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_mesh_shown_alone_ends_opaque() {
+        assert_eq!(mesh_opacity(0.31, false), 0.31);
+        assert!((mesh_opacity(0.31, true) - 0.5).abs() < 1e-6);
+        assert_eq!(mesh_opacity(0.62, true), 1.0);
+        assert_eq!(mesh_opacity(1.0, true), 1.0);
+        assert_eq!(mesh_opacity(0.0, true), 0.0);
+    }
 
     #[test]
     fn mesh_light_is_the_legacy_scene_light() {

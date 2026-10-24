@@ -113,6 +113,34 @@ pub fn pin_material(person: bool) -> Material {
     m
 }
 
+/// A drone on the minimap: an octahedron (a diamond seen from the side) of half-height `radius`
+/// centred on `pos`, faceted.
+pub fn drone_mesh(pos: DVec3, radius: f64) -> MeshData {
+    let r = radius;
+    let positions = vec![
+        (pos + DVec3::X * r).to_array(),
+        (pos + DVec3::Y * r).to_array(),
+        (pos - DVec3::X * r).to_array(),
+        (pos - DVec3::Y * r).to_array(),
+        (pos + DVec3::Z * r).to_array(),
+        (pos - DVec3::Z * r).to_array(),
+    ];
+    let mut indices = Vec::with_capacity(24);
+    for i in 0..4u32 {
+        let j = (i + 1) % 4;
+        // Upper and lower faces, counter-clockwise seen from outside.
+        indices.extend([i, j, 4]);
+        indices.extend([j, i, 5]);
+    }
+    MeshData { positions, indices, flat: true, ..Default::default() }
+}
+
+/// A marker drawn flat in full colour, unlit: on the minimap a lit pin a few pixels tall reads as
+/// a dark speck against the height colours.
+pub fn flat_material(rgb: u32) -> Material {
+    Material { shading: Shading::Unlit, tint: config::rgba(rgb, 1.0), blend: Blend::Opaque, double_sided: true }
+}
+
 /// The ring's look: flat colour at 0.8 opacity, both sides (legacy `MeshBasicMaterial`).
 pub fn ring_material(person: bool) -> Material {
     Material {
@@ -178,10 +206,28 @@ mod tests {
     }
 
     #[test]
+    fn the_drone_diamond_is_closed_and_centred() {
+        let c = DVec3::new(5.0, -3.0, 40.0);
+        let m = drone_mesh(c, 2.0);
+        assert_eq!(m.positions.len(), 6);
+        assert_eq!(m.indices.len(), 24);
+        assert!(m.indices.iter().all(|i| (*i as usize) < m.positions.len()));
+        // Every face's normal points away from the centre (outward winding).
+        for f in m.indices.chunks_exact(3) {
+            let [a, b, d] = [f[0], f[1], f[2]].map(|i| DVec3::from(m.positions[i as usize]));
+            let n = (b - a).cross(d - a);
+            assert!(n.dot((a + b + d) / 3.0 - c) > 0.0);
+        }
+        let top = m.positions.iter().map(|p| p[2]).fold(f64::NEG_INFINITY, f64::max);
+        assert!((top - 42.0).abs() < 1e-12);
+    }
+
+    #[test]
     fn colours_follow_the_kind() {
         assert_eq!(marker_color(true), 0x39d98a);
         assert_eq!(marker_color(false), 0xff4d4d);
         assert_eq!(ring_material(true).tint[3], 0.8);
         assert_eq!(ring_material(false).blend, Blend::Alpha);
+        assert_eq!(flat_material(marker_color(true)).tint, [0x39 as f32 / 255.0, 0xd9 as f32 / 255.0, 0x8a as f32 / 255.0, 1.0]);
     }
 }

@@ -10,7 +10,8 @@
 //! - [`scene`] / [`inset`]: the main reconstruction view and the point panel's view
 //! - [`follow`], [`reveal`], [`markers`], [`points`]: camera rules, arrival fade, detection
 //!   markers, point chunk reading (pure, tested)
-//! - [`minimap`], [`card`], [`panels`]: the minimap widget, the detection card, panel text
+//! - [`card`], [`panels`], [`panels_live`], [`live_ui`]: the detection card, panel text, the live
+//!   panels (monitor, settings, delay pattern) and their DOM glue
 
 pub mod app;
 pub mod board;
@@ -21,7 +22,6 @@ pub mod inset;
 pub mod live_layer;
 pub mod live_ui;
 pub mod markers;
-pub mod minimap;
 pub mod panels;
 pub mod panels_live;
 pub mod points;

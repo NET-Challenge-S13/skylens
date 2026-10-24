@@ -152,6 +152,8 @@ pub struct PointClouds {
     slots: Option<SlotCloud>,
     /// The animated live layer (two slot scenes), when the screen drives one.
     live: Option<LiveSlots>,
+    /// The live layer is fed and animated but not drawn (a screen showing the mesh instead).
+    live_hidden: bool,
 }
 
 impl PointClouds {
@@ -192,6 +194,11 @@ impl PointClouds {
 
     pub fn live_ref(&self) -> Option<&LiveSlots> {
         self.live.as_ref()
+    }
+
+    /// Draws the live layer or leaves it out; it keeps taking batches either way.
+    pub fn set_live_visible(&mut self, visible: bool) {
+        self.live_hidden = !visible;
     }
 
     pub fn contains(&self, id: u64) -> bool {
@@ -365,7 +372,7 @@ impl PointClouds {
             .filter(|s| s.visible && s.alpha > 0.0 && s.scene.points() > 0)
             .map(|s| (&s.scene, s.alpha))
             .collect();
-        if let Some(live) = &self.live {
+        if let Some(live) = self.live.as_ref().filter(|_| !self.live_hidden) {
             list.extend(live.scenes().into_iter().filter(|s| s.points() > 0).map(|s| (s, 1.0)));
         }
         list.into_iter().unzip()

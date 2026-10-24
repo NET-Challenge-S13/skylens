@@ -5253,7 +5253,6 @@ dependencies = [
  "anyhow",
  "blitz-dom",
  "prost",
- "skrifa",
  "skylens-shared",
  "skylens-viewer",
  "wasm-bindgen",

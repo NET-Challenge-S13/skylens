@@ -26,10 +26,8 @@ skylens-shared.workspace = true
 skylens-viewer.workspace = true
 prost.workspace = true
 anyhow.workspace = true
-# Glyph lookup for the minimap's scale label (the same version vello and parley use).
-skrifa = "0.44"
 
-# The minimap is a Blitz custom widget, so the board needs the Widget trait itself.
+# The waiting and monitor waves are Blitz custom widgets, so the board needs the Widget trait itself.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 blitz-dom = { workspace = true, features = ["custom-widget"] }
 
