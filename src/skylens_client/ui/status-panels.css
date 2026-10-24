@@ -171,15 +171,20 @@
 .delay__cell[data-hue='6'] { background: rgba(163, 172, 201, 0.1); border-color: rgba(163, 172, 201, 0.4); color: #a3acc9; }
 .delay__cell[data-hue='7'] { background: rgba(191, 191, 148, 0.1); border-color: rgba(191, 191, 148, 0.4); color: #bfbf94; }
 
-/* The newest delivery: a heavier outline in the full hue (border plus an inner ring). */
-.delay__cell.is-new[data-hue='0'] { border-color: #8fb3c9; box-shadow: inset 0 0 0 1px #8fb3c9, 0 0 6px rgba(143, 179, 201, 0.35); }
-.delay__cell.is-new[data-hue='1'] { border-color: #9fbf9f; box-shadow: inset 0 0 0 1px #9fbf9f, 0 0 6px rgba(159, 191, 159, 0.35); }
-.delay__cell.is-new[data-hue='2'] { border-color: #c9b48f; box-shadow: inset 0 0 0 1px #c9b48f, 0 0 6px rgba(201, 180, 143, 0.35); }
-.delay__cell.is-new[data-hue='3'] { border-color: #b39fc4; box-shadow: inset 0 0 0 1px #b39fc4, 0 0 6px rgba(179, 159, 196, 0.35); }
-.delay__cell.is-new[data-hue='4'] { border-color: #8fc2bb; box-shadow: inset 0 0 0 1px #8fc2bb, 0 0 6px rgba(143, 194, 187, 0.35); }
-.delay__cell.is-new[data-hue='5'] { border-color: #c49f9f; box-shadow: inset 0 0 0 1px #c49f9f, 0 0 6px rgba(196, 159, 159, 0.35); }
-.delay__cell.is-new[data-hue='6'] { border-color: #a3acc9; box-shadow: inset 0 0 0 1px #a3acc9, 0 0 6px rgba(163, 172, 201, 0.35); }
-.delay__cell.is-new[data-hue='7'] { border-color: #bfbf94; box-shadow: inset 0 0 0 1px #bfbf94, 0 0 6px rgba(191, 191, 148, 0.35); }
+/* The newest delivery: a 2px border in the full hue (an inset shadow drew a second line in Blitz).
+   Same box size: border-box, and the line height drops by the extra pixel on each side. */
+.delay__cell.is-new {
+  border-width: 2px;
+  line-height: 16px;
+}
+.delay__cell.is-new[data-hue='0'] { border-color: #8fb3c9; box-shadow: 0 0 6px rgba(143, 179, 201, 0.35); }
+.delay__cell.is-new[data-hue='1'] { border-color: #9fbf9f; box-shadow: 0 0 6px rgba(159, 191, 159, 0.35); }
+.delay__cell.is-new[data-hue='2'] { border-color: #c9b48f; box-shadow: 0 0 6px rgba(201, 180, 143, 0.35); }
+.delay__cell.is-new[data-hue='3'] { border-color: #b39fc4; box-shadow: 0 0 6px rgba(179, 159, 196, 0.35); }
+.delay__cell.is-new[data-hue='4'] { border-color: #8fc2bb; box-shadow: 0 0 6px rgba(143, 194, 187, 0.35); }
+.delay__cell.is-new[data-hue='5'] { border-color: #c49f9f; box-shadow: 0 0 6px rgba(196, 159, 159, 0.35); }
+.delay__cell.is-new[data-hue='6'] { border-color: #a3acc9; box-shadow: 0 0 6px rgba(163, 172, 201, 0.35); }
+.delay__cell.is-new[data-hue='7'] { border-color: #bfbf94; box-shadow: 0 0 6px rgba(191, 191, 148, 0.35); }
 
 /* Older steps scrolled off to the left. */
 .delay__cell--more {
