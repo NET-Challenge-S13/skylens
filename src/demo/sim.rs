@@ -402,13 +402,30 @@ pub async fn run_drones(core: String, follow_route: bool, flight: Flight) -> any
 }
 
 /// Watch `/control`: log mission phases, and with `auto` assign that route once the tower
-/// socket has been up for a few seconds. Returns when the socket fails.
+/// socket has been up for a few seconds. The core drops every screen socket when a new mission
+/// starts (screens reconnect to an empty world), so a closed socket is reopened; only a failed
+/// reconnect ends the watch. The route is assigned once, not again on every reconnect.
 pub async fn run_control_watch(core: String, auto: Option<viewer::AssignRoute>) -> anyhow::Result<()> {
     let url = format!("ws://{core}/control");
-    let ws = connect(&url).await?;
+    let mut auto = auto;
+    let mut last_phase = None;
+    loop {
+        let reason = watch_session(&url, &mut auto, &mut last_phase).await?;
+        log("tower", &format!("관제탑 소켓이 닫혔습니다 ({reason}). 다시 연결합니다"));
+        tokio::time::sleep(Duration::from_secs(1)).await;
+    }
+}
+
+/// One `/control` connection. `Err` when it cannot connect, `Ok(reason)` when the open socket
+/// ends. Takes `auto` once its route has been sent.
+async fn watch_session(
+    url: &str,
+    auto: &mut Option<viewer::AssignRoute>,
+    last_phase: &mut Option<i32>,
+) -> anyhow::Result<String> {
+    let ws = connect(url).await?;
     let (mut sink, mut stream) = ws.split();
     let mut assign_at = auto.is_some().then(|| tokio::time::Instant::now() + Duration::from_secs(3));
-    let mut last_phase = None;
     loop {
         let at = assign_at;
         let wait = async move {
@@ -420,17 +437,20 @@ pub async fn run_control_watch(core: String, auto: Option<viewer::AssignRoute>) 
         tokio::select! {
             _ = wait => {
                 assign_at = None;
-                if let Some(r) = &auto {
+                if let Some(r) = auto.take() {
                     let env = envelope(1, Body::AssignRoute(r.clone()));
-                    sink.send(WsMessage::Binary(env.encode_to_vec().into())).await?;
+                    if let Err(e) = sink.send(WsMessage::Binary(env.encode_to_vec().into())).await {
+                        *auto = Some(r);
+                        return Ok(format!("assign: {e}"));
+                    }
                     log("auto", &format!("--auto: 미리 계획된 경로({}개 지점)를 배정했습니다", r.waypoints.len()));
                 }
             }
             frame = stream.next() => match frame {
                 Some(Ok(WsMessage::Binary(b))) => {
                     match Envelope::decode(&b[..]) {
-                        Ok(Envelope { body: Some(Body::MissionStatus(s)), .. }) if last_phase != Some(s.phase) => {
-                            last_phase = Some(s.phase);
+                        Ok(Envelope { body: Some(Body::MissionStatus(s)), .. }) if *last_phase != Some(s.phase) => {
+                            *last_phase = Some(s.phase);
                             log("tower", &format!("미션: {} ({}) 드론 {}대", phase_name(s.phase), s.message, s.drones_online));
                         }
                         Ok(Envelope { body: Some(Body::PlannedRoute(p)), .. }) => {
@@ -439,9 +459,9 @@ pub async fn run_control_watch(core: String, auto: Option<viewer::AssignRoute>) 
                         _ => {}
                     }
                 }
-                Some(Ok(WsMessage::Close(_))) | None => anyhow::bail!("control socket closed by the core"),
+                Some(Ok(WsMessage::Close(_))) | None => return Ok("closed by the core".into()),
                 Some(Ok(_)) => {}
-                Some(Err(e)) => anyhow::bail!("control socket: {e}"),
+                Some(Err(e)) => return Ok(e.to_string()),
             },
         }
     }
