@@ -165,7 +165,7 @@ related: "[[INTENT.md]], [[COMPONENTS.md]], [[ARCHITECTURE.md]], [[NETWORK_ARCHI
 - 노드는 `ReconNode::declare()`로 선언하고 `CompositionHost`가 id로 들고 있는다. 프레임 묶음(`LiveFrameSet`, 키는 `FrameKey(드론, 순번, 개정)`)을 `compose`하면 새 묶음만 한 번 들어가고, 재선언은 무시되며, 카메라가 빠진 묶음은 기다린다.
 - 늦게 오거나 고쳐진 프레임은 노드의 reconcile 정책(append-only / replay window / zone invalidation / strict)을 따른다.
 - 구간은 `zones(span, overlap)`으로 나눈다. 같은 구간 번호는 항상 같은 공간 조각을 가리킨다.
-- 메시는 deltamesh `SdfMesher`(GPU는 `GpuMesher`, 프로세스당 장치 하나)다. 0.05 m 복셀(deltamesh 기본값 0.2 m의 1/4, 점 묶음 0.025 m·영향 반경 0.1 m도 같은 비율), 32³ 블록. 경계 정점이 이웃 블록과 비트 단위로 같아 균열 없이 이어진다.
+- 메시는 deltamesh `SdfMesher`(GPU는 `GpuMesher`, 프로세스당 장치 하나)다. 0.05 m 복셀과 0.025 m 점 묶음(deltamesh 기본값의 1/4), 영향 반경 0.2 m(점 사이 빈틈을 잇는 거리. 0.1 m로 줄이면 점이 성긴 곳에 구멍이 났다), 32³ 블록. 경계 정점이 이웃 블록과 비트 단위로 같아 균열 없이 이어진다.
 - deltamesh는 crates.io 릴리스(0.1.1)를 쓴다. 유니폼 간격을 GPU 정렬값의 배수로 맞추는 수정(정렬값 64바이트 GPU에서 첫 구간이 멈추던 문제)이 릴리스에 들어 있다. 벤더 복사본은 없다.
 - 렌더링은 pointblitz(0.3)다. 점 청크는 16비트 위치(포맷 v2)이고 파싱은 메인 스레드 밖에서 한다. 점 슬롯은 `SlotScene` 하나(칸 = 슬롯 id, 칸당 16바이트)에 쌓고, 같은 패스에서 점 청크 장면들과 함께 그린다. 메시 블록은 pointblitz에 더한 메시 렌더 경로가 정점 색에 흰 빛(고른 빛 0.85 + 위에서 오는 빛 0.15)만 얹어 그린다. 현황판의 메시 표시는 메시가 오면 메시만 그린다(0.05 m 메시가 세부를 가지며, 위에 점을 겹치면 가까이서 자글자글해 보였다). 점 표시는 메시를 그리지 않는다.
 - cumulus3d는 crates.io 릴리스(0.11)를 쓴다. 전체 GPU SIFT, CUDA BA·희소 단계는 릴리스에 들어 있고 `.gpu()`가 고른다. 벤더 복사본은 없다. 새 릴리스는 `cumulus3d-sync.yml`이 `deps/cumulus3d-v<버전>` PR로 따라간다(`docs/CUMULUS3D_SYNC.md`).
