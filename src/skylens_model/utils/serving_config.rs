@@ -19,7 +19,7 @@
 //! | `SKYLENS_GRPC_ADDR`     | `0.0.0.0:8101` | gRPC `skylens.model.v1.ModelService` listener |
 //! | `SKYLENS_CHECKPOINT`    | unset          | SkyLensNet checkpoint; unset = live mode runs without a detector |
 //! | `SKYLENS_CAMERAS`       | `left,center,right` | camera names in a frame set |
-//! | `SKYLENS_ZONE_SPAN`     | `6`            | cumulus3d zone span, in frame sets |
+//! | `SKYLENS_ZONE_SPAN`     | `4`            | cumulus3d zone span, in frame sets (6 before: the first zone took long to show) |
 //! | `SKYLENS_ZONE_OVERLAP`  | `2`            | cumulus3d zone overlap, in frame sets |
 //! | `SKYLENS_SETTLE_TOL`    | `0.02`         | stable display: intrinsics count as settled when two refined zones' focal lengths differ by less than this (relative) |
 //! | `SKYLENS_SETTLE_MAX_ZONE` | `1`          | stable display: intrinsics are frozen at this zone at the latest (earlier zones may be re-densified once) |
@@ -28,7 +28,7 @@
 //! | `SKYLENS_GPU`           | unset (= CUDA available) | force the GPU backends on or off |
 //! | `SKYLENS_STABLE_DISPLAY` | `1`           | cumulus3d stable display: points leave as the live diff stream (point slot chunks); `0` = zone previews and refined zones as point chunks |
 //! | `SKYLENS_LIVE_STRIDE`   | `2`            | stable display: keep 1 of this many points in the live display (1 = every point) |
-//! | `SKYLENS_ZONE_PREVIEW`  | `0` (off)      | stable display: sparse zone previews as `Preview` deltas (slot_kind 4) before the refined zone |
+//! | `SKYLENS_ZONE_PREVIEW`  | `1` (on)       | stable display: sparse zone previews as `Preview` deltas (slot_kind 4) before the refined zone; `0` = refined zones only |
 //! | `SKYLENS_BACKLOG_BATCH` | `1` (off)      | backlog batching threshold; positions waiting at least this many are processed as one batch. Default off: batching > 1 in cumulus3d 0.11.0 shrinks the display scale ~30x (upstream bug) |
 //! | `SKYLENS_CAMERA_JSON`  | built-in demo camera | camera intrinsics prior. Unset: built-in DJI FC9589 1920x1080 (fx 1505, fy 1510, cx 960, cy 540; theater30 self-calibration, the footage camera.json 1329 is 12% low). A set path overrides it; a missing file means no prior |
 //! | `SKYLENS_FRAME_WIDTH`   | unset (= the file's `video_width`) | width of the pushed frames; the prior's fx, fy, cx, cy are scaled by this / `video_width` |
@@ -73,7 +73,7 @@ pub struct Settings {
     pub stable_display: bool,
     /// Stable display: live display thinning (1 of this many points, at least 1).
     pub live_stride: usize,
-    /// Stable display: sparse zone previews as `Preview` deltas (`SKYLENS_ZONE_PREVIEW`, default off).
+    /// Stable display: sparse zone previews as `Preview` deltas (`SKYLENS_ZONE_PREVIEW`, default on).
     pub zone_preview: bool,
     /// Backlog batch threshold (`SKYLENS_BACKLOG_BATCH`; default 1 = off).
     pub backlog_batch: Option<usize>,
@@ -146,14 +146,14 @@ impl Settings {
                 .filter(|s| !s.is_empty())
                 .map(PathBuf::from),
             cameras,
-            zone_span: int("SKYLENS_ZONE_SPAN", 6),
+            zone_span: int("SKYLENS_ZONE_SPAN", 4),
             zone_overlap: int("SKYLENS_ZONE_OVERLAP", 2),
             work_dir: get("SKYLENS_WORK_DIR")
                 .map(PathBuf::from)
                 .unwrap_or_else(|| repo_root().join("runs").join("model")),
             gpu: flag("SKYLENS_GPU"),
             stable_display: flag("SKYLENS_STABLE_DISPLAY").unwrap_or(true),
-            zone_preview: flag("SKYLENS_ZONE_PREVIEW").unwrap_or(false),
+            zone_preview: flag("SKYLENS_ZONE_PREVIEW").unwrap_or(true),
             backlog_batch: Some(get("SKYLENS_BACKLOG_BATCH").and_then(|v| v.trim().parse().ok()).unwrap_or(1)),
             live_stride: int("SKYLENS_LIVE_STRIDE", crate::models::skylens::DEFAULT_LIVE_STRIDE).max(1),
             camera_json: Some(
@@ -233,8 +233,8 @@ mod tests {
         assert!(s.stable_display);
         assert_eq!(s.live_stride, 2);
         assert!(s.zone_preview);
-        assert_eq!(s.backlog_batch, None);
-        assert_eq!((s.zone_span, s.zone_overlap), (6, 2));
+        assert_eq!(s.backlog_batch, Some(1));
+        assert_eq!((s.zone_span, s.zone_overlap), (4, 2));
         assert_eq!((s.settle_tol, s.settle_max_zone), (0.02, 1));
         assert_eq!((s.focal_sigma, s.dist_sigma), (0.02, 0.01));
     }

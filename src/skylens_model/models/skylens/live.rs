@@ -39,7 +39,11 @@ use deltamesh::Mesher;
 use skylens_shared::geo::GeoAnchor;
 use skylens_shared::proto::model::v1::Level;
 
+use skylens_shared::proto::model::v1::Chunk;
+use skylens_shared::proto::payload::v1::DetectionBatch;
+
 use super::chunks::{ChunkLog, detections_chunk, mesh_chunk, points_delivery};
+use super::frames::FrameClock;
 use super::fusion::{FrameObservation, Fuser};
 use super::recon::{positions_f64, zone_points, zone_views};
 use super::slotstream::{SlotEncoder, align_delta};
@@ -125,13 +129,19 @@ fn spawn(name: &str, f: impl FnOnce() + Send + 'static) -> anyhow::Result<JoinHa
     Ok(std::thread::Builder::new().name(name.into()).spawn(f)?)
 }
 
-/// Runs the UNet on queued frames and hands the observations to the consumer.
-pub fn spawn_detector(queue: Arc<FrameQueue>, det: Arc<dyn Detector>, tx: Sender<Msg>) -> anyhow::Result<JoinHandle<()>> {
+/// Runs the UNet on queued frames and hands the observations to the consumer, tagged with the
+/// drone and capture time `clock` knows for the frame.
+pub fn spawn_detector(
+    queue: Arc<FrameQueue>,
+    det: Arc<dyn Detector>,
+    clock: Arc<FrameClock>,
+    tx: Sender<Msg>,
+) -> anyhow::Result<JoinHandle<()>> {
     spawn("skylens-detect", move || {
         while let Some(f) = queue.pop() {
             match catch_unwind(AssertUnwindSafe(|| det.detect(&f.rgb, None, f.width, f.height))) {
                 Ok(Ok(d)) => {
-                    let obs = FrameObservation::from_detections(&d);
+                    let obs = FrameObservation::from_detections(&d).with_source(clock.source_of(&f.name, &f.camera));
                     if tx.send(Msg::Observation { name: f.name.clone(), obs }).is_err() {
                         return;
                     }
@@ -230,7 +240,7 @@ pub struct Consumer {
     detecting: bool,
     positions: HashMap<String, usize>,
     refined_generation: HashMap<u32, u32>,
-    detection_version: HashMap<u32, u32>,
+    detections: DetectionEmitter,
     fuser: Fuser,
     anchor: GeoAnchor,
     display: Option<DisplayOut>,
@@ -244,7 +254,7 @@ impl Consumer {
             detecting,
             positions: HashMap::new(),
             refined_generation: HashMap::new(),
-            detection_version: HashMap::new(),
+            detections: DetectionEmitter::default(),
             fuser: Fuser::new(anchor, MAX_OBSERVATIONS),
             anchor,
             display: None,
@@ -435,16 +445,54 @@ impl Consumer {
         self.log.publish(blocks);
     }
 
+    /// Fusion is global, so any change can move any detection: the whole set is regrouped by
+    /// owner segment and only the batches that differ from the last published ones go out.
     fn flush_detections(&mut self, dirty: BTreeSet<u32>) {
-        let mut out = Vec::with_capacity(dirty.len());
-        for seg in dirty {
-            let v = self.detection_version.entry(seg).or_insert(0);
-            *v += 1;
-            out.push(detections_chunk(seg, *v, &self.fuser.batch(seg)));
+        if dirty.is_empty() {
+            return;
         }
+        let out = self.detections.chunks(self.fuser.batches());
         if !out.is_empty() {
             self.log.publish(out);
         }
+    }
+}
+
+/// Turns the fuser's batches (one per owner segment) into detection chunks.
+///
+/// Contract with the core and the screens: a detection chunk of segment `s` carries every
+/// detection owned by `s` and replaces the earlier batch of `s`. A detection is owned by one
+/// segment at a time, so the union of the latest batches has no duplicate ids. When a detection
+/// changes owner, both segments get a new batch in the same publish (ascending segment order);
+/// a segment that no longer owns anything gets an empty batch.
+#[derive(Default)]
+struct DetectionEmitter {
+    version: HashMap<u32, u32>,
+    /// Last published payload per segment.
+    last: HashMap<u32, Vec<u8>>,
+}
+
+impl DetectionEmitter {
+    fn chunks(&mut self, mut batches: std::collections::BTreeMap<u32, DetectionBatch>) -> Vec<Chunk> {
+        use prost::Message;
+        let segs: BTreeSet<u32> = batches.keys().copied().chain(self.last.keys().copied()).collect();
+        let mut out = Vec::new();
+        for seg in segs {
+            let batch = batches.remove(&seg).unwrap_or_default();
+            let bytes = batch.encode_to_vec();
+            if self.last.get(&seg).is_some_and(|b| *b == bytes) {
+                continue;
+            }
+            let v = self.version.entry(seg).or_insert(0);
+            *v += 1;
+            out.push(detections_chunk(seg, *v, &batch));
+            if batch.detections.is_empty() {
+                self.last.remove(&seg);
+            } else {
+                self.last.insert(seg, bytes);
+            }
+        }
+        out
     }
 }
 
@@ -468,6 +516,30 @@ mod tests {
             rgb: Arc::from(vec![0u8; 3]),
             gps: None,
         })
+    }
+
+    #[test]
+    fn detection_batches_go_out_per_owner_only_when_they_change() {
+        use prost::Message;
+        use skylens_shared::proto::payload::v1::Detection;
+        use std::collections::BTreeMap;
+        let det = |id: &str, segment: u32| Detection { id: id.into(), segment, ..Default::default() };
+        let batch = |d: Vec<Detection>| DetectionBatch { detections: d };
+        let mut e = DetectionEmitter::default();
+        let sv = |c: &[Chunk]| c.iter().map(|x| (x.segment, x.version)).collect::<Vec<_>>();
+
+        let first = e.chunks(BTreeMap::from([(0, batch(vec![det("fire-1", 0)])), (1, batch(vec![det("person-1", 1)]))]));
+        assert_eq!(sv(&first), vec![(0, 1), (1, 1)]);
+        // Nothing changed: nothing goes out.
+        let same = e.chunks(BTreeMap::from([(0, batch(vec![det("fire-1", 0)])), (1, batch(vec![det("person-1", 1)]))]));
+        assert!(same.is_empty());
+        // person-1 moves to segment 0: both batches change, segment 1 is emptied.
+        let moved = e.chunks(BTreeMap::from([(0, batch(vec![det("fire-1", 0), det("person-1", 0)]))]));
+        assert_eq!(sv(&moved), vec![(0, 2), (1, 2)]);
+        let empty = DetectionBatch::decode(moved[1].payload.as_slice()).unwrap();
+        assert!(empty.detections.is_empty());
+        // An empty segment stays quiet afterwards.
+        assert!(e.chunks(BTreeMap::from([(0, batch(vec![det("fire-1", 0), det("person-1", 0)]))])).is_empty());
     }
 
     #[test]

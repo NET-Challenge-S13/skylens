@@ -152,6 +152,8 @@ pub struct Engine {
     assembler: Mutex<Assembler>,
     log: Arc<chunks::ChunkLog>,
     frame_queue: Option<Arc<FrameQueue>>,
+    /// Capture times of declared sets, for the drone/time of each detected frame.
+    clock: Arc<frames::FrameClock>,
     stop: Arc<AtomicBool>,
     poller: Mutex<Option<JoinHandle<()>>>,
     /// Stream id of this model run (see [`Engine::stream_id`]).
@@ -257,8 +259,9 @@ impl Engine {
             consumer = consumer.display_stream(stream);
         }
         consumer.spawn(rx)?;
+        let clock = Arc::new(frames::FrameClock::default());
         if let (Some(q), Some(det)) = (&frame_queue, &detector) {
-            live::spawn_detector(Arc::clone(q), Arc::clone(det), tx.clone())?;
+            live::spawn_detector(Arc::clone(q), Arc::clone(det), Arc::clone(&clock), tx.clone())?;
         }
         live::spawn_forwarder(events, tx.clone())?;
         let stop = Arc::new(AtomicBool::new(false));
@@ -272,6 +275,7 @@ impl Engine {
             detector,
             log,
             frame_queue,
+            clock,
             stop,
             poller: Mutex::new(Some(poller)),
             stream,
@@ -328,7 +332,13 @@ impl Engine {
             Assembled::Pending { key, missing } => {
                 FrameState::pending(LiveKey::new(key.source_id, key.sequence, key.revision), missing)
             }
-            Assembled::Complete(set) => FrameState::ready(frames::to_live_set(&set, &self.cfg.cameras, self.cfg.anchor)?),
+            Assembled::Complete(set) => {
+                // Before compose: the frame hook may decode the set before compose returns.
+                if let Some(key) = &set.key {
+                    self.clock.record(key, set.captured_at_ms);
+                }
+                FrameState::ready(frames::to_live_set(&set, &self.cfg.cameras, self.cfg.anchor)?)
+            }
         };
         let outcome = self.node.compose(state).map_err(|e| anyhow!("compose: {e}"))?;
         Ok(PushOutcome::from_compose(&outcome))

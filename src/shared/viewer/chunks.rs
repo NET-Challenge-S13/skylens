@@ -674,9 +674,14 @@ impl ChunkStore {
             }
             ids.push(id);
         }
-        // What the batch this one replaces carried and this one does not is withdrawn.
+        // What the batch this one replaces carried and this one does not is withdrawn, unless
+        // it now belongs to another segment's batch (a detection whose owner moved can arrive in
+        // its new segment's batch before the old segment's batch drops it).
         let before = self.detection_batches.insert(chunk.segment, (chunk.version, ids.clone())).map(|(_, b)| b).unwrap_or_default();
-        let removed: Vec<String> = before.into_iter().filter(|id| !ids.contains(id)).collect();
+        let removed: Vec<String> = before
+            .into_iter()
+            .filter(|id| !ids.contains(id) && self.detections.get(id).is_some_and(|d| d.segment == chunk.segment))
+            .collect();
         for id in &removed {
             self.detections.remove(id);
             self.revealed.remove(id);
@@ -1000,6 +1005,7 @@ mod tests {
     #[test]
     fn a_newer_detection_batch_replaces_the_one_before() {
         use payload::DetectionCategory::{Fire, Person};
+        // A batch is its segment's whole state, and every detection in it has that segment.
         let mut s = ChunkStore::new();
         let batch = |list: &[(&str, u32, payload::DetectionCategory)], version: u32| {
             let mut c = detections(list);
@@ -1007,17 +1013,26 @@ mod tests {
             c.version = version;
             c
         };
-        s.apply(&batch(&[("p1", 3, Person), ("f1", 3, Fire)], 1));
+        s.apply(&batch(&[("p1", 7, Person), ("f1", 7, Fire)], 1));
         // Version 2 no longer carries p1: it is withdrawn.
-        let a = s.apply(&batch(&[("f1", 3, Fire), ("p2", 3, Person)], 2));
+        let a = s.apply(&batch(&[("f1", 7, Fire), ("p2", 7, Person)], 2));
         assert_eq!(a.change, Change::Detections { ids: vec!["f1".into(), "p2".into()], removed: vec!["p1".into()] });
         assert!(s.detection("p1").is_none());
         assert_eq!(s.detections().map(|d| d.id.as_str()).collect::<Vec<_>>(), ["f1", "p2"]);
         // An older batch arriving late changes nothing.
-        assert_eq!(s.apply(&batch(&[("p1", 3, Person)], 1)).change, Change::Stale);
+        assert_eq!(s.apply(&batch(&[("p1", 7, Person)], 1)).change, Change::Stale);
         assert!(s.detection("p1").is_none());
+        // A detection moving to another segment, whose new batch comes first, is kept when the
+        // old segment's batch drops it.
+        let mut moved = detections(&[("f1", 2, Fire)]);
+        moved.segment = 2;
+        moved.version = 1;
+        s.apply(&moved);
+        let a = s.apply(&batch(&[("p2", 7, Person)], 3));
+        assert_eq!(a.change, Change::Detections { ids: vec!["p2".into()], removed: vec![] });
+        assert_eq!(s.detection("f1").map(|d| d.segment), Some(2));
         // Another batch (segment) keeps its own ids.
-        let mut other = detections(&[("p9", 4, Person)]);
+        let mut other = detections(&[("p9", 8, Person)]);
         other.segment = 8;
         other.version = 1;
         s.apply(&other);

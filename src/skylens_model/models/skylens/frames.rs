@@ -7,13 +7,16 @@
 //! takes part in the alignment itself; it only pins the origin, and every zone
 //! and chunk comes out in ENU metres about the anchor.
 
-use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::sync::Mutex;
 use std::time::{Duration, SystemTime};
 
 use anyhow::{Context, bail};
 use cumulus3d_cli::compose::{EncodedFormat, FrameKey as LiveKey, LiveFrameSet};
 use skylens_shared::geo::GeoAnchor;
 use skylens_shared::proto::model::v1::{FrameKey, FrameSet, ImageFormat, LiveImage};
+
+use super::fusion::FrameSource;
 
 /// Name of the GPS record that pins the ENU origin at the anchor.
 pub const ANCHOR_RECORD: &str = ".skylens-anchor";
@@ -72,6 +75,69 @@ pub fn to_live_set(set: &FrameSet, cameras: &[String], anchor: GeoAnchor) -> any
         }
     }
     Ok(live)
+}
+
+/// Capture times remembered for detection fusion.
+pub const MAX_CLOCK_ENTRIES: usize = 8192;
+
+/// `source_id` as cumulus3d writes it into a spooled image name: ASCII letters,
+/// digits, `-` and `_` kept, anything else `_` (cumulus3d `spool_name`).
+pub fn spool_source(source_id: &str) -> String {
+    source_id.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect()
+}
+
+/// `(source, sequence)` of a spooled image name `<spool>/<camera>/<source>_<sequence:010>.<ext>`.
+fn parse_spool_name(name: &str) -> Option<(String, u64)> {
+    let file = name.rsplit(['/', '\\']).next()?;
+    let stem = file.rsplit_once('.').map_or(file, |(s, _)| s);
+    let (src, seq) = stem.rsplit_once('_')?;
+    Some((src.to_string(), seq.parse().ok()?))
+}
+
+#[derive(Default)]
+struct ClockState {
+    times: HashMap<(String, u64), i64>,
+    order: VecDeque<(String, u64)>,
+}
+
+/// Capture time of every declared set, so a decoded frame (which only carries its stored image
+/// name and camera) can tell fusion which drone took it and when. Recorded before the set is
+/// composed, so the lookup never races the frame hook.
+#[derive(Default)]
+pub struct FrameClock {
+    st: Mutex<ClockState>,
+}
+
+impl FrameClock {
+    /// Remembers the capture time of `key`'s set (`captured_at_ms <= 0`: now).
+    pub fn record(&self, key: &FrameKey, captured_at_ms: i64) {
+        let t = if captured_at_ms > 0 {
+            captured_at_ms
+        } else {
+            SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map_or(0, |d| d.as_millis() as i64)
+        };
+        let id = (spool_source(&key.source_id), key.sequence);
+        let mut st = self.st.lock().unwrap_or_else(|p| p.into_inner());
+        if st.times.insert(id.clone(), t).is_none() {
+            st.order.push_back(id);
+            while st.order.len() > MAX_CLOCK_ENTRIES {
+                if let Some(old) = st.order.pop_front() {
+                    st.times.remove(&old);
+                }
+            }
+        }
+    }
+
+    /// Drone (`<source>/<camera>`, each camera is one drone of the formation) and capture time of
+    /// a decoded frame. A name that is not a spooled one gives the camera alone and no time.
+    pub fn source_of(&self, name: &str, camera: &str) -> FrameSource {
+        let Some((src, seq)) = parse_spool_name(name) else {
+            return FrameSource { drone: camera.to_string(), time_ms: None };
+        };
+        let st = self.st.lock().unwrap_or_else(|p| p.into_inner());
+        let time_ms = st.times.get(&(src.clone(), seq)).copied();
+        FrameSource { drone: format!("{src}/{camera}"), time_ms }
+    }
 }
 
 /// What [`Assembler::offer`] made of a push.
@@ -269,6 +335,17 @@ mod tests {
         // A complete re-send still goes through, so the node can report it as a duplicate.
         let full = set(1, vec![jpeg("left"), jpeg("center"), jpeg("right")]);
         assert!(matches!(a.offer(full).unwrap(), Assembled::Complete(_)));
+    }
+
+    #[test]
+    fn clock_resolves_spooled_names() {
+        let c = FrameClock::default();
+        c.record(&FrameKey { source_id: "formation 1".into(), sequence: 42, revision: 0 }, 1_700_000_000_500);
+        let s = c.source_of("C:/work/live/spool/left/formation_1_0000000042.jpg", "left");
+        assert_eq!(s, FrameSource { drone: "formation_1/left".into(), time_ms: Some(1_700_000_000_500) });
+        let unknown = c.source_of("spool/right/formation_1_0000000043.jpg", "right");
+        assert_eq!(unknown, FrameSource { drone: "formation_1/right".into(), time_ms: None });
+        assert_eq!(c.source_of("frames/img.png", "left"), FrameSource { drone: "left".into(), time_ms: None });
     }
 
     #[test]

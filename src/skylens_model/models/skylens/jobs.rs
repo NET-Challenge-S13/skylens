@@ -27,7 +27,7 @@ use skylens_shared::proto::model::v1::{Gps as ProtoGps, Level, Source};
 
 use super::chunks::ZonePoint;
 use super::frames::ANCHOR_RECORD;
-use super::fusion::{FrameObservation, View};
+use super::fusion::{FrameObservation, FrameSource, View};
 use super::recon::{zone_points, zone_views};
 use super::sources;
 use super::{EngineConfig, SETTLE_MAX_ZONE, SETTLE_TOL};
@@ -173,7 +173,11 @@ pub fn run(
             Ok(d) => sink
                 .lock()
                 .unwrap_or_else(|p| p.into_inner())
-                .push((f.name.clone(), FrameObservation::from_detections(&d))),
+                // Job frames have no capture time: each one counts as its own view.
+                .push((
+                    f.name.clone(),
+                    FrameObservation::from_detections(&d).with_source(FrameSource { drone: f.camera.clone(), time_ms: None }),
+                )),
             Err(e) => tracing::warn!("detector failed on {}: {e:#}", f.name),
         });
     }
