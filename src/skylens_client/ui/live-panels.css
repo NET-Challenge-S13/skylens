@@ -163,7 +163,7 @@
   line-height: 1.3;
 }
 
-/* Wraps: the panel is only as wide as the toolbar row, and the point count must stay readable. */
+/* Wraps: the panel is only as wide as the toolbar row. */
 .live-monitor__detail {
   font-variant-numeric: tabular-nums;
   color: var(--text-tertiary);

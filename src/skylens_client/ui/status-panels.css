@@ -160,26 +160,26 @@
   color: transparent;
 }
 
-/* One hue per zone, kept quiet like the panel's other read-outs: a faint wash, a hairline in the
-   hue and the zone name in it. */
-.delay__cell[data-hue='0'] { background: rgba(200, 240, 122, 0.1); border-color: rgba(200, 240, 122, 0.4); color: #c8f07a; }
-.delay__cell[data-hue='1'] { background: rgba(143, 209, 106, 0.1); border-color: rgba(143, 209, 106, 0.4); color: #8fd16a; }
-.delay__cell[data-hue='2'] { background: rgba(167, 201, 127, 0.1); border-color: rgba(167, 201, 127, 0.4); color: #a7c97f; }
-.delay__cell[data-hue='3'] { background: rgba(90, 169, 255, 0.1); border-color: rgba(90, 169, 255, 0.4); color: #5aa9ff; }
-.delay__cell[data-hue='4'] { background: rgba(169, 212, 255, 0.1); border-color: rgba(169, 212, 255, 0.4); color: #a9d4ff; }
-.delay__cell[data-hue='5'] { background: rgba(255, 207, 153, 0.1); border-color: rgba(255, 207, 153, 0.4); color: #ffcf99; }
-.delay__cell[data-hue='6'] { background: rgba(201, 179, 245, 0.1); border-color: rgba(201, 179, 245, 0.4); color: #c9b3f5; }
-.delay__cell[data-hue='7'] { background: rgba(242, 167, 216, 0.1); border-color: rgba(242, 167, 216, 0.4); color: #f2a7d8; }
+/* One hue per zone from a low-saturation slate palette, so the cells sit in the panel's blue-grey
+   instead of jumping out of it: a faint wash, a hairline in the hue and the zone name in it. */
+.delay__cell[data-hue='0'] { background: rgba(143, 179, 201, 0.1); border-color: rgba(143, 179, 201, 0.4); color: #8fb3c9; }
+.delay__cell[data-hue='1'] { background: rgba(159, 191, 159, 0.1); border-color: rgba(159, 191, 159, 0.4); color: #9fbf9f; }
+.delay__cell[data-hue='2'] { background: rgba(201, 180, 143, 0.1); border-color: rgba(201, 180, 143, 0.4); color: #c9b48f; }
+.delay__cell[data-hue='3'] { background: rgba(179, 159, 196, 0.1); border-color: rgba(179, 159, 196, 0.4); color: #b39fc4; }
+.delay__cell[data-hue='4'] { background: rgba(143, 194, 187, 0.1); border-color: rgba(143, 194, 187, 0.4); color: #8fc2bb; }
+.delay__cell[data-hue='5'] { background: rgba(196, 159, 159, 0.1); border-color: rgba(196, 159, 159, 0.4); color: #c49f9f; }
+.delay__cell[data-hue='6'] { background: rgba(163, 172, 201, 0.1); border-color: rgba(163, 172, 201, 0.4); color: #a3acc9; }
+.delay__cell[data-hue='7'] { background: rgba(191, 191, 148, 0.1); border-color: rgba(191, 191, 148, 0.4); color: #bfbf94; }
 
-/* The newest delivery: the hairline in full hue and a small glow. */
-.delay__cell.is-new[data-hue='0'] { border-color: rgb(200, 240, 122); box-shadow: 0 0 6px rgba(200, 240, 122, 0.45); }
-.delay__cell.is-new[data-hue='1'] { border-color: rgb(143, 209, 106); box-shadow: 0 0 6px rgba(143, 209, 106, 0.45); }
-.delay__cell.is-new[data-hue='2'] { border-color: rgb(167, 201, 127); box-shadow: 0 0 6px rgba(167, 201, 127, 0.45); }
-.delay__cell.is-new[data-hue='3'] { border-color: rgb(90, 169, 255); box-shadow: 0 0 6px rgba(90, 169, 255, 0.45); }
-.delay__cell.is-new[data-hue='4'] { border-color: rgb(169, 212, 255); box-shadow: 0 0 6px rgba(169, 212, 255, 0.45); }
-.delay__cell.is-new[data-hue='5'] { border-color: rgb(255, 207, 153); box-shadow: 0 0 6px rgba(255, 207, 153, 0.45); }
-.delay__cell.is-new[data-hue='6'] { border-color: rgb(201, 179, 245); box-shadow: 0 0 6px rgba(201, 179, 245, 0.45); }
-.delay__cell.is-new[data-hue='7'] { border-color: rgb(242, 167, 216); box-shadow: 0 0 6px rgba(242, 167, 216, 0.45); }
+/* The newest delivery: a heavier outline in the full hue (border plus an inner ring). */
+.delay__cell.is-new[data-hue='0'] { border-color: #8fb3c9; box-shadow: inset 0 0 0 1px #8fb3c9, 0 0 6px rgba(143, 179, 201, 0.35); }
+.delay__cell.is-new[data-hue='1'] { border-color: #9fbf9f; box-shadow: inset 0 0 0 1px #9fbf9f, 0 0 6px rgba(159, 191, 159, 0.35); }
+.delay__cell.is-new[data-hue='2'] { border-color: #c9b48f; box-shadow: inset 0 0 0 1px #c9b48f, 0 0 6px rgba(201, 180, 143, 0.35); }
+.delay__cell.is-new[data-hue='3'] { border-color: #b39fc4; box-shadow: inset 0 0 0 1px #b39fc4, 0 0 6px rgba(179, 159, 196, 0.35); }
+.delay__cell.is-new[data-hue='4'] { border-color: #8fc2bb; box-shadow: inset 0 0 0 1px #8fc2bb, 0 0 6px rgba(143, 194, 187, 0.35); }
+.delay__cell.is-new[data-hue='5'] { border-color: #c49f9f; box-shadow: inset 0 0 0 1px #c49f9f, 0 0 6px rgba(196, 159, 159, 0.35); }
+.delay__cell.is-new[data-hue='6'] { border-color: #a3acc9; box-shadow: inset 0 0 0 1px #a3acc9, 0 0 6px rgba(163, 172, 201, 0.35); }
+.delay__cell.is-new[data-hue='7'] { border-color: #bfbf94; box-shadow: inset 0 0 0 1px #bfbf94, 0 0 6px rgba(191, 191, 148, 0.35); }
 
 /* Older steps scrolled off to the left. */
 .delay__cell--more {

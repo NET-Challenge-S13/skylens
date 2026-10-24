@@ -62,19 +62,6 @@ pub fn mmss(sec: f64, round: bool) -> String {
     format!("{}:{:02}", s / 60, s % 60)
 }
 
-/// `1,234,567`.
-pub fn thousands(n: u64) -> String {
-    let digits = n.to_string();
-    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
-    for (i, c) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i) % 3 == 0 {
-            out.push(',');
-        }
-        out.push(c);
-    }
-    out
-}
-
 /// `Z0`, `Z1`...
 pub fn zone_label(zone: u32) -> String {
     format!("Z{zone}")
@@ -121,14 +108,13 @@ pub struct MonitorText {
 }
 
 /// `None` while nothing is applied (the monitor is hidden). `since_update_s`: seconds since the
-/// panel last saw the log change.
+/// panel last saw the log change. No point count: the minimap's header already shows it.
 pub fn monitor(s: &Snapshot<'_>, since_update_s: f64) -> Option<MonitorText> {
     let cur = s.current()?;
     let zones = front_zone(s).map_or(0, |z| z + 1);
     let prog = positions_text(cur);
-    let points = format!("{}점", thousands(u64::from(cur.total_points)));
     if cur.kind == Kind::Final {
-        let detail = if prog.is_empty() { format!("구역 {zones}개 · {points}") } else { format!("{prog} · {points}") };
+        let detail = if prog.is_empty() { format!("구역 {zones}개") } else { prog };
         return Some(MonitorText {
             label: "3D 복원 · 생성 완료".to_string(),
             detail,
@@ -139,7 +125,7 @@ pub fn monitor(s: &Snapshot<'_>, since_update_s: f64) -> Option<MonitorText> {
     let events = if prog.is_empty() { format!("이벤트 {}/{}", s.applied, s.entries.len()) } else { prog };
     Some(MonitorText {
         label: "3D 복원 · 생성 중".to_string(),
-        detail: format!("구역 {zones} · {events} · {points}"),
+        detail: format!("구역 {zones} · {events}"),
         age: format!("마지막 갱신 {}초 전", since_update_s.max(0.0).floor() as u64),
         done: false,
     })
@@ -532,14 +518,6 @@ mod tests {
     }
 
     #[test]
-    fn counts_get_thousands_separators() {
-        assert_eq!(thousands(0), "0");
-        assert_eq!(thousands(999), "999");
-        assert_eq!(thousands(1_000), "1,000");
-        assert_eq!(thousands(1_234_567), "1,234,567");
-    }
-
-    #[test]
     fn phases_go_waiting_live_final() {
         let l = log();
         assert_eq!(phase(&snap(&[], 0, true)), Phase::Waiting);
@@ -575,19 +553,19 @@ mod tests {
         assert_eq!(monitor(&snap(&l, 0, true), 0.0), None);
         let m = monitor(&snap(&l, 3, true), 7.9).unwrap();
         assert_eq!(m.label, "3D 복원 · 생성 중");
-        assert_eq!(m.detail, "구역 2 · 이벤트 3/4 · 120,000점");
+        assert_eq!(m.detail, "구역 2 · 이벤트 3/4");
         assert_eq!(m.age, "마지막 갱신 7초 전");
         assert!(!m.done);
         let m = monitor(&snap(&l, 4, true), 1.0).unwrap();
         assert_eq!(m.label, "3D 복원 · 생성 완료");
-        assert_eq!(m.detail, "구역 2개 · 1,234,567점");
+        assert_eq!(m.detail, "구역 2개");
         assert_eq!(m.age, "소요 2:09");
         assert!(m.done);
         // The core's frame progress replaces the event count.
         let mut p = l.clone();
         p[2].positions = 12;
         p[2].positions_total = 40;
-        assert_eq!(monitor(&snap(&p, 3, true), 0.0).unwrap().detail, "구역 2 · 위치 12/40 · 120,000점");
+        assert_eq!(monitor(&snap(&p, 3, true), 0.0).unwrap().detail, "구역 2 · 위치 12/40");
     }
 
     #[test]
