@@ -717,10 +717,13 @@ html {
   color: var(--text-secondary);
 }
 
-/* --- Toasts --- */
+/* --- Toasts ---
+   A toast is one more floating surface: the glass panel, hairline border and radius of every
+   other panel, body text, and the kind shown by a status dot (like the panel headers) rather than
+   a thick coloured bar. It sits below the top row of chips and buttons so it never covers them. */
 #toast-root {
   position: fixed;
-  top: 16px;
+  top: 64px;
   left: 50%;
   transform: translateX(-50%);
   display: flex;
@@ -730,35 +733,55 @@ html {
   /* Toasts stay inside the screen: a long error (a bridge URL, a whole message) wraps instead of
      running off both edges in one line. */
   width: calc(100vw - 32px);
-  z-index: 50;
+  /* Above the modal overlays (100, 110): an error from a dialog's action shows over that dialog
+     rather than dimmed behind its backdrop. */
+  z-index: 120;
   pointer-events: none;
 }
 
 .toast {
   display: flex;
-  align-items: center;
-  gap: 9px;
+  align-items: flex-start;
+  gap: 10px;
   box-sizing: border-box;
-  max-width: 640px;
+  max-width: 520px;
   overflow-wrap: anywhere;
-  padding: 9px 16px;
-  border-radius: var(--radius-sm);
-  border-left: 3px solid var(--neutral-dot);
-  font-family: var(--font-mono);
-  font-size: var(--text-md);
-  color: var(--text-primary);
-  background: var(--surface-2);
-  border-top: 1px solid var(--border-hairline);
-  border-right: 1px solid var(--border-hairline);
-  border-bottom: 1px solid var(--border-hairline);
+  padding: 10px 14px;
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-md);
+  background: var(--surface-glass);
   box-shadow: var(--shadow-panel);
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--text-secondary);
   animation: toast-in 0.25s ease;
 }
+.toast::before {
+  content: '';
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  /* Centred on the first line (line-height 1.5 of --text-sm). */
+  margin-top: 6px;
+  border-radius: 50%;
+  background: var(--neutral-dot);
+  color: var(--neutral-dot);
+  box-shadow: 0 0 8px currentColor;
+}
 .toast.kind-danger {
-  border-left-color: var(--danger);
+  border-color: rgba(255, 82, 82, 0.4);
+}
+.toast.kind-danger::before {
+  background: var(--danger);
+  color: var(--danger);
 }
 .toast.kind-person {
-  border-left-color: var(--person);
+  border-color: rgba(57, 217, 138, 0.4);
+}
+.toast.kind-person::before {
+  background: var(--person);
+  color: var(--person);
 }
 
 @keyframes toast-in {

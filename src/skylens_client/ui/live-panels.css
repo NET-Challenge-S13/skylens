@@ -84,9 +84,9 @@
   border-color: var(--border-strong);
 }
 
-/* A read-out, not a button: secondary ink. */
+/* A read-out, not a button, but the same ink as the button beside it: one row, one colour. */
 .board-toolbar .cam-state {
-  color: var(--text-secondary);
+  color: var(--status-ink);
   pointer-events: none;
 }
 
