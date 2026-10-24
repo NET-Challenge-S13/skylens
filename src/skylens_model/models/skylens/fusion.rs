@@ -19,9 +19,10 @@
 //!   whether a person track was in view (a hidden track is not a miss).
 //! - Hazards. Every visible cell adds the class probabilities at its pixel,
 //!   weighted by how decisive that pixel is (its largest class probability). A
-//!   cell is a hazard when the weighted mean of `1 - p(normal)` reaches
-//!   [`HAZARD_MIN_PROB`]; its class is then the most likely non-normal class (so
-//!   fire 0.45 / collapse 0.40 is a fire). Hazard columns of one class that touch
+//!   cell is a hazard when its most likely fused class is a hazard class and that
+//!   class's mean probability reaches [`HAZARD_MIN_PROB`]; the confidence is that
+//!   probability. (Summing the hazard classes, `1 - p(normal)`, flooded the
+//!   theater run with undecided ~0.53 road_blocked cells.) Hazard columns of one class that touch
 //!   (8-neighbourhood) form one zone with a convex outline.
 //! - People. A person point is placed on the cell nearest to it in pixels among
 //!   the visible cells on the front surface of its pixel ray, within
@@ -68,7 +69,7 @@ pub const DEPTH_TOL_M: f64 = 1.5;
 pub const DEPTH_TOL_FRAC: f64 = 0.02;
 /// Largest splat radius of one cell in the depth buffer, buffer pixels.
 const SPLAT_MAX_PX: i64 = 8;
-/// A cell is a hazard when its fused `1 - p(normal)` reaches this.
+/// A cell is a hazard when its likeliest class is a hazard class with at least this mean probability.
 pub const HAZARD_MIN_PROB: f64 = 0.5;
 /// A hazard cell or a person needs this many distinct views.
 pub const MIN_VIEWS: usize = 2;
@@ -708,11 +709,11 @@ impl Fuser {
                 continue;
             }
             let mean: [f64; HAZARD_CLASSES] = std::array::from_fn(|i| sum_wp[i] / sum_w);
-            let p_hazard = (1.0 - mean[0]).clamp(0.0, 1.0);
-            if p_hazard < HAZARD_MIN_PROB {
+            let class = (1..HAZARD_CLASSES).max_by(|a, b| mean[*a].total_cmp(&mean[*b]).then(b.cmp(a))).unwrap_or(1);
+            let p_hazard = mean[class].clamp(0.0, 1.0);
+            if p_hazard < HAZARD_MIN_PROB || p_hazard <= mean[0] {
                 continue;
             }
-            let class = (1..HAZARD_CLASSES).max_by(|a, b| mean[*a].total_cmp(&mean[*b]).then(b.cmp(a))).unwrap_or(1);
             let col = cols.entry((class, (k.0, k.1))).or_default();
             col.conf = col.conf.max(p_hazard);
             for i in 0..3 {
@@ -1125,17 +1126,24 @@ mod tests {
     }
 
     #[test]
-    fn mixed_hazard_classes_are_reported_as_the_likeliest_hazard() {
+    fn an_undecided_cell_is_not_a_hazard() {
         let mut f = Fuser::new(ANCHOR, 64);
         f.set_zone(0, &ground(), views(&[("a", nadir(30.0, 30.0)), ("b", nadir(30.0, 30.0))]));
-        // No class reaches 0.5 alone, but a hazard is 0.85 likely.
-        let mixed = || frame_probs([0.15, 0.45, 0.40, 0.0], 90, 110, 90, 110, vec![]);
-        f.add_observation("a", obs(mixed(), "d1", 0));
-        f.add_observation("b", obs(mixed(), "d2", 0));
+        // Hazard is 0.53 likely in sum, but no hazard class wins: not reported.
+        let undecided = || frame_probs([0.47, 0.13, 0.13, 0.27], 90, 110, 90, 110, vec![]);
+        f.add_observation("a", obs(undecided(), "d1", 0));
+        f.add_observation("b", obs(undecided(), "d2", 0));
+        assert!(all(&mut f).is_empty());
+        // One hazard class above 0.5: reported at that class's probability.
+        let mut f = Fuser::new(ANCHOR, 64);
+        f.set_zone(0, &ground(), views(&[("a", nadir(30.0, 30.0)), ("b", nadir(30.0, 30.0))]));
+        let fire = || frame_probs([0.2, 0.6, 0.1, 0.1], 90, 110, 90, 110, vec![]);
+        f.add_observation("a", obs(fire(), "d1", 0));
+        f.add_observation("b", obs(fire(), "d2", 0));
         let d = all(&mut f);
         assert_eq!(d.len(), 1, "{d:?}");
         assert_eq!(d[0].category, DetectionCategory::Fire as i32);
-        assert!((d[0].confidence - 0.85).abs() < 0.02, "{}", d[0].confidence);
+        assert!((d[0].confidence - 0.6).abs() < 0.02, "{}", d[0].confidence);
     }
 
     #[test]

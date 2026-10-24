@@ -448,10 +448,13 @@ impl Board {
         Some(DVec3::from(self.site.as_ref()?.enu_of(d.gps.as_ref()?)))
     }
 
-    /// Whether a detection is confident enough to show: persons need the settings' threshold
-    /// (default 80 %); hazard zones are shown as delivered.
+    /// Whether a detection is confident enough to show: at least its class's threshold in the
+    /// settings (person 80 %, fire 60 %, collapse 60 %, road block 70 % by default).
     pub fn confident(&self, d: &payload::Detection) -> bool {
-        d.category() != payload::DetectionCategory::Person || d.confidence as f32 + 1e-6 >= self.settings.borrow().person_min_conf
+        match crate::panels_live::conf_class(d.category()) {
+            Some(i) => d.confidence as f32 + 1e-6 >= self.settings.borrow().min_conf[i],
+            None => true,
+        }
     }
 
     /// Detections that just became revealable (final level in, placeable, confident enough), in

@@ -252,13 +252,31 @@ pub struct LiveSettings {
     pub point_size: f32,
     pub color_mode: ColorMode,
     pub fit_requested: bool,
-    /// Person detections below this confidence (0..1) are not shown (markers, pins, alerts).
-    pub person_min_conf: f32,
+    /// Per detection class ([`CONF_CLASSES`] order), the confidence (0..1) below which a
+    /// detection is not shown (markers, pins, alerts).
+    pub min_conf: [f32; 4],
 }
 
-/// The person-confidence thresholds the settings offer (percent), and the default.
-pub const PERSON_CONF_STEPS: [u32; 5] = [50, 60, 70, 80, 90];
-pub const PERSON_CONF_DEFAULT: u32 = 80;
+/// The detection classes the settings give a confidence threshold: key (`data-conf-class`),
+/// label, default (percent). Persons default high (a false alert sends people); road blocks
+/// next, since open ground reads as one easily.
+pub const CONF_CLASSES: [(&str, &str, u32); 4] =
+    [("person", "사람", 80), ("fire", "화재", 60), ("collapse", "붕괴", 60), ("road_blocked", "도로 막힘", 70)];
+
+/// The thresholds the settings offer (percent).
+pub const CONF_STEPS: [u32; 5] = [50, 60, 70, 80, 90];
+
+/// Index in [`CONF_CLASSES`] of a detection category (`None` for an unknown one).
+pub fn conf_class(category: skylens_shared::proto::payload::v1::DetectionCategory) -> Option<usize> {
+    use skylens_shared::proto::payload::v1::DetectionCategory as C;
+    match category {
+        C::Person => Some(0),
+        C::Fire => Some(1),
+        C::Collapse => Some(2),
+        C::RoadBlocked => Some(3),
+        C::Unspecified => None,
+    }
+}
 
 impl Default for LiveSettings {
     fn default() -> Self {
@@ -267,7 +285,7 @@ impl Default for LiveSettings {
             point_size: 2.0,
             color_mode: ColorMode::Rgb,
             fit_requested: false,
-            person_min_conf: PERSON_CONF_DEFAULT as f32 / 100.0,
+            min_conf: CONF_CLASSES.map(|(_, _, d)| d as f32 / 100.0),
         }
     }
 }
@@ -318,8 +336,9 @@ pub fn settings_markup(s: &LiveSettings) -> String {
             "<div class=\"board-settings__row\"><span class=\"board-settings__lbl\">색</span>{modes}</div>",
             "</div>",
             "<div class=\"board-settings__section\">탐지</div>",
-            "<div class=\"board-settings__row\"><span class=\"board-settings__lbl\">사람 신뢰도</span>{confs}</div>",
-            "<div class=\"board-settings__note board-settings__note--row\">이 값보다 확신도가 낮은 사람 탐지는 표시하지 않습니다</div>",
+            "<div class=\"board-settings__row\"><button type=\"button\" class=\"board-seg\" data-live=\"conf-menu\" id=\"board-conf-toggle\">클래스별 신뢰도 ▸</button>",
+            "<span class=\"board-settings__note\">이 값보다 확신도가 낮은 탐지는 표시하지 않습니다</span></div>",
+            "<div class=\"board-settings__sub is-off\" id=\"board-conf-menu\">{confs}</div>",
             "<div class=\"board-settings__section\">카메라</div>",
             "<div class=\"board-settings__row\"><button type=\"button\" class=\"board-seg\" data-live=\"fit\">전체 보기</button>",
             "<span class=\"board-settings__note\">복원된 범위 전체가 보이게 맞춥니다</span></div>",
@@ -329,19 +348,27 @@ pub fn settings_markup(s: &LiveSettings) -> String {
         points_off = if s.display == Display::Points { "" } else { " is-off" },
         size = size_text(s.point_size),
         modes = modes,
-        confs = conf_buttons(s.person_min_conf),
+        confs = conf_rows(&s.min_conf),
     )
 }
 
-/// The person-confidence buttons (`data-live="conf"`), the current one on.
-pub fn conf_buttons(min_conf: f32) -> String {
-    PERSON_CONF_STEPS
+/// One row per class of threshold buttons (`data-live="conf"`, `data-conf-class`,
+/// `data-conf`), the current one on.
+pub fn conf_rows(min_conf: &[f32; 4]) -> String {
+    CONF_CLASSES
         .iter()
-        .map(|p| {
-            format!(
-                "<button type=\"button\" class=\"board-seg{}\" data-live=\"conf\" data-conf=\"{p}\">{p}%</button>",
-                if conf_step(min_conf) == *p { " is-on" } else { "" },
-            )
+        .zip(min_conf)
+        .map(|((key, label, _), v)| {
+            let buttons: String = CONF_STEPS
+                .iter()
+                .map(|p| {
+                    format!(
+                        "<button type=\"button\" class=\"board-seg{}\" data-live=\"conf\" data-conf-class=\"{key}\" data-conf=\"{p}\">{p}%</button>",
+                        if conf_step(*v) == *p { " is-on" } else { "" },
+                    )
+                })
+                .collect();
+            format!("<div class=\"board-settings__row\"><span class=\"board-settings__lbl\">{label}</span>{buttons}</div>")
         })
         .collect()
 }
@@ -498,23 +525,24 @@ impl DelayGrid {
     }
 }
 
-/// The pattern of the live stream. A step is the front zone (the newest zone delivered so far);
-/// a zone's first delivery sits in row 1 at its own step, and each later delivery (a REPLACE as
-/// the next zone settles it) one row up at the step the front had reached by then. That is the
-/// staircase of the delay pattern: zone k is first seen at step k and refined at step k + 1.
+/// The pattern of the live stream: a zone's n-th delivery (preview, then refined, then any
+/// replace) sits in row n at step zone + n, so zone k is first seen at step k + 1 and its next
+/// stage one step and one row further, above zone k + 1's first delivery. That is the staircase
+/// of the delay pattern. (Placing a stage at the step the newest zone had reached stacked a
+/// zone's preview and refined copies in one column, since with previews on the refined copy
+/// comes before the next zone.)
 pub fn delay_grid_live(entries: &[LogEntry]) -> DelayGrid {
     let mut grid = DelayGrid::default();
     let mut deliveries: BTreeMap<u32, u32> = BTreeMap::new();
-    let mut front: Option<u32> = None;
     for e in entries {
         if e.kind == Kind::Final {
             grid.done = true;
             continue;
         }
-        front = Some(front.map_or(e.zone, |f| f.max(e.zone)));
         let n = deliveries.entry(e.zone).or_insert(0);
         *n += 1;
-        let cell = DelayCell { row: (*n).min(DELAY_ROWS), col: front.unwrap_or(e.zone) + 1, zone: e.zone, kind: Some(e.kind) };
+        let row = (*n).min(DELAY_ROWS);
+        let cell = DelayCell { row, col: e.zone + row, zone: e.zone, kind: Some(e.kind) };
         match grid.cells.iter_mut().find(|c| c.row == cell.row && c.col == cell.col && c.zone == cell.zone) {
             Some(c) => *c = cell,
             None => grid.cells.push(cell),
@@ -725,14 +753,18 @@ mod tests {
     }
 
     #[test]
-    fn person_confidence_defaults_to_80_and_the_settings_offer_the_steps() {
+    fn each_class_has_its_threshold_row_with_its_default_on() {
+        use skylens_shared::proto::payload::v1::DetectionCategory as C;
         let s = LiveSettings::default();
-        assert_eq!(conf_step(s.person_min_conf), 80);
+        assert_eq!(s.min_conf.map(conf_step), [80, 60, 60, 70]);
         let m = settings_markup(&s);
-        for p in PERSON_CONF_STEPS {
-            assert!(m.contains(&format!("data-conf=\"{p}\"")), "{p}");
+        for (key, label, d) in CONF_CLASSES {
+            assert!(m.contains(&format!("is-on\" data-live=\"conf\" data-conf-class=\"{key}\" data-conf=\"{d}\"")), "{key}");
+            assert!(m.contains(label));
         }
-        assert!(m.contains("is-on\" data-live=\"conf\" data-conf=\"80\""));
+        assert!(m.contains("id=\"board-conf-menu\""));
+        assert_eq!(conf_class(C::RoadBlocked), Some(3));
+        assert_eq!(conf_class(C::Unspecified), None);
     }
 
     #[test]
@@ -746,14 +778,14 @@ mod tests {
 
     #[test]
     fn live_deliveries_climb_one_row_per_refinement_on_a_staircase() {
-        // Z0 lands at step 1; Z1 at step 2 while Z0 is refined (row 2) at step 2; Z2 at step 3
-        // while Z1 is refined at step 3.
+        // Previews on: Z0's preview, then its refined copy before Z1 arrives. The refined copy
+        // still sits at step 2, above Z1's preview, not on Z0's own column.
         let l = vec![
-            entry(1, Kind::Refined, 0, 0.0, 1),
-            entry(2, Kind::Refined, 1, 0.0, 2),
-            entry(3, Kind::Replace, 0, 0.0, 2),
-            entry(4, Kind::Refined, 2, 0.0, 3),
-            entry(5, Kind::Replace, 1, 0.0, 3),
+            entry(1, Kind::Preview, 0, 0.0, 1),
+            entry(2, Kind::Refined, 0, 0.0, 1),
+            entry(3, Kind::Preview, 1, 0.0, 2),
+            entry(4, Kind::Refined, 1, 0.0, 2),
+            entry(5, Kind::Preview, 2, 0.0, 3),
         ];
         let g = delay_grid_live(&l);
         let at = |row, col| g.cells.iter().find(|c| c.row == row && c.col == col).map(|c| c.zone);
@@ -773,7 +805,7 @@ mod tests {
     fn refinements_past_the_top_row_stay_in_it() {
         let l: Vec<LogEntry> = (1..=5).map(|i| entry(i, Kind::Replace, 0, 0.0, 1)).collect();
         let g = delay_grid_live(&l);
-        assert!(g.cells.iter().all(|c| c.row <= DELAY_ROWS && c.col == 1));
+        assert!(g.cells.iter().all(|c| c.row <= DELAY_ROWS && c.col == c.row));
         assert_eq!(g.cells.len(), DELAY_ROWS as usize);
     }
 

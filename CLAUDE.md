@@ -131,7 +131,7 @@ scripts/         # sync-main.sh (develop → main 동기화) · 학습 평가 �
 - UNet 추론은 `tch` 0.24(libtorch 2.11). libtorch는 빌드 때 내려받는다(`download-libtorch`, CUDA 판은 `.cargo/config.toml`의 `TORCH_CUDA_VERSION`). Python venv와 무관하다.
 - 프로토콜 계약은 `src/shared/proto/`(model · viewer · payload). `skylens-shared`가 protox로 컴파일하므로 protoc가 없어도 된다.
 - cumulus3d는 crates.io 릴리스(0.11)를 쓴다(벤더 복사본 없음, 새 릴리스는 `.github/workflows/cumulus3d-sync.yml`이 PR로 따라간다). 라이브 점은 stable display의 메모리 표시 델타(`Event::DisplayDelta`)를 점 슬롯 청크로 내보낸다(`slot_kind` 1 refined · 2 replace · 3 final · 4 preview).
-- 모델 서버 기본값: live stride 2 · zone preview 끔 · backlog batch 1(끔) · lookahead 4 · 내장 카메라 DJI FC9589(fx 1505 · fy 1510). 환경변수 표는 `src/skylens_model/utils/serving_config.rs` 머리에 있다.
+- 모델 서버 기본값: live stride 2 · zone preview 켬 · zone span 4 · backlog batch 1(끔) · lookahead 4 · 내장 카메라 DJI FC9589(fx 1505 · fy 1510). 환경변수 표는 `src/skylens_model/utils/serving_config.rs` 머리에 있다.
 
 **Go** (`src/skylens_core`, 루트 `go.work`)
 

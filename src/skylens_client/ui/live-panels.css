@@ -374,6 +374,16 @@
   font-size: var(--text-xs);
   color: var(--text-tertiary);
 }
+/* The per-class confidence sub-menu, folded until its button opens it. */
+.board-settings__sub {
+  margin: 6px 0 0 12px;
+  padding-left: 10px;
+  border-left: 1px solid var(--divider);
+}
+.board-settings__sub.is-off {
+  display: none;
+}
+
 .board-settings__note--row {
   display: block;
   margin-top: 4px;

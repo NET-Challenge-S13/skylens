@@ -199,7 +199,7 @@ struct Shown {
     size: String,
     mode: Option<ColorMode>,
     display: Option<Display>,
-    conf: Option<u32>,
+    conf: Option<[u32; 4]>,
     wait_opacity: Option<i64>,
     monitor_width: Option<i64>,
 }
@@ -214,6 +214,8 @@ pub struct LivePanels {
     last_change_ms: f64,
     flash_until: f64,
     settings_open: bool,
+    /// The per-class confidence sub-menu in the settings is unfolded.
+    conf_menu_open: bool,
     shown: Shown,
     mounted: bool,
 }
@@ -231,6 +233,7 @@ impl LivePanels {
             last_change_ms: skylens_viewer::now_ms(),
             flash_until: 0.0,
             settings_open: false,
+            conf_menu_open: false,
             shown: Shown::default(),
             mounted: false,
         }
@@ -327,10 +330,19 @@ impl LivePanels {
             "conf" => {
                 if let Some((_, key)) = input.closest_data("conf")
                     && let Ok(p) = key.parse::<u32>()
-                    && pl::PERSON_CONF_STEPS.contains(&p)
+                    && pl::CONF_STEPS.contains(&p)
+                    && let Some((_, class)) = input.closest_data("conf-class")
+                    && let Some(i) = pl::CONF_CLASSES.iter().position(|(k, _, _)| *k == class)
                 {
-                    s.person_min_conf = p as f32 / 100.0;
+                    s.min_conf[i] = p as f32 / 100.0;
                 }
+            }
+            "conf-menu" => {
+                drop(s);
+                self.conf_menu_open = !self.conf_menu_open;
+                dom.toggle_class("board-conf-menu", "is-off", !self.conf_menu_open);
+                dom.set_text("board-conf-toggle", if self.conf_menu_open { "클래스별 신뢰도 ▾" } else { "클래스별 신뢰도 ▸" });
+                return true;
             }
             "size-" | "size+" | "mode" => {}
             _ => return false,
@@ -354,13 +366,15 @@ impl LivePanels {
             }
             self.shown.mode = Some(s.color_mode);
         }
-        if self.shown.conf != Some(pl::conf_step(s.person_min_conf)) {
-            let step = pl::conf_step(s.person_min_conf).to_string();
+        let steps = s.min_conf.map(pl::conf_step);
+        if self.shown.conf != Some(steps) {
             for b in dom.find_all("[data-live=conf]") {
-                let on = dom.attr(b, "data-conf").as_deref() == Some(step.as_str());
+                let class = dom.attr(b, "data-conf-class");
+                let i = pl::CONF_CLASSES.iter().position(|(k, _, _)| Some(*k) == class.as_deref());
+                let on = i.is_some_and(|i| dom.attr(b, "data-conf").as_deref() == Some(steps[i].to_string().as_str()));
                 dom.toggle_class(b, "is-on", on);
             }
-            self.shown.conf = Some(pl::conf_step(s.person_min_conf));
+            self.shown.conf = Some(steps);
         }
         if self.shown.display != Some(s.display) {
             for b in dom.find_all("[data-live=display]") {
