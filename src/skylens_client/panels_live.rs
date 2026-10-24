@@ -260,6 +260,9 @@ pub struct LiveSettings {
     /// Per detection class ([`CONF_CLASSES`] order), the confidence (0..1) below which a
     /// detection is not shown (markers, pins, alerts).
     pub min_conf: [f32; 4],
+    /// The mesh under the points gets a faint white light (relief) instead of its plain vertex
+    /// colours. Off by default: the plain mesh under the points read best on the theater run.
+    pub mesh_shading: bool,
 }
 
 /// The detection classes the settings give a confidence threshold: key (`data-conf-class`),
@@ -291,6 +294,7 @@ impl Default for LiveSettings {
             color_mode: ColorMode::Rgb,
             fit_requested: false,
             min_conf: CONF_CLASSES.map(|(_, _, d)| d as f32 / 100.0),
+            mesh_shading: false,
         }
     }
 }
@@ -333,6 +337,9 @@ pub fn settings_markup(s: &LiveSettings) -> String {
             "<div class=\"board-settings__section\">메인 화면 표시</div>",
             "<div class=\"board-settings__options\" role=\"radiogroup\">{displays}</div>",
             "<div class=\"board-settings__group{points_off}\" id=\"board-settings-points\">",
+            "<div class=\"board-settings__section\">메시 음영</div>",
+            "<div class=\"board-settings__row\">{shades}",
+            "<span class=\"board-settings__note\">메시에 약한 빛을 얹어 굴곡을 보입니다</span></div>",
             "<div class=\"board-settings__section\">점 표시</div>",
             "<div class=\"board-settings__row\"><span class=\"board-settings__lbl\">점 크기</span>",
             "<button type=\"button\" class=\"board-seg board-seg--ic\" data-live=\"size-\">\u{2212}</button>",
@@ -350,11 +357,25 @@ pub fn settings_markup(s: &LiveSettings) -> String {
             "</div></div>",
         ),
         displays = displays,
+        shades = shade_buttons(s.mesh_shading),
         points_off = if s.display == Display::Points { "" } else { " is-off" },
         size = size_text(s.point_size),
         modes = modes,
         confs = conf_rows(&s.min_conf),
     )
+}
+
+/// The mesh shading buttons (`data-live="shade"`, `data-shade="on|off"`), the current one on.
+pub fn shade_buttons(on: bool) -> String {
+    [("off", "끔", !on), ("on", "켬", on)]
+        .iter()
+        .map(|(key, label, cur)| {
+            format!(
+                "<button type=\"button\" class=\"board-seg{}\" data-live=\"shade\" data-shade=\"{key}\">{label}</button>",
+                if *cur { " is-on" } else { "" },
+            )
+        })
+        .collect()
 }
 
 /// One row per class of threshold buttons (`data-live="conf"`, `data-conf-class`,
@@ -774,6 +795,15 @@ mod tests {
             assert!(m.contains(&format!("id=\"{id}\"")), "{id}");
         }
         assert!(m.contains("3D 공간 생성 중") && m.contains("sl-surface--panel live-monitor"));
+    }
+
+    #[test]
+    fn mesh_shading_is_off_by_default_with_a_toggle() {
+        let s = LiveSettings::default();
+        assert!(!s.mesh_shading);
+        let m = settings_markup(&s);
+        assert!(m.contains("is-on\" data-live=\"shade\" data-shade=\"off\""));
+        assert!(m.contains("data-shade=\"on\""));
     }
 
     #[test]

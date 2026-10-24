@@ -200,6 +200,7 @@ struct Shown {
     mode: Option<ColorMode>,
     display: Option<Display>,
     conf: Option<[u32; 4]>,
+    shade: Option<bool>,
     wait_opacity: Option<i64>,
     monitor_width: Option<i64>,
 }
@@ -339,6 +340,11 @@ impl LivePanels {
                     s.min_conf[i] = p as f32 / 100.0;
                 }
             }
+            "shade" => {
+                if let Some((_, key)) = input.closest_data("shade") {
+                    s.mesh_shading = key == "on";
+                }
+            }
             "conf-menu" => {
                 drop(s);
                 self.conf_menu_open = !self.conf_menu_open;
@@ -367,6 +373,13 @@ impl LivePanels {
                 dom.toggle_class(b, "is-on", on);
             }
             self.shown.mode = Some(s.color_mode);
+        }
+        if self.shown.shade != Some(s.mesh_shading) {
+            for b in dom.find_all("[data-live=shade]") {
+                let on = (dom.attr(b, "data-shade").as_deref() == Some("on")) == s.mesh_shading;
+                dom.toggle_class(b, "is-on", on);
+            }
+            self.shown.shade = Some(s.mesh_shading);
         }
         let steps = s.min_conf.map(pl::conf_step);
         if self.shown.conf != Some(steps) {

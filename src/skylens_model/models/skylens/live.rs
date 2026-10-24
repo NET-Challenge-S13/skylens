@@ -189,8 +189,12 @@ pub fn spawn_poller(node: ReconNode, stop: Arc<AtomicBool>) -> anyhow::Result<Jo
 /// At 0.2 m one vertex colour averaged tens of the display's points and the surface read as
 /// blurred. A 0.05 m voxel was tried on the theater run and looked worse on the board (about
 /// 2.8x the chunks, and holes where the points were sparse), so 0.1 m it is.
+///
+/// `SKYLENS_MESH_VOXEL` overrides the voxel (metres) for comparison runs; the bin follows at half
+/// of it and the splat radius stays 0.2 m (scaling it down too tore the surface into holes).
 fn mesh_config() -> deltamesh::Config {
-    deltamesh::Config { voxel: 0.1, bin: 0.05, splat_radius: 0.2, ..deltamesh::Config::default() }
+    let voxel = std::env::var("SKYLENS_MESH_VOXEL").ok().and_then(|v| v.trim().parse::<f32>().ok()).filter(|v| *v > 0.0).unwrap_or(0.1);
+    deltamesh::Config { voxel, bin: voxel / 2.0, splat_radius: 0.2, ..deltamesh::Config::default() }
 }
 
 /// Creates the mesher: deltamesh's GPU mesher when asked and built with the

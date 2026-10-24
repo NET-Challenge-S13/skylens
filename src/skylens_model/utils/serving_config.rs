@@ -33,6 +33,7 @@
 //! | `SKYLENS_CAMERA_JSON`  | built-in demo camera | camera intrinsics prior. Unset: built-in DJI FC9589 1920x1080 (fx 1505, fy 1510, cx 960, cy 540; theater30 self-calibration, the footage camera.json 1329 is 12% low). A set path overrides it; a missing file means no prior |
 //! | `SKYLENS_FRAME_WIDTH`   | unset (= the file's `video_width`) | width of the pushed frames; the prior's fx, fy, cx, cy are scaled by this / `video_width` |
 //! | `SKYLENS_PRECISION`     | `auto`         | SkyLensNet arithmetic on CUDA: `auto` (by compute capability: >= 8.0 bf16, 7.x fp16 autocast, else fp32), `fp32`, `fp16`, `bf16` |
+//! | `SKYLENS_MESH_VOXEL`    | `0.1`          | deltamesh voxel in metres (bin = half of it, splat radius 0.2 m); for comparison runs |
 //! | `DELTAMESH_EXTRACT_BATCH` | `128` (set by `app::main`) | deltamesh GPU mesher blocks per extraction batch; deltamesh's own default 512 holds about 0.7 GB more GPU memory |
 
 use std::net::SocketAddr;

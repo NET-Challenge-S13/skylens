@@ -52,6 +52,17 @@ pub fn mesh_opacity(fade: f32, display: Display) -> f32 {
 pub const SURFACE_EVEN: f32 = 0.85;
 pub const SURFACE_KEY: f32 = 0.15;
 
+/// The plain mesh surface: its vertex colours as they are, unlit (the default, see
+/// [`LiveSettings::mesh_shading`](crate::panels_live::LiveSettings::mesh_shading)).
+pub fn plain_surface(alpha: f32) -> Material {
+    Material {
+        shading: Shading::Unlit,
+        tint: [1.0, 1.0, 1.0, alpha],
+        blend: if alpha >= 1.0 { Blend::Opaque } else { Blend::Alpha },
+        double_sided: true,
+    }
+}
+
 /// The mesh surface: the reconstruction's own vertex colours under a neutral light that is mostly
 /// even (0.85) with a faint key from above (0.15), so the colours stay those of the points drawn
 /// over it while the surface's relief still reads. The old warm 0.35 + 0.5 light came out darker
@@ -145,6 +156,8 @@ pub struct StatusScene {
     fit_hold_until: f64,
     /// Mesh alpha per segment as last applied.
     mesh_alpha: BTreeMap<u32, f32>,
+    /// Whether the mesh blocks were last styled shaded.
+    mesh_shaded: Option<bool>,
     /// Marker id -> mesh id base (pin, ring = base + 1).
     marker_ids: BTreeMap<String, u64>,
     next_marker: u64,
@@ -175,6 +188,7 @@ impl StatusScene {
             layer: LiveLayer::new(LiveView::Main),
             fit_hold_until: 0.0,
             mesh_alpha: BTreeMap::new(),
+            mesh_shaded: None,
             marker_ids: BTreeMap::new(),
             next_marker: 0,
             pin_scale: 1.0,
@@ -340,10 +354,10 @@ impl ViewScreen for StatusScene {
         // Points: one scene per segment, faded in on arrival; the slot stream as the animated
         // live layer (fade and glide per point), coloured as the controls bar says.
         gpu.sync_segments(&board.store, 0.0);
-        let (mode, scale, fit, display) = {
+        let (mode, scale, fit, display, shading) = {
             let mut st = board.settings.borrow_mut();
             let fit = std::mem::take(&mut st.fit_requested);
-            (st.color_mode, st.point_size, fit, st.display)
+            (st.color_mode, st.point_size, fit, st.display, st.mesh_shading)
         };
         // Both displays draw the points; the mesh display lays the mesh under them as the surface
         // that fills the gaps between points, while the points keep the detail and the colour.
@@ -362,15 +376,18 @@ impl ViewScreen for StatusScene {
             gpu.clouds.set_alpha(segment_cloud(seg), a);
         }
 
-        // Mesh blocks, unlit in their vertex colours, faded with their segment and opaque once the
-        // fade is through; hidden in the points display.
+        // Mesh blocks in their vertex colours (plain, or under the faint key light when the
+        // settings ask), faded with their segment and opaque once the fade is through; hidden in
+        // the points display.
         let fade = &self.fade;
         let mesh_alpha = |seg: u32| mesh_opacity(fade.alpha(seg), display);
-        gpu.sync_mesh_blocks(&board.store, |e| surface(mesh_alpha(e.segment)));
+        let material = |a: f32| if shading { surface(a) } else { plain_surface(a) };
+        gpu.sync_mesh_blocks(&board.store, |e| material(mesh_alpha(e.segment)));
         let alphas: BTreeMap<u32, f32> = fade.segments().map(|(s, _)| (s, mesh_alpha(s))).collect();
-        if alphas != self.mesh_alpha {
-            gpu.restyle_mesh_blocks(&board.store, |e| surface(mesh_alpha(e.segment)));
+        if alphas != self.mesh_alpha || self.mesh_shaded != Some(shading) {
+            gpu.restyle_mesh_blocks(&board.store, |e| material(mesh_alpha(e.segment)));
             self.mesh_alpha = alphas;
+            self.mesh_shaded = Some(shading);
         }
 
         self.sync_markers(gpu, &board);
