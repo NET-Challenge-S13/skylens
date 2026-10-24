@@ -1,0 +1,70 @@
+# MediaMTX on the Daejeon VM, stage 2: pull from the bridge.
+#
+# Same as mediamtx.yml except where the drone paths get their source:
+#   stage 1, mediamtx.yml      : publisher (a local ffmpeg test source pushes in)
+#   stage 2, mediamtx-pull.yml : Daejeon pulls the bridge SRT (outbound from here)
+#
+# The gateway rides 5G and cannot enter KOREN, so the bridge holds the feed and
+# Daejeon fetches it. The bridge MediaMTX allows a password-less read from
+# 116.89.187.181.
+
+logLevel: info
+logDestinations: [stdout]
+
+api: no
+metrics: no
+pprof: no
+playback: no
+# RTSP on loopback only, so the bridge can pull the video through the SSH tunnel
+# (its key carries permitopen 127.0.0.1:8554) and re-send it as WebRTC on the
+# operator LAN. That detour exists because the WebRTC media below is UDP and does
+# not cross the VPN and KOREN boundary: the signalling answers and the screens
+# still show NO SIGNAL. Nothing outside this host can reach 8554.
+rtsp: yes
+rtspAddress: 127.0.0.1:8554
+rtmp: no
+hls: no
+moq: no
+
+srt: yes
+srtAddress: :10890
+
+webrtc: yes
+webrtcAddress: :10889
+webrtcEncryption: no
+webrtcAllowOrigins: ['*']
+webrtcTrustedProxies: [127.0.0.1]
+webrtcLocalUDPAddress: :10189
+webrtcLocalTCPAddress: ''
+webrtcIPsFromInterfaces: yes
+webrtcIPsFromInterfacesList: [ens3]
+webrtcAdditionalHosts: []
+webrtcICEServers2: []
+webrtcHandshakeTimeout: 10s
+webrtcTrackGatherTimeout: 2s
+
+pathDefaults:
+  sourceOnDemand: no
+
+# Pull all three paths from the bridge. The names are the core's drone1, drone2
+# and drone3 (SKYLENS_CORE_STREAM_PATH = `drone{id}`).
+#
+# Through the tunnel, not the public address. The bridge holds one SSH
+# connection to this host and carries a reverse forward in it: localhost:18554
+# here is the bridge's RTSP. Pulling over that means the home router needs no
+# inbound port for the video, which keeps the rule this deployment is built on -
+# the bridge dials in, nothing dials the bridge. RTSP over TCP is also what the
+# tunnel can carry; SRT is UDP and cannot go through it.
+paths:
+  drone1:
+    source: rtsp://127.0.0.1:18554/drone1
+    rtspTransport: tcp
+    sourceOnDemand: no
+  drone2:
+    source: rtsp://127.0.0.1:18554/drone2
+    rtspTransport: tcp
+    sourceOnDemand: no
+  drone3:
+    source: rtsp://127.0.0.1:18554/drone3
+    rtspTransport: tcp
+    sourceOnDemand: no

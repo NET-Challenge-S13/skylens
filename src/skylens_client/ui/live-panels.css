@@ -1,0 +1,418 @@
+/* Live reconstruction panels: waiting screen, top-right toolbar, monitor, settings overlay.
+   Added on top of status-panels.css (which stays the legacy file); uses the tokens of the shared
+   style.css. Every surface here follows the top-left reference (pane label chip, #server-status
+   panel): hairline border, --radius-md, --shadow-panel, display-font headings, mono details.
+   Right column, top to bottom: toolbar (14px) - monitor (56px) - [detection card bottom-right]. */
+
+/* --- Waiting screen (until the first delta) --- */
+.live-wait {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  background: radial-gradient(ellipse 45% 40% at 50% 52%, rgba(94, 200, 255, 0.16), rgba(5, 7, 10, 0) 70%);
+  font-family: var(--font-body);
+}
+.live-wait__wave {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.live-wait__cap {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 11%;
+  text-align: center;
+}
+.live-wait__big {
+  font-family: var(--font-display);
+  font-size: 38px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: #d8f0ff;
+  text-shadow: 0 0 18px rgba(94, 200, 255, 0.7);
+}
+.live-wait__sub {
+  margin-top: 8px;
+  font-family: var(--font-mono);
+  font-size: var(--text-md);
+  letter-spacing: 0.05em;
+  color: #5fb8e8;
+}
+
+/* --- Top-right toolbar: camera-state chip + settings button, as wide as their text ---
+   The monitor under it takes this row's width (set from live_ui.rs once laid out). */
+.board-toolbar {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  z-index: 30;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Same metrics as the tower's toolbar (.control-toolbar__btn): the button and the camera-state
+   chip are one family of chips in one row. The link state lives in #server-status only. */
+.board-toolbar__btn,
+.board-toolbar .cam-state {
+  position: static;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 14px;
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-sm);
+  background: var(--surface-1);
+  font-family: var(--font-display);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.board-toolbar__btn {
+  color: var(--status-ink);
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.board-toolbar__btn:hover {
+  background: var(--surface-2);
+  border-color: var(--border-strong);
+}
+
+/* A read-out, not a button, but the same ink as the button beside it: one row, one colour. */
+.board-toolbar .cam-state {
+  color: var(--status-ink);
+  pointer-events: none;
+}
+
+/* --- Monitor (top-right, under the toolbar): the reference panel plus a live wave strip --- */
+.live-monitor {
+  position: absolute;
+  top: 56px;
+  right: 16px;
+  /* Until the toolbar is laid out; then live_ui.rs sets the toolbar's width inline. */
+  width: 300px;
+  z-index: 4;
+  display: none;
+  box-sizing: border-box;
+  overflow: hidden;
+  padding: 12px 14px;
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-md);
+  background: var(--surface-glass);
+  box-shadow: var(--shadow-panel);
+  pointer-events: none;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+.live-monitor.is-flash {
+  border-color: var(--border-focus);
+  box-shadow: 0 0 14px rgba(94, 200, 255, 0.35), var(--shadow-panel);
+}
+
+.live-monitor__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.live-monitor__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.live-monitor__label {
+  font-family: var(--font-display);
+  font-weight: 600;
+  font-size: var(--text-xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.live-monitor.is-done .live-monitor__label {
+  white-space: normal;
+  line-height: 1.3;
+}
+
+/* Wraps: the panel is only as wide as the toolbar row. */
+.live-monitor__detail {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-tertiary);
+  letter-spacing: 0.02em;
+}
+
+/* Two classes: the shared `.pane canvas { height: 100% }` outranks one, and stretched the strip
+   past the panel's bottom, where it was cut off. */
+.live-monitor .live-monitor__wave {
+  display: block;
+  width: 100%;
+  height: 64px;
+  margin-top: 8px;
+  box-sizing: border-box;
+  border-top: 1px solid var(--divider);
+  border-radius: var(--radius-sm);
+  /* Transparent: the wave floats on the panel's own glass. */
+  background: transparent;
+}
+.live-monitor.is-done .live-monitor__wave {
+  opacity: 0.45;
+}
+
+/* --- Settings overlay (opened from the toolbar button), after the tower's settings modal --- */
+.board-settings-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 110;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(2, 4, 8, 0.68);
+}
+.board-settings-overlay.is-hidden {
+  display: none;
+}
+
+.board-settings {
+  position: relative;
+  box-sizing: border-box;
+  width: min(460px, 94vw);
+  max-height: 88vh;
+  overflow: auto;
+  /* The tower's dialog head: an accent line on top, the title over a divider. */
+  padding: 22px 22px 20px;
+  background: var(--surface-2);
+  border-top: 2px solid var(--status-ink);
+}
+
+.board-settings__close {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+}
+.board-settings__close:hover {
+  background: var(--surface-inset);
+  color: var(--text-primary);
+}
+
+.board-settings__title {
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--status-ink);
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--divider);
+}
+
+.board-settings__section {
+  margin-top: 16px;
+  margin-bottom: 8px;
+  font-family: var(--font-display);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.board-settings__options {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.board-option {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 11px 13px;
+  text-align: left;
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-md);
+  background: var(--surface-inset);
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  cursor: pointer;
+}
+.board-option:hover {
+  background: rgba(255, 255, 255, 0.06);
+  border-color: var(--border-strong);
+}
+.board-option.is-active {
+  border-color: var(--border-focus);
+  background: rgba(94, 200, 255, 0.12);
+}
+
+.board-option__name {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-body);
+  font-size: var(--text-md);
+  font-weight: 600;
+}
+.board-option.is-active .board-option__name {
+  color: var(--status-ink);
+}
+
+.board-option__hint {
+  font-size: var(--text-sm);
+  color: var(--text-secondary);
+}
+
+.board-settings__badge {
+  padding: 2px 6px;
+  border: 1px solid var(--border-hairline);
+  border-radius: 999px;
+  background: rgba(94, 200, 255, 0.18);
+  font-family: var(--font-display);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--status-ink);
+}
+
+.board-settings__group.is-off {
+  opacity: 0.4;
+  pointer-events: none;
+}
+
+.board-settings__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0;
+}
+
+.board-settings__lbl {
+  min-width: 56px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+
+.board-settings__val {
+  min-width: 34px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+/* Controls guide: what to do on the left (key caps, a mouse with the button lit, words), what
+   it does on the right. One fixed first column so every section lines up. */
+.board-help__list {
+  display: grid;
+  grid-template-columns: 250px 1fr;
+  column-gap: 12px;
+  row-gap: 8px;
+  align-items: center;
+  margin: 0 0 4px;
+  font-size: var(--text-sm);
+}
+.board-help__list dt {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-primary);
+}
+.board-help__list dd {
+  margin: 0;
+  color: var(--text-secondary);
+}
+.board-help__mouse {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 20px;
+}
+.board-help__key {
+  display: inline-block;
+  min-width: 22px;
+  padding: 1px 6px;
+  border: 1px solid var(--border-strong);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--surface-inset);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 16px;
+  text-align: center;
+  color: var(--text-primary);
+}
+.board-help__note {
+  display: block;
+  margin-top: 16px;
+  line-height: 1.5;
+}
+
+.board-settings__note {
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+}
+/* The per-class confidence sub-menu, folded until its button opens it. */
+.board-settings__sub {
+  margin: 6px 0 0 12px;
+  padding-left: 10px;
+  border-left: 1px solid var(--divider);
+}
+.board-settings__sub.is-off {
+  display: none;
+}
+
+.board-settings__note--row {
+  display: block;
+  margin-top: 4px;
+}
+
+.board-seg {
+  padding: 6px 12px;
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-sm);
+  background: var(--surface-inset);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+.board-seg:hover {
+  border-color: var(--border-focus);
+}
+.board-seg.is-on {
+  border-color: var(--border-focus);
+  color: var(--info);
+  background: rgba(94, 200, 255, 0.14);
+}
+.board-seg--ic {
+  min-width: 34px;
+  text-align: center;
+}
+
+/* Short viewports (a phone on its side): no room for the right column's monitor. */
+@media (max-height: 600px) {
+  .live-monitor { display: none !important; }
+}

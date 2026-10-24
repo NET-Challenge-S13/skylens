@@ -15,6 +15,7 @@ key                 shape / dtype                  notes
 ``person_heatmap``  (B, 1, H/s, W/s) float32       CenterNet gaussian splat
 ``person_wh``       (B, 2, H/s, W/s) float32       (w, h) in output-stride units
 ``person_reg_mask`` (B, 1, H/s, W/s) float32       1 at valid centres
+``person_offset``   (B, 2, H/s, W/s) float32       sub-cell centre c/s - floor(c/s), at reg_mask
 =================== ============================== =================================
 
 The three ``person_*`` keys are omitted together when no sample in the batch
@@ -49,7 +50,11 @@ __all__ = [
     "draw_gaussian",
     "THERMAL_ABSENT",
     "THERMAL_MIN",
+    "RADIUS_ROUNDINGS",
 ]
+
+#: Accepted values for ``SkyLensCollator(radius_rounding=...)``.
+RADIUS_ROUNDINGS = ("trunc", "round")
 
 #: Value reserved in the thermal channel to mean "this modality is absent".
 THERMAL_ABSENT = 0.0
@@ -143,7 +148,15 @@ class SkyLensCollator:
         Append a 5th channel that is 1.0 where the thermal plane is real
         (README §2.3 "명확" option). ``pixel_values`` then has ``C = 5``.
     min_overlap:
-        ``min_overlap`` passed to :func:`gaussian_radius`.
+        ``min_overlap`` passed to :func:`gaussian_radius`. Lower values give a
+        larger radius, i.e. a wider soft ring around each centre.
+    radius_rounding:
+        How the real-valued gaussian radius becomes an integer cell count.
+        ``"trunc"`` (default, the v4 behaviour) truncates toward zero, so any
+        box whose radius is below 1.0 gets radius 0 and a strictly one-hot
+        target. ``"round"`` rounds to the nearest integer, so a box with radius
+        >= 0.5 keeps a minimal soft ring. Small VisDrone people sit exactly in
+        that band, which is why the two rules differ.
     modality_dropout:
         ``(p_drop_thermal, p_drop_rgb)`` -- symmetric modality dropout from
         README §2.2. Defaults to ``(0.0, 0.0)``; the recommended training value
@@ -158,6 +171,7 @@ class SkyLensCollator:
         person_head_stride: int = 4,
         validity_channel: bool = False,
         min_overlap: float = 0.7,
+        radius_rounding: str = "trunc",
         modality_dropout: tuple[float, float] = (0.0, 0.0),
         max_objects: int = 512,
         rng: np.random.Generator | None = None,
@@ -167,6 +181,13 @@ class SkyLensCollator:
         self.person_head_stride = int(person_head_stride)
         self.validity_channel = bool(validity_channel)
         self.min_overlap = float(min_overlap)
+        if not 0.0 < float(min_overlap) < 1.0:
+            raise ValueError(f"min_overlap must be in (0, 1); got {min_overlap}")
+        if radius_rounding not in RADIUS_ROUNDINGS:
+            raise ValueError(
+                f"radius_rounding must be one of {sorted(RADIUS_ROUNDINGS)}; got {radius_rounding!r}"
+            )
+        self.radius_rounding = str(radius_rounding)
         self.modality_dropout = modality_dropout
         self.max_objects = int(max_objects)
         self._rng = rng if rng is not None else np.random.default_rng()
@@ -207,14 +228,16 @@ class SkyLensCollator:
             hm = np.zeros((len(samples), 1, oh, ow), dtype=np.float32)
             wh = np.zeros((len(samples), 2, oh, ow), dtype=np.float32)
             reg = np.zeros((len(samples), 1, oh, ow), dtype=np.float32)
+            off = np.zeros((len(samples), 2, oh, ow), dtype=np.float32)
             for i, s_ in enumerate(samples):
                 boxes = s_.get("person_boxes")
                 if boxes is None or len(boxes) == 0:
                     continue
-                self._encode_boxes(np.asarray(boxes, np.float32), hm[i, 0], wh[i], reg[i, 0])
+                self._encode_boxes(np.asarray(boxes, np.float32), hm[i, 0], wh[i], reg[i, 0], off[i])
             batch["person_heatmap"] = torch.from_numpy(hm)
             batch["person_wh"] = torch.from_numpy(wh)
             batch["person_reg_mask"] = torch.from_numpy(reg)
+            batch["person_offset"] = torch.from_numpy(off)
 
         return batch
 
@@ -283,7 +306,8 @@ class SkyLensCollator:
         return (THERMAL_MIN + (1.0 - THERMAL_MIN) * norm).astype(np.float32)
 
     def _encode_boxes(self, boxes: np.ndarray, heatmap: np.ndarray,
-                      wh: np.ndarray, reg_mask: np.ndarray) -> None:
+                      wh: np.ndarray, reg_mask: np.ndarray,
+                      offset: np.ndarray | None = None) -> None:
         """CenterNet encoding of xyxy pixel boxes into the output-stride grids."""
         s = self.person_head_stride
         oh, ow = heatmap.shape
@@ -297,9 +321,13 @@ class SkyLensCollator:
             if not (0 <= cxi < ow and 0 <= cyi < oh):
                 continue
 
-            radius = max(0, int(gaussian_radius((bh, bw), self.min_overlap)))
+            r = gaussian_radius((bh, bw), self.min_overlap)
+            radius = max(0, int(round(r)) if self.radius_rounding == "round" else int(r))
             draw_gaussian(heatmap, (cxi, cyi), radius)
 
             wh[0, cyi, cxi] = bw
             wh[1, cyi, cxi] = bh
             reg_mask[cyi, cxi] = 1.0
+            if offset is not None:
+                offset[0, cyi, cxi] = cx - cxi
+                offset[1, cyi, cxi] = cy - cyi

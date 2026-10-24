@@ -1,0 +1,92 @@
+[package]
+name = "skylens-viewer"
+description = "Screen layer shared by the control tower and the status board: CSS, widgets, core link, chunk store, pointblitz 3D view"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+path = "lib.rs"
+
+[dependencies]
+skylens-shared.workspace = true
+prost.workspace = true
+anyhow.workspace = true
+pointblitz.workspace = true
+wgpu.workspace = true
+anyrender.workspace = true
+# Same versions blitz and pointblitz resolve to (see Cargo.lock).
+glam = "0.34"
+peniko = "0.6"
+# Font collection for the bundled fonts; features as Blitz declares them.
+parley = { version = "0.12", default-features = false, features = ["std"] }
+wgpu_context = "0.10"
+keyboard-types = "0.7"
+winit = "=0.31.0-beta.3"
+
+# build.rs fetches the bridge certificate to pin (see link::PINNED_CERTS).
+[build-dependencies]
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+
+# Native: Blitz with its default features, tokio-tungstenite for the core link.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# Decodes the embedded window icon (res/icon/skylens-256.png).
+image = { version = "0.25", default-features = false, features = ["png"] }
+blitz-dom = { workspace = true, features = ["custom-widget"] }
+blitz-html.workspace = true
+blitz-paint = { workspace = true, features = ["custom-widget"] }
+blitz-traits.workspace = true
+blitz-shell = { workspace = true, features = ["custom-widget"] }
+anyrender_vello.workspace = true
+tokio.workspace = true
+# wss with rustls on ring (the provider reqwest already pulls in; aws-lc-rs would need cmake and
+# nasm on every runner and in the Android NDK build). link.rs passes its own client config.
+tokio-tungstenite = { version = "0.29", features = ["__rustls-tls"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12", "logging"] }
+webpki-roots = "1"
+futures-util = { version = "0.3", default-features = false, features = ["std", "sink"] }
+
+# Android: the NativeActivity glue (cargo-apk packages a NativeActivity APK). winit needs one of
+# its activity features or android-activity refuses to compile; blitz-shell takes the same
+# android-activity 0.6 for its event loop. libc for system properties (settings, see android.rs).
+[target.'cfg(target_os = "android")'.dependencies]
+android-activity = { version = "0.6", features = ["native-activity"] }
+winit = { version = "=0.31.0-beta.3", features = ["android-native-activity"] }
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+# System icon sizes for the window and task bar icons.
+windows-sys = { version = "0.61", features = ["Win32_UI_WindowsAndMessaging"] }
+
+# Web: the same Blitz revision without the desktop-only features (system fonts,
+# clipboard, file dialogs), like Blitz's own examples/wasm_hello. Declared directly
+# because the workspace entry turns default features on.
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+blitz-dom = { git = "https://github.com/DioxusLabs/blitz", rev = "45496d9288b063719ebeae4e0761273f7881b3d7", default-features = false, features = ["woff", "custom-widget"] }
+blitz-html = { git = "https://github.com/DioxusLabs/blitz", rev = "45496d9288b063719ebeae4e0761273f7881b3d7", default-features = false }
+blitz-paint = { git = "https://github.com/DioxusLabs/blitz", rev = "45496d9288b063719ebeae4e0761273f7881b3d7", default-features = false, features = ["custom-widget"] }
+blitz-traits = { git = "https://github.com/DioxusLabs/blitz", rev = "45496d9288b063719ebeae4e0761273f7881b3d7", default-features = false }
+blitz-shell = { git = "https://github.com/DioxusLabs/blitz", rev = "45496d9288b063719ebeae4e0761273f7881b3d7", default-features = false, features = ["custom-widget"] }
+# vello_hybrid runs on WebGPU and on WebGL2.
+anyrender_vello_hybrid = { version = "0.11", features = ["webgl"] }
+wasm-bindgen = "0.2"
+js-sys = "0.3"
+web-sys = { version = "0.3", features = [
+    "BinaryType",
+    "CloseEvent",
+    "CssStyleDeclaration",
+    "Document",
+    "Element",
+    "Event",
+    "HtmlCanvasElement",
+    "HtmlElement",
+    "Location",
+    "MessageEvent",
+    "Performance",
+    "UrlSearchParams",
+    "WebSocket",
+    "Window",
+    "console",
+] }

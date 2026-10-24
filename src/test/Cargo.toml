@@ -1,0 +1,23 @@
+[package]
+name = "skylens-tests"
+description = "Cross-component tests"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+path = "lib.rs"
+
+[dev-dependencies]
+# slots.rs: the model's slot encoder (compiled from its source, without libtorch) feeding the
+# screens' chunk store, with cumulus3d's own display diff as the producer.
+anyhow.workspace = true
+tracing.workspace = true
+serde_json.workspace = true
+skylens-shared.workspace = true
+skylens-viewer.workspace = true
+pointblitz-io.workspace = true
+cumulus3d-cli.workspace = true
+cumulus3d-core = "0.11"

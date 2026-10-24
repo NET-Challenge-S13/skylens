@@ -1,0 +1,78 @@
+// Encodings of Chunk.payload (see skylens/model/v1/model.proto).
+//
+// The core only routes these by Chunk metadata. Producers (skylens_model, the
+// core's terrain feed) encode them and screens decode them. CHUNK_KIND_POINTS
+// carries pointblitz chunk bytes (pointblitz-io chunk format v2) and has no
+// message here. Terrain and buildings are sent as raw source data; the control
+// tower builds their look (grade, extrusion, edges, display modes) itself.
+syntax = "proto3";
+
+package skylens.payload.v1;
+
+import "skylens/model/v1/model.proto";
+
+option go_package = "github.com/NET-Challenge-S13/skylens/src/skylens_core/gen/skylens/payload/v1;payloadv1";
+
+// CHUNK_KIND_MESH_BLOCK: one deltamesh BlockMesh.
+// Zero triangles means the viewer removes the block.
+message MeshBlock {
+  repeated int32 id = 1;        // [x, y, z] block coordinate
+  uint32 version = 2;           // keep only if newer than what the viewer has
+  repeated float positions = 3; // x y z per vertex, absolute ENU metres
+  bytes colors = 4;             // r g b per vertex
+  repeated uint32 indices = 5;  // three per triangle, counter-clockwise from outside
+}
+
+enum DetectionCategory {
+  DETECTION_CATEGORY_UNSPECIFIED = 0;
+  DETECTION_CATEGORY_PERSON = 1;
+  DETECTION_CATEGORY_FIRE = 2;
+  DETECTION_CATEGORY_COLLAPSE = 3;
+  DETECTION_CATEGORY_ROAD_BLOCKED = 4;
+}
+
+// One fused detection: the confidence-weighted result of every frame that saw it.
+message Detection {
+  string id = 1;                                 // stable across updates
+  DetectionCategory category = 2;
+  skylens.model.v1.Gps gps = 3;                  // point for people, centroid for hazard zones
+  double confidence = 4;                         // after inter-frame interpolation
+  string label = 5;
+  uint32 segment = 6;                            // the board shows it once this segment has arrived
+  repeated skylens.model.v1.Gps outline = 7;     // hazard zone outline; empty for people
+  uint32 frames = 8;                             // frames that contributed
+}
+
+// CHUNK_KIND_DETECTIONS and DetectJobResult.detections.
+message DetectionBatch {
+  repeated Detection detections = 1;
+}
+
+// CHUNK_KIND_TERRAIN: one terrain cell. Heights on a regular grid over the cell's
+// ENU rectangle, plus the satellite image that drapes it.
+message TerrainTile {
+  repeated int32 cell = 1;        // [x, y] cell index, same as Chunk.block_id[0..2]
+  double min_e = 2;               // cell rectangle, ENU metres about Site.anchor
+  double min_n = 3;
+  double max_e = 4;
+  double max_n = 5;
+  uint32 cols = 6;                // grid size; heights are row-major, row 0 at min_n
+  uint32 rows = 7;
+  repeated float heights = 8;     // metres above Site.anchor altitude (cols * rows)
+  bytes imagery_jpeg = 9;         // satellite image for the rectangle, north up; empty when unavailable
+  bool ring = 10;                 // coarse background ring cell (lower resolution)
+}
+
+// One building footprint, extruded by the screen.
+message Building {
+  string id = 1;
+  repeated double outline = 2;    // closed ring as e,n pairs (ENU metres), counter-clockwise
+  double base = 3;                // ground height at the footprint, metres above anchor altitude
+  double height = 4;              // extrusion height, metres
+}
+
+// CHUNK_KIND_BUILDINGS: the buildings whose centroid falls in one terrain cell.
+message BuildingSet {
+  repeated int32 cell = 1;
+  repeated Building buildings = 2;
+}

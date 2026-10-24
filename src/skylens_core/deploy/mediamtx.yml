@@ -1,0 +1,64 @@
+# MediaMTX on the Daejeon VM (the distribution node).
+#
+# Role: take the drone video and send it to commander browsers over WebRTC (WHEP).
+# Ports moved off the defaults to fit the KOREN policy range (10000-15000):
+#   WHEP signalling  8889 -> 10889 (TCP)   reachable only through the bridge tunnel
+#   WebRTC media     8189 -> 10189 (UDP)   straight from Daejeon to the browser
+#   SRT ingest       8890 -> 10890 (UDP)   stage 1 takes the local test source only
+#
+# The public address sits directly on ens3 with no NAT, so no server-side STUN
+# is needed; webrtcIPsFromInterfacesList offers only the ens3 address
+# (116.89.187.181) as an ICE candidate.
+
+logLevel: info
+logDestinations: [stdout]
+
+# Turn off the protocols we do not use, to open as few ports as possible.
+api: no
+metrics: no
+pprof: no
+playback: no
+# RTSP on loopback only, so the bridge can pull the video through the SSH tunnel
+# (its key carries permitopen 127.0.0.1:8554) and re-send it as WebRTC on the
+# operator LAN. That detour exists because the WebRTC media below is UDP and does
+# not cross the VPN and KOREN boundary: the signalling answers and the screens
+# still show NO SIGNAL. Nothing outside this host can reach 8554.
+rtsp: yes
+rtspAddress: 127.0.0.1:8554
+rtmp: no
+hls: no
+moq: no                         # on by default in v1.21; it would open 8892/8893
+
+# ---- SRT (ingest) ----
+srt: yes
+srtAddress: :10890
+
+# ---- WebRTC (egress) ----
+webrtc: yes
+webrtcAddress: :10889
+webrtcEncryption: no            # TLS is the bridge nginx's job
+webrtcAllowOrigins: ['*']
+webrtcTrustedProxies: [127.0.0.1]
+webrtcLocalUDPAddress: :10189
+webrtcLocalTCPAddress: ''       # no TCP fallback, UDP only
+webrtcIPsFromInterfaces: yes
+webrtcIPsFromInterfacesList: [ens3]
+webrtcAdditionalHosts: []
+webrtcICEServers2: []           # no NAT, so no STUN
+webrtcHandshakeTimeout: 10s
+webrtcTrackGatherTimeout: 2s
+
+# ---- paths ----
+# The core owns these names. SKYLENS_CORE_STREAM_PATH defaults to `drone{id}`,
+# the core reads frames from srt://127.0.0.1:10890?streamid=read:droneN, and it
+# hands the screens /live/droneN/whep. All three names have to line up.
+# (The demo reads this file and swaps only `paths` for all_others; see
+# src/demo/paths.rs.)
+pathDefaults:
+  source: publisher
+  sourceOnDemand: no
+
+paths:
+  drone1:                       # left  (stage 1: the ffmpeg test source)
+  drone2:                       # center
+  drone3:                       # right

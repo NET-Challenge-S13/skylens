@@ -1,0 +1,12 @@
+# Work logs stay local, never committed.
+worklog/
+
+# Measurement results go in even with a .log extension: the root .gitignore rule
+# for `*.log` targets application logs, while the lab's saturation and state runs
+# are results, the evidence quoted in the presentation.
+!lab/results/scale-*.log
+!lab/results/saturation-*.log
+!lab/results/state-*.log
+
+# Error logs are not results, so they stay out.
+lab/results/*-error.log
