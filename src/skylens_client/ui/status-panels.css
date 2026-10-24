@@ -249,13 +249,10 @@
    blinking until it lands. app.rs toggles `is-dim` every 600 ms (Blitz runs no CSS keyframes). */
 .delay__cell.is-pending {
   border-style: dashed;
+  opacity: 0.9;
 }
-/* The off phase blanks the cell to an empty slot (colours, not opacity: Blitz did not repaint an
-   opacity change made by a class toggle). */
 .delay__cell.is-pending.is-dim {
-  border-color: var(--divider);
-  background: transparent;
-  color: transparent;
+  opacity: 0.2;
 }
 
 /* Older steps scrolled off to the left. */
