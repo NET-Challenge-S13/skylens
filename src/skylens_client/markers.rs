@@ -144,32 +144,30 @@ fn push_ring(positions: &mut Vec<[f64; 3]>, indices: &mut Vec<u32>, centre: DVec
     }
 }
 
-/// A drone on the minimap: a quadcopter seen from above (a small body, two diagonal arms and a
-/// rotor ring at each arm's end) spanning about `2 x radius`, level at `pos`, and a thin stem
-/// down to `ground_z` so its height above the reconstruction reads at a glance. A diamond read
-/// as just another marker.
+/// A drone on the minimap: a diamond (octahedron of half-height `radius`, faceted) circled by a
+/// level ring like Saturn's, so it reads as a drone rather than another marker, and a thin stem
+/// down to `ground_z` (when finite and below) so its height reads at a glance.
 pub fn drone_mesh(pos: DVec3, radius: f64, ground_z: f64) -> MeshData {
-    let (mut positions, mut indices) = (Vec::new(), Vec::new());
     let r = radius;
-    let t = r * 0.08; // arm half-thickness
-    let body = r * 0.22;
-    push_box(&mut positions, &mut indices, pos - DVec3::new(body, body, t * 1.5), pos + DVec3::new(body, body, t * 1.5));
-    let arm = r * 0.72;
-    for (sx, sy) in [(1.0, 1.0), (1.0, -1.0), (-1.0, 1.0), (-1.0, -1.0)] {
-        let dir = DVec3::new(sx, sy, 0.0).normalize();
-        let tip = pos + dir * arm;
-        // A diagonal arm as a row of small cubes from the body to the rotor (boxes here are
-        // axis-aligned, and a row of them reads as one bar at minimap size).
-        const LINKS: u32 = 6;
-        for k in 1..=LINKS {
-            let c = pos + dir * (arm * f64::from(k) / f64::from(LINKS));
-            push_box(&mut positions, &mut indices, c - DVec3::new(t * 1.6, t * 1.6, t), c + DVec3::new(t * 1.6, t * 1.6, t));
-        }
-        push_ring(&mut positions, &mut indices, tip, r * 0.2, r * 0.32);
+    let mut positions = vec![
+        (pos + DVec3::X * r).to_array(),
+        (pos + DVec3::Y * r).to_array(),
+        (pos - DVec3::X * r).to_array(),
+        (pos - DVec3::Y * r).to_array(),
+        (pos + DVec3::Z * r).to_array(),
+        (pos - DVec3::Z * r).to_array(),
+    ];
+    let mut indices = Vec::with_capacity(24);
+    for i in 0..4u32 {
+        let j = (i + 1) % 4;
+        // Upper and lower faces, counter-clockwise seen from outside.
+        indices.extend([i, j, 4]);
+        indices.extend([j, i, 5]);
     }
-    if ground_z.is_finite() && ground_z < pos.z {
-        let s = r * 0.035;
-        push_box(&mut positions, &mut indices, DVec3::new(pos.x - s, pos.y - s, ground_z), DVec3::new(pos.x + s, pos.y + s, pos.z - t));
+    push_ring(&mut positions, &mut indices, pos, r * 1.45, r * 1.75);
+    if ground_z.is_finite() && ground_z < pos.z - r {
+        let s = r * 0.06;
+        push_box(&mut positions, &mut indices, DVec3::new(pos.x - s, pos.y - s, ground_z), DVec3::new(pos.x + s, pos.y + s, pos.z - r));
     }
     MeshData { positions, indices, flat: true, ..Default::default() }
 }
@@ -245,21 +243,24 @@ mod tests {
     }
 
     #[test]
-    fn the_drone_is_a_level_quadcopter_with_a_stem_to_the_ground() {
+    fn the_drone_is_a_ringed_diamond_with_a_stem_to_the_ground() {
         let c = DVec3::new(5.0, -3.0, 40.0);
         let m = drone_mesh(c, 2.0, 10.0);
-        assert!(!m.indices.is_empty() && m.indices.len() % 3 == 0);
         assert!(m.indices.iter().all(|i| (*i as usize) < m.positions.len()));
-        let xs = m.positions.iter().map(|p| p[0]);
-        let (lo, hi) = xs.fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), x| (a.min(x), b.max(x)));
-        // Rotors at the arm ends: about 2 x radius across, centred on the drone.
-        assert!((hi - lo - 2.0 * (2.0 * 0.72 / 2f64.sqrt() + 2.0 * 0.32)).abs() < 1e-9, "{}", hi - lo);
-        assert!(((lo + hi) / 2.0 - c.x).abs() < 1e-9);
+        // The diamond's faces point outward (its first 24 indices).
+        for f in m.indices[..24].chunks_exact(3) {
+            let [a, b, d] = [f[0], f[1], f[2]].map(|i| DVec3::from(m.positions[i as usize]));
+            assert!((b - a).cross(d - a).dot((a + b + d) / 3.0 - c) > 0.0);
+        }
+        // The ring is level with the drone and wider than the diamond.
+        let ring: Vec<DVec3> = m.positions[6..6 + 32].iter().map(|p| DVec3::from(*p)).collect();
+        assert!(ring.iter().all(|p| (p.z - c.z).abs() < 1e-9));
+        let widest = ring.iter().map(|p| (*p - c).length()).fold(0.0, f64::max);
+        assert!((widest - 3.5).abs() < 1e-9);
         // The stem reaches the ground; without ground below there is none.
-        let bottom = m.positions.iter().map(|p| p[2]).fold(f64::INFINITY, f64::min);
-        assert_eq!(bottom, 10.0);
+        assert_eq!(m.positions.iter().map(|p| p[2]).fold(f64::INFINITY, f64::min), 10.0);
         let floating = drone_mesh(c, 2.0, f64::NEG_INFINITY);
-        assert!(floating.positions.iter().all(|p| p[2] > 39.0));
+        assert!(floating.positions.iter().all(|p| p[2] >= 38.0));
     }
 
     #[test]

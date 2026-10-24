@@ -47,7 +47,7 @@ const ZOOM_MAX: f64 = 2.5;
 /// Distance factor per wheel step (like the orbit's `0.95`).
 const ZOOM_STEP: f64 = 0.95;
 /// Minimap drones: size relative to a pin, and colours.
-const DRONE_SCALE: f64 = 1.6;
+const DRONE_SCALE: f64 = 1.0;
 const DRONE_RGB: u32 = 0xeef4ff;
 const DRONE_ACTIVE_RGB: u32 = 0xffd27f;
 /// Point size (CSS px), independent of the main view's setting.
@@ -311,7 +311,7 @@ impl InsetScene {
     /// Every drone the board has telemetry for, as diamonds; the followed one in the core colour.
     fn sync_drones(&mut self, gpu: &mut Gpu3d, board: &Board) {
         let bounds = board.points_box();
-        // Larger than a pin: the quadcopter's shape has to read at minimap size.
+        // Pin-sized; the ring makes it read as a drone.
         let radius = Self::pin_scale(bounds.map_or(f64::NAN, |(lo, hi)| (hi - lo).max_element())) * DRONE_SCALE;
         let ground_z = bounds.map_or(f64::NEG_INFINITY, |(lo, _)| lo.z);
         let shown: BTreeMap<u32, (DVec3, bool)> = board.drones.iter().map(|d| (d.id, (d.pos, Some(d.id) == board.active_drone))).collect();
