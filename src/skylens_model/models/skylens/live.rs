@@ -174,6 +174,14 @@ pub fn spawn_poller(node: ReconNode, stop: Arc<AtomicBool>) -> anyhow::Result<Jo
     })
 }
 
+/// The mesher's settings: deltamesh's defaults at half the voxel (0.1 m instead of 0.2 m), with
+/// the bin and the splat radius halved with it so the field keeps its shape at the finer grid.
+/// At 0.2 m one vertex colour averaged tens of the display's points and the surface read as
+/// blurred next to the points it was built from.
+fn mesh_config() -> deltamesh::Config {
+    deltamesh::Config { voxel: 0.1, bin: 0.05, splat_radius: 0.2, ..deltamesh::Config::default() }
+}
+
 /// Creates the mesher: deltamesh's GPU mesher when asked and built with the
 /// `gpu-mesh` feature, the CPU `SdfMesher` otherwise (or when no GPU is found).
 fn new_mesher(gpu: bool) -> Box<dyn Mesher> {
@@ -181,7 +189,7 @@ fn new_mesher(gpu: bool) -> Box<dyn Mesher> {
     {
         if gpu {
             let made = deltamesh::gpu::GpuCtx::shared()
-                .and_then(|ctx| deltamesh::gpu_mesher::GpuMesher::new(ctx, deltamesh::Config::default()));
+                .and_then(|ctx| deltamesh::gpu_mesher::GpuMesher::new(ctx, mesh_config()));
             match made {
                 Ok(m) => return Box::new(m),
                 Err(e) => tracing::warn!("deltamesh GPU mesher unavailable ({e}); using the CPU mesher"),
@@ -194,7 +202,7 @@ fn new_mesher(gpu: bool) -> Box<dyn Mesher> {
             tracing::info!("built without the gpu-mesh feature; deltamesh runs on the CPU");
         }
     }
-    Box::new(deltamesh::sdf::SdfMesher::new(deltamesh::Config::default()))
+    Box::new(deltamesh::sdf::SdfMesher::new(mesh_config()))
 }
 
 /// One zone result as the consumer handles it.

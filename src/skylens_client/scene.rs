@@ -38,10 +38,25 @@ const BG_RGB: [u8; 3] = [0x0d, 0x0f, 0x14];
 /// The legacy scene light on a mesh: `AmbientLight(0xffe8cf, 0.35)` (a hemisphere light with the
 /// same sky and ground colour is the same thing) and `DirectionalLight(0xfff1d8, 0.5)` at
 /// three.js (10, 20, 8), i.e. ENU (10, -8, 20). Opaque at `alpha` 1, blended below.
-/// Mesh opacity for a segment whose reveal fade is at `fade`: the fade itself under the points,
-/// or, with the mesh shown alone, scaled so a first delivery's fade ends fully opaque.
-pub fn mesh_opacity(fade: f32, mesh_only: bool) -> f32 {
-    if mesh_only { (fade / crate::reveal::alpha_for_level(skylens_shared::proto::model::v1::Level::Preview)).min(1.0) } else { fade }
+/// Mesh opacity for a segment whose reveal fade is at `fade`, in the mesh display: scaled so a
+/// first delivery's fade ends fully opaque (the mesh is the ground the points stand on). The
+/// points display shows no mesh.
+pub fn mesh_opacity(fade: f32, display: Display) -> f32 {
+    match display {
+        Display::Mesh => (fade / crate::reveal::alpha_for_level(skylens_shared::proto::model::v1::Level::Preview)).min(1.0),
+        Display::Points => 0.0,
+    }
+}
+
+/// The mesh surface: the reconstruction's own vertex colours, unlit, so the surface has the same
+/// colours as the points drawn over it (lit, it came out darker and warmer than the scene).
+pub fn surface(alpha: f32) -> Material {
+    Material {
+        shading: Shading::Unlit,
+        tint: [1.0, 1.0, 1.0, alpha],
+        blend: if alpha >= 1.0 { Blend::Opaque } else { Blend::Alpha },
+        double_sided: true,
+    }
 }
 
 pub fn lambert(alpha: f32) -> Material {
@@ -268,11 +283,11 @@ impl ViewScreen for StatusScene {
             let fit = std::mem::take(&mut st.fit_requested);
             (st.color_mode, st.point_size, fit, st.display)
         };
-        // The mesh display hides the points, but only once there is a mesh to show instead.
-        let mesh_only = display == Display::Mesh && board.store.mesh_block_count() > 0;
+        // Both displays draw the points; the mesh display lays the mesh under them as the surface
+        // that fills the gaps between points, while the points keep the detail and the colour.
         let paint = Paint::of(mode, board.height_range());
         self.layer.pump(gpu, &mut board, paint, BG_RGB, info.now_ms / 1000.0);
-        gpu.clouds.set_live_visible(!mesh_only);
+        gpu.clouds.set_live_visible(true);
         if fit {
             self.fit_view(&board, info);
         }
@@ -282,18 +297,17 @@ impl ViewScreen for StatusScene {
         self.fade.update(info.dt);
         board.first_progress = self.fade.first_progress();
         for (seg, a) in self.fade.segments() {
-            gpu.clouds.set_alpha(segment_cloud(seg), if mesh_only { 0.0 } else { a });
+            gpu.clouds.set_alpha(segment_cloud(seg), a);
         }
 
-        // Mesh blocks, lit like the legacy scene, faded with their segment. Shown alone, the mesh
-        // is the surface itself and goes opaque once its fade is through (a first delivery is
-        // otherwise translucent under its points).
+        // Mesh blocks, unlit in their vertex colours, faded with their segment and opaque once the
+        // fade is through; hidden in the points display.
         let fade = &self.fade;
-        let mesh_alpha = |seg: u32| mesh_opacity(fade.alpha(seg), mesh_only);
-        gpu.sync_mesh_blocks(&board.store, |e| lambert(mesh_alpha(e.segment)));
+        let mesh_alpha = |seg: u32| mesh_opacity(fade.alpha(seg), display);
+        gpu.sync_mesh_blocks(&board.store, |e| surface(mesh_alpha(e.segment)));
         let alphas: BTreeMap<u32, f32> = fade.segments().map(|(s, _)| (s, mesh_alpha(s))).collect();
         if alphas != self.mesh_alpha {
-            gpu.restyle_mesh_blocks(&board.store, |e| lambert(mesh_alpha(e.segment)));
+            gpu.restyle_mesh_blocks(&board.store, |e| surface(mesh_alpha(e.segment)));
             self.mesh_alpha = alphas;
         }
 
@@ -344,12 +358,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_mesh_shown_alone_ends_opaque() {
-        assert_eq!(mesh_opacity(0.31, false), 0.31);
-        assert!((mesh_opacity(0.31, true) - 0.5).abs() < 1e-6);
-        assert_eq!(mesh_opacity(0.62, true), 1.0);
-        assert_eq!(mesh_opacity(1.0, true), 1.0);
-        assert_eq!(mesh_opacity(0.0, true), 0.0);
+    fn the_mesh_display_ends_opaque_and_the_points_display_has_no_mesh() {
+        assert!((mesh_opacity(0.31, Display::Mesh) - 0.5).abs() < 1e-6);
+        assert_eq!(mesh_opacity(0.62, Display::Mesh), 1.0);
+        assert_eq!(mesh_opacity(1.0, Display::Mesh), 1.0);
+        assert_eq!(mesh_opacity(0.0, Display::Mesh), 0.0);
+        assert_eq!(mesh_opacity(1.0, Display::Points), 0.0);
+    }
+
+    #[test]
+    fn the_mesh_surface_is_unlit_in_its_own_colours() {
+        let m = surface(1.0);
+        assert_eq!((m.shading, m.blend, m.tint), (Shading::Unlit, Blend::Opaque, [1.0; 4]));
+        assert_eq!(surface(0.5).blend, Blend::Alpha);
     }
 
     #[test]

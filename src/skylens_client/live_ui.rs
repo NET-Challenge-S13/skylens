@@ -374,16 +374,16 @@ impl LivePanels {
         self.match_toolbar_width(dom);
     }
 
-    /// The monitor is exactly as wide as the camera-state chip and the settings button above it
-    /// (at their text's width), so the right column has one width that follows the chips. The
-    /// guide button left of them stays out of it.
+    /// The monitor is exactly as wide as the two buttons above it, guide and settings (at their
+    /// text's width), so the right column has one width that follows them. The camera-state chip
+    /// left of them stays out of it.
     fn match_toolbar_width(&mut self, dom: &mut Dom<'_>) {
-        let (Some(cam), Some(btn)) = (dom.find(q("#board-toolbar .cam-state")), dom.find("board-settings-btn")) else { return };
+        let (Some(guide), Some(btn)) = (dom.find("board-help-btn"), dom.find("board-settings-btn")) else { return };
         // Blitz lays out in CSS pixels.
         let doc = dom.doc_ref();
         let span = |n: NodeId| doc.get_node(n).map(|n| (f64::from(n.absolute_position(0.0, 0.0).x), f64::from(n.final_layout().size.width)));
-        let width = match (span(cam), span(btn)) {
-            (Some((cam_x, _)), Some((btn_x, btn_w))) => btn_x + btn_w - cam_x,
+        let width = match (span(guide), span(btn)) {
+            (Some((guide_x, _)), Some((btn_x, btn_w))) => btn_x + btn_w - guide_x,
             _ => 0.0,
         };
         let px = width.round() as i64;
