@@ -93,12 +93,12 @@ impl WaveWidget {
         }
         let t = (skylens_viewer::now_ms() - self.t0) / 1000.0;
         let (ca, sa) = ((t * 0.18).cos(), (t * 0.18).sin());
-        // A wide strip (the monitor) spreads the field over most of its height: measured over a
-        // turn of the camera, 98 % of the dots fall between about 21 % and 96 % of the strip (the
-        // old 0.24 / 0.3 / 0.7 left the top third empty). Dots past the edges are skipped.
+        // A wide strip (the monitor) spreads the field over most of its height, with tall crests:
+        // measured over a turn of the camera, 98 % of the dots fall between about 27 % and 96 % of
+        // the strip. Dots past the edges are skipped.
         let strip = w > h * 2.5;
-        let (depth, crest) = if strip { (h * 0.29, h * 0.35) } else { (h * 0.2, h * 0.62) };
-        let (cx, cy) = (w / 2.0, if strip { h * 0.68 } else { h * 0.64 });
+        let (depth, crest) = if strip { (h * 0.25, h * 0.7) } else { (h * 0.2, h * 0.62) };
+        let (cx, cy) = (w / 2.0, if strip { h * 0.7 } else { h * 0.64 });
         let tf = Affine::scale(scale);
         for i in 0..self.cols {
             for j in 0..self.rows {
