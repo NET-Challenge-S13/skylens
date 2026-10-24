@@ -18,7 +18,7 @@ use crate::pointblitz::core::{FrameStyle, PointSize};
 use crate::points;
 use skylens_shared::proto::payload::v1 as payload;
 use skylens_viewer::camera::{Pose, damp_factor};
-use skylens_viewer::config::{self, color};
+use skylens_viewer::config;
 use skylens_viewer::view3d::{SEGMENT_CLOUDS, cloud_segment, retag, segment_cloud};
 use skylens_viewer::{FrameInfo, FrameSpec, Gpu3d, ViewInput, ViewScreen};
 use std::cell::RefCell;
@@ -46,6 +46,10 @@ const ZOOM_MIN: f64 = 0.4;
 const ZOOM_MAX: f64 = 2.5;
 /// Distance factor per wheel step (like the orbit's `0.95`).
 const ZOOM_STEP: f64 = 0.95;
+/// Minimap drones: size relative to a pin, and colours.
+const DRONE_SCALE: f64 = 1.6;
+const DRONE_RGB: u32 = 0xeef4ff;
+const DRONE_ACTIVE_RGB: u32 = 0xffd27f;
 /// Point size (CSS px), independent of the main view's setting.
 const POINT_PX: f32 = 1.5;
 /// Ids of the minimap's own meshes: detection pins (pin, ring = base + 1) and drones
@@ -306,7 +310,10 @@ impl InsetScene {
 
     /// Every drone the board has telemetry for, as diamonds; the followed one in the core colour.
     fn sync_drones(&mut self, gpu: &mut Gpu3d, board: &Board) {
-        let radius = Self::pin_scale(board.points_box().map_or(f64::NAN, |(lo, hi)| (hi - lo).max_element()));
+        let bounds = board.points_box();
+        // Larger than a pin: the quadcopter's shape has to read at minimap size.
+        let radius = Self::pin_scale(bounds.map_or(f64::NAN, |(lo, hi)| (hi - lo).max_element())) * DRONE_SCALE;
+        let ground_z = bounds.map_or(f64::NEG_INFINITY, |(lo, _)| lo.z);
         let shown: BTreeMap<u32, (DVec3, bool)> = board.drones.iter().map(|d| (d.id, (d.pos, Some(d.id) == board.active_drone))).collect();
         let gone: Vec<u32> = self.drones.keys().filter(|id| !shown.contains_key(id)).copied().collect();
         for id in gone {
@@ -320,7 +327,10 @@ impl InsetScene {
             }
             let mesh_id = DRONE_IDS + u64::from(id);
             debug_assert!(mesh_id < SEGMENT_CLOUDS);
-            gpu.meshes.upsert(&gpu.device, &gpu.queue, mesh_id, &markers::drone_mesh(pos, radius), None, markers::flat_material(if active { color::DRONE_CORE } else { color::DRONE_TRAIL }));
+            // White over the height colours (a blue drone vanished into the low ground), the
+            // followed drone in the route gold.
+            let rgb = if active { DRONE_ACTIVE_RGB } else { DRONE_RGB };
+            gpu.meshes.upsert(&gpu.device, &gpu.queue, mesh_id, &markers::drone_mesh(pos, radius, ground_z), None, markers::flat_material(rgb));
             self.drones.insert(id, want);
         }
     }
