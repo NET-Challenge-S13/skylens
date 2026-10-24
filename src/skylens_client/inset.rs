@@ -2,7 +2,7 @@
 //!
 //! A separate scene and camera: every delivered point segment (and the point slot stream)
 //! coloured by height over the range the points actually span, on `#06090e`, with the visible
-//! detections as pins above the points and the drones that are moving as diamonds.
+//! detections as pins above the points and every drone with telemetry as diamonds.
 //!
 //! The camera is a turntable: it orbits the centre of the delivered points' box, far enough that
 //! the whole box fits, at 35 degrees above the horizon, one turn every 40 s, so positions read in
@@ -300,16 +300,16 @@ impl InsetScene {
         }
     }
 
-    /// The drones that are moving, as diamonds; a drone that stops is taken off.
+    /// Every drone the board has telemetry for, as diamonds; the followed one in the core colour.
     fn sync_drones(&mut self, gpu: &mut Gpu3d, board: &Board) {
         let radius = Self::pin_scale(board.points_box().map_or(f64::NAN, |(lo, hi)| (hi - lo).max_element()));
-        let moving: BTreeMap<u32, (DVec3, bool)> = board.moving_drones().map(|d| (d.id, (d.pos, Some(d.id) == board.active_drone))).collect();
-        let gone: Vec<u32> = self.drones.keys().filter(|id| !moving.contains_key(id)).copied().collect();
+        let shown: BTreeMap<u32, (DVec3, bool)> = board.drones.iter().map(|d| (d.id, (d.pos, Some(d.id) == board.active_drone))).collect();
+        let gone: Vec<u32> = self.drones.keys().filter(|id| !shown.contains_key(id)).copied().collect();
         for id in gone {
             self.drones.remove(&id);
             gpu.meshes.remove(DRONE_IDS + u64::from(id));
         }
-        for (id, (pos, active)) in moving {
+        for (id, (pos, active)) in shown {
             let want = (pos, active, radius);
             if self.drones.get(&id) == Some(&want) {
                 continue;

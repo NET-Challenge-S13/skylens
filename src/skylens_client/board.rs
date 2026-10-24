@@ -52,15 +52,7 @@ pub struct Drone {
     pub id: u32,
     pub pos: DVec3,
     pub forward: DVec3,
-    /// Board time ([`Board::time`]) of the last telemetry frame that moved it by more than
-    /// [`MOVE_EPSILON_M`]; None while it has not moved since it appeared.
-    pub moved_at: Option<f64>,
 }
-
-/// A telemetry position closer than this (metres) to the previous one is not a move (GPS jitter).
-pub const MOVE_EPSILON_M: f64 = 0.3;
-/// A drone counts as moving for this long (seconds of board time) after its last move.
-pub const MOVING_HOLD_S: f64 = 3.0;
 
 /// What the board read off one segment's point chunks (or its slots).
 #[derive(Debug, Clone, PartialEq)]
@@ -181,25 +173,16 @@ impl Board {
         let forward = follow::drone_forward(t.heading_deg);
         match self.drones.iter_mut().find(|d| d.id == t.drone_id) {
             Some(d) => {
-                if d.pos.distance(pos) > MOVE_EPSILON_M {
-                    d.moved_at = Some(self.time);
-                }
                 d.pos = pos;
                 d.forward = forward;
             }
             None => {
-                self.drones.push(Drone { id: t.drone_id, pos, forward, moved_at: None });
+                self.drones.push(Drone { id: t.drone_id, pos, forward });
                 if self.drones.len() == 1 {
                     self.active_drone = Some(t.drone_id);
                 }
             }
         }
-    }
-
-    /// Drones that moved within the last [`MOVING_HOLD_S`] seconds of board time.
-    pub fn moving_drones(&self) -> impl Iterator<Item = &Drone> {
-        let now = self.time;
-        self.drones.iter().filter(move |d| d.moved_at.is_some_and(|t| now - t <= MOVING_HOLD_S))
     }
 
     pub fn assign_route(&mut self, r: &viewer::AssignRoute) {
@@ -752,28 +735,5 @@ mod tests {
         assert!((a.pos.z - 10.0).abs() < 1e-6);
         b.assign_route(&viewer::AssignRoute { drone_id: 2, waypoints: vec![model::Gps::default()], r#loop: false });
         assert!(b.route.is_none(), "one waypoint is no route");
-    }
-
-    #[test]
-    fn a_drone_is_moving_for_three_seconds_after_it_moved_more_than_jitter() {
-        let mut b = board();
-        let at = |lat: f64| model::DroneTelemetry { drone_id: 1, gps: Some(model::Gps { lat, lon: 127.3475, alt: 40.0 }), ..Default::default() };
-        b.telemetry(&at(36.3685));
-        assert_eq!(b.moving_drones().count(), 0, "appearing is not moving");
-        // About 0.1 m north: jitter.
-        b.time = 1.0;
-        b.telemetry(&at(36.368_501));
-        assert_eq!(b.moving_drones().count(), 0);
-        // About 11 m north: a move.
-        b.time = 2.0;
-        b.telemetry(&at(36.3686));
-        assert_eq!(b.drones[0].moved_at, Some(2.0));
-        assert_eq!(b.moving_drones().map(|d| d.id).collect::<Vec<_>>(), vec![1]);
-        b.time = 4.9;
-        assert_eq!(b.moving_drones().count(), 1);
-        // Hovering in place since: it stops counting after the hold.
-        b.telemetry(&at(36.3686));
-        b.time = 5.1;
-        assert_eq!(b.moving_drones().count(), 0);
     }
 }
