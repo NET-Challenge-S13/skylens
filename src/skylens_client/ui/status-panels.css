@@ -24,8 +24,6 @@
   align-items: flex-start;
   /* The toolbar's own gap: when the two ends meet they sit as close as the buttons do. */
   gap: 8px;
-  overflow-x: auto;
-  overflow-y: hidden;
 }
 .board-row > * {
   flex: 0 0 auto;
@@ -34,18 +32,29 @@
   flex: 1 1 auto;
   min-width: 0;
 }
-/* In the rows the panels are laid out, not placed. */
+/* In the rows the panels are laid out, not placed (relative keeps them the containing block of
+   anything placed inside them). */
 .board-top .sl-surface,
 .board-top .board-toolbar,
 .board-top .live-monitor {
-  position: static;
+  position: relative;
+  /* Their placement offsets (top 14px, right 16px, ...) would shift them inside the row. */
+  top: auto;
+  right: auto;
+  bottom: auto;
+  left: auto;
 }
 .board-top .board-toolbar {
   pointer-events: auto;
 }
+/* Only a narrow screen scrolls a row: a scroll box clips on both axes, and on a wide screen it cut
+   the chips' and buttons' borders and shadows for nothing. The padding keeps them inside it. */
 @media (max-width: 760px) {
   .board-row {
     pointer-events: auto;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: 6px;
   }
 }
 

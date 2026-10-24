@@ -2,6 +2,72 @@
    Everything shared/global stays in style.css (owned elsewhere). Uses the
    token system defined there (--surface-*, --border-*, --font-*, etc). */
 
+/* --- Rows: the screen's name and the toolbar, the mission panel, and at the bottom the fleet
+   and the video ---
+   Each row is one flex line with a spacer between its ends, so on a narrower screen the ends
+   close in to the toolbar's 8px gap instead of overlapping, and when even that does not fit the
+   row scrolls sideways. Between the panels the rows let clicks through to the 3D view; only on a
+   narrow screen, where they may need scrolling, do they take the pointer. Same rule as the
+   status board's top rows. */
+.tower-band {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+.tower-band--top {
+  top: 14px;
+}
+.tower-band--bottom {
+  bottom: 16px;
+}
+.tower-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.tower-row--bottom {
+  align-items: flex-end;
+}
+.tower-row > * {
+  flex: 0 0 auto;
+}
+.tower-row__spacer {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* In the rows the panels are laid out, not placed (relative, not static: the video frame's corner
+   ticks and labels are placed inside it). */
+.tower-band .sl-surface,
+.tower-band .control-toolbar {
+  position: relative;
+  /* Their placement offsets (top 14px, right 16px, ...) would shift them inside the row. */
+  top: auto;
+  right: auto;
+  bottom: auto;
+  left: auto;
+}
+.tower-band .control-toolbar,
+.tower-band .mission-panel,
+.tower-band .telemetry-panel,
+.tower-band .video-panel {
+  pointer-events: auto;
+}
+/* Only a narrow screen scrolls a row: a scroll box clips on both axes, and on a wide screen it cut
+   the chips' and buttons' borders and shadows for nothing. The padding keeps them inside it. */
+@media (max-width: 760px) {
+  .tower-row {
+    pointer-events: auto;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-bottom: 6px;
+  }
+}
+
 .control-toolbar {
   position: absolute;
   top: 14px;

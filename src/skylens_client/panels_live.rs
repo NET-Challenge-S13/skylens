@@ -201,7 +201,7 @@ impl Display {
 
     pub fn hint(self) -> &'static str {
         match self {
-            Display::Mesh => "복원된 표면 위에 점을 함께 표시",
+            Display::Mesh => "복원된 표면(메시)으로 표시",
             Display::Points => "수신한 점을 그대로 표시 (점 크기·색 조절)",
         }
     }

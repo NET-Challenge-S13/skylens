@@ -94,6 +94,22 @@ pub fn lambert(alpha: f32) -> Material {
     }
 }
 
+/// How close the live view flies to a detection (metres from the body) and from how high above
+/// the horizon it looks at it (degrees).
+const ZOOM_DISTANCE_M: f64 = 14.0;
+const ZOOM_ELEVATION_DEG: f64 = 40.0;
+
+/// A close, oblique look at a detection's body (1.1 m above its feet) from the side the camera is
+/// already on, so the move in is a straight dolly rather than a swing round.
+pub fn zoom_pose(feet: DVec3, from: &Pose) -> Pose {
+    let target = feet + DVec3::Z * 1.1;
+    let side = (from.eye - from.target).truncate();
+    let side = if side.length_squared() > 1e-9 { side.normalize() } else { crate::glam::DVec2::new(0.0, -1.0) };
+    let (s, c) = ZOOM_ELEVATION_DEG.to_radians().sin_cos();
+    let eye = target + side.extend(0.0) * (c * ZOOM_DISTANCE_M) + DVec3::Z * (s * ZOOM_DISTANCE_M);
+    Pose::new(eye, target)
+}
+
 /// Oblique top-down pose over a bounds box (z up, as the inset): the target is the centre, the
 /// eye sits `1.2 x` the horizontal diagonal above it and back to the south for a ~60 degree pitch.
 /// Returns the pose and the eye distance.
@@ -116,6 +132,9 @@ pub struct StatusScene {
     slot_framed: bool,
     /// The operator moved the camera: no more automatic reframing.
     touched: bool,
+    /// Live slot mode: the pose the camera had when it went to a detection, to come back to
+    /// once the detection is confirmed.
+    before_focus: Option<Pose>,
     framed_box: Option<(DVec3, DVec3)>,
     fog: (f64, f64),
     css_height: f64,
@@ -147,6 +166,7 @@ impl StatusScene {
             follower: Follower::default(),
             framed: false,
             slot_framed: false,
+            before_focus: None,
             touched: false,
             framed_box: None,
             fog: framing.base_fog(),
@@ -220,13 +240,39 @@ impl StatusScene {
                     b.0.cmplt(l - DVec3::splat(span)).any() || b.1.cmpgt(h + DVec3::splat(span)).any()
                 }
             };
-            if !self.touched && let Some((lo, hi)) = board.points_box() && grew(&(lo, hi)) {
+            let focus = board.focused();
+            // Framing runs whenever no fly-to is under way, a focus included: the pose the
+            // camera returns to after a detection is the framed view it had just before, not the
+            // unframed start a detection that is already focused at launch would otherwise find.
+            if self.before_focus.is_none() && !self.touched && let Some((lo, hi)) = board.points_box() && grew(&(lo, hi)) {
                 self.framed_box = Some((lo, hi));
                 let (pose, reach) = top_down_pose(lo, hi);
                 self.orbit.set_pose(pose);
                 self.orbit.max_distance = self.orbit.max_distance.max(reach * 4.0);
                 self.slot_framed = true;
                 self.framed = true;
+            }
+            // A detection in focus (CAM FOCUSING / LOCKED): fly in to it; once it is confirmed,
+            // fly back to where the camera was. The operator's own moves pause both.
+            if !self.orbit.auto_paused(info.now_ms) {
+                let k = damp_factor(2.5, info.dt);
+                match focus {
+                    // The pose to come back to is the one the camera has when the fly-to starts.
+                    Some((_, feet)) if self.slot_framed || self.before_focus.is_some() => {
+                        let current = self.orbit.pose();
+                        let back = *self.before_focus.get_or_insert(current);
+                        self.orbit.approach(&zoom_pose(feet, &back), k);
+                    }
+                    Some(_) => {}
+                    None => {
+                        if let Some(back) = self.before_focus {
+                            self.orbit.approach(&back, k);
+                            if self.orbit.pose().eye.distance(back.eye) < 0.05 && self.orbit.pose().target.distance(back.target) < 0.05 {
+                                self.before_focus = None;
+                            }
+                        }
+                    }
+                }
             }
             self.orbit.update(info.dt);
             return;
@@ -299,11 +345,12 @@ impl ViewScreen for StatusScene {
             let fit = std::mem::take(&mut st.fit_requested);
             (st.color_mode, st.point_size, fit, st.display)
         };
-        // Both displays draw the points; the mesh display lays the mesh under them as the surface
-        // that fills the gaps between points, while the points keep the detail and the colour.
+        // The mesh display shows the mesh alone once there is one (at 0.05 m it carries the
+        // detail itself; points over it read as speckle up close); before that, the points.
+        let mesh_only = display == Display::Mesh && board.store.mesh_block_count() > 0;
         let paint = Paint::of(mode, board.height_range());
         self.layer.pump(gpu, &mut board, paint, BG_RGB, info.now_ms / 1000.0);
-        gpu.clouds.set_live_visible(true);
+        gpu.clouds.set_live_visible(!mesh_only);
         if fit {
             self.fit_view(&board, info);
         }
@@ -313,7 +360,7 @@ impl ViewScreen for StatusScene {
         self.fade.update(info.dt);
         board.first_progress = self.fade.first_progress();
         for (seg, a) in self.fade.segments() {
-            gpu.clouds.set_alpha(segment_cloud(seg), a);
+            gpu.clouds.set_alpha(segment_cloud(seg), if mesh_only { 0.0 } else { a });
         }
 
         // Mesh blocks, unlit in their vertex colours, faded with their segment and opaque once the
@@ -380,6 +427,19 @@ mod tests {
         assert_eq!(mesh_opacity(1.0, Display::Mesh), 1.0);
         assert_eq!(mesh_opacity(0.0, Display::Mesh), 0.0);
         assert_eq!(mesh_opacity(1.0, Display::Points), 0.0);
+    }
+
+    #[test]
+    fn the_zoom_looks_at_the_body_from_the_cameras_side() {
+        let feet = DVec3::new(10.0, 20.0, 3.0);
+        let from = Pose::new(DVec3::new(10.0, -80.0, 60.0), DVec3::new(10.0, 0.0, 0.0));
+        let z = zoom_pose(feet, &from);
+        assert!((z.target - (feet + DVec3::Z * 1.1)).length() < 1e-9);
+        assert!(((z.eye - z.target).length() - ZOOM_DISTANCE_M).abs() < 1e-9);
+        // Same side as before (south), above the body at the set elevation.
+        assert!(z.eye.y < z.target.y && z.eye.z > z.target.z);
+        let elev = ((z.eye.z - z.target.z) / ZOOM_DISTANCE_M).asin().to_degrees();
+        assert!((elev - ZOOM_ELEVATION_DEG).abs() < 1e-9);
     }
 
     #[test]
