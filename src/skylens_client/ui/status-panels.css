@@ -64,6 +64,10 @@
   color: var(--text-tertiary);
   letter-spacing: 0.02em;
 }
+/* The mission line, empty until a mission runs. */
+.server-status__detail:empty {
+  display: none;
+}
 
 @media (prefers-reduced-motion: reduce) {
   .server-status__dot {
@@ -227,6 +231,7 @@
   grid-template-rows: auto 1fr;
   border: 1px solid var(--border-hairline);
   border-radius: var(--radius-md);
+  background: var(--surface-glass);
   box-shadow: var(--shadow-panel);
   overflow: hidden;
 }
@@ -311,7 +316,7 @@
   font-family: var(--font-mono);
   font-size: var(--text-sm);
   color: var(--text-tertiary);
-  background: #06090e;
+  background: #0a0e15;
 }
 
 .point-inset__legend {

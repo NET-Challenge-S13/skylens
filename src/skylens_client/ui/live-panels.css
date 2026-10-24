@@ -54,11 +54,10 @@
   gap: 8px;
 }
 
-/* Same metrics as the tower's toolbar (.control-toolbar__btn): the button, the camera-state chip
-   and the link badge are one family of chips in one row. */
+/* Same metrics as the tower's toolbar (.control-toolbar__btn): the button and the camera-state
+   chip are one family of chips in one row. The link state lives in #server-status only. */
 .board-toolbar__btn,
-.board-toolbar .cam-state,
-.board-toolbar .net-badge {
+.board-toolbar .cam-state {
   position: static;
   display: flex;
   align-items: center;
@@ -85,9 +84,8 @@
   border-color: var(--border-strong);
 }
 
-/* Read-outs, not buttons: secondary ink. */
-.board-toolbar .cam-state,
-.board-toolbar .net-badge {
+/* A read-out, not a button: secondary ink. */
+.board-toolbar .cam-state {
   color: var(--text-secondary);
   pointer-events: none;
 }

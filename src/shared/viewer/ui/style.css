@@ -725,7 +725,11 @@ html {
   transform: translateX(-50%);
   display: flex;
   flex-direction: column;
+  align-items: center;
   gap: 8px;
+  /* Toasts stay inside the screen: a long error (a bridge URL, a whole message) wraps instead of
+     running off both edges in one line. */
+  width: calc(100vw - 32px);
   z-index: 50;
   pointer-events: none;
 }
@@ -734,6 +738,9 @@ html {
   display: flex;
   align-items: center;
   gap: 9px;
+  box-sizing: border-box;
+  max-width: 640px;
+  overflow-wrap: anywhere;
   padding: 9px 16px;
   border-radius: var(--radius-sm);
   border-left: 3px solid var(--neutral-dot);

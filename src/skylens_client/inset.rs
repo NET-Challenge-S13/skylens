@@ -27,8 +27,10 @@ use std::f64::consts::TAU;
 use std::rc::Rc;
 
 pub const FOV_DEG: f64 = 45.0;
-const BACKGROUND: u32 = 0x06090e;
-const BACKGROUND_RGB: [u8; 3] = [0x06, 0x09, 0x0e];
+/// `--surface-glass` over the board's backdrop: the view reads as part of a panel like the others,
+/// not as a darker hole inside the panel's hairline border.
+const BACKGROUND: u32 = 0x0a0e15;
+const BACKGROUND_RGB: [u8; 3] = [0x0a, 0x0e, 0x15];
 /// One turntable turn takes this long (s).
 pub const TURN_SECONDS: f64 = 40.0;
 /// The turntable's height above the horizon (degrees) and the range a drag may tilt it to.

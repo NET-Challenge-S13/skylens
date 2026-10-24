@@ -16,7 +16,7 @@ use skylens_shared::proto::model::v1 as model;
 use skylens_viewer::camera::{SyncEvent, SyncState};
 use skylens_viewer::link::VIEWER_PATH;
 use skylens_viewer::protocol::{Body, GpuLossAlert};
-use skylens_viewer::widgets::{CardKind, LoadingScreen, NetBadge, ToastKind, Toasts};
+use skylens_viewer::widgets::{CardKind, LoadingScreen, ToastKind, Toasts};
 use skylens_viewer::widgets::detection_card::detection_label;
 use skylens_viewer::{CoreLink, Dom, LinkEvent, Page, PollCx, ScreenApp, ScreenDocument, SiteFrame, UiInput, View3d, q};
 use std::cell::RefCell;
@@ -137,7 +137,6 @@ pub struct StatusApp {
     inset: Option<Rc<RefCell<InsetScene>>>,
     loading: Option<LoadingScreen>,
     toasts: Toasts,
-    badge: Option<NetBadge>,
     card: Option<Card>,
     /// The delay pattern's markup as last written.
     delay: String,
@@ -161,7 +160,6 @@ impl StatusApp {
             inset: None,
             loading: None,
             toasts: Toasts::new(),
-            badge: None,
             card: None,
             delay: String::new(),
             inset_place: None,
@@ -292,7 +290,9 @@ impl StatusApp {
         let status = &self.link.status;
         let state = PanelState::of(status.connected(), status.receiving);
         dom.set_attr(q(".server-status__dot"), "data-state", state.data_state());
-        dom.set_text(q(".server-status__text"), state.label());
+        // The panel is the board's one link indicator: its title is the wording the top-right
+        // badge used to show (`코어 스트림 수신 중`, `코어 연결됨 · 데이터 대기`, ...).
+        dom.set_text(q(".server-status__text"), status.badge_text());
         let core = b.core_status.as_ref();
         let chunks = core.map_or(0, |c| c.chunks).max(b.local_chunks);
         let detections = core.map_or(0, |c| c.detections).max(b.local_detections);
@@ -300,7 +300,7 @@ impl StatusApp {
         if let [counts, line, ..] = details.as_slice() {
             dom.set_text(*counts, &panels::counts_line(chunks, detections, core.and_then(|c| c.latency_ms)));
             let mission = b.mission.as_ref().map(|m| (m.message.as_str(), m.drones_online));
-            dom.set_text(*line, &panels::link_line(state, mission, status.badge_text()));
+            dom.set_text(*line, &panels::link_line(state, mission));
         }
         // Delay pattern: the live stream's zones when there is one, else the core's segments.
         let grid = if b.live.entries().is_empty() {
@@ -399,7 +399,6 @@ impl StatusApp {
 impl ScreenApp for StatusApp {
     fn mount(&mut self, dom: &mut Dom<'_>) {
         dom.mount_widget("status-view", View3d::boxed(self.scene.clone()));
-        self.badge = NetBadge::mount(dom, "net-status");
         self.card = Card::bind(dom);
         self.live.mount(dom);
         self.loading = LoadingScreen::mount(dom, LOADING_TITLE);
@@ -422,9 +421,6 @@ impl ScreenApp for StatusApp {
         self.board.borrow_mut().refresh();
         self.step_detections(dom, now, dt);
 
-        if let Some(badge) = &mut self.badge {
-            badge.show_link(dom, &self.link.status);
-        }
         self.render_server_panel(dom);
         self.render_banner(dom);
         self.render_points(dom);
@@ -514,7 +510,7 @@ mod tests {
         assert_eq!(p.stylesheets.last().map(String::as_str), Some(LIVE_PANELS_CSS));
         assert!(p.stylesheets.iter().any(|c| c == STATUS_PANELS_CSS));
         let html = p.html();
-        for id in ["status-view", "overlay-status", "board-toolbar", "board-settings-btn", "net-status", "server-status", "board-waiting", "toast-root"] {
+        for id in ["status-view", "overlay-status", "board-toolbar", "board-settings-btn", "server-status", "board-waiting", "toast-root"] {
             assert!(html.contains(&format!("id=\"{id}\"")), "{id}");
         }
     }

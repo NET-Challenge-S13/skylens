@@ -36,14 +36,6 @@ impl PanelState {
         }
     }
 
-    /// `.server-status__text`.
-    pub fn label(self) -> &'static str {
-        match self {
-            PanelState::Waiting => "서버 · 대기 중",
-            PanelState::Connected => "서버 · 연결됨",
-            PanelState::Receiving => "서버 · 수신 중",
-        }
-    }
 }
 
 /// First `.server-status__detail`: `청크 N · 탐지 N`, plus `· Nms` when the core reports latency.
@@ -55,11 +47,12 @@ pub fn counts_line(chunks: u64, detections: u64, latency_ms: Option<f64>) -> Str
     s
 }
 
-/// Second `.server-status__detail`: the mission line once data flows, else the link wording.
-pub fn link_line(state: PanelState, mission: Option<(&str, u32)>, detail: &str) -> String {
+/// Second `.server-status__detail`: the mission line once data flows, else empty (hidden). The
+/// link wording itself is the panel's title now, so it is not repeated here.
+pub fn link_line(state: PanelState, mission: Option<(&str, u32)>) -> String {
     match (state, mission) {
         (PanelState::Receiving, Some((message, drones))) => format!("{message} · 드론 {drones}대"),
-        _ => detail.to_string(),
+        _ => String::new(),
     }
 }
 
@@ -210,18 +203,17 @@ mod tests {
 
     #[test]
     fn server_panel_matches_the_captures() {
-        let s = PanelState::of(true, false);
-        assert_eq!((s.data_state(), s.label()), ("connected", "서버 · 연결됨"));
-        assert_eq!(PanelState::of(true, true).label(), "서버 · 수신 중");
+        assert_eq!(PanelState::of(true, false).data_state(), "connected");
+        assert_eq!(PanelState::of(true, true).data_state(), "receiving");
         assert_eq!(PanelState::of(false, false).data_state(), "waiting");
         assert_eq!(counts_line(0, 0, Some(0.0)), "청크 0 · 탐지 0 · 0ms");
         assert_eq!(counts_line(17, 1, Some(1.6)), "청크 17 · 탐지 1 · 2ms");
         assert_eq!(counts_line(3, 0, None), "청크 3 · 탐지 0");
         assert_eq!(
-            link_line(PanelState::Receiving, Some(("드론 연결됨 \u{2014} 임무 수행 중", 3)), "x"),
+            link_line(PanelState::Receiving, Some(("드론 연결됨 \u{2014} 임무 수행 중", 3))),
             "드론 연결됨 \u{2014} 임무 수행 중 · 드론 3대"
         );
-        assert_eq!(link_line(PanelState::Connected, Some(("m", 3)), "코어 연결됨 · 데이터 대기"), "코어 연결됨 · 데이터 대기");
+        assert_eq!(link_line(PanelState::Connected, Some(("m", 3))), "");
     }
 
     #[test]
