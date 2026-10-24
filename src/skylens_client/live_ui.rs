@@ -238,7 +238,10 @@ impl LivePanels {
     /// Appends the panels and the settings overlay to the board's pane and mounts the wave
     /// widgets. The settings button is in the template's toolbar (`#board-settings-btn`).
     pub fn mount(&mut self, dom: &mut Dom<'_>) {
-        dom.append_html(q("section.pane"), &pl::live_markup());
+        dom.append_html(q("section.pane"), &pl::wait_markup());
+        // The monitor is the right end of the status row; without the row, the pane.
+        let row = if dom.find("board-row-status").is_some() { q("#board-row-status") } else { q("section.pane") };
+        dom.append_html(row, &pl::monitor_markup());
         dom.append_html(q("section.pane"), &pl::settings_markup(&self.settings.borrow()));
         dom.append_html(q("section.pane"), &pl::help_markup());
         if let Some(c) = dom.find("live-wait-wave") {

@@ -47,9 +47,9 @@ const ZOOM_MAX: f64 = 2.5;
 /// Distance factor per wheel step (like the orbit's `0.95`).
 const ZOOM_STEP: f64 = 0.95;
 /// Minimap drones: size relative to a pin, and colours.
-const DRONE_SCALE: f64 = 1.0;
-const DRONE_RGB: u32 = 0xeef4ff;
-const DRONE_ACTIVE_RGB: u32 = 0xffd27f;
+const DRONE_SCALE: f64 = 0.65;
+const DRONE_RGB: u32 = 0xa77bff;
+const DRONE_ACTIVE_RGB: u32 = 0xd6c2ff;
 /// Point size (CSS px), independent of the main view's setting.
 const POINT_PX: f32 = 1.5;
 /// Ids of the minimap's own meshes: detection pins (pin, ring = base + 1) and drones
@@ -145,8 +145,8 @@ pub struct InsetScene {
     layer: LiveLayer,
     pins: BTreeMap<String, Pin>,
     next_pin: u64,
-    /// Drone id -> (position, active, radius) as last uploaded.
-    drones: BTreeMap<u32, (DVec3, bool, f64)>,
+    /// Drone id -> (position, active, radius, foot of its line) as last uploaded.
+    drones: BTreeMap<u32, (DVec3, bool, f64, Option<DVec3>)>,
 }
 
 impl InsetScene {
@@ -314,6 +314,7 @@ impl InsetScene {
         // Pin-sized; the ring makes it read as a drone.
         let radius = Self::pin_scale(bounds.map_or(f64::NAN, |(lo, hi)| (hi - lo).max_element())) * DRONE_SCALE;
         let ground_z = bounds.map_or(f64::NEG_INFINITY, |(lo, _)| lo.z);
+        let foot = markers::drones_foot(&board.drones.iter().map(|d| d.pos).collect::<Vec<_>>(), ground_z);
         let shown: BTreeMap<u32, (DVec3, bool)> = board.drones.iter().map(|d| (d.id, (d.pos, Some(d.id) == board.active_drone))).collect();
         let gone: Vec<u32> = self.drones.keys().filter(|id| !shown.contains_key(id)).copied().collect();
         for id in gone {
@@ -321,16 +322,16 @@ impl InsetScene {
             gpu.meshes.remove(DRONE_IDS + u64::from(id));
         }
         for (id, (pos, active)) in shown {
-            let want = (pos, active, radius);
+            let want = (pos, active, radius, foot);
             if self.drones.get(&id) == Some(&want) {
                 continue;
             }
             let mesh_id = DRONE_IDS + u64::from(id);
             debug_assert!(mesh_id < SEGMENT_CLOUDS);
-            // White over the height colours (a blue drone vanished into the low ground), the
-            // followed drone in the route gold.
+            // Violet: a hue the height colours do not use (a blue drone vanished into the low
+            // ground); the followed drone lighter.
             let rgb = if active { DRONE_ACTIVE_RGB } else { DRONE_RGB };
-            gpu.meshes.upsert(&gpu.device, &gpu.queue, mesh_id, &markers::drone_mesh(pos, radius, ground_z), None, markers::flat_material(rgb));
+            gpu.meshes.upsert(&gpu.device, &gpu.queue, mesh_id, &markers::drone_mesh(pos, radius, foot), None, markers::flat_material(rgb));
             self.drones.insert(id, want);
         }
     }

@@ -113,22 +113,27 @@ pub fn pin_material(person: bool) -> Material {
     m
 }
 
-/// Adds an axis-aligned box from `lo` to `hi` to a mesh being built.
-fn push_box(positions: &mut Vec<[f64; 3]>, indices: &mut Vec<u32>, lo: DVec3, hi: DVec3) {
-    let base = positions.len() as u32;
-    for k in 0..8u32 {
-        let x = if k & 1 == 0 { lo.x } else { hi.x };
-        let y = if k & 2 == 0 { lo.y } else { hi.y };
-        let z = if k & 4 == 0 { lo.z } else { hi.z };
-        positions.push([x, y, z]);
+/// Adds a thin square beam of half-width `w` from `a` to `b` (any direction).
+fn push_beam(positions: &mut Vec<[f64; 3]>, indices: &mut Vec<u32>, a: DVec3, b: DVec3, w: f64) {
+    let axis = (b - a).normalize_or_zero();
+    if axis == DVec3::ZERO {
+        return;
     }
-    // Two triangles per face (both sides are drawn, so the winding only needs to be consistent).
-    for f in [[0, 1, 3, 2], [4, 6, 7, 5], [0, 4, 5, 1], [2, 3, 7, 6], [0, 2, 6, 4], [1, 5, 7, 3]] {
-        indices.extend([base + f[0], base + f[1], base + f[2], base + f[0], base + f[2], base + f[3]]);
+    let side = if axis.z.abs() < 0.9 { axis.cross(DVec3::Z) } else { axis.cross(DVec3::X) }.normalize() * w;
+    let up = axis.cross(side).normalize() * w;
+    let base = positions.len() as u32;
+    for end in [a, b] {
+        for (s, u) in [(1.0, 1.0), (-1.0, 1.0), (-1.0, -1.0), (1.0, -1.0)] {
+            positions.push((end + side * s + up * u).to_array());
+        }
+    }
+    for i in 0..4u32 {
+        let j = (i + 1) % 4;
+        indices.extend([base + i, base + j, base + 4 + j, base + i, base + 4 + j, base + 4 + i]);
     }
 }
 
-/// Adds a flat ring (rotor guard) around `centre` in the horizontal plane.
+/// Adds a flat ring around `centre` in the horizontal plane.
 fn push_ring(positions: &mut Vec<[f64; 3]>, indices: &mut Vec<u32>, centre: DVec3, inner: f64, outer: f64) {
     const SEGMENTS: u32 = 16;
     let base = positions.len() as u32;
@@ -145,9 +150,10 @@ fn push_ring(positions: &mut Vec<[f64; 3]>, indices: &mut Vec<u32>, centre: DVec
 }
 
 /// A drone on the minimap: a diamond (octahedron of half-height `radius`, faceted) circled by a
-/// level ring like Saturn's, so it reads as a drone rather than another marker, and a thin stem
-/// down to `ground_z` (when finite and below) so its height reads at a glance.
-pub fn drone_mesh(pos: DVec3, radius: f64, ground_z: f64) -> MeshData {
+/// level ring like Saturn's, so it reads as a drone rather than another marker, and a thin line
+/// from it down to `foot` on the ground. The drones' lines meet at one foot, like the rays of a
+/// triangulation.
+pub fn drone_mesh(pos: DVec3, radius: f64, foot: Option<DVec3>) -> MeshData {
     let r = radius;
     let mut positions = vec![
         (pos + DVec3::X * r).to_array(),
@@ -165,11 +171,20 @@ pub fn drone_mesh(pos: DVec3, radius: f64, ground_z: f64) -> MeshData {
         indices.extend([j, i, 5]);
     }
     push_ring(&mut positions, &mut indices, pos, r * 1.45, r * 1.75);
-    if ground_z.is_finite() && ground_z < pos.z - r {
-        let s = r * 0.06;
-        push_box(&mut positions, &mut indices, DVec3::new(pos.x - s, pos.y - s, ground_z), DVec3::new(pos.x + s, pos.y + s, pos.z - r));
+    if let Some(f) = foot.filter(|f| f.is_finite() && f.z < pos.z - r) {
+        push_beam(&mut positions, &mut indices, pos - DVec3::Z * r, f, r * 0.06);
     }
     MeshData { positions, indices, flat: true, ..Default::default() }
+}
+
+/// Where the drones' lines meet: under the middle of the drones, on the ground at `ground_z`.
+pub fn drones_foot(drones: &[DVec3], ground_z: f64) -> Option<DVec3> {
+    if drones.is_empty() || !ground_z.is_finite() {
+        return None;
+    }
+    let sum = drones.iter().fold(DVec3::ZERO, |a, p| a + *p);
+    let c = sum / drones.len() as f64;
+    Some(DVec3::new(c.x, c.y, ground_z))
 }
 
 /// A marker drawn flat in full colour, unlit: on the minimap a lit pin a few pixels tall reads as
@@ -243,9 +258,10 @@ mod tests {
     }
 
     #[test]
-    fn the_drone_is_a_ringed_diamond_with_a_stem_to_the_ground() {
+    fn the_drone_is_a_ringed_diamond_with_a_line_to_the_shared_foot() {
         let c = DVec3::new(5.0, -3.0, 40.0);
-        let m = drone_mesh(c, 2.0, 10.0);
+        let foot = DVec3::new(0.0, 0.0, 10.0);
+        let m = drone_mesh(c, 2.0, Some(foot));
         assert!(m.indices.iter().all(|i| (*i as usize) < m.positions.len()));
         // The diamond's faces point outward (its first 24 indices).
         for f in m.indices[..24].chunks_exact(3) {
@@ -255,12 +271,21 @@ mod tests {
         // The ring is level with the drone and wider than the diamond.
         let ring: Vec<DVec3> = m.positions[6..6 + 32].iter().map(|p| DVec3::from(*p)).collect();
         assert!(ring.iter().all(|p| (p.z - c.z).abs() < 1e-9));
-        let widest = ring.iter().map(|p| (*p - c).length()).fold(0.0, f64::max);
-        assert!((widest - 3.5).abs() < 1e-9);
-        // The stem reaches the ground; without ground below there is none.
-        assert_eq!(m.positions.iter().map(|p| p[2]).fold(f64::INFINITY, f64::min), 10.0);
-        let floating = drone_mesh(c, 2.0, f64::NEG_INFINITY);
-        assert!(floating.positions.iter().all(|p| p[2] >= 38.0));
+        assert!((ring.iter().map(|p| (*p - c).length()).fold(0.0, f64::max) - 3.5).abs() < 1e-9);
+        // The line ends at the foot.
+        let end: Vec<DVec3> = m.positions[m.positions.len() - 4..].iter().map(|p| DVec3::from(*p)).collect();
+        let mid = end.iter().fold(DVec3::ZERO, |a, p| a + *p) / 4.0;
+        assert!((mid - foot).length() < 1e-9);
+        // No foot, no line.
+        assert_eq!(drone_mesh(c, 2.0, None).positions.len(), 6 + 32);
+    }
+
+    #[test]
+    fn the_drones_meet_under_their_middle() {
+        let d = [DVec3::new(0.0, 0.0, 50.0), DVec3::new(6.0, 0.0, 52.0), DVec3::new(0.0, 6.0, 48.0)];
+        assert_eq!(drones_foot(&d, 3.0), Some(DVec3::new(2.0, 2.0, 3.0)));
+        assert_eq!(drones_foot(&[], 3.0), None);
+        assert_eq!(drones_foot(&d, f64::NEG_INFINITY), None);
     }
 
     #[test]

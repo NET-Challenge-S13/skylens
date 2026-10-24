@@ -396,11 +396,23 @@ pub fn help_markup() -> String {
     )
 }
 
-/// Waiting screen and monitor, in this order.
+/// Waiting screen and monitor, in this order (the two parts the glue mounts separately).
 pub fn live_markup() -> String {
+    format!("{}{}", wait_markup(), monitor_markup())
+}
+
+/// The waiting screen, over the whole pane.
+pub fn wait_markup() -> String {
     format!(
+        "<div id=\"live-wait\" class=\"live-wait\"><canvas id=\"live-wait-wave\" class=\"live-wait__wave\"></canvas><div class=\"live-wait__cap\"><div class=\"live-wait__big\">{title}</div><div class=\"live-wait__sub\" id=\"live-wait-sub\"></div></div></div>",
+        title = WAIT_TITLE,
+    )
+}
+
+/// The monitor panel, which goes at the end of the status row (`#board-row-status`).
+pub fn monitor_markup() -> String {
+    String::from(
         concat!(
-            "<div id=\"live-wait\" class=\"live-wait\"><canvas id=\"live-wait-wave\" class=\"live-wait__wave\"></canvas><div class=\"live-wait__cap\"><div class=\"live-wait__big\">{title}</div><div class=\"live-wait__sub\" id=\"live-wait-sub\"></div></div></div>",
             "<div id=\"live-monitor\" class=\"sl-surface sl-surface--panel live-monitor\">",
             "<div class=\"live-monitor__head\"><div class=\"live-monitor__body\">",
             "<span class=\"live-monitor__label\" id=\"live-mon-label\"></span>",
@@ -410,7 +422,6 @@ pub fn live_markup() -> String {
             "<canvas id=\"live-monitor-wave\" class=\"live-monitor__wave\" width=\"270\" height=\"64\"></canvas>",
             "</div>",
         ),
-        title = WAIT_TITLE,
     )
 }
 

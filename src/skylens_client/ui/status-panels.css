@@ -3,15 +3,58 @@
    token system defined in style.css (--surface-*, --border-*, --font-*). The top-left pane label
    and #server-status are the reference look every other board surface follows. */
 
-/* --- Server-status panel (top-left, below the pane label) --- */
-#server-status.server-status {
-  top: 54px;
+/* --- Top rows: the screen's name and the toolbar, then the server panel and the monitor ---
+   Each row is one flex line with a spacer between its two ends, so on a narrower screen the two
+   ends close in and stop at the row's gap instead of overlapping, and when even that does not
+   fit the row scrolls sideways. The rows let clicks through to the 3D view between the panels;
+   only on a narrow screen, where they may need scrolling, do they take the pointer. */
+.board-top {
+  position: absolute;
+  top: 14px;
   left: 16px;
-  /* Dot | body, the delay pattern on its own row under both. A grid, not a wrapping flex: the
-     max-content width of a wrapping flex is every item on one line, which left the panel twice
-     as wide as its contents. */
+  right: 16px;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  pointer-events: none;
+}
+.board-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.board-row > * {
+  flex: 0 0 auto;
+}
+.board-row__spacer {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+/* In the rows the panels are laid out, not placed. */
+.board-top .sl-surface,
+.board-top .board-toolbar,
+.board-top .live-monitor {
+  position: static;
+}
+.board-top .board-toolbar {
+  pointer-events: auto;
+}
+@media (max-width: 760px) {
+  .board-row {
+    pointer-events: auto;
+  }
+}
+
+/* --- Server-status panel (left of the status row) --- */
+#server-status.server-status {
+  /* The body (status dot beside the title, details flush left under it), then the delay pattern
+     on its own row. A grid, not a wrapping flex: the max-content width of a wrapping flex is
+     every item on one line, which left the panel twice as wide as its contents. */
   display: grid;
-  grid-template-columns: auto auto;
+  grid-template-columns: auto;
   justify-content: start;
   align-items: center;
   max-width: none;
@@ -48,6 +91,12 @@
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+.server-status__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .server-status__text {
@@ -230,6 +279,9 @@
   bottom: 16px;
   z-index: 6;
   width: 380px;
+  /* Never wider than the screen. */
+  max-width: calc(100vw - 32px);
+  box-sizing: border-box;
   height: 250px;
   display: grid;
   grid-template-columns: 1fr 64px;
@@ -358,6 +410,9 @@
 #overlay-status .detect-card {
   right: 16px;
   bottom: 16px;
+  /* Never wider than the screen. */
+  max-width: calc(100vw - 32px);
+  box-sizing: border-box;
   /* An alert: on a short screen (a phone) where it meets the minimap (6) or the side panels
      (.sl-surface, 20), it comes out on top. Below the toolbar (30), dialogs and toasts. */
   z-index: 25;
