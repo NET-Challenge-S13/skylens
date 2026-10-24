@@ -112,7 +112,7 @@
               <text class="d-tag" x="316" y="78">② KOREN 고속망 · GPU 서버</text>
               <rect class="d-box d-box--scene" x="316" y="96" width="138" height="52" />
               <text class="d-label" x="385" y="118" text-anchor="middle">3D 복원</text>
-              <text class="d-sub" x="385" y="136" text-anchor="middle">3DGS</text>
+              <text class="d-sub" x="385" y="136" text-anchor="middle">점군 · 메시</text>
               <rect class="d-box" x="466" y="96" width="138" height="52" />
               <text class="d-label" x="535" y="118" text-anchor="middle">AI 감지</text>
               <text class="d-sub" x="535" y="136" text-anchor="middle">UNet 4채널</text>
@@ -123,8 +123,8 @@
               <path class="d-line" d="M535 148 V174" marker-end="url(#fb)" />
               <rect class="d-box" x="316" y="176" width="288" height="44" />
               <text class="d-sub" x="460" y="195" text-anchor="middle">2D 탐지를 3D 세계좌표로 투영</text>
-              <text class="d-sub" x="460" y="211" text-anchor="middle">Depth Map 레이캐스팅</text>
-              <text class="d-sub" x="316" y="242">둘은 서로를 기다리지 않아요</text>
+              <text class="d-sub" x="460" y="211" text-anchor="middle">복원된 점에 투영해요</text>
+              <text class="d-sub" x="316" y="242">탐지는 복원된 점 위에 올라가요</text>
 
               <!-- KOREN → screens -->
               <path class="d-line d-line--ink" d="M620 149 H694" marker-end="url(#fa)" />
@@ -225,14 +225,14 @@
           <h3>3D 복원: 사진에서 공간을 되찾아요</h3>
           <div class="prose">
             <p>
-              먼저 각 프레임을 어디서 찍었는지 역산해요 (COLMAP SfM). 그다음 그 위치들을 근거로
-              공간을 수십만 개의 작은 반투명 덩어리로 학습해요 (gsplat, 3D Gaussian Splatting).
-              메시를 만드는 게 아니라 <strong>보이는 그대로의 장면</strong>을 학습하기 때문에
-              잔해처럼 형태가 복잡한 대상에 잘 맞아요.
+              프레임이 들어오는 대로 각 프레임을 어디서 찍었는지 맞추고 점을 쌓아요(cumulus3d).
+              구역에 프레임이 차면 그 구역을 다시 맞춰 촘촘하게 만들고, 그 위에 0.1m 메시를
+              덮어요(deltamesh). 화면에는 바뀐 점과 바뀐 메시 조각만 보내요.
             </p>
             <p>
-              실내 복도를 직접 찍어 검증했어요. 540프레임에서 가우시안 653,353개, PSNR 23.62를
-              얻었어요. 자세한 숫자는 <a href="model.html#recon">AI 모델</a> 쪽에 있어요.
+              KOREN 실배치에서 드론 3대가 53초씩 찍은 영상을 보냈을 때, 송출을 시작하고 39.2초 만에
+              첫 화면이 떴어요. 자세한 숫자와, 처음 설계였던 3DGS 실험 결과는
+              <a href="model.html#recon">AI 모델</a> 쪽에 있어요.
             </p>
           </div>
 
@@ -245,17 +245,16 @@
             </p>
           </div>
 
-          <h3>둘은 서로를 기다리지 않아요</h3>
+          <h3>탐지는 복원 위에 올라가요</h3>
           <div class="prose">
             <p>
-              3D 복원은 프레임을 모아 도는 무거운 배치 작업이고, 탐지는 프레임이 오는 대로 계속
-              도는 스트림 작업이에요. 한 프로세스에 묶으면 복원이 도는 동안 탐지가 멈춰요. 재난
-              상황에서 그건 <strong>사람을 늦게 찾는다</strong>는 뜻이에요. 그래서 둘을 따로
-              떼어 놨어요.
+              탐지는 프레임이 들어오는 대로 돌아요. 그 결과는 복원이 그 프레임의 카메라 위치를
+              맞춘 뒤에, 복원된 점 위로 투영돼 3D 좌표가 돼요. 그래서 위험구역과 사람 마커는 그
+              구역이 복원돼야 화면에 보여요.
             </p>
             <p>
-              두 갈래가 만나는 지점은 하나뿐이에요. 탐지 결과를 3D 좌표로 바꿀 때 복원된 장면의
-              깊이를 참조하는 부분이에요. 이 참조도 비동기라서 탐지를 막지 않아요.
+              3D가 아직 거칠어도 탐지는 그대로 돌아가요. 장면 품질이 영향을 주는 건 마커 위치의
+              정밀도뿐이에요.
             </p>
           </div>
         </div>
@@ -274,14 +273,15 @@
             </p>
             <p>
               고속망이 실제로 값을 하는 곳은 <strong>복원된 3D 장면을 나르는 구간</strong>이에요.
-              장면 1회분이 30MB이고 이건 주기마다 한 번에 터지는 버스트라, 평균 대역이 아니라
-              순간 대역이 지배해요.
+              복원 결과는 구역이 정제될 때마다 한 번에 몰려 나가요. 데모 실측으로 구역 하나에
+              10~16MB였어요. 이렇게 한 번에 터지는 버스트라, 평균 대역이 아니라 순간 대역이
+              지배해요.
             </p>
           </div>
 
           <div class="table-scroll">
             <table>
-              <caption>3D 장면 한 번(30MB)을 보내는 데 걸리는 시간</caption>
+              <caption>30MB를 보내는 데 걸리는 시간</caption>
               <thead>
                 <tr>
                   <th scope="col">링크</th>
@@ -337,7 +337,7 @@
               다듬어지는 동안 다음 구간의 거친 결과가 도착해요. 이걸 딜레이 패턴이라고 불러요.
             </p>
             <p>
-              수준별로 뭐가 보이는지는 <a href="screens.html#delay">화면 둘러보기</a>에
+              단계별로 뭐가 보이는지는 <a href="screens.html#delay">화면 둘러보기</a>에
               정리해 뒀어요.
             </p>
           </div>
@@ -364,71 +364,63 @@
           <div class="plate plate--lv4">
             <p class="plate__title">같은 수식, 두 구현</p>
             <p>
-              변환 코드는 TypeScript와 Python 두 벌로 존재해요 (<code>geo.ts</code>와
-              <code>geo.py</code>). 뷰어와 모델 서버가 각각 다른 언어라서예요. 두 파일은 수치가
-              항상 같아야 해서, 한쪽만 고치는 일은 없어요.
+              변환 코드는 Rust와 Python 두 벌로 존재해요 (<code>src/shared</code>의
+              <code>geo.rs</code>와 <code>geo.py</code>). 화면 · 서버와 학습 코드가 각각 다른
+              언어라서예요. 두 파일은 수치가 항상 같아야 해서, 한쪽만 고치는 일은 없어요.
             </p>
           </div>
         </div>
       </section>
 
       <section class="seg" aria-labelledby="budget">
-        <div class="seg__rail"><span class="tick tick--lv2"></span></div>
+        <div class="seg__rail"><span class="tick tick--lv4"></span></div>
         <div class="seg__body">
           <h2 id="budget">30초 안에 들어오나요</h2>
 
           <div class="prose">
             <p>
-              한 바퀴를 30초 주기로 잡고 구간별 예산을 나눴어요. 네트워크 쪽은 전부 여유가
-              있고, <strong>성립 여부는 복원 잡 하나에 걸려 있어요.</strong>
+              첫 화면까지 30초를 목표로 단계별 예산을 나눴어요. KOREN 실배치에서 재 보니
+              <strong>첫 화면은 39.2초에 떴어요.</strong> 목표보다 9.2초 늦었고, 가장 크게 벌어진
+              건 첫 프레임 묶음이 GPU 서버에 닿기까지였어요.
             </p>
           </div>
 
           <div class="table-scroll">
             <table>
-              <caption>30초 주기 예산</caption>
+              <caption>첫 화면까지: 예산과 실측</caption>
               <thead>
                 <tr>
                   <th scope="col">단계</th>
                   <th scope="col" class="num">예산</th>
-                  <th scope="col">근거</th>
+                  <th scope="col" class="num">실측</th>
                 </tr>
               </thead>
               <tbody>
                 <tr>
-                  <th scope="row">드론 → 서버 업링크</th>
-                  <td class="num">1~2초</td>
-                  <td>SRT 지연 200~500ms + 인코딩</td>
+                  <th scope="row">송출 시작 → 첫 프레임 묶음 도착</th>
+                  <td class="num">11~12초</td>
+                  <td class="num">22.1초</td>
                 </tr>
                 <tr>
-                  <th scope="row">한 묶음이 채워지는 시간</th>
-                  <td class="num">약 10초</td>
-                  <td>10초 분량 프레임으로 잡 1회분을 만들어요</td>
+                  <th scope="row">첫 구역 복원 → 현황판 표시</th>
+                  <td class="num">11~19초</td>
+                  <td class="num">17.1초</td>
                 </tr>
                 <tr>
-                  <th scope="row">3D 복원 1회</th>
-                  <td class="num">10~15초</td>
-                  <td>V100에서 실측이 필요해요: 유일한 미검증 항목</td>
-                </tr>
-                <tr>
-                  <th scope="row">서버 → 배포 지점</th>
-                  <td class="num">1초 미만</td>
-                  <td>KOREN 백본</td>
-                </tr>
-                <tr>
-                  <th scope="row">배포 지점 → 단말</th>
-                  <td class="num">1~3초</td>
-                  <td>전송 포맷을 <code>.spz</code>로 바꾸는 걸 전제로 해요</td>
+                  <th scope="row">합계</th>
+                  <td class="num">30초</td>
+                  <td class="num">39.2초</td>
                 </tr>
               </tbody>
             </table>
           </div>
 
-          <div class="note note--open">
+          <div class="note note--info">
             <p>
-              <b>아직 안 끝난 것.</b> 배정받은 GPU가 V100으로 확정되면서 복원 1회가 15초 안에
-              들어오는지가 남은 질문이에요. 학습 스텝을 줄여 맞추되 품질이 버티는 지점을 찾는
-              중이에요. 이 숫자가 안 나오면 30초라는 주기 자체를 다시 정해야 해요.
+              <b>전체는 324초가 걸렸어요.</b> 53초 분량 영상을 92초에 다 받았고, 남은 구역을
+              복원하는 데 4분 가까이 더 걸렸어요. 복원 처리량이 영상 속도를 따라가지 못하는 게 이
+              구조의 한계예요. 타임라인은 <a href="model.html#recon">AI 모델</a>에서 그래프로 볼 수
+              있어요.
             </p>
           </div>
         </div>
