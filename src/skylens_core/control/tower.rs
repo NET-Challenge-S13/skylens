@@ -2,9 +2,10 @@
 //!
 //! One scene, three ways to draw its buildings (점 / 검정 텍스처 건물 / 실사 항공뷰): switching
 //! swaps materials and visibility, it never rebuilds what is already on the GPU. Everything the
-//! legacy scene sized in its normalised units (fog, camera offsets, drone size, pads, point size)
-//! is scaled by [`World::unit`], the metres one legacy unit stood for over the same operating
-//! area, so the view frames the city the way the legacy one did.
+//! legacy scene sized in its normalised units (fog, camera offsets, drone size, point size) is
+//! scaled by [`World::unit`], the metres one legacy unit stood for over the same operating area,
+//! so the view frames the city the way the legacy one did. Route pads are the exception: they are
+//! sized in metres so they stay as thin as the building edges.
 
 use crate::buildings::{self, Mulberry32};
 use crate::fleet::{Fleet, Placement};
@@ -34,6 +35,22 @@ pub const TRAIL_LENGTH: usize = 40;
 pub const TARGET_EXTENT: f64 = 44.0;
 /// Legacy `droneViewScale()` on map scenes.
 pub const DRONE_VIEW_SCALE: f64 = 0.15;
+/// Drone wireframe radius in metres. The legacy size was 0.6 `DRONE_VIEW_SCALE` units, about 6 m on
+/// a 3 km area, and the followed drone grew 1.6x: wider than a three-drone formation's ~10 m
+/// spacing, so the three merged into one shape. In metres it stays under half the spacing whatever
+/// the area. Every drone gets the same size; the followed one is marked by colour and its halo.
+pub const DRONE_RADIUS_M: f64 = 3.0;
+/// Halo around the followed drone, relative to its wireframe (legacy 1.32 on top of the 1.6x).
+pub const DRONE_HALO: f64 = 1.18;
+/// Follow camera scale in metres: `Chase`'s 9 back and 4 up become about 32 m and 14 m, close
+/// enough that the formation fills the view as three drones (legacy `DRONE_VIEW_SCALE * unit`
+/// sat about 96 m back on a 3 km area).
+pub const CHASE_SCALE_M: f64 = 3.5;
+/// Waypoint ground pads in metres. The legacy pads were 0.25 to 0.42 units, which on a 3 km area is
+/// an 18 to 30 m ring; a looping route of close waypoints then merged into wide bands. These stay
+/// on the scale of building edges so the route reads as a path.
+pub const PAD_INNER_M: f64 = 1.6;
+pub const PAD_OUTER_M: f64 = 2.6;
 /// Legacy camera: 55 degree vertical field of view, near plane 0.1 units.
 pub const FOV_DEG: f64 = 55.0;
 /// Sun position of the legacy scene (three.js (40, 70, -30) = ENU (40, 30, 70)).
@@ -563,7 +580,7 @@ impl TowerScene {
         gpu.clouds.set_alpha(id(K_POINTS, 0), 0.92);
     }
 
-    fn sync_route(&mut self, gpu: &mut Gpu3d, w: &World, unit: f64) {
+    fn sync_route(&mut self, gpu: &mut Gpu3d, w: &World) {
         let key = (w.route_rev, w.terrain_rev);
         if self.route_key == Some(key) {
             return;
@@ -603,7 +620,7 @@ impl TowerScene {
             &LineSet { positions: drops, topology: Topology::List, colors: None, color: config::rgba(gold, 0.35), blend: Blend::Alpha, depth_test: true },
         );
         let grounds: Vec<[f64; 3]> = legs.iter().map(|(_, g)| *g).collect();
-        let pads = ring_mesh(&grounds, 0.25 * unit, 0.42 * unit, 20);
+        let pads = ring_mesh(&grounds, PAD_INNER_M, PAD_OUTER_M, 20);
         let pad_material = Material { shading: Shading::Unlit, tint: config::rgba(gold, 0.75), blend: Blend::Alpha, double_sided: true };
         gpu.meshes.upsert(&gpu.device, &gpu.queue, id(K_PADS, 0), &pads, None, pad_material);
     }
@@ -639,7 +656,7 @@ impl TowerScene {
         );
     }
 
-    fn sync_drones(&mut self, gpu: &mut Gpu3d, fleet: &Fleet, unit: f64) {
+    fn sync_drones(&mut self, gpu: &mut Gpu3d, fleet: &Fleet) {
         let live: HashSet<u32> = fleet.tracks().iter().filter(|t| t.placed).map(|t| t.info.id).collect();
         let gone: Vec<u32> = self.trails.keys().filter(|i| !live.contains(*i)).copied().collect();
         for d in gone {
@@ -652,9 +669,9 @@ impl TowerScene {
             let d = t.info.id;
             let active = fleet.active == Some(d);
             let tint = drone_tint(d);
-            let scale = if active { 1.6 } else { 1.0 } * DRONE_VIEW_SCALE * unit;
+            let radius = DRONE_RADIUS_M;
             let core = LineSet {
-                positions: octahedron_edges(t.pos, t.forward, 0.6 * scale),
+                positions: octahedron_edges(t.pos, t.forward, radius),
                 topology: Topology::List,
                 colors: None,
                 color: config::rgba(tint, if active { 1.0 } else { 0.65 }),
@@ -664,7 +681,7 @@ impl TowerScene {
             gpu.lines.upsert(&gpu.device, &gpu.queue, id(K_CORE, u64::from(d)), &core);
             if active {
                 let halo = LineSet {
-                    positions: octahedron_edges(t.pos, t.forward, 0.6 * scale * 1.32),
+                    positions: octahedron_edges(t.pos, t.forward, radius * DRONE_HALO),
                     topology: Topology::List,
                     colors: None,
                     color: config::rgba(0xe8fbff, 0.72),
@@ -745,9 +762,9 @@ impl ViewScreen for TowerScene {
         if s.building_points {
             self.sync_points(gpu, &w, unit, info.now_ms);
         }
-        self.sync_route(gpu, &w, unit);
+        self.sync_route(gpu, &w);
         self.sync_grid(gpu, &w, unit);
-        self.sync_drones(gpu, &w.fleet, unit);
+        self.sync_drones(gpu, &w.fleet);
         // Cheap: visibility flags and material constants, every frame so new uploads follow.
         self.apply_mode(gpu, mode, &s);
 
@@ -759,7 +776,7 @@ impl ViewScreen for TowerScene {
                 self.overview.step(dt)
             }
             Some(t) => {
-                self.chase.scale = DRONE_VIEW_SCALE * unit;
+                self.chase.scale = CHASE_SCALE_M;
                 self.chase.step(t.pos, t.forward, dt)
             }
         };
