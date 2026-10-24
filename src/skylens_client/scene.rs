@@ -345,12 +345,11 @@ impl ViewScreen for StatusScene {
             let fit = std::mem::take(&mut st.fit_requested);
             (st.color_mode, st.point_size, fit, st.display)
         };
-        // The mesh display shows the mesh alone once there is one (at 0.05 m it carries the
-        // detail itself; points over it read as speckle up close); before that, the points.
-        let mesh_only = display == Display::Mesh && board.store.mesh_block_count() > 0;
+        // Both displays draw the points; the mesh display lays the mesh under them as the surface
+        // that fills the gaps between points, while the points keep the detail and the colour.
         let paint = Paint::of(mode, board.height_range());
         self.layer.pump(gpu, &mut board, paint, BG_RGB, info.now_ms / 1000.0);
-        gpu.clouds.set_live_visible(!mesh_only);
+        gpu.clouds.set_live_visible(true);
         if fit {
             self.fit_view(&board, info);
         }
@@ -360,7 +359,7 @@ impl ViewScreen for StatusScene {
         self.fade.update(info.dt);
         board.first_progress = self.fade.first_progress();
         for (seg, a) in self.fade.segments() {
-            gpu.clouds.set_alpha(segment_cloud(seg), if mesh_only { 0.0 } else { a });
+            gpu.clouds.set_alpha(segment_cloud(seg), a);
         }
 
         // Mesh blocks, unlit in their vertex colours, faded with their segment and opaque once the
