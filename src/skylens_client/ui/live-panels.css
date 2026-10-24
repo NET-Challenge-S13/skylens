@@ -180,7 +180,8 @@
   box-sizing: border-box;
   border-top: 1px solid var(--divider);
   border-radius: var(--radius-sm);
-  background: rgba(5, 7, 10, 0.55);
+  /* Transparent: the wave floats on the panel's own glass. */
+  background: transparent;
 }
 .live-monitor.is-done .live-monitor__wave {
   opacity: 0.45;

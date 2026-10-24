@@ -355,8 +355,9 @@ pub fn live_markup() -> String {
 
 /// Refinement rows the pattern shows; later refinements of a zone stay in the top row.
 pub const DELAY_ROWS: u32 = 3;
-/// Steps (columns) the pattern shows; older steps scroll off to the left behind an ellipsis.
-pub const DELAY_COLS: u32 = 8;
+/// Column slots the pattern shows at most. Past that the steps scroll left one per new step and
+/// the first slot becomes an ellipsis, so the newest `DELAY_COLS - 1` steps stay in view.
+pub const DELAY_COLS: u32 = 6;
 
 /// One cell of the pattern: what zone `zone` got at refinement `row` (1 = first delivery) while
 /// the reconstruction front was at step `col`.
@@ -430,14 +431,15 @@ pub fn zone_hue(zone: u32) -> u32 {
 }
 
 /// The pattern as markup: a grid of `rows x columns` cells, row 1 at the bottom, the step numbers
-/// under it, the newest delivery marked. Only the last [`DELAY_COLS`] steps show.
+/// under it, the newest delivery marked. At most [`DELAY_COLS`] slots: steps 1..=6, or once past
+/// that an ellipsis and the last five steps.
 pub fn delay_markup(grid: &DelayGrid) -> String {
     if grid.is_empty() {
         return String::new();
     }
     let last = grid.last_col();
-    let first = last.saturating_sub(DELAY_COLS - 1).max(1);
-    let clipped = first > 1;
+    let clipped = last > DELAY_COLS;
+    let first = if clipped { last - (DELAY_COLS - 2) } else { 1 };
     let rows = grid.cells.iter().map(|c| c.row).max().unwrap_or(1).max(2);
     let newest = grid.cells.last().copied();
     let mut out = String::from("<div class=\"delay\">");
@@ -665,10 +667,15 @@ mod tests {
         assert_eq!(delay_markup(&DelayGrid::default()), "");
         let l: Vec<LogEntry> = (0..12).map(|z| entry(z + 1, Kind::Refined, z, 0.0, 1)).collect();
         let m = delay_markup(&delay_grid_live(&l));
-        // Steps 5..12 show behind an ellipsis.
-        assert!(m.contains("<span class=\"delay__step\">\u{2026}</span><span class=\"delay__step\">5</span>"));
+        // Six slots: an ellipsis in the first, then steps 8..12.
+        assert!(m.contains("<span class=\"delay__step\">\u{2026}</span><span class=\"delay__step\">8</span>"));
         assert!(m.contains("<span class=\"delay__step\">12</span>"));
-        assert!(!m.contains("<span class=\"delay__step\">4</span>"));
+        assert!(!m.contains("<span class=\"delay__step\">7</span>"));
+        assert_eq!(m.matches("class=\"delay__step\"").count(), DELAY_COLS as usize);
+        // Up to six steps there is no ellipsis.
+        let six = delay_markup(&delay_grid_live(&l[..6]));
+        assert!(!six.contains('\u{2026}'));
+        assert_eq!(six.matches("class=\"delay__step\"").count(), 6);
         // The newest delivery is marked, its zone keeps its hue.
         assert!(m.contains("delay__cell is-new\" data-hue=\"3\" title=\"Z11 · 1단계 · REFINED\">Z11<"));
         // Two rows at least, the top one first.
