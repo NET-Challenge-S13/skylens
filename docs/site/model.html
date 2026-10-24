@@ -214,17 +214,19 @@
             </p>
           </div>
 
-          <figure class="figure--narrow">
+          <figure>
             <img
-              src="assets/unet.jpeg"
-              alt="UNet 구조 다이어그램. 입력이 여러 단계로 줄어들었다가 다시 커지고, 같은 단계끼리 가로로 연결되는 스킵 커넥션이 그려져 있습니다."
-              width="639"
-              height="330"
+              src="assets/model-arch.jpg"
+              alt="SkyLens 모델 구조도. 왼쪽에서 R, G, B, 열화상 네 채널이 하나의 H×W×4 입력으로 합쳐지고, 인코더 4단, 병목, 디코더 4단을 지나 공유 몸통에서 두 갈래로 나뉩니다. 위쪽 출력은 위험구역을 빨갛게 칠한 분할 마스크, 아래쪽 출력은 사람마다 확신도가 붙은 표시입니다. 아래 헤드 옆에 YAMNet 소리 분류가 확신도를 보정하는 확장 경로로 점선으로 그려져 있습니다."
+              width="2000"
+              height="1007"
               loading="lazy"
             />
             <figcaption>
-              UNet 구조. 줄였다가 다시 키우면서, 같은 크기의 단계끼리 직접 연결해 세부를 잃지
-              않아요. SkyLens는 여기에 입력을 4채널로 넓히고 출력 헤드를 둘로 늘렸어요.
+              모델 구조. 4채널 입력이 인코더 4단과 디코더 4단을 지나고, 같은 크기의 단계끼리 바로
+              이어져(스킵 연결) 세부를 잃지 않아요. 몸통 하나를 두 헤드가 나눠 써요. 사람 헤드는
+              사람마다 중심점과 확신도를 내고, 상자 크기는 참고값으로 같이 내요. 오른쪽 아래
+              YAMNet은 소리로 확신도를 보정하는 확장 경로예요.
             </figcaption>
           </figure>
 
@@ -247,6 +249,97 @@
               </tbody>
             </table>
           </div>
+        </div>
+      </section>
+
+      <section class="seg" aria-labelledby="examples">
+        <div class="seg__rail"><span class="tick tick--lv4"></span></div>
+        <div class="seg__body">
+          <h2 id="examples">이렇게 찾아요</h2>
+
+          <div class="prose">
+            <p>
+              채택 모델(research v6)을 학습에 쓰지 않은 검증·시험 이미지에 돌린 결과예요. 위험구역은
+              왼쪽이 정답, 오른쪽이 모델 출력이에요. 사람은 초록 상자가 정답, 빨간 상자와 점이
+              모델이 찾은 사람이에요.
+            </p>
+          </div>
+
+          <ul class="readout">
+            <li><b>0.86</b><span>사람 재현율 (정밀도 0.5에서). 데이터셋마다 따로 학습한 YOLOv8x 세 개는 0.85</span></li>
+            <li><b>0.74</b><span>붕괴 IoU. 목표 0.65</span></li>
+            <li><b>0.42</b><span>도로 차단 IoU. 목표 0.30, 선행 연구 0.33</span></li>
+            <li><b>0.48</b><span>화재 IoU. 목표 0.50에 조금 못 미쳤어요</span></li>
+          </ul>
+
+          <div class="gallery gallery--wide">
+            <figure>
+              <img
+                src="assets/detect/collapse-road-1.jpg"
+                alt="허리케인이 지나간 해안 주택가를 위에서 찍은 사진 두 장. 왼쪽 정답에는 무너진 집들이 파란색, 가운데 도로가 노란색으로 칠해져 있고, 오른쪽 모델 출력도 같은 집과 도로를 칠했지만 더 넓게 칠했습니다."
+                width="1032"
+                height="547"
+                loading="lazy"
+              />
+              <figcaption>
+                RescueNet 시험 이미지. 파란색이 붕괴, 노란색이 도로 차단이에요. 무너진 집과 막힌
+                길을 다 잡았지만, 정답보다 넓게 칠하는 편이에요.
+              </figcaption>
+            </figure>
+            <figure>
+              <img
+                src="assets/detect/collapse-road-2.jpg"
+                alt="잔해가 흩어진 주택가 사진 두 장. 왼쪽 정답에는 무너진 집 네 채가 파란색으로 칠해져 있고, 오른쪽 모델 출력은 같은 집들에 더해 길 일부를 노란색으로 칠했습니다."
+                width="1032"
+                height="550"
+                loading="lazy"
+              />
+              <figcaption>
+                같은 데이터의 다른 장면. 붕괴는 정답과 거의 같은 자리에 칠했고, 정답에 없는 도로
+                차단도 일부 칠했어요.
+              </figcaption>
+            </figure>
+          </div>
+
+          <div class="gallery">
+            <figure>
+              <img
+                src="assets/detect/person-sard.jpg"
+                alt="돌무더기 옆 흙길을 비스듬히 내려다본 드론 사진. 길 위와 돌무더기 위의 사람 네 명에 빨간 상자가 쳐져 있습니다."
+                width="1360"
+                height="803"
+                loading="lazy"
+              />
+              <figcaption>
+                수색 구조 데이터 SARD. 돌무더기와 길 위의 네 명을 모두 찾았어요.
+              </figcaption>
+            </figure>
+            <figure>
+              <img
+                src="assets/detect/person-city.jpg"
+                alt="도심 대로를 높은 곳에서 내려다본 드론 사진. 인도와 횡단보도의 작은 사람들에 빨간 상자가 여러 개 쳐져 있습니다."
+                width="1360"
+                height="803"
+                loading="lazy"
+              />
+              <figcaption>
+                VisDrone 도심. 정답 28명 중 22명을 맞혔어요. 멀리 있는 작은 사람일수록 놓쳐요.
+              </figcaption>
+            </figure>
+          </div>
+
+          <figure class="figure--dialog">
+            <img
+              src="assets/detect/person-night.jpg"
+              alt="밤에 횡단보도를 위에서 내려다본 사진. 걷는 사람 셋과 오토바이를 탄 사람 하나에 초록 정답 상자와 빨간 모델 상자가 겹쳐 있습니다."
+              width="512"
+              height="537"
+              loading="lazy"
+            />
+            <figcaption>
+              LLVIP 밤 거리. 일반 영상과 열화상을 함께 넣어 네 명을 모두 찾았어요.
+            </figcaption>
+          </figure>
         </div>
       </section>
 
@@ -298,8 +391,9 @@
               <strong>기하학으로 풀어요.</strong>
             </p>
             <p>
-              핵심은 <strong>깊이를 센서에서 얻지 않는다</strong>는 점이에요. 이미 복원해 둔 3D
-              장면을 그 프레임의 드론 위치에서 렌더하면 깊이 맵이 부산물로 나와요. 그걸 역참조해요.
+              핵심은 <strong>깊이를 센서에서 얻지 않는다</strong>는 점이에요. 이미 복원해 둔 점들을
+              그 프레임을 찍은 카메라 위치로 투영하면, 픽셀마다 가장 앞에 있는 면이 정해져요. 탐지
+              결과는 그 앞면에만 얹어요. 벽 뒤에 가려진 바닥은 증거를 받지 않아요.
             </p>
           </div>
 
@@ -320,9 +414,10 @@
               않아요.
             </p>
             <p>
-              드론 여러 대가 같은 지점을 봤으면 시선을 교차시켜 위치를 더 정확하게 만들 수 있어요
-              (삼각측량). 마커가 공중에 붕 뜨는 걸 막기 위해 지표면으로 눌러 주는 보정도 함께
-              들어가요.
+              증거는 현장 전체에 <strong>하나뿐인 지도</strong>에 쌓여요. 바닥을 가로세로 칸으로
+              나누고 높이도 층으로 나눠서, 지붕과 그 아래 땅은 다른 칸이에요. 같은 곳을 다시
+              지나가거나 다른 드론이 보면 같은 칸에 더해지고, 같은 대상은 끝까지 같은 이름으로
+              남아요.
             </p>
           </div>
 
@@ -334,10 +429,19 @@
               있으니까 기하학적으로 푸는 게 더 정확하고 단순해요.
             </p>
             <p>
-              프레임마다 확신도가 흔들려도(0.6 → 0.4 → 못 찾음) 괜찮아요. 같은 3D 위치에 쌓이는
-              증거로 다루면 확신도가 알아서 수렴하거든요. 이때 <strong>다른 드론이 거의 같은
-              시각에 다른 각도에서 잡은 것</strong>이, 같은 드론이 나중에 다시 지나가며 잡은 것보다
-              훨씬 강한 증거예요.
+              프레임마다 확신도가 흔들려도(0.6 → 0.4 → 못 찾음) 괜찮아요. 확신도는 그 사람이
+              화면에 들어온 횟수로 찾은 점수의 합을 나눈 값이라, 볼수록 수렴해요. 가려져서 안 보인
+              프레임은 놓친 걸로 세지 않아요. 한 프레임의 두 탐지는 언제나 다른 사람이에요.
+            </p>
+            <p>
+              한 드론이 2초 안에 찍은 프레임들은 한 번 본 것으로 쳐요. 그리고
+              <strong>서로 다른 시점 두 번 이상</strong>에서 봐야 화면에 올라가요. 그래서 다른
+              드론이 다른 각도에서 잡은 것이, 같은 드론의 연속 프레임보다 훨씬 강한 증거예요.
+            </p>
+            <p>
+              위험구역도 같은 지도에 칸마다 클래스 확률을 쌓아요. 가장 그럴듯한 클래스가 위험
+              클래스이고 그 평균 확률이 0.5 이상인 칸만 위험구역이 되고, 붙어 있는 칸끼리 하나의
+              구역으로 묶어요.
             </p>
           </div>
 
@@ -359,7 +463,58 @@
 
           <div class="prose">
             <p>
-              실내 복도를 세 번 지나며 찍은 영상 3편을 하나의 좌표계로 통합했어요. 결과는 이래요.
+              지금은 cumulus3d가 드론 영상에서 바로 점군을 쌓고, deltamesh가 그 위에 0.1m 메시를
+              덮어요. 이 구조를 KOREN 실배치 위에서 처음부터 끝까지 재 봤어요. 드론 3대가 각자
+              53초 분량의 영상을 동시에 보낸 조건이에요(SRT, 드론당 2.5Mbps).
+            </p>
+          </div>
+
+          <h3>실서버에서 걸린 시간</h3>
+
+          <figure class="chart" data-chart="timeline" data-label="전체 파이프라인 타임라인. 송출 시작 후 22.1초에 첫 프레임 묶음이 도착하고, 39.2초에 현황판에 첫 데이터가 뜨고, 92초에 마지막 프레임을 받고, 324초에 마지막 데이터가 도착합니다.">
+            <div class="chart__plot"></div>
+            <figcaption>
+              막대에 마우스를 올리면 구간마다 무슨 일이 일어나는지 보여요. 노란 점선은
+              지휘관이 현황판에서 보는 순간이에요.
+            </figcaption>
+          </figure>
+
+          <div class="table-scroll">
+            <table>
+              <caption>전체 파이프라인 타임라인</caption>
+              <thead>
+                <tr>
+                  <th scope="col" class="num">시각</th>
+                  <th scope="col">끝난 일</th>
+                  <th scope="col" class="num">걸린 시간</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><th scope="row" class="num">0초</th><td>드론 3대 영상 송출 시작</td><td class="num">없음</td></tr>
+                <tr><th scope="row" class="num">22.1초</th><td>첫 프레임 묶음(카메라 3장)이 판교 V100에 도착</td><td class="num">22.1초</td></tr>
+                <tr><th scope="row" class="num">39.2초</th><td>첫 구역 복원 완료, 현황판에 첫 데이터 표시</td><td class="num">17.1초</td></tr>
+                <tr><th scope="row" class="num">92초</th><td>마지막 프레임 수신 (수신 구간 70.4초)</td><td class="num">70.4초</td></tr>
+                <tr><th scope="row" class="num">324초</th><td>마지막 구역 복원 완료, 현황판에 마지막 데이터 도착</td><td class="num">231.8초</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="prose">
+            <p>
+              <strong>송출을 시작하고 39.2초 만에 지휘관이 첫 화면을 봐요.</strong> 전체는 324초
+              (약 5분 24초)가 걸렸어요. 복원이 영상보다 느려서, 마지막 프레임을 받은 뒤에도 4분
+              가까이 남은 구역을 복원해요. 처리량이 영상 속도를 따라가지 못하는 게 이 구조의 한계예요.
+            </p>
+          </div>
+
+          <h3>그 전에는 3DGS로 설계를 정했어요</h3>
+          <div class="prose">
+            <p>
+              처음 설계는 COLMAP으로 카메라 위치를 풀고 gsplat(3D Gaussian Splatting)으로 장면을
+              학습하는 방식이었어요. 아래 숫자는 그때 실내 복도를 세 번 지나며 찍은 영상 3편으로
+              잰 거예요. 매칭과 학습에 수십 분이 걸려 비행 중에 화면을 채우기 어려워서 라이브
+              복원은 cumulus3d로 바꿨지만, "거칠게 먼저 띄우고 뒤에서 다듬는다"는 딜레이 패턴의
+              근거는 여기서 나왔어요.
             </p>
           </div>
 
@@ -417,17 +572,11 @@
 
           <h3>거친 결과를 먼저 띄우는 게 실제로 성립해요</h3>
 
-          <figure>
-            <img
-              src="assets/recon-measurements.png"
-              alt="두 개의 그래프. 왼쪽은 학습 스텝에 따른 복원 품질과 형상 개수를 로그 축으로 보여주고, 오른쪽은 입력 장수에 따른 단계별 소요 시간을 막대로 보여줍니다."
-              width="2327"
-              height="885"
-              loading="lazy"
-            />
+          <figure class="chart" data-chart="psnr" data-label="학습 스텝에 따른 PSNR. 250스텝 16.09dB에서 1,000스텝 18.47dB, 7,000스텝 21.48dB를 지나 30,000스텝 23.62dB까지 로그 곡선으로 오릅니다.">
+            <div class="chart__plot"></div>
             <figcaption>
-              (a) 품질 곡선이 로그 형태라 초반에 대부분을 벌어요. (b) 입력 장수가 1.5배가 되면
-              프레임 간 대조는 5배로 늘어나요. 장수의 제곱에 비례해요.
+              학습 스텝에 따른 복원 품질(PSNR). 가로축이 로그라서 곡선이 거의 직선이에요. 초반에
+              대부분을 벌어요. 점에 마우스를 올리면 SSIM·LPIPS·가우시안 개수도 보여요.
             </figcaption>
           </figure>
 
@@ -463,6 +612,16 @@
             </p>
           </div>
 
+          <h3>장수가 늘면 매칭은 제곱으로 늘어요</h3>
+
+          <figure class="chart" data-chart="stages" data-label="단계별 소요 시간. 360장 SIFT는 특징점 추출 26초, 전수 매칭 8분 27초, 매퍼 13분 17초. 540장 ALIKED는 35초, 42분 15초, 54분 14초.">
+            <div class="chart__plot"></div>
+            <figcaption>
+              입력 장수가 1.5배가 되자 전수 매칭은 5배로 늘었어요. 프레임끼리 전부 대조하니까
+              장수의 제곱에 비례해요. 학습(30,000스텝)은 여기에 37분 52초가 더 걸렸어요.
+            </figcaption>
+          </figure>
+
           <h3>드론 위치를 카메라 위치로 그냥 쓸 수는 없어요</h3>
           <dl class="kv">
             <dt>자세 오차 0.1°</dt>
@@ -486,9 +645,9 @@
 
           <div class="note note--open">
             <p>
-              <b>아직 판정 안 한 것.</b> 드론 편대를 얼마나 벌려 놓을지 실험은 6조건을 돌렸는데,
-              조건마다 평가 세트가 달라서 숫자를 비교할 수 없었어요. 공통 평가 세트로 다시 돌려야
-              해요. 정황상 간격을 넓히는 쪽이 유력해 보이지만, 아직 결론이라고 말하지 않아요.
+              <b>판정하지 못한 것.</b> 드론 편대를 얼마나 벌려 놓을지 실험은 6조건을 돌렸는데,
+              조건마다 평가 세트가 달라서 숫자를 비교할 수 없었어요. 정황상 간격을 넓히는 쪽이
+              유력해 보였지만, 공통 평가 세트로 다시 재지 않았으니 결론이라고 말하지 않아요.
             </p>
           </div>
         </div>
@@ -603,5 +762,6 @@
     </footer>
 
     <script src="assets/guide.js"></script>
+    <script src="assets/charts.js"></script>
   </body>
 </html>

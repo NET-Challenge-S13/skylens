@@ -70,8 +70,8 @@
 
           <div class="prose">
             <p>
-              드론이 보낸 영상이 게이트웨이와 프록시를 거쳐 코어에 모여요. 코어가 모델 API에
-              일을 시키고, 받은 결과를 두 화면으로 내보내요.
+              드론이 보낸 영상이 게이트웨이와 프록시를 거쳐 코어에 모여요. 코어가 영상에서 뽑은
+              프레임을 모델 서버에 넘기고, 돌아온 점 · 메시 · 탐지를 두 화면으로 내보내요.
             </p>
           </div>
 
@@ -81,8 +81,8 @@
               <desc id="arch-desc">
                 현장의 드론이 KOREN 외부망의 게이트웨이로, 게이트웨이가 내부망의 프록시로, 프록시가
                 코어로 데이터를 보냅니다. 코어는 위쪽의 관제탑과 제어를 주고받고, 아래쪽의 모델
-                API에 잡을 발행하며, 오른쪽의 클라이언트 릴레이를 거쳐 외부망의 현황판으로 결과를
-                배포합니다.
+                서버에 프레임을 넘겨 점 · 메시 · 탐지 청크를 받으며, 오른쪽의 브리지를 거쳐 외부망의
+                현황판으로 결과를 배포합니다.
               </desc>
               <defs>
                 <marker id="aa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -117,7 +117,7 @@
 
               <rect class="d-box" x="162" y="152" width="110" height="50" />
               <text class="d-label" x="217" y="174" text-anchor="middle">게이트웨이</text>
-              <text class="d-sub" x="217" y="191" text-anchor="middle">relay | webrtc</text>
+              <text class="d-sub" x="217" y="191" text-anchor="middle">SRT 수신</text>
               <path class="d-line d-line--ink" d="M272 177 H296" marker-end="url(#aa)" />
 
               <rect class="d-box" x="300" y="152" width="100" height="50" />
@@ -127,13 +127,13 @@
 
               <rect class="d-box d-box--scene" x="424" y="148" width="120" height="58" />
               <text class="d-label" x="484" y="170" text-anchor="middle">코어</text>
-              <text class="d-sub" x="484" y="187" text-anchor="middle">보관 · 잡 발행</text>
-              <text class="d-sub" x="484" y="200" text-anchor="middle">딜레이 패턴 · 배포</text>
+              <text class="d-sub" x="484" y="187" text-anchor="middle">보관 · 추출</text>
+              <text class="d-sub" x="484" y="200" text-anchor="middle">영상 · 배포</text>
               <path class="d-line d-line--ink" d="M544 177 H586" marker-end="url(#aa)" />
 
               <rect class="d-box" x="590" y="152" width="120" height="50" />
-              <text class="d-label" x="650" y="174" text-anchor="middle">클라이언트</text>
-              <text class="d-sub" x="650" y="191" text-anchor="middle">웹서버 · 시그널링</text>
+              <text class="d-label" x="650" y="174" text-anchor="middle">브리지</text>
+              <text class="d-sub" x="650" y="191" text-anchor="middle">현황판 웹 · 중계</text>
               <path class="d-line d-line--ink" d="M710 177 H740" marker-end="url(#aa)" />
 
               <rect class="d-box d-box--danger" x="744" y="152" width="134" height="50" />
@@ -142,10 +142,10 @@
 
               <!-- model api -->
               <path class="d-line d-line--ink" d="M484 208 V242" marker-start="url(#aa)" marker-end="url(#aa)" />
-              <text class="d-sub" x="554" y="230">잡 ↔ 결과</text>
+              <text class="d-sub" x="554" y="230">프레임 ↔ 청크 (gRPC)</text>
               <rect class="d-box" x="424" y="246" width="120" height="52" />
-              <text class="d-label" x="484" y="268" text-anchor="middle">모델 API</text>
-              <text class="d-sub" x="484" y="285" text-anchor="middle">3DGS 복원 · 탐지</text>
+              <text class="d-label" x="484" y="268" text-anchor="middle">모델 서버</text>
+              <text class="d-sub" x="484" y="285" text-anchor="middle">점군 · 메시 · 탐지</text>
 
               <!-- shared library, drawn as a footnote box -->
               <rect class="d-zone" x="20" y="246" width="380" height="52" />
@@ -190,7 +190,7 @@
                 <tr>
                   <th scope="row"><code>skylens_gateway</code></th>
                   <td>KOREN 외부망</td>
-                  <td>연구망으로 들어가는 문이에요. 받은 요청을 대전으로 넘기고, 드론 영상을 받아 둬요</td>
+                  <td>연구망으로 들어가는 문이에요. 드론 영상을 SRT로 받고, 현황판 웹을 내주고, 요청을 대전으로 넘겨요</td>
                   <td>nginx 설정</td>
                 </tr>
                 <tr>
@@ -202,19 +202,19 @@
                 <tr>
                   <th scope="row"><code>skylens_core</code></th>
                   <td>KOREN 내부망</td>
-                  <td>관제탑을 서빙하고, 데이터를 전부 들고 있고, 잡을 발행하고, 결과를 배포해요</td>
+                  <td>관제탑 화면을 내주고, 데이터를 전부 들고 있고, 영상에서 프레임을 뽑아 모델 서버에 넘기고, 결과를 두 화면에 나눠 보내요</td>
                   <td>Go</td>
                 </tr>
                 <tr>
                   <th scope="row"><code>skylens_model</code></th>
                   <td>KOREN 내부망</td>
-                  <td>연산 서버예요. 3D 복원과 탐지 추론이 여기서 돌아요</td>
+                  <td>연산 서버예요. cumulus3d 라이브 복원, deltamesh 메시, UNet 탐지와 3D 융합이 여기서 돌아요</td>
                   <td>Rust (학습은 Python)</td>
                 </tr>
                 <tr>
                   <th scope="row"><code>skylens_client</code></th>
                   <td>KOREN 외부망</td>
-                  <td>관제탑·현황판 화면이에요. 웹과 데스크톱이 같은 HTML/CSS를 써요</td>
+                  <td>현황판 화면이에요. 웹 · 데스크톱 · Android가 같은 코드를 써요 (관제탑 화면은 코어 안에 있어요)</td>
                   <td>Rust · HTML/CSS</td>
                 </tr>
                 <tr>
@@ -233,22 +233,22 @@
             </table>
           </div>
 
-          <h3>코어가 딜레이 패턴을 쥐고 있어요</h3>
+          <h3>순서는 서버가 정해요</h3>
           <div class="prose">
             <p>
-              코어는 프록시에서 온 입력을 구간으로 나눠 모델 API에 잡을 어사인해요. 어느 구간을
-              먼저 낮은 수준으로 확정할지, 언제 다음 수준을 올릴지 정하는 곳이 여기예요.
+              어느 구역을 언제 닫고, 언제 미리보기를 내고, 언제 정제본으로 바꿀지는 모델 서버가
+              들어온 프레임을 보고 정해요. 코어는 청크 내용을 풀지 않고 메타데이터만 읽어서 두
+              화면에 나눠 보내요.
             </p>
             <p>
-              이 결정권은 <strong>코어에만</strong> 있어요. 화면이 자기 타이머로 단계를 올리는
-              구조는 쓰지 않아요. 그러면 화면이 "실제로 계산된 것"이 아니라 "계산됐을 법한 것"을
-              그리게 되니까요.
+              화면이 자기 타이머로 단계를 올리는 구조는 쓰지 않아요. 그러면 화면이 "실제로 계산된
+              것"이 아니라 "계산됐을 법한 것"을 그리게 되니까요.
             </p>
           </div>
 
           <div class="note note--open">
             <p>
-              <b>이번 단계에는 DB가 없어요.</b> 코어가 구간·복원 결과·마커·텔레메트리를 전부
+              <b>DB는 없어요.</b> 코어가 프레임 메타 · 청크 · 마커 · 텔레메트리를 전부
               메모리에 들고 있고, 세션이 끝나면 사라져요.
             </p>
           </div>
@@ -274,32 +274,37 @@
                 <tr>
                   <th scope="row"><code>skylens_core</code></th>
                   <td class="num">8080</td>
-                  <td><code>ws /uplink</code> · <code>ws /viewer</code> · <code>GET /health</code> · 관제탑 서빙</td>
+                  <td><code>ws /uplink</code> · <code>ws /control</code> · <code>ws /viewer</code> · <code>GET /vworld/*</code> · <code>GET /health</code> · 관제탑 웹</td>
                 </tr>
                 <tr>
                   <th scope="row"><code>skylens_gateway</code></th>
-                  <td class="num">8081</td>
-                  <td>드론 접속 · <code>GET /health</code></td>
+                  <td class="num">80</td>
+                  <td><code>/</code> 현황판 웹 · <code>ws /viewer</code> · <code>ws /uplink</code> · <code>/live/{드론}/whep</code> 영상</td>
+                </tr>
+                <tr>
+                  <th scope="row">MediaMTX (브리지)</th>
+                  <td class="num">10890</td>
+                  <td>드론 영상 SRT 수신</td>
                 </tr>
                 <tr>
                   <th scope="row"><code>skylens_proxy</code></th>
                   <td class="num">8082</td>
-                  <td>게이트웨이·드론 접속 · <code>GET /health</code></td>
+                  <td>코어로 넘김 · <code>GET /health</code></td>
                 </tr>
                 <tr>
-                  <th scope="row"><code>skylens_client</code></th>
-                  <td class="num">8090</td>
-                  <td>현황판 서빙 · WebRTC 시그널링 · <code>GET /health</code></td>
+                  <th scope="row"><code>skylens_drone</code></th>
+                  <td class="num">8091</td>
+                  <td>임무 생성 · 편대 · DJI 클라우드 업로드</td>
                 </tr>
                 <tr>
                   <th scope="row"><code>skylens_model</code></th>
-                  <td class="num">8100</td>
-                  <td><code>POST /recon/jobs</code> · <code>POST /detect/jobs</code> · <code>GET /jobs/{id}</code></td>
+                  <td class="num">8100 · 8101</td>
+                  <td>REST <code>GET /health</code> · gRPC (코어가 쓰는 쪽)</td>
                 </tr>
                 <tr>
-                  <th scope="row">Vite 개발 서버</th>
-                  <td class="num">5173</td>
-                  <td>두 화면의 개발 모드 원본</td>
+                  <th scope="row">데모 현황판 서버</th>
+                  <td class="num">8090</td>
+                  <td>데모에서 게이트웨이를 대신해요</td>
                 </tr>
               </tbody>
             </table>
@@ -334,7 +339,7 @@
                 <tr>
                   <th scope="row">브리지</th>
                   <td>KOREN 외부망 · 등록 IP</td>
-                  <td><code>skylens_gateway</code> · <code>skylens_client</code> · nginx · 영상 수신(SRT)</td>
+                  <td><code>skylens_gateway</code> · 현황판 웹(<code>skylens_client</code>) · nginx · 영상 수신(SRT)</td>
                 </tr>
                 <tr>
                   <th scope="row">대전</th>
@@ -373,7 +378,7 @@
 
           <ul class="prose">
             <li><strong>프록시</strong> 코어가 죽으면 대기 경로로 바꾸고, 복구되면 돌아와요.</li>
-            <li><strong>코어</strong> 모델 API가 없으면 잡을 다시 제출해요.</li>
+            <li><strong>코어</strong> 모델 서버가 없어도 미션은 그대로 가요. 영상과 드론은 보이고, 라이브 점만 모델이 돌아올 때까지 비어 있어요.</li>
             <li><strong>현황판</strong> 코어가 없으면 마지막으로 받은 상태를 그대로 들고 있어요.</li>
           </ul>
 

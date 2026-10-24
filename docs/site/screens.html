@@ -59,6 +59,10 @@
             사람이 보는 화면은 둘이에요. 관제탑은 드론을 어디로 보낼지 정하는 화면이고, 현황판은
             복원된 현장을 3D로 보는 화면이에요. 역할이 다르니까 보이는 것도 달라요.
           </p>
+          <p class="lede">
+            두 화면은 같은 코드로 웹 브라우저에서도, Windows · macOS · Linux 데스크톱 앱으로도
+            돌아가요. 현황판은 Android 앱도 있어요.
+          </p>
         </div>
       </section>
 
@@ -71,21 +75,23 @@
           <div class="prose">
             <p>
               오퍼레이터가 드론의 경로를 GPS 좌표로 지정하는 화면이에요. 실제 지형 위에 드론의
-              현재 위치가 그려지고, 메인 드론이 보내는 카메라 영상이 우측 아래 패널에 떠요.
+              현재 위치가 그려지고, 고른 드론이 보내는 카메라 영상이 우측 아래 패널에 떠요.
+              왼쪽 위에는 미션이 어디까지 왔는지(대기 · 태스크 지정 · 드론 연결 대기 · 임무
+              수행)가, 왼쪽 아래에는 드론마다 위치 · 고도 · 방위 · 속도 · 배터리가 보여요.
             </p>
           </div>
 
           <figure>
             <img
               src="assets/control-tower.jpg"
-              alt="관제탑 화면. 어두운 배경 위에 파란 윤곽선으로 그려진 도시 건물들과 드론 세 대의 아이콘, 우측 아래에 메인 카메라 영상 패널이 있습니다."
-              width="1568"
-              height="760"
+              alt="관제탑 화면. 어두운 배경 위에 하늘색 건물들이 입체로 서 있고, 가운데에 드론 세 대가 각자의 색으로 그려져 있습니다. 왼쪽 위에 미션 진행 단계, 왼쪽 아래에 드론 세 대의 텔레메트리, 오른쪽 아래에 중앙 드론의 카메라 영상이 있습니다."
+              width="1600"
+              height="915"
               loading="lazy"
             />
             <figcaption>
               관제탑 화면. 실제 지형 위에 건물이 올라가고, 드론 세 대가 각자의 색으로 표시돼요.
-              우측 아래는 메인 드론의 카메라 영상이에요.
+              오른쪽 아래는 고른 드론의 카메라 영상이에요.
             </figcaption>
           </figure>
 
@@ -133,22 +139,28 @@
           <div class="prose">
             <p>
               툴바의 <code>경로 계획 · ROUTE</code>를 누르면 지도가 떠요. 가고 싶은 지점을 찍으면
-              GPS 웨이포인트가 쌓이고, <code>ASSIGN</code>을 누르면 리더 드론이 그 경로를 따라
-              비행해요. 나머지 드론은 리더와 일정한 간격을 유지하며 따라가요.
+              GPS 웨이포인트가 쌓이고, 마커를 다시 누르면 지워져요. 지도 범위(300m · 1.2km ·
+              2.5km), 비행 고도, 왕복 여부를 고른 뒤 <code>Assign</code>을 누르면 리더 드론이 그
+              경로를 따라 비행해요. 나머지 드론은 리더와 일정한 간격을 유지하며 따라가요.
+            </p>
+            <p>
+              <strong>경로를 배정하는 순간이 새 미션의 시작이에요.</strong> 지난 미션의 점 · 메시 ·
+              탐지는 지우고 처음부터 다시 쌓아요. <code>클라우드 미션 · CLOUD</code>에서는 DJI Fly
+              계정 클라우드에 올라간 웨이포인트 미션을 확인할 수 있어요.
             </p>
           </div>
 
-          <figure>
+          <figure class="figure--dialog">
             <img
-              src="assets/route-planner.png"
-              alt="경로 계획 모달. 위도, 경도, 고도 입력 칸과 웨이포인트 다섯 개가 목록으로 쌓여 있고 아래에 CLEAR와 ASSIGN 버튼이 있습니다."
-              width="1683"
-              height="1080"
+              src="assets/route-planner.jpg"
+              alt="경로 계획 창. 300m 범위 위성 지도 위에 웨이포인트 세 개가 초록 선으로 이어져 공연장 둘레를 지나고, 위쪽에 지도 범위 버튼과 고도 슬라이더, 왕복 반복 선택이, 아래쪽에 웨이포인트 세 줄과 Clear, Assign 버튼이 있습니다."
+              width="1000"
+              height="1665"
               loading="lazy"
             />
             <figcaption>
-              경로 계획 모달. 웨이포인트마다 위도·경도·고도가 그대로 보여요. 배정하면 리더 드론이
-              그 순서대로 비행해요.
+              경로 계획 창. 지도를 찍은 순서대로 웨이포인트가 이어지고, 목록에 위도 · 경도 · 고도가
+              그대로 보여요. 왕복 반복을 켜면 경로를 오가며 계속 날아요.
             </figcaption>
           </figure>
 
@@ -175,8 +187,8 @@
                   <td>조종할 드론을 바꿔요</td>
                 </tr>
                 <tr>
-                  <th scope="row"><code>Space</code></th>
-                  <td>일시정지</td>
+                  <th scope="row"><code>Esc</code></th>
+                  <td>설정 창을 닫아요</td>
                 </tr>
               </tbody>
             </table>
@@ -192,30 +204,118 @@
 
           <div class="prose">
             <p>
-              지휘관이 보는 3D 상황판이에요. 서버가 복원을 마친 구간을 보내오면 그 구간이 화면에
+              지휘관이 보는 3D 상황판이에요. 서버가 복원을 마친 구역을 보내오면 그 구역이 화면에
               나타나요. 드론이 지나갔다고 보이는 게 아니라
-              <strong>복원돼서 도착해야 보여요.</strong>
+              <strong>복원돼서 도착해야 보여요.</strong> 비행을 따라 지도가 자라나요.
             </p>
             <p>
-              AI가 찾은 사람과 위험구역은 GPS 좌표로 도착해서 3D 위에 마커로 얹혀요. 마커도
-              해당 구간이 복원돼야 표시돼요. 마커를 누르면 카메라가 그 지점으로 날아가고,
-              확인을 누르면 원래 보던 곳으로 돌아와요.
+              AI가 찾은 사람과 위험구역은 3D 위에 마커로 얹혀요. 새 탐지가 오면 카메라가 그
+              지점으로 다가가고, <code>확인</code>을 누르면 다가가기 전에 보던 곳으로 돌아와요.
             </p>
           </div>
 
           <figure>
             <img
-              src="assets/status-board.png"
-              alt="현황판 화면. 3D로 복원된 정원 장면 위에 초록색 원형 마커가 하나 찍혀 있고, 좌측 상단에 서버 수신 상태, 우측 하단에 생존자 추정 카드와 확신도 86퍼센트가 표시돼 있습니다."
-              width="1280"
-              height="720"
+              src="assets/status-board.jpg"
+              alt="현황판 화면. 가운데에 드론 영상으로 복원한 야외 원형 공연장이 3D로 떠 있습니다. 왼쪽 위에 서버 상태와 진행 단계 격자, 오른쪽 위에 3D 복원 생성 중 패널과 물결 애니메이션, 왼쪽 아래에 고도를 색으로 칠한 미니맵과 드론 세 대가 있습니다."
+              width="1600"
+              height="915"
               loading="lazy"
             />
             <figcaption>
-              현황판 화면. 실제 촬영본으로 복원한 3D 장면 위에 탐지 마커가 올라와 있어요. 좌측
-              상단에 지금까지 받은 구간 수와 지연이, 우측 아래에 탐지 카드가 떠요.
+              현황판 화면. 드론 영상으로 복원한 현장이 가운데에 쌓여요. 이 장면은 실제 촬영본으로
+              데모를 돌린 거예요.
             </figcaption>
           </figure>
+
+          <div class="table-scroll">
+            <table>
+              <caption>현황판 화면 구성</caption>
+              <thead>
+                <tr>
+                  <th scope="col">자리</th>
+                  <th scope="col">보여 주는 것</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row">왼쪽 위 · 서버 패널</th>
+                  <td>코어와 연결됐는지, 받은 청크와 탐지 수, 드론이 몇 대 붙었는지, 그리고 진행 단계(<a href="#delay">딜레이 패턴</a>)</td>
+                </tr>
+                <tr>
+                  <th scope="row">오른쪽 위 · 3D 복원</th>
+                  <td>지금 생성 중인지, 구역과 이벤트 수, 마지막 갱신이 얼마 전인지</td>
+                </tr>
+                <tr>
+                  <th scope="row">왼쪽 아래 · 미니맵</th>
+                  <td>위에서 본 현장을 높이 색으로 칠하고 드론 위치를 그려요. 접을 수 있어요</td>
+                </tr>
+                <tr>
+                  <th scope="row">오른쪽 아래 · 탐지 카드</th>
+                  <td>새 탐지의 종류와 확신도. 확인을 누르면 원래 시점으로 돌아가요</td>
+                </tr>
+                <tr>
+                  <th scope="row">오른쪽 위 · 버튼</th>
+                  <td><code>CAM</code>은 카메라 상태(따라가는 중 · 탐지로 다가가는 중 · 고정 · 돌아가는 중), <code>조작</code>은 조작 안내, <code>설정</code>은 표시 설정</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <h3>보는 방식은 설정에서 바꿔요</h3>
+          <div class="prose">
+            <p>
+              <strong>메시</strong>로 보면 점들 위에 0.1m 면이 덮여 바닥과 벽이 이어져 보이고,
+              <strong>점</strong>으로 보면 복원된 점을 그대로 봐요. 점 크기와 색(실제 색 · 구역 색 ·
+              높이 색)을 고를 수 있고, 메시에는 굴곡을 보이게 하는 음영을 켤 수 있어요(기본은 꺼짐).
+            </p>
+            <p>
+              탐지는 클래스마다 <strong>확신도 기준</strong>을 넘어야 화면에 올라와요. 기본값은
+              사람 80% · 화재 60% · 붕괴 60% · 도로 차단 70%이고, 설정에서 50~90% 사이로 바꿀 수
+              있어요.
+            </p>
+          </div>
+
+          <div class="gallery">
+            <figure>
+            <img
+                src="assets/board-settings.jpg"
+                alt="현황판 설정 창. 표시 방식으로 메시와 점을 고르는 버튼, 메시 음영 켜기와 끄기, 점 크기와 색, 클래스별 신뢰도 기준을 펼치는 메뉴가 있습니다."
+                width="1000"
+                height="1201"
+                loading="lazy"
+              />
+              <figcaption>설정 창. 표시 방식, 메시 음영, 점 크기와 색, 클래스별 확신도 기준.</figcaption>
+            </figure>
+            <figure>
+            <img
+                src="assets/board-guide.jpg"
+                alt="현황판 조작 안내 창. 마우스 그림과 키보드 키 그림으로 회전, 이동, 확대와 축소 방법을 보여 주고, 터치와 미니맵 조작도 따로 적혀 있습니다."
+                width="1000"
+                height="996"
+                loading="lazy"
+              />
+              <figcaption>조작 안내 창. 마우스 · 터치 · 미니맵 조작을 그림으로 보여 줘요.</figcaption>
+            </figure>
+          </div>
+
+          <div class="table-scroll">
+            <table>
+              <caption>현황판 조작법</caption>
+              <thead>
+                <tr>
+                  <th scope="col">조작</th>
+                  <th scope="col">동작</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><th scope="row">왼쪽 드래그 · 한 손가락 드래그</th><td>회전</td></tr>
+                <tr><th scope="row">오른쪽 드래그 · <code>Shift</code>나 <code>Ctrl</code> + 왼쪽 드래그</th><td>이동</td></tr>
+                <tr><th scope="row">휠 · 가운데 버튼 드래그 · 두 손가락</th><td>확대 · 축소</td></tr>
+                <tr><th scope="row">미니맵 더블클릭</th><td>미니맵을 처음 시점으로</td></tr>
+              </tbody>
+            </table>
+          </div>
 
           <div class="plate plate--lv4">
             <p class="plate__title">비어 있으면 비워 둬요</p>
@@ -235,140 +335,108 @@
 
           <div class="prose">
             <p>
-              한 구간을 최종 품질까지 다 만들어서 보내면, 지휘관은 그동안 아무것도 못 봐요. 그래서
-              <strong>낮은 품질을 먼저 확정해 띄우고 뒤에서 정제해요.</strong> 앞 구간을 다듬는
-              동안 다음 구간의 첫 결과가 도착하니까, 화면에는 서로 다른 수준의 구간이 동시에
-              올라와 있어요.
-            </p>
-            <p>
-              품질은 3D 장면을 얼마나 학습했는지로 갈려요. 수준이 올라갈수록 학습 스텝이 늘고,
-              그만큼 판단할 수 있는 게 늘어나요.
+              한 구역을 최종 품질까지 다 만들어서 보내면, 지휘관은 그동안 아무것도 못 봐요. 그래서
+              <strong>거친 결과를 먼저 띄우고 뒤에서 정제해요.</strong> 앞 구역을 다듬는 동안 다음
+              구역의 첫 결과가 도착하니까, 화면에는 단계가 다른 구역이 동시에 올라와 있어요.
             </p>
           </div>
 
           <div class="table-scroll">
             <table>
-              <caption>수준별로 지휘관이 확인할 수 있는 것</caption>
+              <caption>단계별로 보이는 것</caption>
               <thead>
                 <tr>
-                  <th scope="col">수준</th>
-                  <th scope="col" class="num">학습 스텝</th>
-                  <th scope="col">이때 판단할 수 있는 것</th>
+                  <th scope="col">단계</th>
+                  <th scope="col">언제</th>
+                  <th scope="col">보이는 것</th>
                 </tr>
               </thead>
               <tbody>
                 <tr>
-                  <th scope="row">1</th>
-                  <td class="num">250</td>
-                  <td>형상 윤곽만 보여요</td>
+                  <th scope="row">1 · 미리보기</th>
+                  <td>구역에 카메라 3장 묶음이 4개 차면</td>
+                  <td>빠르게 맞춘 거친 점. 어디가 어떻게 생겼는지 대략 보여요</td>
                 </tr>
                 <tr>
-                  <th scope="row">2</th>
-                  <td class="num">1,000</td>
-                  <td>공간이 어떻게 생겼는지 알 수 있어요</td>
+                  <th scope="row">2 · 정제</th>
+                  <td>다음 구역 미리보기와 같은 단계에</td>
+                  <td>다시 맞춘 촘촘한 점과 0.1m 메시. 진입 동선을 판단할 수 있어요</td>
                 </tr>
                 <tr>
-                  <th scope="row">3</th>
-                  <td class="num">3,500</td>
-                  <td>표면이 만들어져요</td>
-                </tr>
-                <tr>
-                  <th scope="row">4</th>
-                  <td class="num">7,000</td>
-                  <td>진입 동선을 판단할 수 있는 실용 품질이에요</td>
+                  <th scope="row">3 · 다시 놓기</th>
+                  <td>첫 구역만, 카메라 값이 안정되면</td>
+                  <td>첫 구역을 더 정확한 자리에 다시 놓아요</td>
                 </tr>
               </tbody>
             </table>
           </div>
 
-          <!-- The bars are drawn at the density they describe: level 1 is a
-               sparse dotted outline, level 4 is solid. Same grammar as the
-               rest of the page. -->
+          <!-- Same grid as the board's server panel: a column is one step of
+               progress, a row is the stage, and a zone climbs one row per step
+               (column = zone + stage). The newest cell has the heavy border,
+               the cell still in progress is dashed. -->
           <div class="diagram">
-            <svg viewBox="0 0 900 300" role="img" aria-labelledby="delay-title delay-desc">
-              <title id="delay-title">딜레이 패턴 타임라인</title>
+            <svg viewBox="0 0 900 250" role="img" aria-labelledby="delay-title delay-desc">
+              <title id="delay-title">딜레이 패턴 진행 격자</title>
               <desc id="delay-desc">
-                구간 네 개가 시간 차를 두고 시작하고, 각 구간이 수준 1에서 4까지 단계적으로
-                올라갑니다. 같은 시각에 서로 다른 구간이 서로 다른 수준으로 화면에 올라와 있습니다.
+                가로는 진행 단계 1에서 6, 세로는 미리보기, 정제, 다시 놓기 세 단계입니다. 구역 Z0은
+                1단계에 미리보기, 2단계에 정제, 3단계에 다시 놓기로 올라갑니다. 구역마다 한 칸씩
+                늦게 같은 계단을 오르고, 6단계에는 Z5 미리보기가 생성 중이고 Z4 정제가 가장 최근에
+                끝났습니다.
               </desc>
-              <defs>
-                <marker id="da" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                  <path d="M 0 0 L 10 5 L 0 10 z" fill="#93a5c2" />
-                </marker>
-              </defs>
-
-              <!-- 'now' guide -->
-              <path d="M500 48 V262" stroke="#ffd27f" stroke-width="1" stroke-dasharray="4 4" />
-              <text class="d-tag" x="500" y="40" text-anchor="middle" fill="#ffd27f">지금</text>
-
-              <!-- segment 1 -->
-              <text class="d-sub" x="88" y="92" text-anchor="end">구간 1</text>
-              <rect class="d-lv1" x="100.5" y="70.5" width="59" height="33" />
-              <text class="d-sub" x="130" y="92" text-anchor="middle">1</text>
-              <rect class="d-lv2" x="160.5" y="70.5" width="69" height="33" />
-              <text class="d-sub" x="195" y="92" text-anchor="middle">2</text>
-              <rect class="d-lv3" x="230.5" y="70.5" width="89" height="33" />
-              <text class="d-sub" x="275" y="92" text-anchor="middle">3</text>
-              <rect class="d-lv4" x="320" y="70" width="550" height="34" />
-              <text class="d-sub d-on-lv4" x="595" y="92" text-anchor="middle">수준 4 · 유지</text>
-
-              <!-- segment 2 -->
-              <text class="d-sub" x="88" y="142" text-anchor="end">구간 2</text>
-              <rect class="d-lv1" x="220.5" y="120.5" width="59" height="33" />
-              <text class="d-sub" x="250" y="142" text-anchor="middle">1</text>
-              <rect class="d-lv2" x="280.5" y="120.5" width="69" height="33" />
-              <text class="d-sub" x="315" y="142" text-anchor="middle">2</text>
-              <rect class="d-lv3" x="350.5" y="120.5" width="89" height="33" />
-              <text class="d-sub" x="395" y="142" text-anchor="middle">3</text>
-              <rect class="d-lv4" x="440" y="120" width="430" height="34" />
-              <text class="d-sub d-on-lv4" x="655" y="142" text-anchor="middle">수준 4 · 유지</text>
-
-              <!-- segment 3 -->
-              <text class="d-sub" x="88" y="192" text-anchor="end">구간 3</text>
-              <rect class="d-lv1" x="340.5" y="170.5" width="59" height="33" />
-              <text class="d-sub" x="370" y="192" text-anchor="middle">1</text>
-              <rect class="d-lv2" x="400.5" y="170.5" width="69" height="33" />
-              <text class="d-sub" x="435" y="192" text-anchor="middle">2</text>
-              <rect class="d-lv3" x="470.5" y="170.5" width="89" height="33" />
-              <text class="d-sub" x="515" y="192" text-anchor="middle">3</text>
-              <rect class="d-lv4" x="560" y="170" width="310" height="34" />
-              <text class="d-sub d-on-lv4" x="715" y="192" text-anchor="middle">수준 4 · 유지</text>
-
-              <!-- segment 4 -->
-              <text class="d-sub" x="88" y="242" text-anchor="end">구간 4</text>
-              <rect class="d-lv1" x="460.5" y="220.5" width="59" height="33" />
-              <text class="d-sub" x="490" y="242" text-anchor="middle">1</text>
-              <rect class="d-lv2" x="520.5" y="220.5" width="69" height="33" />
-              <text class="d-sub" x="555" y="242" text-anchor="middle">2</text>
-              <rect class="d-lv3" x="590.5" y="220.5" width="89" height="33" />
-              <text class="d-sub" x="635" y="242" text-anchor="middle">3</text>
-              <rect class="d-lv4" x="680" y="220" width="190" height="34" />
-              <text class="d-sub d-on-lv4" x="775" y="242" text-anchor="middle">수준 4 · 유지</text>
-
-              <!-- time axis -->
-              <path class="d-line" d="M100 274 H878" marker-end="url(#da)" />
-              <text class="d-sub" x="100" y="292">드론이 구간 1을 통과</text>
-              <text class="d-sub" x="860" y="292" text-anchor="end">시간</text>
+              <text class="d-sub" x="150" y="63" text-anchor="end">3 · 다시 놓기</text>
+              <text class="d-sub" x="150" y="119" text-anchor="end">2 · 정제</text>
+              <text class="d-sub" x="150" y="175" text-anchor="end">1 · 미리보기</text>
+              <rect class="d-box" x="220" y="152" width="92" height="36" />
+              <text class="d-sub" x="266" y="175" text-anchor="middle">Z0</text>
+              <rect class="d-box" x="330" y="152" width="92" height="36" />
+              <text class="d-sub" x="376" y="175" text-anchor="middle">Z1</text>
+              <rect class="d-box" x="440" y="152" width="92" height="36" />
+              <text class="d-sub" x="486" y="175" text-anchor="middle">Z2</text>
+              <rect class="d-box" x="550" y="152" width="92" height="36" />
+              <text class="d-sub" x="596" y="175" text-anchor="middle">Z3</text>
+              <rect class="d-box" x="660" y="152" width="92" height="36" />
+              <text class="d-sub" x="706" y="175" text-anchor="middle">Z4</text>
+              <rect class="d-box" x="770" y="152" width="92" height="36" style="stroke-dasharray:4 4" />
+              <text class="d-sub" x="816" y="175" text-anchor="middle">Z5</text>
+              <rect class="d-box d-box--scene" x="330" y="96" width="92" height="36" />
+              <text class="d-label" x="376" y="119" text-anchor="middle">Z0</text>
+              <rect class="d-box d-box--scene" x="440" y="96" width="92" height="36" />
+              <text class="d-label" x="486" y="119" text-anchor="middle">Z1</text>
+              <rect class="d-box d-box--scene" x="550" y="96" width="92" height="36" />
+              <text class="d-label" x="596" y="119" text-anchor="middle">Z2</text>
+              <rect class="d-box d-box--scene" x="660" y="96" width="92" height="36" />
+              <text class="d-label" x="706" y="119" text-anchor="middle">Z3</text>
+              <rect class="d-box d-box--scene" x="770" y="96" width="92" height="36" style="stroke-width:2.5" />
+              <text class="d-label" x="816" y="119" text-anchor="middle">Z4</text>
+              <rect class="d-box d-box--scene" x="440" y="40" width="92" height="36" />
+              <text class="d-label" x="486" y="63" text-anchor="middle">Z0</text>
+              <text class="d-sub" x="266" y="246" text-anchor="middle">1</text>
+              <text class="d-sub" x="376" y="246" text-anchor="middle">2</text>
+              <text class="d-sub" x="486" y="246" text-anchor="middle">3</text>
+              <text class="d-sub" x="596" y="246" text-anchor="middle">4</text>
+              <text class="d-sub" x="706" y="246" text-anchor="middle">5</text>
+              <text class="d-sub" x="816" y="246" text-anchor="middle">6</text>
             </svg>
           </div>
 
           <div class="prose">
             <p>
-              노란 선이 그어진 순간을 보면, 구간 1·2는 이미 최종 품질이고 구간 3은 아직 표면을
-              만드는 중, 구간 4는 윤곽만 잡혀 있어요. <strong>같은 화면에 네 구간이 서로 다른
-              수준으로 동시에 올라와 있는 게 정상</strong>이에요.
+              진행 단계 6을 보면, Z5는 미리보기를 만드는 중이고(점선) Z4는 방금 정제가
+              끝났어요(굵은 테두리). <strong>같은 화면에 미리보기 구역과 정제된 구역이 함께 있는 게
+              정상</strong>이에요. 현황판 왼쪽 위 서버 패널에 이 격자가 그대로 그려져요.
             </p>
           </div>
 
           <h3>알아 두면 좋은 세 가지</h3>
           <ul class="prose">
             <li>
-              <strong>다음 구간이 열리는 기준은 시간이 아니라 드론의 이동량이에요.</strong> 드론이
-              한 구간을 통과해야 그 구간의 수준 1이 확정돼요.
+              <strong>다음 구역이 열리는 기준은 시간이 아니라 들어온 프레임이에요.</strong> 구역에
+              프레임이 차야 그 구역의 미리보기가 나와요.
             </li>
             <li>
-              <strong>새 수준은 낮은 수준을 교체해요.</strong> 쌓이지 않아요. 처리가 밀려서 이미
-              추월당한 수준은 아예 건너뛰어요.
+              <strong>새 단계는 이전 단계를 교체해요.</strong> 쌓이지 않아요. 바뀐 점만 추가 · 이동 ·
+              제거로 흘러와서, 한 번 보인 구역은 제자리에 있어요.
             </li>
             <li>
               <strong>순서를 정하는 쪽은 서버예요.</strong> 화면은 도착한 걸 받아서 그릴 뿐,
