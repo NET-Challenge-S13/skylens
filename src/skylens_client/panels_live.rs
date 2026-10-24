@@ -585,6 +585,11 @@ pub fn delay_markup(grid: &DelayGrid) -> String {
     let first = if clipped { last - (DELAY_COLS - 2) } else { 1 };
     let rows = grid.cells.iter().map(|c| c.row).max().unwrap_or(1).max(2);
     let newest = grid.cells.last().copied();
+    // In the newest step, a stage that arrived above an empty one (zone k's refined copy before
+    // zone k + 1's preview) leaves the empty cell in progress: it shows its expected zone, faint
+    // and pulsing, until that delivery lands.
+    let top_in_last = grid.cells.iter().filter(|c| c.col == last).map(|c| c.row).max().unwrap_or(0);
+    let pending = |row: u32, col: u32| !grid.done && col == last && row < top_in_last && col > row;
     let mut out = String::from("<div class=\"delay\">");
     out.push_str("<div class=\"delay__axis\">정제</div><div class=\"delay__grid\">");
     for row in (1..=rows).rev() {
@@ -609,6 +614,16 @@ pub fn delay_markup(grid: &DelayGrid) -> String {
                             Some(_) => zone_label(c.zone),
                             None => format!("S{}", c.zone + 1),
                         },
+                    ));
+                }
+                None if pending(row, col) => {
+                    let zone = col - row;
+                    out.push_str(&format!(
+                        "<span class=\"delay__cell is-pending\" data-hue=\"{}\" title=\"{} · {}단계 · 생성 중\">{}</span>",
+                        zone_hue(zone),
+                        zone_label(zone),
+                        row,
+                        zone_label(zone),
                     ));
                 }
                 None => out.push_str("<span class=\"delay__cell\"></span>"),
@@ -805,6 +820,18 @@ mod tests {
         let mut f = l.clone();
         f.push(entry(6, Kind::Final, 2, 0.0, 3));
         assert!(delay_grid_live(&f).done);
+    }
+
+    #[test]
+    fn a_stage_that_arrives_first_marks_the_one_below_in_progress() {
+        // Z0 preview, Z0 refined: step 2 has Z0 at row 2 and Z1's preview not in yet.
+        let l = vec![entry(1, Kind::Preview, 0, 0.0, 1), entry(2, Kind::Refined, 0, 0.0, 1)];
+        let m = delay_markup(&delay_grid_live(&l));
+        assert!(m.contains("delay__cell is-pending\" data-hue=\"1\" title=\"Z1 · 1단계 · 생성 중\">Z1<"), "{m}");
+        // Once Z1's preview lands, nothing is pending.
+        let mut l2 = l.clone();
+        l2.push(entry(3, Kind::Preview, 1, 0.0, 2));
+        assert!(!delay_markup(&delay_grid_live(&l2)).contains("is-pending"));
     }
 
     #[test]
