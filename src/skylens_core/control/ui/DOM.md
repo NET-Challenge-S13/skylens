@@ -422,7 +422,7 @@ Assign 성공 시 결과 토스트는 §11 참조.
 | 클라우드 삭제 | `"삭제됨 · ${name}"` (info) 또는 `"삭제 요청됨(미확인) · ${name}"` (danger) | 표시 | `cloudModal.ts:109-112` |
 | 클라우드 삭제 실패 | `"삭제 실패 · ${error}"` | danger | `cloudModal.ts:114` |
 
-`${error}`는 JS `String(error)` 결과다(예: `"Error: ..."`).
+`${error}`는 JS `String(error)` 결과다(예: `"Error: ..."`). 지금은 `Error: ` 접두사를 붙이지 않고, 브리지에 닿지 못했을 때는 `Mission Bridge에 연결할 수 없습니다 (주소). 브리지(skylens-drone)가 실행 중인지 확인하세요.`만 보여 준다. 전송 오류 원문은 표준 오류 로그로 보낸다.
 
 ## 12. 로딩 화면 `.loading-screen`
 

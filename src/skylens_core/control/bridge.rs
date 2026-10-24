@@ -25,14 +25,18 @@ pub fn normalize_base(url: &str) -> String {
     url.trim().trim_end_matches('/').to_string()
 }
 
-/// `String(new Error(message))`.
+/// A bridge error as the toasts show it. The legacy client printed `String(new Error(message))`,
+/// so every toast started with `Error: `; the toast's red dot already says that.
 pub fn js_error(message: &str) -> String {
-    format!("Error: {message}")
+    message.to_string()
 }
 
-/// The legacy "bridge unreachable" error, already stringified as the toasts show it.
-pub fn unreachable_error(endpoint: &str, transport: &str) -> String {
-    js_error(&format!("Mission Bridge에 연결할 수 없습니다 ({endpoint}). npm run mission-bridge를 실행하세요. {transport}"))
+/// "Bridge unreachable" as the toasts show it. The legacy text told the operator to run
+/// `npm run mission-bridge` and appended the raw transport error (`TypeError: ... (os error
+/// 10061)`); the bridge is the Rust `skylens-drone` now, and the transport detail goes to the log
+/// (see the caller), not the operator.
+pub fn unreachable_error(endpoint: &str) -> String {
+    js_error(&format!("Mission Bridge에 연결할 수 없습니다 ({endpoint}). 브리지(skylens-drone)가 실행 중인지 확인하세요."))
 }
 
 /// `errorMessage(response)`: the JSON `error` string, else `Mission Bridge HTTP <status>`.
@@ -258,12 +262,12 @@ mod tests {
     }
 
     #[test]
-    fn errors_are_worded_like_the_legacy_client() {
+    fn errors_are_worded_for_the_operator() {
         assert_eq!(error_message(400, br#"{"error":"bad route"}"#), "bad route");
         assert_eq!(error_message(502, b"oops"), "Mission Bridge HTTP 502");
         assert_eq!(
-            unreachable_error("http://127.0.0.1:8091", "TypeError: Failed to fetch"),
-            "Error: Mission Bridge에 연결할 수 없습니다 (http://127.0.0.1:8091). npm run mission-bridge를 실행하세요. TypeError: Failed to fetch"
+            unreachable_error("http://127.0.0.1:8091"),
+            "Mission Bridge에 연결할 수 없습니다 (http://127.0.0.1:8091). 브리지(skylens-drone)가 실행 중인지 확인하세요."
         );
     }
 
@@ -280,7 +284,7 @@ mod tests {
         ]});
         let members = parse_formation(&f).unwrap();
         assert_eq!(formation_toast(&members), "편대 KMZ 3개 다운로드됨 · 앞·왼쪽 · 앞·오른쪽 · 뒤·중앙 · 클라우드 1기 업로드 · 확인 2건");
-        assert_eq!(parse_formation(&json!({"members":[]})).unwrap_err(), "Error: Mission Bridge 응답에 편대 미션이 없습니다");
+        assert_eq!(parse_formation(&json!({"members":[]})).unwrap_err(), "Mission Bridge 응답에 편대 미션이 없습니다");
     }
 
     #[test]

@@ -594,7 +594,11 @@ impl ControlApp {
     /// The bridge answer as JSON, or the stringified legacy error.
     fn bridge_json(&self, outcome: &Outcome) -> Result<serde_json::Value, String> {
         match outcome {
-            Err(t) => Err(bridge::unreachable_error(&bridge::normalize_base(&self.opts.bridge), t)),
+            Err(t) => {
+                let base = bridge::normalize_base(&self.opts.bridge);
+                eprintln!("[control] mission bridge {base} unreachable: {t}");
+                Err(bridge::unreachable_error(&base))
+            }
             Ok(r) if !r.ok() => Err(bridge::js_error(&bridge::error_message(r.status, &r.body))),
             Ok(r) => r.json().ok_or_else(|| "SyntaxError: Unexpected end of JSON input".to_string()),
         }
