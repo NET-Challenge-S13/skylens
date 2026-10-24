@@ -212,7 +212,10 @@
   width: min(460px, 94vw);
   max-height: 88vh;
   overflow: auto;
-  padding: 20px 22px 18px;
+  /* The tower's dialog head: an accent line on top, the title over a divider. */
+  padding: 22px 22px 20px;
+  background: var(--surface-2);
+  border-top: 2px solid var(--status-ink);
 }
 
 .board-settings__close {
@@ -238,9 +241,11 @@
   font-family: var(--font-display);
   font-size: var(--text-lg);
   font-weight: 600;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--status-ink);
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--divider);
 }
 
 .board-settings__section {

@@ -45,11 +45,11 @@
   background: rgba(2, 4, 8, 0.68);
   backdrop-filter: blur(2px);
   display: flex;
-  /* Pinned to the top, NOT centred. The waypoint list sits under the map and
-     grows as points are placed; centring the dialog turned that growth into the
+  /* Pinned to the top, NOT centred by flexbox. The waypoint list sits under the
+     map and grows as points are placed; flex centring turned that growth into the
      map sliding upward — about 20 px, some 26 m of ground, between one click and
-     the next. An operator aiming at a building would place the next point
-     somewhere else entirely. Growing downward leaves the map where it was. */
+     the next. modals.rs instead centres the dialog once when it opens (an inline
+     padding-top on this overlay) and lets it grow downward from there. */
   align-items: flex-start;
   justify-content: center;
   padding: 4vh 0;

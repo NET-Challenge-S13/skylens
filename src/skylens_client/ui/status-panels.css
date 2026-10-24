@@ -316,6 +316,9 @@
 
 .point-inset__view {
   position: relative;
+  /* Clear of the border by a few pixels: the 3D pass paints its whole rectangle rounded to device
+     pixels, and flush against the border it covered it at some display scales. */
+  margin: 0 3px 3px 3px;
   background: transparent;
   cursor: grab;
   touch-action: none;

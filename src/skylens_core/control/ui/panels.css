@@ -19,20 +19,27 @@
   display: none;
 }
 
+/* The same dialog head as the route planner and cloud mission dialogs (.route-modal): an accent
+   line on top, the title over a divider. */
 .settings-panel {
   width: min(460px, 94vw);
   max-height: 88vh;
   overflow: auto;
-  padding: 20px 22px 18px;
+  padding: 22px 22px 20px;
+  background: var(--surface-2);
+  border-top: 2px solid var(--control-ink);
 }
 
 .settings-panel__title {
   font-family: var(--font-display);
   font-size: var(--text-lg);
-  letter-spacing: 0.08em;
+  font-weight: 600;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--control-ink);
   margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--divider);
 }
 
 .settings-panel__close {

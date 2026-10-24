@@ -7,6 +7,7 @@ use crate::labels;
 use crate::planner::{SPANS, Waypoint};
 use skylens_viewer::dom::{Dom, escape};
 use skylens_viewer::NodeId;
+use std::cell::Cell;
 
 pub const ROUTE_HINT: &str = "지도를 클릭해 웨이포인트를 추가하세요 · 마커를 클릭하면 삭제됩니다";
 pub const ROUTE_HINT_TOO_SHORT: &str = "경로에는 최소 2개의 웨이포인트가 필요합니다";
@@ -49,6 +50,9 @@ pub struct RouteModal {
     pub assign: Option<NodeId>,
     /// Each checkbox and its label, for [`RouteModal::sync_checks`].
     checks: Vec<(NodeId, NodeId)>,
+    dialog: Option<NodeId>,
+    /// Set once the open dialog has been centred; see [`RouteModal::centre_once`].
+    centred: Cell<bool>,
 }
 
 fn nth(v: &[NodeId], i: usize) -> Option<NodeId> {
@@ -111,6 +115,8 @@ impl RouteModal {
                 .into_iter()
                 .filter_map(|(i, l)| Some((i?, l?)))
                 .collect(),
+            dialog: find(dom, ".route-modal"),
+            centred: Cell::new(false),
         };
         // Each checkbox gets the box that draws it (see `.route-modal__check` in panels.css):
         // Blitz paints native checkboxes white whatever the colour scheme. Appended last so the
@@ -206,7 +212,29 @@ impl RouteModal {
     pub fn close(&self, dom: &mut Dom<'_>) {
         if let Some(o) = self.overlay {
             dom.add_class(o, "is-hidden");
+            dom.remove_style(o, "padding-top");
         }
+        self.centred.set(false);
+    }
+
+    /// Centres the open dialog vertically, once per opening: the first laid-out height decides
+    /// the top, and later growth (waypoint rows) extends downward so the map never moves under
+    /// the operator's pointer. Flex centring would re-centre on every row.
+    pub fn centre_once(&self, dom: &mut Dom<'_>) {
+        let (Some(o), Some(d)) = (self.overlay, self.dialog) else { return };
+        if self.centred.get() || !self.is_open(dom) {
+            return;
+        }
+        let height = dom.doc_ref().get_node(d).map_or(0.0, |n| f64::from(n.final_layout().size.height));
+        if height <= 0.0 {
+            return; // not laid out yet; next frame
+        }
+        let vp = dom.doc_ref().viewport();
+        let scale = if vp.scale_f64() > 0.0 { vp.scale_f64() } else { 1.0 };
+        let view_h = f64::from(vp.window_size.1) / scale;
+        let top = ((view_h - height) / 2.0).max(16.0).round();
+        dom.set_style(o, "padding-top", &format!("{top}px"));
+        self.centred.set(true);
     }
 
     pub fn warn_too_short(&self, dom: &mut Dom<'_>) {

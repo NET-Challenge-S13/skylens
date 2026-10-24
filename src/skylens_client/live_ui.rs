@@ -78,10 +78,10 @@ impl WaveWidget {
         let (ca, sa) = ((t * 0.18).cos(), (t * 0.18).sin());
         // A wide strip (the monitor) fits the field's depth and crests into its own height: the
         // near edge (yr*sc down to about -2.05) and the crests (|hh*sc| up to about 0.41) stay
-        // between about 3 % and 98 % of it, so nothing is cut at the strip's edges.
+        // inside it (centred a little low, which balances the panel's text above).
         let strip = w > h * 2.5;
         let (depth, crest) = if strip { (h * 0.24, h * 0.3) } else { (h * 0.2, h * 0.62) };
-        let (cx, cy) = (w / 2.0, if strip { h * 0.6 } else { h * 0.64 });
+        let (cx, cy) = (w / 2.0, if strip { h * 0.66 } else { h * 0.64 });
         let tf = Affine::scale(scale);
         for i in 0..self.cols {
             for j in 0..self.rows {

@@ -953,6 +953,7 @@ impl ScreenApp for ControlApp {
         self.handle_link(dom, now);
         if let Some(r) = self.route.as_ref().filter(|r| r.is_open(dom)) {
             r.sync_checks(dom);
+            r.centre_once(dom);
         }
         if let Some(m) = self.mission.as_mut() {
             m.tick(dom, now);
