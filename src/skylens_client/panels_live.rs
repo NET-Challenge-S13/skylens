@@ -141,9 +141,14 @@ pub const WAIT_FADE_OUT_S: f64 = 0.8;
 /// Seconds it takes to fade back in (a new run).
 pub const WAIT_FADE_IN_S: f64 = 0.4;
 
-/// The waiting screen's sub line: the progress the core reported (if any) and the time waited.
-pub fn wait_sub(progress: &str, waited_s: f64) -> String {
-    if progress.is_empty() { format!("경과 {}", mmss(waited_s, false)) } else { format!("{progress}  ·  경과 {}", mmss(waited_s, false)) }
+/// The waiting screen's sub line: the progress the core reported (if any) and the time waited
+/// since a drone connected; before that, that the board waits for one (no clock runs).
+pub fn wait_sub(progress: &str, waited_s: Option<f64>) -> String {
+    let time = match waited_s {
+        Some(s) => format!("경과 {}", mmss(s, false)),
+        None => "드론 연결 대기".to_string(),
+    };
+    if progress.is_empty() { time } else { format!("{progress}  ·  {time}") }
 }
 
 /// One step of the waiting screen's opacity toward 1 (no delta yet) or 0 (a delta arrived).
@@ -336,7 +341,7 @@ pub fn settings_markup(s: &LiveSettings) -> String {
             "<div class=\"board-settings__row\"><span class=\"board-settings__lbl\">색</span>{modes}</div>",
             "</div>",
             "<div class=\"board-settings__section\">탐지</div>",
-            "<div class=\"board-settings__row\"><button type=\"button\" class=\"board-seg\" data-live=\"conf-menu\" id=\"board-conf-toggle\">클래스별 신뢰도 ▸</button>",
+            "<div class=\"board-settings__row\"><button type=\"button\" class=\"board-seg\" data-live=\"conf-menu\" id=\"board-conf-toggle\">클래스별 신뢰도 · 펼치기</button>",
             "<span class=\"board-settings__note\">이 값보다 확신도가 낮은 탐지는 표시하지 않습니다</span></div>",
             "<div class=\"board-settings__sub is-off\" id=\"board-conf-menu\">{confs}</div>",
             "<div class=\"board-settings__section\">카메라</div>",
@@ -695,8 +700,9 @@ mod tests {
         v = fade_step(v, true, 0.2);
         assert!((v - 0.5).abs() < 1e-9);
         assert_eq!(fade_step(0.9, true, 1.0), 1.0);
-        assert_eq!(wait_sub("", 75.2), "경과 1:15");
-        assert_eq!(wait_sub("위치 3/40", 5.0), "위치 3/40  ·  경과 0:05");
+        assert_eq!(wait_sub("", Some(75.2)), "경과 1:15");
+        assert_eq!(wait_sub("위치 3/40", Some(5.0)), "위치 3/40  ·  경과 0:05");
+        assert_eq!(wait_sub("", None), "드론 연결 대기");
     }
 
     #[test]

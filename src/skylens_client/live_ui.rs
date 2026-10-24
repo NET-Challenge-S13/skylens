@@ -209,7 +209,9 @@ pub struct LivePanels {
     wait_cfg: Rc<Cell<WaveCfg>>,
     mon_cfg: Rc<Cell<WaveCfg>>,
     wait_fade: f64,
-    wait_started_ms: f64,
+    /// When a drone was first seen connected since the waiting screen came up; the waited time
+    /// counts from here.
+    drones_since_ms: Option<f64>,
     last_sig: (usize, usize, Option<u32>),
     last_change_ms: f64,
     flash_until: f64,
@@ -228,7 +230,7 @@ impl LivePanels {
             wait_cfg: Rc::new(Cell::new(WaveCfg { opacity: 1.0, calm: false, zones: 0 })),
             mon_cfg: Rc::new(Cell::new(WaveCfg { opacity: 1.0, calm: false, zones: 0 })),
             wait_fade: 1.0,
-            wait_started_ms: skylens_viewer::now_ms(),
+            drones_since_ms: None,
             last_sig: (0, 0, None),
             last_change_ms: skylens_viewer::now_ms(),
             flash_until: 0.0,
@@ -341,7 +343,7 @@ impl LivePanels {
                 drop(s);
                 self.conf_menu_open = !self.conf_menu_open;
                 dom.toggle_class("board-conf-menu", "is-off", !self.conf_menu_open);
-                dom.set_text("board-conf-toggle", if self.conf_menu_open { "클래스별 신뢰도 ▾" } else { "클래스별 신뢰도 ▸" });
+                dom.set_text("board-conf-toggle", if self.conf_menu_open { "클래스별 신뢰도 · 접기" } else { "클래스별 신뢰도 · 펼치기" });
                 return true;
             }
             "size-" | "size+" | "mode" => {}
@@ -388,7 +390,9 @@ impl LivePanels {
     }
 
     /// Once per frame. `dt` seconds since the last call, `now` in ms.
-    pub fn poll(&mut self, dom: &mut Dom<'_>, log: &DeltaLog, now: f64, dt: f64) {
+    /// `drones_connected`: a drone is connected (the mission reports one online, or telemetry
+    /// came in); the waiting screen's clock runs only from then.
+    pub fn poll(&mut self, dom: &mut Dom<'_>, log: &DeltaLog, drones_connected: bool, now: f64, dt: f64) {
         if !self.mounted {
             return;
         }
@@ -402,7 +406,7 @@ impl LivePanels {
             self.last_sig = sig;
         }
         let snap = Snapshot { entries: log.entries(), applied: log.applied(), live: log.is_live() };
-        self.render_wait(dom, &snap, now, dt);
+        self.render_wait(dom, &snap, drones_connected, now, dt);
         self.render_monitor(dom, &snap, now);
         self.render_settings(dom);
         self.match_toolbar_width(dom);
@@ -427,10 +431,14 @@ impl LivePanels {
         }
     }
 
-    fn render_wait(&mut self, dom: &mut Dom<'_>, snap: &Snapshot<'_>, now: f64, dt: f64) {
+    fn render_wait(&mut self, dom: &mut Dom<'_>, snap: &Snapshot<'_>, drones_connected: bool, now: f64, dt: f64) {
         let waiting = pl::phase(snap) == Phase::Waiting;
-        if waiting && self.wait_fade <= 0.0 {
-            self.wait_started_ms = now;
+        if !drones_connected || (waiting && self.wait_fade <= 0.0) {
+            // No drone yet, or the waiting screen came back for a new run: no clock.
+            self.drones_since_ms = None;
+        }
+        if drones_connected && self.drones_since_ms.is_none() {
+            self.drones_since_ms = Some(now);
         }
         self.wait_fade = pl::fade_step(self.wait_fade, waiting, dt);
         self.wait_cfg.set(WaveCfg { opacity: self.wait_fade as f32, calm: false, zones: 0 });
@@ -445,7 +453,7 @@ impl LivePanels {
             }
         }
         if op > 0 {
-            let sub = pl::wait_sub("", (now - self.wait_started_ms) / 1000.0);
+            let sub = pl::wait_sub("", self.drones_since_ms.map(|t| (now - t) / 1000.0));
             if self.shown.wait_sub != sub {
                 dom.set_text("live-wait-sub", &sub);
                 self.shown.wait_sub = sub;

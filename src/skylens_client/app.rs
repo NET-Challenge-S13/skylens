@@ -445,7 +445,11 @@ impl ScreenApp for StatusApp {
         self.render_server_panel(dom);
         self.render_banner(dom);
         self.render_points(dom);
-        self.live.poll(dom, &self.board.borrow().live, now, dt);
+        let drones_connected = {
+            let b = self.board.borrow();
+            !b.drones.is_empty() || b.mission.as_ref().is_some_and(|m| m.drones_online > 0)
+        };
+        self.live.poll(dom, &self.board.borrow().live, drones_connected, now, dt);
 
         if let Some(l) = &mut self.loading {
             l.tick(dom, now);
