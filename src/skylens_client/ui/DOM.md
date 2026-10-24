@@ -148,7 +148,7 @@
 
 ## 6. 오버레이 `#overlay-status`
 
-세 자식이 이 순서로 들어 있다: `.detect-card`, `.cam-state`, `#board-waiting`.
+레거시에서는 세 자식이 이 순서로 들어 있었다: `.detect-card`, `.cam-state`, `#board-waiting`. 지금은 `.cam-state`를 `#board-toolbar` 맨 앞(설정 버튼과 연결 배지 왼쪽)으로 옮겼다. 레거시 자리는 연결 배지와 같은 우상단이라 배지 밑에 깔려 글자가 겹쳐 보였다.
 
 ### 6.1 탐지 카드 `.detect-card` `overlay.ts:111-163`
 
@@ -203,6 +203,8 @@
 
 ## 7. 점 토글 `#point-toggle`
 
+> 지금은 없다. 토글 버튼은 미니맵 패널(`#point-inset`) 머리의 `#point-inset-fold`(`접기`/`열기`)로 합쳤고, 아래 `meta` 문구는 머리의 `.point-inset__meta`에 쓴다. 패널은 처음부터 있고 접히기만 한다. 아래는 레거시 기록이다.
+
 만드는 곳: `skylens_client/ui/pointToggle.ts:8-22`. `section.pane` 끝, 화면 이름 칩 뒤.
 
 ```html
@@ -248,8 +250,7 @@
 |---|---|---|
 | `.detect-card` | `is-open`일 때 보임 | 닫힘 |
 | `#board-waiting` | `is-visible`일 때 보임 | 템플릿은 보임 |
-| `#point-toggle` | `is-on` | 켜짐 |
-| `#point-inset` | `is-open` + `has-data`일 때 보임 | 없음 |
+| `#point-inset` | 처음부터 보임. `is-open`이 없으면 머리만 남는다(접힘) | 열림 |
 
 ## 10. 토스트 `#toast-root`
 

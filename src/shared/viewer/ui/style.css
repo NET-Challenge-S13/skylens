@@ -439,6 +439,9 @@ html {
   height: 5px;
   border-radius: 3px;
   margin: 10px 18px 0;
+  /* `.detect-card > *` pads every child by 18px; inside the track that padding pushed the fill
+     18px in, so 0 % was not at the track's start. */
+  padding: 0;
   width: auto;
   background: var(--surface-inset);
   overflow: hidden;

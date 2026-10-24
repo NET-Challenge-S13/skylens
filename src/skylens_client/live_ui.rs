@@ -76,10 +76,12 @@ impl WaveWidget {
         }
         let t = (skylens_viewer::now_ms() - self.t0) / 1000.0;
         let (ca, sa) = ((t * 0.18).cos(), (t * 0.18).sin());
-        // A wide strip (the monitor) gets the field's depth from its width, not its few pixels of
-        // height, centred so the crests stay inside it.
-        let vh = h.max(w * 0.3);
-        let (cx, cy) = (w / 2.0, if vh > h { h * 0.5 + vh * 0.08 } else { h * 0.64 });
+        // A wide strip (the monitor) fits the field's depth and crests into its own height: the
+        // near edge (yr*sc down to about -2.05) and the crests (|hh*sc| up to about 0.41) stay
+        // between about 3 % and 98 % of it, so nothing is cut at the strip's edges.
+        let strip = w > h * 2.5;
+        let (depth, crest) = if strip { (h * 0.24, h * 0.3) } else { (h * 0.2, h * 0.62) };
+        let (cx, cy) = (w / 2.0, if strip { h * 0.6 } else { h * 0.64 });
         let tf = Affine::scale(scale);
         for i in 0..self.cols {
             for j in 0..self.rows {
@@ -90,7 +92,7 @@ impl WaveWidget {
                 let (xr, yr) = (x * ca - y * sa, x * sa + y * ca);
                 let sc = 1.0 / (1.0 + yr * 0.22);
                 let sx = cx + xr * sc * w * 0.47;
-                let sy = cy + yr * sc * vh * 0.2 - hh * sc * vh * 0.62;
+                let sy = cy + yr * sc * depth - hh * sc * crest;
                 let size = self.dot * sc + 0.3;
                 // A strip (the monitor) is narrower than the wave: dots past its edges are not drawn.
                 if sx < 0.0 || sx > w || sy < 0.0 || sy > h {

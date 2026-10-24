@@ -4,15 +4,6 @@
    panel): hairline border, --radius-md, --shadow-panel, display-font headings, mono details.
    Right column, top to bottom: toolbar (14px) - monitor (56px) - [detection card bottom-right]. */
 
-/* Board-wide text scale: every panel uses these tokens (the shared tower style keeps its own). */
-:root {
-  --text-xs: 12.5px;
-  --text-sm: 13.5px;
-  --text-md: 15px;
-  --text-lg: 17px;
-  --text-xl: 21px;
-}
-
 /* --- Waiting screen (until the first delta) --- */
 .live-wait {
   position: absolute;
@@ -63,40 +54,42 @@
   gap: 8px;
 }
 
-/* The pane label, the button and the badge share one height so the top row lines up. */
-.pane-label--status,
+/* Same metrics as the tower's toolbar (.control-toolbar__btn): the button, the camera-state chip
+   and the link badge are one family of chips in one row. */
 .board-toolbar__btn,
+.board-toolbar .cam-state,
 .board-toolbar .net-badge {
-  box-sizing: border-box;
-  height: 32px;
-}
-
-.board-toolbar__btn {
+  position: static;
   display: flex;
   align-items: center;
-  padding: 6px 12px;
+  gap: 7px;
+  padding: 8px 14px;
   border: 1px solid var(--border-hairline);
   border-radius: var(--radius-sm);
   background: var(--surface-1);
-  box-shadow: var(--shadow-panel);
-  color: var(--status-ink);
   font-family: var(--font-display);
   font-size: var(--text-sm);
   font-weight: 600;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   white-space: nowrap;
+}
+
+.board-toolbar__btn {
+  color: var(--status-ink);
   cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
 }
 .board-toolbar__btn:hover {
+  background: var(--surface-2);
   border-color: var(--border-strong);
 }
 
+/* Read-outs, not buttons: secondary ink. */
+.board-toolbar .cam-state,
 .board-toolbar .net-badge {
-  position: static;
-  padding: 6px 12px;
-  box-shadow: var(--shadow-panel);
-  white-space: nowrap;
+  color: var(--text-secondary);
+  pointer-events: none;
 }
 
 /* --- Monitor (top-right, under the toolbar): the reference panel plus a live wave strip --- */
@@ -179,10 +172,12 @@
   text-overflow: ellipsis;
 }
 
-.live-monitor__wave {
+/* Two classes: the shared `.pane canvas { height: 100% }` outranks one, and stretched the strip
+   past the panel's bottom, where it was cut off. */
+.live-monitor .live-monitor__wave {
   display: block;
   width: 100%;
-  height: 48px;
+  height: 64px;
   margin-top: 8px;
   box-sizing: border-box;
   border-top: 1px solid var(--divider);

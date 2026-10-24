@@ -1,4 +1,4 @@
-/* STATUS-only panels: server status (with the delay pattern), point layer panel and its toggle,
+/* STATUS-only panels: server status (with the delay pattern), the minimap (point layer panel),
    detection card placement. Kept separate from style.css (owned by a different pass). Uses the
    token system defined in style.css (--surface-*, --border-*, --font-*). The top-left pane label
    and #server-status are the reference look every other board surface follows. */
@@ -140,40 +140,42 @@
   flex: 0 0 auto;
   box-sizing: border-box;
   width: 30px;
-  height: 22px;
-  line-height: 20px;
-  border: 1px solid var(--border-hairline);
-  border-radius: 5px;
-  background: var(--surface-inset);
+  height: 20px;
+  line-height: 18px;
+  /* An empty step is just a slot: the panel's divider line, no fill. */
+  border: 1px solid var(--divider);
+  border-radius: var(--radius-sm);
+  background: transparent;
   font-family: var(--font-mono);
   font-size: var(--text-xs);
-  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
   text-align: center;
   white-space: nowrap;
   overflow: hidden;
   color: transparent;
 }
 
-/* One pastel hue per zone: tinted fill, stronger border, text in the hue. */
-.delay__cell[data-hue='0'] { background: rgba(200, 240, 122, 0.22); border-color: rgba(200, 240, 122, 0.6); color: #c8f07a; }
-.delay__cell[data-hue='1'] { background: rgba(143, 209, 106, 0.22); border-color: rgba(143, 209, 106, 0.6); color: #8fd16a; }
-.delay__cell[data-hue='2'] { background: rgba(167, 201, 127, 0.22); border-color: rgba(167, 201, 127, 0.6); color: #a7c97f; }
-.delay__cell[data-hue='3'] { background: rgba(90, 169, 255, 0.22); border-color: rgba(90, 169, 255, 0.6); color: #5aa9ff; }
-.delay__cell[data-hue='4'] { background: rgba(169, 212, 255, 0.22); border-color: rgba(169, 212, 255, 0.6); color: #a9d4ff; }
-.delay__cell[data-hue='5'] { background: rgba(255, 207, 153, 0.22); border-color: rgba(255, 207, 153, 0.6); color: #ffcf99; }
-.delay__cell[data-hue='6'] { background: rgba(201, 179, 245, 0.22); border-color: rgba(201, 179, 245, 0.6); color: #c9b3f5; }
-.delay__cell[data-hue='7'] { background: rgba(242, 167, 216, 0.22); border-color: rgba(242, 167, 216, 0.6); color: #f2a7d8; }
+/* One hue per zone, kept quiet like the panel's other read-outs: a faint wash, a hairline in the
+   hue and the zone name in it. */
+.delay__cell[data-hue='0'] { background: rgba(200, 240, 122, 0.1); border-color: rgba(200, 240, 122, 0.4); color: #c8f07a; }
+.delay__cell[data-hue='1'] { background: rgba(143, 209, 106, 0.1); border-color: rgba(143, 209, 106, 0.4); color: #8fd16a; }
+.delay__cell[data-hue='2'] { background: rgba(167, 201, 127, 0.1); border-color: rgba(167, 201, 127, 0.4); color: #a7c97f; }
+.delay__cell[data-hue='3'] { background: rgba(90, 169, 255, 0.1); border-color: rgba(90, 169, 255, 0.4); color: #5aa9ff; }
+.delay__cell[data-hue='4'] { background: rgba(169, 212, 255, 0.1); border-color: rgba(169, 212, 255, 0.4); color: #a9d4ff; }
+.delay__cell[data-hue='5'] { background: rgba(255, 207, 153, 0.1); border-color: rgba(255, 207, 153, 0.4); color: #ffcf99; }
+.delay__cell[data-hue='6'] { background: rgba(201, 179, 245, 0.1); border-color: rgba(201, 179, 245, 0.4); color: #c9b3f5; }
+.delay__cell[data-hue='7'] { background: rgba(242, 167, 216, 0.1); border-color: rgba(242, 167, 216, 0.4); color: #f2a7d8; }
 
-/* The newest delivery glows in its own hue. */
-.delay__cell.is-new { box-shadow: 0 0 8px rgba(94, 200, 255, 0.55); }
-.delay__cell.is-new[data-hue='0'] { box-shadow: 0 0 8px rgba(200, 240, 122, 0.7); }
-.delay__cell.is-new[data-hue='1'] { box-shadow: 0 0 8px rgba(143, 209, 106, 0.7); }
-.delay__cell.is-new[data-hue='2'] { box-shadow: 0 0 8px rgba(167, 201, 127, 0.7); }
-.delay__cell.is-new[data-hue='3'] { box-shadow: 0 0 8px rgba(90, 169, 255, 0.7); }
-.delay__cell.is-new[data-hue='4'] { box-shadow: 0 0 8px rgba(169, 212, 255, 0.7); }
-.delay__cell.is-new[data-hue='5'] { box-shadow: 0 0 8px rgba(255, 207, 153, 0.7); }
-.delay__cell.is-new[data-hue='6'] { box-shadow: 0 0 8px rgba(201, 179, 245, 0.7); }
-.delay__cell.is-new[data-hue='7'] { box-shadow: 0 0 8px rgba(242, 167, 216, 0.7); }
+/* The newest delivery: the hairline in full hue and a small glow. */
+.delay__cell.is-new[data-hue='0'] { border-color: rgb(200, 240, 122); box-shadow: 0 0 6px rgba(200, 240, 122, 0.45); }
+.delay__cell.is-new[data-hue='1'] { border-color: rgb(143, 209, 106); box-shadow: 0 0 6px rgba(143, 209, 106, 0.45); }
+.delay__cell.is-new[data-hue='2'] { border-color: rgb(167, 201, 127); box-shadow: 0 0 6px rgba(167, 201, 127, 0.45); }
+.delay__cell.is-new[data-hue='3'] { border-color: rgb(90, 169, 255); box-shadow: 0 0 6px rgba(90, 169, 255, 0.45); }
+.delay__cell.is-new[data-hue='4'] { border-color: rgb(169, 212, 255); box-shadow: 0 0 6px rgba(169, 212, 255, 0.45); }
+.delay__cell.is-new[data-hue='5'] { border-color: rgb(255, 207, 153); box-shadow: 0 0 6px rgba(255, 207, 153, 0.45); }
+.delay__cell.is-new[data-hue='6'] { border-color: rgb(201, 179, 245); box-shadow: 0 0 6px rgba(201, 179, 245, 0.45); }
+.delay__cell.is-new[data-hue='7'] { border-color: rgb(242, 167, 216); box-shadow: 0 0 6px rgba(242, 167, 216, 0.45); }
 
 /* Older steps scrolled off to the left. */
 .delay__cell--more {
@@ -211,86 +213,86 @@
   color: var(--text-tertiary);
 }
 
-/* --- Point layer toggle (bottom-left), chip metrics like the pane label --- */
-.point-toggle {
+/* --- Minimap (bottom-left): the point layer panel, folded from its own header ---
+   The 3D drawing happens in .point-inset__view's rectangle, so that box must stay transparent. */
+.point-inset {
   position: absolute;
   left: 16px;
   bottom: 16px;
   z-index: 6;
-  box-sizing: border-box;
-  height: 32px;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 6px 12px;
-  border: 1px solid var(--border-hairline);
-  border-radius: var(--radius-sm);
-  background: var(--surface-glass);
-  box-shadow: var(--shadow-panel);
-  color: var(--text-secondary);
-  font-family: var(--font-mono);
-  font-size: var(--text-sm);
-  cursor: pointer;
-}
-.point-toggle:hover {
-  border-color: var(--border-strong);
-}
-.point-toggle.is-on {
-  border-color: var(--border-focus);
-}
-
-.point-toggle__label {
-  font-family: var(--font-display);
-  font-size: var(--text-sm);
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-primary);
-}
-
-.point-toggle__meta {
-  font-family: var(--font-mono);
-  font-size: var(--text-sm);
-  font-variant-numeric: tabular-nums;
-  color: var(--text-tertiary);
-}
-.point-toggle.is-on .point-toggle__meta {
-  color: var(--status-ink);
-}
-
-/* --- Point layer panel (bottom-left, above its toggle) ---
-   A small second view of the point layer under the main board; the 3D drawing happens in
-   .point-inset__view's rectangle, so that box must stay transparent. */
-.point-inset {
-  position: absolute;
-  left: 16px;
-  bottom: 58px;
-  z-index: 6;
   width: 380px;
   height: 250px;
-  display: none;
-  grid-template-columns: 1fr 58px;
+  display: grid;
+  grid-template-columns: 1fr 64px;
   grid-template-rows: auto 1fr;
   border: 1px solid var(--border-hairline);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-panel);
   overflow: hidden;
 }
-.point-inset.is-open.has-data {
-  display: grid;
+
+/* Folded: the header alone. */
+.point-inset:not(.is-open) {
+  height: auto !important;
+  grid-template-rows: auto;
+}
+.point-inset:not(.is-open) .point-inset__view,
+.point-inset:not(.is-open) .point-inset__legend {
+  display: none;
+}
+.point-inset:not(.is-open) .point-inset__head {
+  border-bottom: none;
+}
+
+.point-inset__head {
+  grid-column: 1 / 3;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px 6px 12px;
+  background: var(--surface-glass);
+  border-bottom: 1px solid var(--divider);
 }
 
 .point-inset__title {
-  grid-column: 1 / 3;
-  padding: 7px 12px;
-  background: var(--surface-glass);
-  border-bottom: 1px solid var(--divider);
   font-family: var(--font-display);
   font-size: var(--text-xs);
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+  white-space: nowrap;
   color: var(--text-primary);
+}
+
+.point-inset__meta {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-tertiary);
+}
+
+.point-inset__fold {
+  flex: 0 0 auto;
+  padding: 3px 10px;
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-sm);
+  background: var(--surface-1);
+  color: var(--status-ink);
+  font-family: var(--font-display);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.point-inset__fold:hover {
+  background: var(--surface-2);
+  border-color: var(--border-strong);
 }
 
 .point-inset__view {
@@ -332,9 +334,15 @@
   border-radius: 2px;
 }
 
+.point-inset__tick {
+  white-space: nowrap;
+}
+
+/* Two lines, broken in the markup ("하위 1%" / "높이 기준"). */
 .point-inset__caption {
   font-size: var(--text-xs);
   line-height: 1.25;
+  white-space: nowrap;
   text-align: center;
   color: var(--text-tertiary);
 }

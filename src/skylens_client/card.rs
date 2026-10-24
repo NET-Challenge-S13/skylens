@@ -1,7 +1,8 @@
 //! The detection card and the camera-state chip (legacy `ui/overlay.ts`). The template already
-//! holds the markup the legacy code built into `#overlay-status` (card, then `.cam-state`, then
-//! the waiting banner), so this binds to those nodes instead of building new ones, and writes them
-//! the way `openCard` / `closeCard` / `refreshCamState` did.
+//! holds the markup the legacy code built: the card in `#overlay-status`, and `.cam-state` in
+//! `#board-toolbar` (it used to sit under the link badge, which hid it). This binds to those nodes
+//! instead of building new ones, and writes them the way `openCard` / `closeCard` /
+//! `refreshCamState` did.
 
 use skylens_shared::proto::payload::v1 as payload;
 use skylens_viewer::camera::SyncState;
@@ -30,9 +31,9 @@ impl Card {
             label: dom.find_in(card, ".detect-card__label")?,
             conf: dom.find_in(card, ".detect-card__conf")?,
             fill: dom.find_in(card, ".detect-card__bar span")?,
-            cam_state: dom.find(q("#overlay-status .cam-state"))?,
+            cam_state: dom.find(q("#board-toolbar .cam-state"))?,
             open: None,
-            cam_text: dom.text(q("#overlay-status .cam-state")).unwrap_or_default(),
+            cam_text: dom.text(q("#board-toolbar .cam-state")).unwrap_or_default(),
         })
     }
 

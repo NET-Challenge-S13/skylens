@@ -339,12 +339,8 @@ impl StatusApp {
             let refined = b.segments.values().filter(|s| s.refined).count();
             (b.point_layer_on, delivered, refined, b.total_points(), !b.point_segments().is_empty(), b.height_range())
         };
-        dom.set_text(q(".point-toggle__meta"), &panels::point_meta(on, delivered, refined, total));
-        dom.toggle_class("point-toggle", "is-on", on);
-        dom.set_attr("point-toggle", "aria-pressed", if on { "true" } else { "false" });
-
-        // The panel appears with the first point chunk and stays.
-        if self.inset.is_none() && has_segments {
+        // The panel is there from the start (empty until the first point chunk) and only folds.
+        if self.inset.is_none() {
             let added = dom.append_html(q("section.pane"), &panels::inset_markup(on));
             if let Some(view) = added.first().and_then(|root| dom.find_in(*root, ".point-inset__view")) {
                 let inset = Rc::new(RefCell::new(InsetScene::new(self.board.clone())));
@@ -353,9 +349,11 @@ impl StatusApp {
             }
         }
         if self.inset.is_some() {
+            dom.set_text(q(".point-inset__meta"), &panels::point_meta(on, delivered, refined, total));
             dom.toggle_class("point-inset", "is-open", on);
-            dom.toggle_class("point-inset", "has-data", has_segments);
-            if total > 0 {
+            dom.set_text("point-inset-fold", panels::fold_label(on));
+            dom.set_attr("point-inset-fold", "aria-expanded", if on { "true" } else { "false" });
+            if total > 0 && has_segments {
                 dom.set_style(q(".point-inset__empty"), "display", "none");
             } else if dom.attr(q(".point-inset__empty"), "style").is_some_and(|s| s.contains("display")) {
                 dom.remove_style(q(".point-inset__empty"), "display");
@@ -450,7 +448,7 @@ impl ScreenApp for StatusApp {
             self.confirm(dom);
             return true;
         }
-        if input.is_click() && input.closest_id("point-toggle").is_some() {
+        if input.is_click() && input.closest_id("point-inset-fold").is_some() {
             {
                 let mut b = self.board.borrow_mut();
                 b.point_layer_on = !b.point_layer_on;
@@ -516,7 +514,7 @@ mod tests {
         assert_eq!(p.stylesheets.last().map(String::as_str), Some(LIVE_PANELS_CSS));
         assert!(p.stylesheets.iter().any(|c| c == STATUS_PANELS_CSS));
         let html = p.html();
-        for id in ["status-view", "overlay-status", "board-toolbar", "board-settings-btn", "net-status", "server-status", "board-waiting", "point-toggle", "toast-root"] {
+        for id in ["status-view", "overlay-status", "board-toolbar", "board-settings-btn", "net-status", "server-status", "board-waiting", "toast-root"] {
             assert!(html.contains(&format!("id=\"{id}\"")), "{id}");
         }
     }

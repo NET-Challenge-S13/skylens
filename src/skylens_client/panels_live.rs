@@ -342,7 +342,7 @@ pub fn live_markup() -> String {
             "<span class=\"live-monitor__detail\" id=\"live-mon-sub\"></span>",
             "<span class=\"live-monitor__detail\" id=\"live-mon-age\"></span>",
             "</div></div>",
-            "<canvas id=\"live-monitor-wave\" class=\"live-monitor__wave\" width=\"270\" height=\"48\"></canvas>",
+            "<canvas id=\"live-monitor-wave\" class=\"live-monitor__wave\" width=\"270\" height=\"64\"></canvas>",
             "</div>",
         ),
         title = WAIT_TITLE,
