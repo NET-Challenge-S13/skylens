@@ -134,7 +134,9 @@ impl Track {
             let mut out = v.clone();
             out.duration = d;
             out.segments.truncate(1);
-            out.rows.retain(|r| r.t <= d);
+            // The row at `d` already belongs to the next pass: keeping it makes the last step a
+            // jump of hundreds of metres, and that step's speed is what the end of the clip shows.
+            out.rows.retain(|r| r.t < d);
             if out.rows.len() < 2 {
                 return v.clone();
             }
@@ -500,7 +502,9 @@ mod tests {
         let t = track().first_pass_only();
         assert!(close(t.left.duration, 4.0, 1e-9));
         assert_eq!(t.left.segments.len(), 1);
-        assert!(t.left.rows.iter().all(|r| r.t <= 4.0));
+        assert!(t.left.rows.iter().all(|r| r.t < 4.0));
+        // The end of the clip holds the first pass's last fix, not the second pass's first.
+        assert!(close(t.left.sample(4.0).lat, 36.3656, 1e-9));
     }
 
     #[test]
