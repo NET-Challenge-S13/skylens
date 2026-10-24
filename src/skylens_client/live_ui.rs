@@ -137,6 +137,7 @@ struct Shown {
     mode: Option<ColorMode>,
     display: Option<Display>,
     wait_opacity: Option<i64>,
+    monitor_width: Option<i64>,
 }
 
 pub struct LivePanels {
@@ -291,6 +292,20 @@ impl LivePanels {
         self.render_wait(dom, &snap, now, dt);
         self.render_monitor(dom, &snap, now);
         self.render_settings(dom);
+        self.match_toolbar_width(dom);
+    }
+
+    /// The monitor is exactly as wide as the toolbar row above it (camera-state chip and settings
+    /// button at their text's width), so the right column has one width that follows the chips.
+    fn match_toolbar_width(&mut self, dom: &mut Dom<'_>) {
+        let Some(bar) = dom.find("board-toolbar") else { return };
+        // Blitz lays out in CSS pixels.
+        let width = dom.doc_ref().get_node(bar).map_or(0.0, |n| f64::from(n.final_layout().size.width));
+        let px = width.round() as i64;
+        if px > 0 && self.shown.monitor_width != Some(px) {
+            dom.set_style("live-monitor", "width", &format!("{px}px"));
+            self.shown.monitor_width = Some(px);
+        }
     }
 
     fn render_wait(&mut self, dom: &mut Dom<'_>, snap: &Snapshot<'_>, now: f64, dt: f64) {

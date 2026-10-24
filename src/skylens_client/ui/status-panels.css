@@ -229,11 +229,25 @@
   display: grid;
   grid-template-columns: 1fr 64px;
   grid-template-rows: auto 1fr;
-  border: 1px solid var(--border-hairline);
+  /* No border of its own: .point-inset__frame draws the one border. Both at once drew two outlines
+     a pixel apart at some scales, which read as a second panel behind the first. */
   border-radius: var(--radius-md);
   background: var(--surface-glass);
   box-shadow: var(--shadow-panel);
   overflow: hidden;
+}
+
+/* The panel's border, drawn again by the last child on top of everything inside. The 3D view
+   paints its whole rectangle rounded to device pixels and, at some display scales, covered the
+   panel's own border on the left and bottom; a frame painted after it cannot be covered. */
+.point-inset__frame {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  box-sizing: border-box;
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-md);
+  pointer-events: none;
 }
 
 /* Folded: the header alone. */
@@ -302,9 +316,6 @@
 
 .point-inset__view {
   position: relative;
-  /* The 3D pass paints the whole layout rectangle and, rounded to device pixels at some scales
-     (1.0x, 1.25x), covered a pixel of the panel's left and bottom border. Keep it inside. */
-  margin: 0 0 1px 1px;
   background: transparent;
   cursor: grab;
   touch-action: none;
