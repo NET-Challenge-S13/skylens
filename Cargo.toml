@@ -73,3 +73,8 @@ wgpu = "30"
 [profile.release]
 codegen-units = 1
 lto = "thin"
+
+# Dependencies carry no debug info in dev builds: it is most of target/debug's size
+# and nobody steps into them. Our own crates keep full debug info.
+[profile.dev.package."*"]
+debug = false
