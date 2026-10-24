@@ -142,6 +142,8 @@ pub struct StatusApp {
     delay: String,
     /// The point panel's inline placement last written (outer None: not written yet).
     inset_place: Option<Option<[f64; 4]>>,
+    /// Whether the minimap is shown unfolded, as last written to the DOM.
+    inset_open: Option<bool>,
     site_seen: bool,
     last_poll_ms: Option<f64>,
     gpu_alert: GpuLossAlert,
@@ -163,6 +165,7 @@ impl StatusApp {
             card: None,
             delay: String::new(),
             inset_place: None,
+            inset_open: None,
             gpu_alert: GpuLossAlert::default(),
             site_seen: false,
             last_poll_ms: None,
@@ -350,9 +353,25 @@ impl StatusApp {
         }
         if self.inset.is_some() {
             dom.set_text(q(".point-inset__meta"), &panels::point_meta(on, delivered, refined, total));
-            dom.toggle_class("point-inset", "is-open", on);
-            dom.set_text("point-inset-fold", panels::fold_label(on));
-            dom.set_attr("point-inset-fold", "aria-expanded", if on { "true" } else { "false" });
+            if self.inset_open != Some(on) {
+                self.inset_open = Some(on);
+                dom.toggle_class("point-inset", "is-open", on);
+                dom.set_text("point-inset-fold", panels::fold_label(on));
+                dom.set_attr("point-inset-fold", "aria-expanded", if on { "true" } else { "false" });
+                // Folding by inline styles, not a class rule on the panel: see status-panels.css.
+                if on {
+                    dom.remove_style("point-inset", "height");
+                    dom.remove_style(q(".point-inset__view"), "display");
+                    dom.remove_style(q(".point-inset__legend"), "display");
+                    dom.remove_style(q(".point-inset__head"), "border-bottom");
+                    self.inset_place = None; // re-apply a short viewport's inline height
+                } else {
+                    dom.set_style("point-inset", "height", "auto");
+                    dom.set_style(q(".point-inset__view"), "display", "none");
+                    dom.set_style(q(".point-inset__legend"), "display", "none");
+                    dom.set_style(q(".point-inset__head"), "border-bottom", "none");
+                }
+            }
             if total > 0 && has_segments {
                 dom.set_style(q(".point-inset__empty"), "display", "none");
             } else if dom.attr(q(".point-inset__empty"), "style").is_some_and(|s| s.contains("display")) {
@@ -385,7 +404,9 @@ impl StatusApp {
                 dom.set_style("point-inset", "top", &format!("{top}px"));
                 dom.set_style("point-inset", "bottom", "auto");
                 dom.set_style("point-inset", "width", &format!("{width}px"));
-                dom.set_style("point-inset", "height", &format!("{height}px"));
+                if self.inset_open != Some(false) {
+                    dom.set_style("point-inset", "height", &format!("{height}px"));
+                }
             }
             None => {
                 for prop in ["left", "top", "bottom", "width", "height"] {

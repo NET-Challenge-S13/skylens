@@ -81,7 +81,7 @@ impl WaveWidget {
         // inside it (centred a little low, which balances the panel's text above).
         let strip = w > h * 2.5;
         let (depth, crest) = if strip { (h * 0.24, h * 0.3) } else { (h * 0.2, h * 0.62) };
-        let (cx, cy) = (w / 2.0, if strip { h * 0.66 } else { h * 0.64 });
+        let (cx, cy) = (w / 2.0, if strip { h * 0.7 } else { h * 0.64 });
         let tf = Affine::scale(scale);
         for i in 0..self.cols {
             for j in 0..self.rows {

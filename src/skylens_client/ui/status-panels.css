@@ -229,39 +229,19 @@
   display: grid;
   grid-template-columns: 1fr 64px;
   grid-template-rows: auto 1fr;
-  /* No border of its own: .point-inset__frame draws the one border. Both at once drew two outlines
-     a pixel apart at some scales, which read as a second panel behind the first. */
+  /* The hairline is a 1px ring outside the box rather than a border: what the panel holds (the 3D
+     view, the header's background) is painted inside the border box and, at some display scales
+     and after folding, covered the border's pixels. Nothing inside can reach the ring. */
+  border: 0;
   border-radius: var(--radius-md);
   background: var(--surface-glass);
-  box-shadow: var(--shadow-panel);
+  box-shadow: 0 0 0 1px var(--border-hairline), var(--shadow-panel);
   overflow: hidden;
 }
 
-/* The panel's border, drawn again by the last child on top of everything inside. The 3D view
-   paints its whole rectangle rounded to device pixels and, at some display scales, covered the
-   panel's own border on the left and bottom; a frame painted after it cannot be covered. */
-.point-inset__frame {
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  box-sizing: border-box;
-  border: 1px solid var(--border-hairline);
-  border-radius: var(--radius-md);
-  pointer-events: none;
-}
-
-/* Folded: the header alone. */
-.point-inset:not(.is-open) {
-  height: auto !important;
-  grid-template-rows: auto;
-}
-.point-inset:not(.is-open) .point-inset__view,
-.point-inset:not(.is-open) .point-inset__legend {
-  display: none;
-}
-.point-inset:not(.is-open) .point-inset__head {
-  border-bottom: none;
-}
+/* Folded, the header alone: app.rs sets that with inline styles (panel height, the view and the
+   legend hidden, no rule under the header). A class rule on the panel left it without its border
+   once unfolded again in Blitz. */
 
 .point-inset__head {
   grid-column: 1 / 3;
