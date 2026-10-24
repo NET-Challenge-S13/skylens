@@ -26,6 +26,8 @@ pub struct WaveCfg {
     pub opacity: f32,
     /// A flat sheet (the run is done).
     pub calm: bool,
+    /// Zones delivered so far; with a palette that has zone hues, the field shows them as bands.
+    pub zones: u32,
 }
 
 /// A grid of dots on a travelling wave, seen from a slowly orbiting camera, coloured by its
@@ -66,22 +68,62 @@ pub struct WavePalette {
     pub mid: [f64; 3],
     pub hi: [f64; 3],
     pub alpha: f32,
+    /// The delay pattern's zone hues: when set, the middle of the ramp is a band per delivered
+    /// zone across the field (oldest left, newest right), each hue pulled [`ZONE_TINT`] of the
+    /// way from `mid`.
+    pub zone_hues: Option<&'static [[f64; 3]; 8]>,
 }
+
+/// The delay pattern's palette (`.delay__cell[data-hue]` in status-panels.css), sRGB 0..1:
+/// #8fb3c9 #9fbf9f #c9b48f #b39fc4 #8fc2bb #c49f9f #a3acc9 #bfbf94.
+pub const DELAY_HUES: [[f64; 3]; 8] = [
+    [0.561, 0.702, 0.788],
+    [0.624, 0.749, 0.624],
+    [0.788, 0.706, 0.561],
+    [0.702, 0.624, 0.769],
+    [0.561, 0.761, 0.733],
+    [0.769, 0.624, 0.624],
+    [0.639, 0.675, 0.788],
+    [0.749, 0.749, 0.580],
+];
+
+/// How far a zone band moves from the slate middle towards its zone hue: a hint of the delay
+/// pattern's colours, not the colours themselves.
+pub const ZONE_TINT: f64 = 0.45;
 
 impl WavePalette {
     /// Deep blue to SkyLens cyan to near white: the waiting screen.
-    pub const CYAN: WavePalette = WavePalette { lo: [0.05, 0.28, 0.85], mid: [0.37, 0.78, 1.0], hi: [0.85, 1.0, 1.0], alpha: 1.0 };
+    pub const CYAN: WavePalette = WavePalette { lo: [0.05, 0.28, 0.85], mid: [0.37, 0.78, 1.0], hi: [0.85, 1.0, 1.0], alpha: 1.0, zone_hues: None };
     /// Slate (#33405a, #8fb3c9, #e2ecf3): the monitor, in the delay pattern's palette so the two
     /// progress read-outs share one tone.
     pub const SLATE: WavePalette =
-        WavePalette { lo: [0.2, 0.251, 0.353], mid: [0.561, 0.702, 0.788], hi: [0.886, 0.925, 0.953], alpha: 0.9 };
+        WavePalette { lo: [0.2, 0.251, 0.353], mid: [0.561, 0.702, 0.788], hi: [0.886, 0.925, 0.953], alpha: 0.9, zone_hues: None };
+    /// [`WavePalette::SLATE`] with the delivered zones as faint bands of their delay-pattern hue.
+    pub const SLATE_ZONES: WavePalette = WavePalette { zone_hues: Some(&DELAY_HUES), ..WavePalette::SLATE };
 }
 
-/// The palette colour at height position `k` (0 trough, 1 crest).
-pub fn wave_rgb(p: &WavePalette, k: f64) -> [f32; 3] {
-    let (lo, mid, hi) = (p.lo, p.mid, p.hi);
-    let mix = |a: [f64; 3], b: [f64; 3], f: f64| [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f];
-    let c = if k < 0.6 { mix(lo, mid, k / 0.6) } else { mix(mid, hi, (k - 0.6) / 0.4) };
+fn lerp3(a: [f64; 3], b: [f64; 3], f: f64) -> [f64; 3] {
+    [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, a[2] + (b[2] - a[2]) * f]
+}
+
+/// The middle colour at screen position `u` (-1 left .. 1 right) over `zones` delivered zones:
+/// one band per zone, oldest on the left, blended smoothly into the next.
+pub fn zone_band(hues: &[[f64; 3]; 8], mid: [f64; 3], zones: u32, u: f64) -> [f64; 3] {
+    let n = zones.max(1);
+    let pos = ((u + 1.0) / 2.0 * f64::from(n) - 0.5).clamp(0.0, f64::from(n - 1));
+    let i = pos.floor() as u32;
+    let j = (i + 1).min(n - 1);
+    let f = pos - f64::from(i);
+    let f = f * f * (3.0 - 2.0 * f);
+    let hue = lerp3(hues[(i % 8) as usize], hues[(j % 8) as usize], f);
+    lerp3(mid, hue, ZONE_TINT)
+}
+
+/// The palette colour at height position `k` (0 trough, 1 crest), with `mid` as the ramp's middle
+/// (the palette's own, or a zone band).
+pub fn wave_rgb(p: &WavePalette, mid: [f64; 3], k: f64) -> [f32; 3] {
+    let (lo, hi) = (p.lo, p.hi);
+    let c = if k < 0.6 { lerp3(lo, mid, k / 0.6) } else { lerp3(mid, hi, (k - 0.6) / 0.4) };
     [c[0] as f32, c[1] as f32, c[2] as f32]
 }
 
@@ -115,7 +157,11 @@ impl WaveWidget {
                 if sx < 0.0 || sx > w || sy < 0.0 || sy > h {
                     continue;
                 }
-                let [r, g, b] = wave_rgb(&self.palette, k);
+                let mid = match self.palette.zone_hues {
+                    Some(hues) => zone_band(hues, self.palette.mid, cfg.zones, xr),
+                    None => self.palette.mid,
+                };
+                let [r, g, b] = wave_rgb(&self.palette, mid, k);
                 let a = (0.35 + 0.65 * k as f32) * cfg.opacity * self.palette.alpha;
                 scene.fill(Fill::NonZero, tf, Color::new([r, g, b, a]), None, &Rect::new(sx - size / 2.0, sy - size / 2.0, sx + size / 2.0, sy + size / 2.0));
             }
@@ -176,8 +222,8 @@ impl LivePanels {
     pub fn new(settings: Rc<RefCell<LiveSettings>>) -> LivePanels {
         LivePanels {
             settings,
-            wait_cfg: Rc::new(Cell::new(WaveCfg { opacity: 1.0, calm: false })),
-            mon_cfg: Rc::new(Cell::new(WaveCfg { opacity: 1.0, calm: false })),
+            wait_cfg: Rc::new(Cell::new(WaveCfg { opacity: 1.0, calm: false, zones: 0 })),
+            mon_cfg: Rc::new(Cell::new(WaveCfg { opacity: 1.0, calm: false, zones: 0 })),
             wait_fade: 1.0,
             wait_started_ms: skylens_viewer::now_ms(),
             last_sig: (0, 0, None),
@@ -198,7 +244,7 @@ impl LivePanels {
             dom.mount_widget(c, WaveWidget::boxed(self.wait_cfg.clone(), WavePalette::CYAN, 84, 52, 2.4));
         }
         if let Some(c) = dom.find("live-monitor-wave") {
-            dom.mount_widget(c, WaveWidget::boxed(self.mon_cfg.clone(), WavePalette::SLATE, 46, 18, 1.6));
+            dom.mount_widget(c, WaveWidget::boxed(self.mon_cfg.clone(), WavePalette::SLATE_ZONES, 46, 18, 1.6));
         }
         self.mounted = true;
     }
@@ -331,7 +377,7 @@ impl LivePanels {
             self.wait_started_ms = now;
         }
         self.wait_fade = pl::fade_step(self.wait_fade, waiting, dt);
-        self.wait_cfg.set(WaveCfg { opacity: self.wait_fade as f32, calm: false });
+        self.wait_cfg.set(WaveCfg { opacity: self.wait_fade as f32, calm: false, zones: 0 });
         let op = (self.wait_fade * 100.0).round() as i64;
         if self.shown.wait_opacity != Some(op) {
             self.shown.wait_opacity = Some(op);
@@ -361,7 +407,8 @@ impl LivePanels {
                     dom.set_text("live-mon-sub", &m.detail);
                     dom.set_text("live-mon-age", &m.age);
                     dom.toggle_class("live-monitor", "is-done", m.done);
-                    self.mon_cfg.set(WaveCfg { opacity: 1.0, calm: m.done });
+                    let zones = pl::front_zone(snap).map_or(1, |z| z + 1);
+                    self.mon_cfg.set(WaveCfg { opacity: 1.0, calm: m.done, zones });
                 }
                 None => {
                     dom.set_style("live-monitor", "display", "none");
@@ -370,5 +417,29 @@ impl LivePanels {
             self.shown.mon = text;
         }
         dom.toggle_class("live-monitor", "is-flash", now < self.flash_until);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn close(a: [f64; 3], b: [f64; 3]) -> bool {
+        a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-9)
+    }
+
+    #[test]
+    fn zone_bands_run_oldest_left_to_newest_right_and_stay_faint() {
+        let mid = WavePalette::SLATE.mid;
+        let tinted = |z: usize| lerp3(mid, DELAY_HUES[z], ZONE_TINT);
+        // One zone: the whole field is its tint.
+        assert!(close(zone_band(&DELAY_HUES, mid, 1, -1.0), tinted(0)));
+        assert!(close(zone_band(&DELAY_HUES, mid, 1, 1.0), tinted(0)));
+        // Three zones: zone 0 at the left edge, zone 1 in the middle, zone 2 at the right edge.
+        assert!(close(zone_band(&DELAY_HUES, mid, 3, -1.0), tinted(0)));
+        assert!(close(zone_band(&DELAY_HUES, mid, 3, 0.0), tinted(1)));
+        assert!(close(zone_band(&DELAY_HUES, mid, 3, 1.0), tinted(2)));
+        // No zone yet behaves as one.
+        assert!(close(zone_band(&DELAY_HUES, mid, 0, 0.3), tinted(0)));
     }
 }
