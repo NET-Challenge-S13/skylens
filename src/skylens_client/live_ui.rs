@@ -340,7 +340,7 @@ impl LivePanels {
                     s.min_conf[i] = p as f32 / 100.0;
                 }
             }
-            "shade" => {
+            "shade" if s.display == Display::Mesh => {
                 if let Some((_, key)) = input.closest_data("shade") {
                     s.mesh_shading = key == "on";
                 }
@@ -352,7 +352,7 @@ impl LivePanels {
                 dom.set_text("board-conf-toggle", if self.conf_menu_open { "클래스별 신뢰도 · 접기" } else { "클래스별 신뢰도 · 펼치기" });
                 return true;
             }
-            "size-" | "size+" | "mode" => {}
+            "size-" | "size+" | "mode" | "shade" => {}
             _ => return false,
         }
         drop(s);
@@ -398,6 +398,7 @@ impl LivePanels {
                 dom.set_attr(b, "aria-checked", if on { "true" } else { "false" });
             }
             dom.toggle_class("board-settings-points", "is-off", s.display != Display::Points);
+            dom.toggle_class("board-settings-mesh", "is-off", s.display != Display::Mesh);
             self.shown.display = Some(s.display);
         }
     }
