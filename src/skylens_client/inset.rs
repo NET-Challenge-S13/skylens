@@ -37,6 +37,10 @@ pub const TURN_SECONDS: f64 = 40.0;
 pub const ELEVATION_DEG: f64 = 35.0;
 const ELEVATION_MIN_DEG: f64 = 10.0;
 const ELEVATION_MAX_DEG: f64 = 80.0;
+/// The opening (and double-click) distance factor: closer than the fit that keeps the whole box in
+/// view from every side, so the reconstruction fills the small panel; its corners may leave the
+/// frame as the turntable turns.
+const HOME_ZOOM: f64 = 0.75;
 /// Range of the operator's distance factor (wheel).
 const ZOOM_MIN: f64 = 0.4;
 const ZOOM_MAX: f64 = 2.5;
@@ -111,7 +115,7 @@ struct Adjust {
 }
 
 impl Adjust {
-    const HOME: Adjust = Adjust { yaw: 0.0, elevation: ELEVATION_DEG.to_radians(), zoom: 1.0 };
+    const HOME: Adjust = Adjust { yaw: 0.0, elevation: ELEVATION_DEG.to_radians(), zoom: HOME_ZOOM };
 }
 
 pub struct InsetScene {
