@@ -1,0 +1,327 @@
+#!/usr/bin/env bash
+# SkyLens bridge installer for 175.126.98.44 (Debian/Ubuntu, any CPU).
+#
+# What this host does:
+#   1. nginx takes the browser requests  (:HTTP_PORT; / is the static board in
+#      WEB_DIR, /viewer and /uplink go through tunnel :20882 to the Daejeon
+#      proxy, /live/ through tunnel :20889 to the Daejeon WHEP endpoint)
+#   2. autossh holds one SSH tunnel to the Daejeon VM, carrying both forwards
+#      (local :20889 -> Daejeon :10889, local :20882 -> Daejeon proxy :8082)
+#   3. MediaMTX takes the SRT feed from the drone gateway (:SRT_PORT/udp)
+#
+# Tunnel direction is this host -> Daejeon: 175 is a KOREN-registered address,
+# so it may reach Daejeon SSH (26022). The other direction would mean opening
+# an SSH port here, so we do not use it.
+#
+# Existing services (WireGuard and such) are left alone; this only adds. Safe
+# to run again.
+#
+# Usage: sudo ./setup-bridge.sh
+set -euo pipefail
+cd "$(dirname "$(readlink -f "$0")")"
+
+if [ "$(id -u)" -ne 0 ]; then
+  echo "root 로 실행하세요:  sudo ./setup-bridge.sh" >&2; exit 1
+fi
+
+# ---------- settings ----------
+HTTP_PORT=80
+PUBLISH_PASS=""
+SRT_PORT=10890
+HTTPS_PORT=443
+TLS_NAMES=
+REDIRECT_TO_HTTPS=yes
+TOWER_PORT=8090
+TOWER_TLS_PORT=8091
+TOWER_ALLOW="127.0.0.1 10.9.8.0/24 10.9.9.0/24"
+VIDEO_MODE=ingest
+WHEP_SOURCE=local
+WHEP_PORT=10889
+WEBRTC_HOSTS=
+DAEJEON_HOST=116.89.187.181
+DAEJEON_PORT=26022
+DAEJEON_USER=ubuntu
+MEDIAMTX_VERSION=v1.21.0
+WEB_DIR=/opt/skylens/web
+if [ -f bridge.env ]; then
+  # shellcheck disable=SC1091
+  . ./bridge.env
+fi
+if [ -z "$PUBLISH_PASS" ]; then
+  # With `tr ... | head -c 20` head exits at 20 bytes, tr dies of SIGPIPE, and
+  # set -e plus pipefail then stops the script at 141 without printing a word.
+  # So cut the input with head first and filter afterwards.
+  PUBLISH_PASS="$(LC_ALL=C head -c 512 /dev/urandom | LC_ALL=C tr -dc 'A-Za-z0-9' | cut -c1-20)"
+  [ ${#PUBLISH_PASS} -eq 20 ] || { echo "비밀번호 생성 실패 (${#PUBLISH_PASS}자)" >&2; exit 1; }
+  GENERATED_PASS=1
+else
+  GENERATED_PASS=0
+fi
+
+TUNNEL_USER=skytunnel
+TUNNEL_PORT=20889
+PROXY_TUNNEL_PORT=20882
+RTSP_TUNNEL_PORT=20554
+RTSP_BACK_PORT=18554
+TUNNEL_DIR=/etc/skylens
+TUNNEL_KEY="$TUNNEL_DIR/tunnel_key"
+TLS_DIR=/etc/skylens/tls
+TLS_CERT="$TLS_DIR/board.crt"
+TLS_KEY="$TLS_DIR/board.key"
+TOWER_ACL=/etc/skylens/tower-acl.conf
+
+step() { printf '\n\033[1;36m== %s ==\033[0m\n' "$*"; }
+ok()   { printf '   \033[32m✓\033[0m %s\n' "$*"; }
+warn() { printf '   \033[33m!\033[0m %s\n' "$*"; }
+
+# ---------- 0. packages ----------
+step "패키지 설치"
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -qq
+apt-get install -y -qq nginx curl ca-certificates autossh openssh-client >/dev/null
+ok "nginx, curl, autossh"
+
+# ---------- 1. the tunnel to Daejeon ----------
+step "대전 터널 ($TUNNEL_USER: ← :10889 · :8082 · :8554, → 대전 :$RTSP_BACK_PORT 로 이 호스트 RTSP)"
+id "$TUNNEL_USER" >/dev/null 2>&1 || useradd -r -M -s /usr/sbin/nologin "$TUNNEL_USER"
+install -d -m 0750 -o "$TUNNEL_USER" -g "$TUNNEL_USER" "$TUNNEL_DIR"
+if [ ! -f "$TUNNEL_KEY" ]; then
+  ssh-keygen -q -t ed25519 -N '' -C "bridge-tunnel@skylens" -f "$TUNNEL_KEY"
+  ok "터널 키 생성: $TUNNEL_KEY"
+else
+  ok "터널 키 있음"
+fi
+chown "$TUNNEL_USER:$TUNNEL_USER" "$TUNNEL_KEY" "$TUNNEL_KEY.pub"
+chmod 0600 "$TUNNEL_KEY"
+touch "$TUNNEL_DIR/known_hosts"; chown "$TUNNEL_USER:$TUNNEL_USER" "$TUNNEL_DIR/known_hosts"
+
+cat > /etc/systemd/system/daejeon-tunnel.service <<UNIT
+[Unit]
+Description=SSH tunnel bridge -> Daejeon for WHEP signaling (SkyLens)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=$TUNNEL_USER
+Environment=AUTOSSH_GATETIME=0
+ExecStart=/usr/bin/autossh -M 0 -N \\
+  -i $TUNNEL_KEY \\
+  -o UserKnownHostsFile=$TUNNEL_DIR/known_hosts \\
+  -o StrictHostKeyChecking=accept-new \\
+  -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \\
+  -o ExitOnForwardFailure=yes \\
+  -o BatchMode=yes \\
+  -L 127.0.0.1:$TUNNEL_PORT:127.0.0.1:10889 \\
+  -L 127.0.0.1:$PROXY_TUNNEL_PORT:127.0.0.1:8082 \\
+  -L 127.0.0.1:$RTSP_TUNNEL_PORT:127.0.0.1:8554 \\
+  -R 127.0.0.1:$RTSP_BACK_PORT:127.0.0.1:8554 \\
+  -p $DAEJEON_PORT $DAEJEON_USER@$DAEJEON_HOST
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload
+systemctl enable --now daejeon-tunnel >/dev/null 2>&1
+systemctl restart daejeon-tunnel
+ok "daejeon-tunnel 서비스 등록 (대전에 키가 등록될 때까지 재시도 상태로 대기)"
+
+# ---------- 2. nginx ----------
+step "현황판 정적 파일 ($WEB_DIR)"
+install -d -m 0755 "$WEB_DIR"
+if [ -n "$(ls -A "$WEB_DIR" 2>/dev/null)" ]; then
+  ok "현황판 파일 있음"
+else
+  warn "현황판 파일 없음. 빌드 산출물(status.html 포함)을 $WEB_DIR 에 복사하세요"
+fi
+
+step "board certificate (TLS on :$HTTPS_PORT)"
+# The browser only grants WebGPU to a secure context, and the board's renderer
+# panics without it, so the board is served over TLS even on the LAN. A
+# self-signed certificate is enough to make the context secure (the viewer
+# clicks through the warning once). To lose the warning, put a trusted pair
+# (mkcert, an internal CA) at the same two paths and run this again - an
+# existing certificate is never overwritten.
+install -d -m 0750 "$TLS_DIR"
+if [ -s "$TLS_CERT" ] && [ -s "$TLS_KEY" ]; then
+  ok "certificate exists: $TLS_CERT ($(openssl x509 -noout -enddate -in "$TLS_CERT" 2>/dev/null | cut -d= -f2))"
+else
+  # Name it after every address a viewer may type: this host's own addresses,
+  # its hostname, and loopback. TLS_NAMES in bridge.env overrides the list.
+  if [ -n "$TLS_NAMES" ]; then
+    SAN="$TLS_NAMES"
+  else
+    SAN="DNS:$(hostname),DNS:$(hostname).local,DNS:localhost,IP:127.0.0.1"
+    for ip in $(hostname -I 2>/dev/null); do
+      case "$ip" in *:*) continue ;; esac
+      SAN="$SAN,IP:$ip"
+    done
+  fi
+  openssl req -x509 -newkey rsa:2048 -sha256 -days 1825 -nodes \
+    -keyout "$TLS_KEY" -out "$TLS_CERT" \
+    -subj "/CN=skylens-board" -addext "subjectAltName=$SAN" >/dev/null 2>&1
+  chmod 0640 "$TLS_KEY"; chmod 0644 "$TLS_CERT"
+  ok "self-signed certificate written ($SAN)"
+fi
+
+step "nginx (:$HTTP_PORT, TLS :$HTTPS_PORT)"
+# A redirect to the default TLS port must not carry :443 in the URL.
+if [ "$HTTPS_PORT" = 443 ]; then HTTPS_SUFFIX=""; else HTTPS_SUFFIX=":$HTTPS_PORT"; fi
+# Where /live/ sends the WHEP exchange: this host's MediaMTX, or the Daejeon one
+# through the tunnel. Local is the default, because Daejeon's UDP media does not
+# cross the VPN boundary.
+case "$WHEP_SOURCE" in
+  local)  WHEP_UPSTREAM="127.0.0.1:$WHEP_PORT" ;;
+  tunnel) WHEP_UPSTREAM="127.0.0.1:$TUNNEL_PORT" ;;
+  *) echo "WHEP_SOURCE 은 local 또는 tunnel" >&2; exit 1 ;;
+esac
+if [ "$REDIRECT_TO_HTTPS" = no ]; then
+  HTTPS_REDIRECT="# redirect off (REDIRECT_TO_HTTPS=no)"
+  TOWER_REDIRECT="# redirect off (REDIRECT_TO_HTTPS=no)"
+else
+  HTTPS_REDIRECT="if (\$scheme = http) { return 301 https://\$host$HTTPS_SUFFIX\$request_uri; }"
+  TOWER_REDIRECT="if (\$skylens_tower_redirect) { return 301 https://\$host:$TOWER_TLS_PORT\$request_uri; }"
+fi
+# The tower is reachable from the operator LAN and the VPN only. nginx reads
+# these lines in order, so the deny has to come last.
+{ for net in $TOWER_ALLOW; do echo "allow $net;"; done; echo "deny all;"; } > "$TOWER_ACL"
+chmod 0644 "$TOWER_ACL"
+sed -e "s/__HTTP_PORT__/$HTTP_PORT/g" -e "s|__WEB_DIR__|$WEB_DIR|g" \
+    -e "s/__HTTPS_PORT__/$HTTPS_PORT/g" -e "s|__HTTPS_HOSTSUFFIX__|$HTTPS_SUFFIX|g" \
+    -e "s|__TLS_CERT__|$TLS_CERT|g" -e "s|__TLS_KEY__|$TLS_KEY|g" \
+    -e "s|__HTTPS_REDIRECT__|$HTTPS_REDIRECT|g" \
+    -e "s/__TOWER_PORT__/$TOWER_PORT/g" -e "s/__TOWER_TLS_PORT__/$TOWER_TLS_PORT/g" \
+    -e "s|__TOWER_ACL__|$TOWER_ACL|g" -e "s|__TOWER_REDIRECT__|$TOWER_REDIRECT|g" \
+    -e "s|__WHEP_UPSTREAM__|$WHEP_UPSTREAM|g" \
+    nginx-skylens.conf > /etc/nginx/sites-available/skylens
+ln -sf /etc/nginx/sites-available/skylens /etc/nginx/sites-enabled/skylens
+if [ -L /etc/nginx/sites-enabled/default ] && \
+   grep -q "Default server configuration" /etc/nginx/sites-available/default 2>/dev/null && \
+   grep -qE "listen\s+$HTTP_PORT\b" /etc/nginx/sites-available/default; then
+  rm -f /etc/nginx/sites-enabled/default
+  warn "nginx 기본 사이트(default) 비활성화 — 포트 $HTTP_PORT 충돌"
+fi
+nginx -t
+systemctl enable --now nginx >/dev/null 2>&1
+systemctl reload nginx
+ok "nginx 활성"
+
+# ---------- 3. MediaMTX (SRT ingest) ----------
+step "MediaMTX $MEDIAMTX_VERSION (SRT :$SRT_PORT, WHEP :$WHEP_PORT, $VIDEO_MODE)"
+mkdir -p /opt/mediamtx
+# The bridge host is a Raspberry Pi 5 (arm64). A hardcoded amd64 download
+# succeeds and only fails to execute, which takes a long time to track down.
+# The asset is named linux_arm64, not linux_arm64v8.
+case "$(uname -m)" in
+  x86_64)        MARCH=amd64 ;;
+  aarch64|arm64) MARCH=arm64 ;;
+  armv7l)        MARCH=armv7 ;;
+  armv6l)        MARCH=armv6 ;;
+  *) echo "지원하지 않는 CPU: $(uname -m)" >&2; exit 1 ;;
+esac
+if [ ! -x /opt/mediamtx/mediamtx ] || [ "$(cat /opt/mediamtx/VERSION 2>/dev/null)" != "$MEDIAMTX_VERSION" ]; then
+  TARBALL="mediamtx_${MEDIAMTX_VERSION}_linux_${MARCH}.tar.gz"
+  curl -fsSL -o "/tmp/$TARBALL" \
+    "https://github.com/bluenviron/mediamtx/releases/download/${MEDIAMTX_VERSION}/${TARBALL}"
+  tar xzf "/tmp/$TARBALL" -C /opt/mediamtx mediamtx
+  rm -f "/tmp/$TARBALL"
+  echo "$MEDIAMTX_VERSION" > /opt/mediamtx/VERSION
+  ok "바이너리 설치 (linux_$MARCH)"
+else
+  ok "바이너리 있음 (linux_$MARCH)"
+fi
+# ingest: the drones publish here and Daejeon pulls it.
+# relay:  Daejeon holds the video and this host pulls it over the tunnel as
+#         RTSP, because Daejeon's UDP media does not cross the VPN boundary.
+case "$VIDEO_MODE" in
+  ingest) MTX_CONF=mediamtx-bridge.yml ;;
+  relay)  MTX_CONF=mediamtx-bridge-relay.yml ;;
+  *) echo "VIDEO_MODE 은 ingest 또는 relay" >&2; exit 1 ;;
+esac
+# ICE candidates have to be addresses the viewers can reach, so default to this
+# host's own IPv4 addresses.
+if [ -n "$WEBRTC_HOSTS" ]; then
+  HOSTS="$WEBRTC_HOSTS"
+else
+  HOSTS=""
+  TICK="'"          # the YAML list wants each host quoted
+  for ip in $(hostname -I 2>/dev/null); do
+    case "$ip" in *:*|127.*) continue ;; esac
+    HOSTS="${HOSTS:+$HOSTS,}$TICK$ip$TICK"
+  done
+fi
+sed -e "s/__PUBLISH_PASS__/$PUBLISH_PASS/g" -e "s/__SRT_PORT__/$SRT_PORT/g" \
+  -e "s/__WHEP_PORT__/$WHEP_PORT/g" -e "s/__RTSP_TUNNEL_PORT__/$RTSP_TUNNEL_PORT/g" \
+  -e "s|__WEBRTC_HOSTS__|$HOSTS|g" \
+  "$MTX_CONF" > /opt/mediamtx/mediamtx.yml
+ok "$MTX_CONF, WebRTC 후보 $HOSTS"
+chmod 0640 /opt/mediamtx/mediamtx.yml
+id mediamtx >/dev/null 2>&1 || useradd -r -s /usr/sbin/nologin mediamtx
+chown -R mediamtx:mediamtx /opt/mediamtx
+cat > /etc/systemd/system/mediamtx.service <<'UNIT'
+[Unit]
+Description=MediaMTX (SkyLens bridge, SRT ingest)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=mediamtx
+WorkingDirectory=/opt/mediamtx
+ExecStart=/opt/mediamtx/mediamtx /opt/mediamtx/mediamtx.yml
+Restart=always
+RestartSec=3
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload
+systemctl enable --now mediamtx >/dev/null 2>&1
+systemctl restart mediamtx
+sleep 1
+systemctl is-active --quiet mediamtx && ok "mediamtx 활성" || { journalctl -u mediamtx -n 20 --no-pager; exit 1; }
+
+# ---------- 4. firewall (only when ufw is already on) ----------
+step "방화벽"
+if command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q '^Status: active'; then
+  ufw allow "$HTTP_PORT/tcp" >/dev/null
+  ufw allow "$HTTPS_PORT/tcp" >/dev/null
+  # The tower ports stay closed in the firewall: the LAN reaches them directly
+  # and nothing outside should.
+  ufw allow "$SRT_PORT/udp" >/dev/null
+  ok "ufw: $HTTP_PORT/tcp, $HTTPS_PORT/tcp, $SRT_PORT/udp 허용 (기존 규칙 유지)"
+else
+  ok "ufw 비활성 — 변경 없음"
+fi
+
+# ---------- 5. summary ----------
+PUB_IP="$(curl -4 -s -m 5 ifconfig.me || echo '?')"
+cat <<SUMMARY
+
+============================================================
+ 브리지 설치 완료
+============================================================
+ 공인 IP           : $PUB_IP
+ 현황판 주소       : https://$(hostname -I | awk '{print $1}')$HTTPS_SUFFIX/   (파일은 $WEB_DIR)
+                     WebGPU 가 보안 컨텍스트에서만 열려서 HTTPS 로 띄웁니다.
+                     자체 서명 인증서라 브라우저 경고를 한 번 넘겨야 합니다.
+                     http:// 로 들어오면 이 주소로 넘깁니다.
+ 라이브 영상       : /live/drone1/whep  (drone1~3) · WHEP 출처 $WHEP_SOURCE · 영상 모드 $VIDEO_MODE
+ 관제탑            : https://$(hostname -I | awk '{print $1}'):$TOWER_TLS_PORT/   (랜·VPN 전용)
+                     평문은 :$TOWER_PORT 이고 같은 주소로 넘깁니다.
+                     허용 범위: $TOWER_ALLOW
+ SRT 수신          : srt://$PUB_IP:$SRT_PORT?streamid=publish:drone1:drone:<PASS>
+ SRT publish 비번  : $PUBLISH_PASS$([ "$GENERATED_PASS" = 1 ] && printf '   (자동 생성 — bridge.env 에 적어두세요)')
+
+ 공유기 뒤라면 포트포워딩 (두 개):
+   TCP $HTTP_PORT  → 이 서버      (브라우저)
+   UDP $SRT_PORT   → 이 서버      (드론 게이트웨이)
+
+ ★ 아래 공개키 한 줄을 정준모에게 보내세요. 대전에 등록되면 터널이 자동으로 붙습니다.
+------------------------------------------------------------
+$(cat "$TUNNEL_KEY.pub")
+------------------------------------------------------------
+ 그다음 ./check-bridge.sh 로 상태 확인
+============================================================
+SUMMARY

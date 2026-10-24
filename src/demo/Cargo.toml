@@ -1,0 +1,40 @@
+[package]
+name = "skylens-demo"
+description = "End-to-end demo launcher"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "skylens-demo"
+path = "main.rs"
+
+[dependencies]
+skylens-shared.workspace = true
+prost.workspace = true
+anyhow.workspace = true
+tokio.workspace = true
+# Flight record (track.json), camera estimate, planned route file
+serde.workspace = true
+serde_json.workspace = true
+# Footage download and the takeoff DEM tile; the footage zip
+ureq.workspace = true
+zip.workspace = true
+# Terrarium DEM tiles are PNG
+image = { version = "0.25", default-features = false, features = ["png"] }
+# Board server (the gateway's part): static files, WebSocket relay, WHEP proxy
+axum.workspace = true
+# Drone uplink simulator and the board server's upstream WebSocket to the core
+tokio-tungstenite = "0.29"
+futures-util = { version = "0.3", default-features = false, features = ["std", "sink"] }
+
+[target.'cfg(windows)'.dependencies]
+# Kill-on-close Job Object so no child outlives the launcher
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+] }

@@ -1,0 +1,94 @@
+# MediaMTX on the bridge (175.126.98.44).
+#
+# Role: hold the SRT feed coming from the field gateway. Daejeon reaches out
+# and pulls it from here, because the gateway rides 5G with a changing address
+# and cannot enter KOREN itself.
+# This host also serves WHEP to the operator LAN. Daejeon still does the fan-out
+# for anyone who can reach its UDP media, but that media does not cross the VPN
+# and KOREN boundary, so LAN viewers take it from here instead - see
+# mediamtx-bridge-relay.yml for the mode where Daejeon holds the video.
+#
+# setup-bridge.sh substitutes __PUBLISH_PASS__ and __SRT_PORT__ from bridge.env.
+
+logLevel: info
+logDestinations: [stdout]
+
+api: no
+metrics: no
+pprof: no
+playback: no
+# RTSP on loopback only. Daejeon pulls the video from here through a reverse
+# forward in the same SSH tunnel (its localhost:18554 -> this host's 8554), so
+# the home router needs no inbound port for the ingest path. TCP is what the
+# tunnel carries; the SRT ingest below stays UDP and local.
+rtsp: yes
+rtspAddress: 127.0.0.1:8554
+rtmp: no
+hls: no
+moq: no
+
+# ---- SRT (ingest) ----
+srt: yes
+srtAddress: :__SRT_PORT__
+
+# ---- WebRTC (egress to the operator LAN) ----
+# The media leaves from this host, so the ICE candidates must be this host's own
+# addresses; __WEBRTC_HOSTS__ carries them. nginx terminates TLS in front, and
+# only nginx on this host talks to this port.
+webrtc: yes
+webrtcAddress: :__WHEP_PORT__
+webrtcEncryption: no
+webrtcAllowOrigins: ['*']
+webrtcTrustedProxies: [127.0.0.1]
+webrtcLocalUDPAddress: :10189
+webrtcLocalTCPAddress: ''
+webrtcIPsFromInterfaces: yes
+webrtcAdditionalHosts: [__WEBRTC_HOSTS__]
+webrtcICEServers2: []
+webrtcHandshakeTimeout: 10s
+webrtcTrackGatherTimeout: 2s
+
+# ---- authentication ----
+# The gateway publishes with a password; only Daejeon may read.
+# The core owns the path names (SKYLENS_CORE_STREAM_PATH, default `drone{id}`).
+# The formation is left, center, right, so drone1, drone2, drone3. Add a path
+# here whenever the formation grows.
+authMethod: internal
+authInternalUsers:
+  - user: drone
+    pass: __PUBLISH_PASS__
+    ips: []
+    permissions:
+      - action: publish
+        path: drone1
+      - action: publish
+        path: drone2
+      - action: publish
+        path: drone3
+  # The demo launcher publishes without credentials (streamid=publish:droneN),
+  # so the operator LAN and the VPN may publish anonymously. Reachable only from
+  # inside those ranges: the SRT port is not forwarded at the router.
+  - user: any
+    pass:
+    ips: ['10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16']
+    permissions:
+      - action: publish
+  - user: any
+    pass:
+    # viewers behind nginx /live/ reach MediaMTX with their real IP (webrtcTrustedProxies + X-Forwarded-For), so LAN/VPN ranges must be allowed for anonymous WHEP read
+    ips: ['127.0.0.1/32', '::1/128', '116.89.187.181/32', '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16']
+    permissions:
+      - action: read
+        path: drone1
+      - action: read
+        path: drone2
+      - action: read
+        path: drone3
+
+pathDefaults:
+  source: publisher
+
+paths:
+  drone1:
+  drone2:
+  drone3:

@@ -1,0 +1,112 @@
+# skylens_core/deploy: 실제 KOREN 회선 위 배치
+
+`docs/COMPONENTS.md` §9가 "이번 단계에서 하지 않는 것"으로 남긴 **실제 KOREN 회선 위 배치**를 다룬다.
+새 컴포넌트가 아니라 **배포 계층**이다 — 어느 컴포넌트가 어느 호스트에 올라가고, KOREN 방화벽을 어떻게 지나며, 라이브 영상은 어떤 경로로 나가는지. 코드보다 **설정과 그 설정을 고른 이유**가 본체다.
+
+컴포넌트 경계·포트의 단일 출처는 `COMPONENTS.md`이고, 이 문서는 그 컴포넌트를 **호스트에 얹는 방법**만 말한다.
+
+## 호스트 ↔ 컴포넌트
+
+| 호스트 | 망 | COMPONENTS 컴포넌트 | 이 디렉터리가 추가로 올리는 것 |
+|---|---|---|---|
+| **브리지** `175.126.98.44` | KOREN 외부망 · 등록 IP | `skylens_gateway` :8081 · 현황판 정적 파일 (`skylens_client` 빌드 산출물, 서버 프로세스 없음) | nginx :80 (정적 현황판 · `/viewer`·`/uplink`·`/live/` 중계) · MediaMTX SRT 수신 :10890 · 대전으로 가는 SSH 터널(autossh, 20889·20882) |
+| **대전** `116.89.187.181` | KOREN 내부망 | `skylens_proxy` :8082 · `skylens_core` :8080 | MediaMTX WHEP :10889 / ICE :10189 · 브리지 키 등록(`permitopen` 10889·8082) |
+| **판교** `10.246.246.9` | KOREN 내부망 · V100 | `skylens_model` :8100 | — (대전과 터널로만 통신) |
+
+컴포넌트 포트(8080~8100)는 호스트 안 또는 KOREN 내부망 사이에서만 쓰이고, 밖으로 노출되는 건 브리지의 80·8081·10890 뿐이다. KOREN 안에서 인바운드로 열리는 포트는 정책(10000~15000)에 맞춘 MediaMTX 셋이다.
+
+## 두 갈래 흐름
+
+COMPONENTS §2의 데이터 흐름(드론 → 게이트웨이 → 프록시 → 코어 → 모델 → 코어 → 현황판)은 **스플랫·마커** 경로다. 이 디렉터리는 거기에 **라이브 영상** 경로 하나를 옆에 붙인다.
+
+```
+스플랫·마커  드론 ─▶ gateway(브리지) ─▶ proxy(대전) ─▶ core(대전) ─▶ model(판교) ─▶ core
+             core ─ws /viewer─▶ proxy(대전) ─▶ 터널 20882 ─▶ 브리지 nginx /viewer ─ws─▶ 현황판
+라이브 영상  게이트웨이 ─SRT─▶ [브리지 MediaMTX] ◀─당김─ 대전 MediaMTX ═══ WebRTC(WHEP) 직결 ═══▶ 현황판
+                                                        └── 시그널링 HTTP: 현황판 → 브리지 nginx /live/ → 터널 20889 → 대전
+```
+
+현황판 페이지 자체는 브리지 nginx가 `WEB_DIR`의 정적 파일로 내보낸다. 서버 프로세스가 없어서 브리지에 올라갈 것은 파일과 nginx 설정뿐이다.
+
+라이브 영상은 캐시가 안 되고 접속자 수만큼 대역이 필요해 브리지가 나르면 브리지 회선이 상한이 된다. 그래서 **대전이 직접 쏜다**(출구 2,618 Mbps, 4스트림 실측). 스플랫·마커는 모두 같은 파일이라 캐시가 되므로 코어가 보관했다가 WebSocket으로 내보낸다.
+
+## 왜 이 구성인가
+
+**브리지가 필요한 이유는 WebRTC가 아니라 KOREN 정책이다.** WebRTC는 영상 중계를 없애지만 주소 교환(시그널링)은 원래 누군가 해야 하고, 보통은 영상 서버 자신이 HTTP로 받는다. KOREN은 등록 IP 외 인바운드를 막으므로 그 HTTP를 밖에서 받아줄 곳이 필요하다. 드론 게이트웨이(5G, 유동 IP)도 같은 이유로 못 들어가므로 SRT를 브리지가 받아두고 대전이 당겨간다. KOREN이 대전 10889/TCP·10890/UDP를 출발지 제한 없이 열어주면 이 우회는 걷어낼 수 있다 — 신청은 병행한다.
+
+**브리지가 대전으로 SSH 터널을 건다.** 브리지→대전 인바운드는 SSH 26022 외에 막혀 있어(11000 실측 차단) nginx가 대전 10889에 직접 못 붙는다. 그런데 그 SSH 하나면 충분하다. 브리지(등록 IP)가 `-L 127.0.0.1:20889:127.0.0.1:10889`와 `-L 127.0.0.1:20882:127.0.0.1:8082` 두 포워드를 한 연결에 싣고, nginx는 브리지 로컬 20889(WHEP)와 20882(프록시)로 보낸다. 반대 방향(대전→브리지)도 가능하지만 브리지에 SSH 포트를 새로 열어야 해서 쓰지 않는다. 대전에는 브리지의 키를 `restrict,permitopen="127.0.0.1:10889",permitopen="127.0.0.1:8082"`로 등록해, 키가 새어도 그 두 포트 외에는 아무것도 못 하게 한다. 현황판의 `ws /viewer`는 브라우저 → 브리지 nginx → 터널 20882 → 대전 프록시 → 코어로 가므로, 코어는 외부에 직접 노출되지 않는다. 프록시(8082)를 거치는 이유는 코어 경로 이중화(`src/skylens_proxy/README.md`)가 그대로 현황판 연결에도 적용되게 하기 위해서다.
+
+**키 등록은 브리지 설치보다 먼저다.** 대전이 `permitopen 8082`를 아직 허용하지 않은 채 브리지 터널이 `-L 20882`를 요청하면, `ExitOnForwardFailure=yes`로 SSH 연결이 끊기면서 WHEP(20889)까지 죽는다. 그래서 순서는 브리지에서 `setup-bridge.sh`로 공개키를 받고 → 대전에서 `register-bridge-key.sh`로 등록하고 → 브리지에서 `check-bridge.sh`로 확인하는 것이다. 이미 옛 권한(10889만)으로 등록된 키라도 `register-bridge-key.sh`를 다시 돌리면 권한 줄이 갱신된다.
+
+**MediaMTX를 쓴다.** SRT로 받아 WHEP로 내보내는 게 내장 기능이라 영상 서버 코드가 0줄이다. Node에는 WebRTC 미디어 구현이 없고(COMPONENTS §8), aiortc로 영상을 하면 재인코딩을 직접 해야 한다.
+
+**진입은 SRT, 배포는 WebRTC.** 진입을 WHIP로 해도 시그널링 때문에 브리지가 그대로 필요하고 버는 건 0.5초 안팎이다. SRT는 불안정한 회선으로 서버에 밀어넣는 용도로 만들어졌고 ffmpeg 한 줄이다.
+
+**서버 측 STUN·TURN을 두지 않는다.** 대전·판교는 공인 IP가 랜카드에 직결(NAT 없음)이라 자기 주소를 안다. 단말은 구글 공개 STUN. TURN은 판교↔브라우저 실측에서 불필요했고, UDP를 막는 망을 만나면 그때 coturn을 브리지에 올린다.
+
+## 포트
+
+| 서비스 | 호스트 | 포트 | 방향 |
+|---|---|---:|---|
+| 현황판 정적 파일 · WebSocket (nginx) | 브리지 | 80 | 브라우저 → 브리지 (`/`, `/viewer`, `/uplink`) |
+| 라이브 WHEP (nginx `/live/` → 터널) | 브리지 | 80 | 브라우저 → 브리지 → 대전 |
+| 드론 접속 (gateway) | 브리지 | 8081 | 드론 → 브리지 |
+| SRT 수신 (MediaMTX) | 브리지 | 10890/udp | 게이트웨이 → 브리지 |
+| 터널 입구 (autossh `-L`) | 브리지 | 20889 → 대전 10889 | 로컬만 (WHEP) |
+| 터널 입구 (autossh `-L`) | 브리지 | 20882 → 대전 8082 | 로컬만 (프록시: `/viewer`·`/uplink`) |
+| 대전 SSH (터널 통로) | 대전 | 26022 | 브리지 → 대전, 이미 개방 |
+| 대전 프록시 (코어 다중 경로) | 대전 | 8082 | 터널 경유만 (브리지 키 `permitopen`) |
+| WHEP 시그널링 (MediaMTX) | 대전 | 10889 | 터널 경유만 |
+| WebRTC 미디어 (MediaMTX) | 대전 | 10189/udp | 대전 → 브라우저, 대전이 개시 |
+| SRT (대전, 로컬 테스트용) | 대전 | 10890/udp | 1단계만 |
+
+`9092`(Kafka)·`9000~9001`(MinIO)·ICMP는 개방 불가 통보 → 큐·저장소는 `10092`·`10900/10901`. ICMP가 없어 상태 점검은 TCP로 한다.
+
+## 구조
+
+`skylens_infra/`는 해체되어 호스트별 컴포넌트 폴더로 들어갔다.
+
+```
+src/skylens_gateway/        브리지(175, 라즈베리파이 5 · Debian 13 · arm64)에 올릴 것. 폴더째 복사해 setup-bridge.sh 하나로 끝.
+                            맥 판(setup-bridge-macos.sh)도 같이 있다 (README.md)
+src/skylens_proxy/          대전 nginx 다중 경로 설정 (README.md)
+src/skylens_core/deploy/    대전. MediaMTX 설정 2종(로컬 테스트 / 브리지 pull) + setup + 브리지 키 등록
+  ├─ scripts/               MediaMTX 설치, ffmpeg SRT 테스트 소스, aiortc WHEP 수신 프로브
+  ├─ lab/                   회선 실측 랩(10분 주기 수집 · 집계 · 보고서). 대전에서 돌린다 (lab/README.md)
+  └─ worklog/               로컬 작업 로그 (gitignore)
+```
+
+## 배포
+
+**브리지 (라즈베리파이 5 · Debian 13)** — `../../skylens_gateway/README.md`. 폴더 복사 → `bridge.env` → `sudo ./setup-bridge.sh` → 출력된 **공개키를 대전에서 등록** → `./check-bridge.sh`. 맥이면 `setup-bridge-macos.sh` · `check-bridge-macos.sh`.
+
+**대전**
+```bash
+sudo ./setup-daejeon.sh local        # 1단계: 로컬 ffmpeg 소스로 WHEP 검증
+./register-bridge-key.sh '<브리지 공개키>'   # 브리지 터널 허용 (10889 · 8082). 브리지 setup 보다 먼저
+sudo ./setup-daejeon.sh bridge       # 2단계: 브리지 SRT 에서 당겨오기
+```
+
+브리지 키는 브리지의 `setup-bridge.sh`가 만든 공개키를 받아 등록한다. 등록 순서와 이유는 "왜 이 구성인가"의 브리지 항목을 본다. 옛 권한으로 이미 등록된 키는 같은 명령을 다시 돌리면 권한 줄이 갱신된다.
+
+**검증** — 브라우저 없이 WHEP 종단을 확인한다.
+```bash
+./scripts/test-source.sh 127.0.0.1 10890 drone1 &                          # 대전 로컬
+~/rtc/bin/python scripts/whep_probe.py http://127.0.0.1:10889/drone1 5     # 대전 안에서
+~/rtc/bin/python scripts/whep_probe.py http://175.126.98.44/live/drone1 5  # 밖에서, 브리지 경유
+# [결과] video 110 frames … 첫 프레임까지 1427 ms   ← 2026-09-07 대전 로컬 실측
+```
+
+## 진행 상태
+
+| 단계 | 내용 | 상태 |
+|---|---|---|
+| 1 | 대전 MediaMTX, SRT→WHEP 종단 | ✅ 실측 검증 |
+| 1' | 브리지 nginx·터널 → **브라우저 실재생** | 브리지 설치 대기 |
+| 2 | 브리지 SRT 수신 + 대전 pull | 설정 준비됨 |
+| 3 | `skylens_gateway`·`skylens_client`를 브리지에, `proxy`·`core`를 대전에, `model`을 판교에 실배치 | 미착수 — COMPONENTS §9 |
+| — | TLS (도메인 + certbot) | 미착수. HTTP에서도 RTCPeerConnection은 동작 |
+
+## COMPONENTS.md 에 제안하는 것
+
+§2에 **라이브 영상 흐름**(SRT → 대전 MediaMTX → WHEP 직결)이 없다. 스플랫·마커와는 캐시 가능 여부가 달라 경로가 갈리므로 §2.4로 한 단락 추가를 제안한다. 이 PR에서는 단일 출처를 건드리지 않고 여기에만 적어 둔다.

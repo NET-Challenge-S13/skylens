@@ -1,0 +1,299 @@
+===== 2026-10-06T12:23:25+09:00 =====
+[uptime] up 7 weeks, 6 days, 3 hours, 7 minutes | load 0.22 0.41 0.46
+[disk] 44G free (8% used)
+[mem] 670MB used / 15993MB
+[crontab]
+  */10 * * * * /home/ubuntu/lab/run_mnd.sh
+  23 7 * * * /home/ubuntu/lab/daily_report.sh > /dev/null 2>&1
+  4,14,24,34,44,54 * * * * /home/ubuntu/lab/run_koren.sh
+  37 * * * * /home/ubuntu/lab/run_deep_mnd.sh
+  41 */6 * * * /home/ubuntu/lab/scale_test.sh 8 50 >> /home/ubuntu/lab/results/scale-$(date +\%Y\%m\%d).log 2>&1
+  52 * * * * /home/ubuntu/lab/state_snapshot.sh
+[tunnel] active · 재시작 0회
+[tunnel-port] 2 개 리스닝
+[samples]
+  deep-koren-20261005.jsonl          1
+  deep-koren-20261006.jsonl         12
+  koren-20261005.jsonl               5
+  koren-20261006.jsonl              74
+  mnd-20261005.jsonl                12
+  mnd-20261006.jsonl                75
+  pi-20261005.jsonl                 10
+  pi-20261006.jsonl                 73
+[errors]
+===== 2026-10-06T12:52:01+09:00 =====
+[uptime] up 7 weeks, 6 days, 3 hours, 36 minutes | load 0.47 0.65 0.62
+[disk] 44G free (8% used)
+[mem] 676MB used / 15993MB
+[crontab]
+  */10 * * * * /home/ubuntu/lab/run_mnd.sh
+  23 7 * * * /home/ubuntu/lab/daily_report.sh > /dev/null 2>&1
+  4,14,24,34,44,54 * * * * /home/ubuntu/lab/run_koren.sh
+  37 * * * * /home/ubuntu/lab/run_deep_mnd.sh
+  41 */6 * * * /home/ubuntu/lab/scale_test.sh 8 50 >> /home/ubuntu/lab/results/scale-$(date +\%Y\%m\%d).log 2>&1
+  52 * * * * /home/ubuntu/lab/state_snapshot.sh
+[tunnel] active · 재시작 0회
+[tunnel-port] 2 개 리스닝
+[samples]
+  deep-koren-20261005.jsonl          1
+  deep-koren-20261006.jsonl         13
+  koren-20261005.jsonl               5
+  koren-20261006.jsonl              77
+  mnd-20261005.jsonl                12
+  mnd-20261006.jsonl                78
+  pi-20261005.jsonl                 10
+  pi-20261006.jsonl                 73
+[errors]
+===== 2026-10-06T13:52:01+09:00 =====
+[uptime] up 7 weeks, 6 days, 4 hours, 36 minutes | load 0.60 0.67 0.64
+[disk] 44G free (8% used)
+[mem] 669MB used / 15993MB
+[crontab]
+  */10 * * * * /home/ubuntu/lab/run_mnd.sh
+  23 7 * * * /home/ubuntu/lab/daily_report.sh > /dev/null 2>&1
+  4,14,24,34,44,54 * * * * /home/ubuntu/lab/run_koren.sh
+  37 * * * * /home/ubuntu/lab/run_deep_mnd.sh
+  41 */6 * * * /home/ubuntu/lab/scale_test.sh 8 50 >> /home/ubuntu/lab/results/scale-$(date +\%Y\%m\%d).log 2>&1
+  52 * * * * /home/ubuntu/lab/state_snapshot.sh
+[tunnel] active · 재시작 0회
+[tunnel-port] 2 개 리스닝
+[samples]
+  deep-koren-20261005.jsonl          1
+  deep-koren-20261006.jsonl         14
+  koren-20261005.jsonl               5
+  koren-20261006.jsonl              83
+  mnd-20261005.jsonl                12
+  mnd-20261006.jsonl                84
+  pi-20261005.jsonl                 10
+  pi-20261006.jsonl                 79
+[errors]
+===== 2026-10-06T14:52:01+09:00 =====
+[uptime] up 7 weeks, 6 days, 5 hours, 36 minutes | load 0.57 0.56 0.55
+[disk] 44G free (8% used)
+[mem] 675MB used / 15993MB
+[crontab]
+  */10 * * * * /home/ubuntu/lab/run_mnd.sh
+  23 7 * * * /home/ubuntu/lab/daily_report.sh > /dev/null 2>&1
+  4,14,24,34,44,54 * * * * /home/ubuntu/lab/run_koren.sh
+  37 * * * * /home/ubuntu/lab/run_deep_mnd.sh
+  41 */6 * * * /home/ubuntu/lab/scale_test.sh 8 50 >> /home/ubuntu/lab/results/scale-$(date +\%Y\%m\%d).log 2>&1
+  52 * * * * /home/ubuntu/lab/state_snapshot.sh
+[tunnel] active · 재시작 0회
+[tunnel-port] 2 개 리스닝
+[samples]
+  deep-koren-20261005.jsonl          1
+  deep-koren-20261006.jsonl         15
+  koren-20261005.jsonl               5
+  koren-20261006.jsonl              89
+  mnd-20261005.jsonl                12
+  mnd-20261006.jsonl                90
+  pi-20261005.jsonl                 10
+  pi-20261006.jsonl                 85
+[errors]
+===== 2026-10-06T15:52:01+09:00 =====
+[uptime] up 7 weeks, 6 days, 6 hours, 36 minutes | load 0.45 0.51 0.61
+[disk] 44G free (8% used)
+[mem] 667MB used / 15993MB
+[crontab]
+  */10 * * * * /home/ubuntu/lab/run_mnd.sh
+  23 7 * * * /home/ubuntu/lab/daily_report.sh > /dev/null 2>&1
+  4,14,24,34,44,54 * * * * /home/ubuntu/lab/run_koren.sh
+  37 * * * * /home/ubuntu/lab/run_deep_mnd.sh
+  41 */6 * * * /home/ubuntu/lab/scale_test.sh 8 50 >> /home/ubuntu/lab/results/scale-$(date +\%Y\%m\%d).log 2>&1
+  52 * * * * /home/ubuntu/lab/state_snapshot.sh
+[tunnel] active · 재시작 0회
+[tunnel-port] 2 개 리스닝
+[samples]
+  deep-koren-20261005.jsonl          1
+  deep-koren-20261006.jsonl         16
+  koren-20261005.jsonl               5
+  koren-20261006.jsonl              95
+  mnd-20261005.jsonl                12
+  mnd-20261006.jsonl                96
+  pi-20261005.jsonl                 10
+  pi-20261006.jsonl                 91
+[errors]
+===== 2026-10-06T16:52:01+09:00 =====
+[uptime] up 7 weeks, 6 days, 7 hours, 36 minutes | load 0.30 0.47 0.55
+[disk] 44G free (8% used)
+[mem] 670MB used / 15993MB
+[crontab]
+  */10 * * * * /home/ubuntu/lab/run_mnd.sh
+  23 7 * * * /home/ubuntu/lab/daily_report.sh > /dev/null 2>&1
+  4,14,24,34,44,54 * * * * /home/ubuntu/lab/run_koren.sh
+  37 * * * * /home/ubuntu/lab/run_deep_mnd.sh
+  41 */6 * * * /home/ubuntu/lab/scale_test.sh 8 50 >> /home/ubuntu/lab/results/scale-$(date +\%Y\%m\%d).log 2>&1
+  52 * * * * /home/ubuntu/lab/state_snapshot.sh
+[tunnel] active · 재시작 0회
+[tunnel-port] 2 개 리스닝
+[samples]
+  deep-koren-20261005.jsonl          1
+  deep-koren-20261006.jsonl         17
+  koren-20261005.jsonl               5
+  koren-20261006.jsonl             101
+  mnd-20261005.jsonl                12
+  mnd-20261006.jsonl               102
+  pi-20261005.jsonl                 10
+  pi-20261006.jsonl                 97
+[errors]
+===== 2026-10-06T17:52:01+09:00 =====
+[uptime] up 7 weeks, 6 days, 8 hours, 36 minutes | load 0.65 0.64 0.63
+[disk] 44G free (8% used)
+[mem] 646MB used / 15993MB
+[crontab]
+  */10 * * * * /home/ubuntu/lab/run_mnd.sh
+  23 7 * * * /home/ubuntu/lab/daily_report.sh > /dev/null 2>&1
+  4,14,24,34,44,54 * * * * /home/ubuntu/lab/run_koren.sh
+  37 * * * * /home/ubuntu/lab/run_deep_mnd.sh
+  41 */6 * * * /home/ubuntu/lab/scale_test.sh 8 50 >> /home/ubuntu/lab/results/scale-$(date +\%Y\%m\%d).log 2>&1
+  52 * * * * /home/ubuntu/lab/state_snapshot.sh
+[tunnel] active · 재시작 0회
+[tunnel-port] 2 개 리스닝
+[samples]
+  deep-koren-20261005.jsonl          1
+  deep-koren-20261006.jsonl         18
+  koren-20261005.jsonl               5
+  koren-20261006.jsonl             107
+  mnd-20261005.jsonl                12
+  mnd-20261006.jsonl               108
+  pi-20261005.jsonl                 10
+  pi-20261006.jsonl                103
+[errors]
+===== 2026-10-06T18:52:01+09:00 =====
+[uptime] up 7 weeks, 6 days, 9 hours, 36 minutes | load 1.37 0.78 0.66
+[disk] 44G free (8% used)
+[mem] 667MB used / 15993MB
+[crontab]
+  */10 * * * * /home/ubuntu/lab/run_mnd.sh
+  23 7 * * * /home/ubuntu/lab/daily_report.sh > /dev/null 2>&1
+  4,14,24,34,44,54 * * * * /home/ubuntu/lab/run_koren.sh
+  37 * * * * /home/ubuntu/lab/run_deep_mnd.sh
+  41 */6 * * * /home/ubuntu/lab/scale_test.sh 8 50 >> /home/ubuntu/lab/results/scale-$(date +\%Y\%m\%d).log 2>&1
+  52 * * * * /home/ubuntu/lab/state_snapshot.sh
+[tunnel] active · 재시작 0회
+[tunnel-port] 2 개 리스닝
+[samples]
+  deep-koren-20261005.jsonl          1
+  deep-koren-20261006.jsonl         19
+  koren-20261005.jsonl               5
+  koren-20261006.jsonl             113
+  mnd-20261005.jsonl                12
+  mnd-20261006.jsonl               114
+  pi-20261005.jsonl                 10
+  pi-20261006.jsonl                109
+[errors]
+===== 2026-10-06T19:52:01+09:00 =====
+[uptime] up 7 weeks, 6 days, 10 hours, 36 minutes | load 0.69 0.60 0.57
+[disk] 44G free (8% used)
+[mem] 684MB used / 15993MB
+[crontab]
+  */10 * * * * /home/ubuntu/lab/run_mnd.sh
+  23 7 * * * /home/ubuntu/lab/daily_report.sh > /dev/null 2>&1
+  4,14,24,34,44,54 * * * * /home/ubuntu/lab/run_koren.sh
+  37 * * * * /home/ubuntu/lab/run_deep_mnd.sh
+  41 */6 * * * /home/ubuntu/lab/scale_test.sh 8 50 >> /home/ubuntu/lab/results/scale-$(date +\%Y\%m\%d).log 2>&1
+  52 * * * * /home/ubuntu/lab/state_snapshot.sh
+[tunnel] active · 재시작 0회
+[tunnel-port] 2 개 리스닝
+[samples]
+  deep-koren-20261005.jsonl          1
+  deep-koren-20261006.jsonl         20
+  koren-20261005.jsonl               5
+  koren-20261006.jsonl             119
+  mnd-20261005.jsonl                12
+  mnd-20261006.jsonl               120
+  pi-20261005.jsonl                 10
+  pi-20261006.jsonl                115
+[errors]
+===== 2026-10-06T20:52:02+09:00 =====
+[uptime] up 7 weeks, 6 days, 11 hours, 36 minutes | load 0.67 0.61 0.62
+[disk] 44G free (8% used)
+[mem] 664MB used / 15993MB
+[crontab]
+  */10 * * * * /home/ubuntu/lab/run_mnd.sh
+  23 7 * * * /home/ubuntu/lab/daily_report.sh > /dev/null 2>&1
+  4,14,24,34,44,54 * * * * /home/ubuntu/lab/run_koren.sh
+  37 * * * * /home/ubuntu/lab/run_deep_mnd.sh
+  41 */6 * * * /home/ubuntu/lab/scale_test.sh 8 50 >> /home/ubuntu/lab/results/scale-$(date +\%Y\%m\%d).log 2>&1
+  52 * * * * /home/ubuntu/lab/state_snapshot.sh
+[tunnel] active · 재시작 0회
+[tunnel-port] 2 개 리스닝
+[samples]
+  deep-koren-20261005.jsonl          1
+  deep-koren-20261006.jsonl         21
+  koren-20261005.jsonl               5
+  koren-20261006.jsonl             125
+  mnd-20261005.jsonl                12
+  mnd-20261006.jsonl               126
+  pi-20261005.jsonl                 10
+  pi-20261006.jsonl                121
+[errors]
+===== 2026-10-06T21:52:01+09:00 =====
+[uptime] up 7 weeks, 6 days, 12 hours, 36 minutes | load 0.72 0.74 0.72
+[disk] 44G free (8% used)
+[mem] 646MB used / 15993MB
+[crontab]
+  */10 * * * * /home/ubuntu/lab/run_mnd.sh
+  23 7 * * * /home/ubuntu/lab/daily_report.sh > /dev/null 2>&1
+  4,14,24,34,44,54 * * * * /home/ubuntu/lab/run_koren.sh
+  37 * * * * /home/ubuntu/lab/run_deep_mnd.sh
+  41 */6 * * * /home/ubuntu/lab/scale_test.sh 8 50 >> /home/ubuntu/lab/results/scale-$(date +\%Y\%m\%d).log 2>&1
+  52 * * * * /home/ubuntu/lab/state_snapshot.sh
+[tunnel] active · 재시작 0회
+[tunnel-port] 2 개 리스닝
+[samples]
+  deep-koren-20261005.jsonl          1
+  deep-koren-20261006.jsonl         22
+  koren-20261005.jsonl               5
+  koren-20261006.jsonl             131
+  mnd-20261005.jsonl                12
+  mnd-20261006.jsonl               132
+  pi-20261005.jsonl                 10
+  pi-20261006.jsonl                127
+[errors]
+===== 2026-10-06T22:52:01+09:00 =====
+[uptime] up 7 weeks, 6 days, 13 hours, 36 minutes | load 0.30 0.66 0.64
+[disk] 44G free (8% used)
+[mem] 660MB used / 15993MB
+[crontab]
+  */10 * * * * /home/ubuntu/lab/run_mnd.sh
+  23 7 * * * /home/ubuntu/lab/daily_report.sh > /dev/null 2>&1
+  4,14,24,34,44,54 * * * * /home/ubuntu/lab/run_koren.sh
+  37 * * * * /home/ubuntu/lab/run_deep_mnd.sh
+  41 */6 * * * /home/ubuntu/lab/scale_test.sh 8 50 >> /home/ubuntu/lab/results/scale-$(date +\%Y\%m\%d).log 2>&1
+  52 * * * * /home/ubuntu/lab/state_snapshot.sh
+[tunnel] active · 재시작 0회
+[tunnel-port] 2 개 리스닝
+[samples]
+  deep-koren-20261005.jsonl          1
+  deep-koren-20261006.jsonl         23
+  koren-20261005.jsonl               5
+  koren-20261006.jsonl             137
+  mnd-20261005.jsonl                12
+  mnd-20261006.jsonl               138
+  pi-20261005.jsonl                 10
+  pi-20261006.jsonl                133
+[errors]
+===== 2026-10-06T23:52:01+09:00 =====
+[uptime] up 7 weeks, 6 days, 14 hours, 36 minutes | load 0.71 0.67 0.57
+[disk] 44G free (8% used)
+[mem] 662MB used / 15993MB
+[crontab]
+  */10 * * * * /home/ubuntu/lab/run_mnd.sh
+  23 7 * * * /home/ubuntu/lab/daily_report.sh > /dev/null 2>&1
+  4,14,24,34,44,54 * * * * /home/ubuntu/lab/run_koren.sh
+  37 * * * * /home/ubuntu/lab/run_deep_mnd.sh
+  41 */6 * * * /home/ubuntu/lab/scale_test.sh 8 50 >> /home/ubuntu/lab/results/scale-$(date +\%Y\%m\%d).log 2>&1
+  52 * * * * /home/ubuntu/lab/state_snapshot.sh
+[tunnel] active · 재시작 0회
+[tunnel-port] 2 개 리스닝
+[samples]
+  deep-koren-20261005.jsonl          1
+  deep-koren-20261006.jsonl         24
+  koren-20261005.jsonl               5
+  koren-20261006.jsonl             143
+  mnd-20261005.jsonl                12
+  mnd-20261006.jsonl               144
+  pi-20261005.jsonl                 10
+  pi-20261006.jsonl                139
+[errors]

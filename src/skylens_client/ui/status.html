@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="ko"><head>
+    <meta charset="UTF-8">
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SkyLens · 현황판 - 실시간 3D 복원</title>
+    <link rel="stylesheet" href="../../shared/viewer/ui/fonts.css" />
+    <link rel="stylesheet" href="../../shared/viewer/ui/style.css" />
+    <link rel="stylesheet" href="status-panels.css" />
+  </head>
+<body>
+    <section class="pane pane--status pane--full">
+      <canvas id="status-view"></canvas>
+      <div id="overlay-status" class="overlay"><div class="detect-card"><div class="detect-card__kicker"></div><div class="detect-card__label"></div><div class="detect-card__conf"></div><div class="detect-card__bar"><span></span></div><button class="detect-card__btn" type="button">탐지 확인</button></div><div class="splat-loading is-visible" id="board-waiting">코어 연결됨 · 첫 구간 복원 대기 중</div></div>
+      
+      
+    <div id="board-top" class="board-top"><div class="board-row board-row--head" id="board-row-head"><div class="sl-surface sl-surface--chip pane-label pane-label--status"><span class="sl-dot"></span><span class="sl-surface__label">현황판 · 실시간 3D 복원</span></div><div class="board-row__spacer"></div><div id="board-toolbar" class="board-toolbar"><div class="cam-state">CAM · SYNCED</div><button type="button" class="board-toolbar__btn" id="board-help-btn" data-live="help">조작 · Guide</button><button type="button" class="board-toolbar__btn" id="board-settings-btn" data-live="settings">설정 · Display</button></div></div><div class="board-row board-row--status" id="board-row-status"><div id="server-status" class="sl-surface sl-surface--panel server-status"><div class="server-status__body"><div class="server-status__title"><span class="server-status__dot" data-state="connected"></span><span class="server-status__text">코어 연결됨 · 데이터 대기</span></div><span class="server-status__detail">청크 0 · 탐지 0 · 0ms</span><span class="server-status__detail"></span></div><div class="server-status__ladder"></div></div><div class="board-row__spacer"></div></div></div></section>
+    <div id="toast-root"></div>
+  
+
+</body></html>

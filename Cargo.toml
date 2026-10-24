@@ -1,0 +1,80 @@
+[workspace]
+resolver = "3"
+members = [
+    "src/shared",
+    "src/shared/viewer",
+    "src/skylens_core/control",
+    "src/skylens_drone",
+    "src/skylens_model",
+    "src/skylens_client",
+    "src/demo",
+    "src/test",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+license = "MIT"
+publish = false
+
+# Members opt into these with `foo.workspace = true`. Entries nobody uses are not resolved.
+[workspace.dependencies]
+skylens-shared = { path = "src/shared" }
+skylens-viewer = { path = "src/shared/viewer" }
+
+# common
+anyhow = "1"
+thiserror = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# servers (skylens_model, skylens_drone, demo)
+tokio = { version = "1", features = ["full"] }
+axum = { version = "0.8", features = ["ws"] }
+
+# demo: footage download (blocking HTTP, proxies from the environment) and its zip
+ureq = "2"
+zip = { version = "0.6.6", default-features = false, features = ["deflate"] }
+
+# gRPC between skylens_core (Go) and skylens_model (Rust); contract in src/shared/proto
+tonic = { version = "0.14", default-features = false, features = ["codegen"] }
+prost = "0.14"
+tonic-prost = "0.14"
+tonic-prost-build = "0.14"
+protox = "0.10" # pure-Rust protobuf compiler, so builds do not need protoc
+
+# reconstruction: 0.8 has the live CompositionHost input, the in-memory display deltas and the SkyLens GPU stages
+cumulus3d-cli = "0.11"
+# 0.1.1 rounds the GPU uniform stride up to the device alignment (fixes the first-segment stall on 64-byte-alignment GPUs such as the RTX 4050).
+deltamesh = "0.1.1"
+
+# UNet inference links libtorch 2.13, downloaded at build time (CUDA flavour from
+# TORCH_CUDA_VERSION in .cargo/config.toml). Independent of the Python venv.
+tch = { version = "0.24", features = ["download-libtorch"] }
+
+# rendering and UI (skylens_client)
+# 0.3.0: the layers SkyLens needs (pass drawing, meshes, textures, lines, fog, background colour) and
+# slot scenes for the live diff stream (SlotScene, slots messages, decision 0052).
+pointblitz = "0.3.0"
+pointblitz-io = "0.3.0"
+# Blitz from git: the 0.3.0-beta.2 release renders with wgpu 29, pointblitz 0.3 needs wgpu 30.
+blitz-dom = { git = "https://github.com/DioxusLabs/blitz", rev = "45496d9288b063719ebeae4e0761273f7881b3d7" }
+blitz-html = { git = "https://github.com/DioxusLabs/blitz", rev = "45496d9288b063719ebeae4e0761273f7881b3d7" }
+blitz-paint = { git = "https://github.com/DioxusLabs/blitz", rev = "45496d9288b063719ebeae4e0761273f7881b3d7" }
+blitz-shell = { git = "https://github.com/DioxusLabs/blitz", rev = "45496d9288b063719ebeae4e0761273f7881b3d7" }
+blitz-traits = { git = "https://github.com/DioxusLabs/blitz", rev = "45496d9288b063719ebeae4e0761273f7881b3d7" }
+anyrender = "0.14"
+anyrender_vello = "0.15"
+wgpu = "30"
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+
+# Dependencies carry no debug info in dev builds: it is most of target/debug's size
+# and nobody steps into them. Our own crates keep full debug info.
+[profile.dev.package."*"]
+debug = false

@@ -48,6 +48,15 @@ class SkyLensTrainingArguments(TrainingArguments):
         default=0.3,
         metadata={"help": "평가 시 검출로 인정할 최소 히트맵 점수."},
     )
+    eval_ap_score_floor: float = field(
+        default=0.05,
+        metadata={
+            "help": (
+                "bbox mAP / point_ap 계산에 쓸 최소 점수. eval_score_threshold(점 P/R/F1 "
+                "운영 임계값)와 분리해 PR 곡선이 잘리지 않게 한다."
+            )
+        },
+    )
     freeze_backbone_epochs: float = field(
         default=0.0,
         metadata={
@@ -98,5 +107,7 @@ class SkyLensTrainingArguments(TrainingArguments):
             raise ValueError("eval_max_detections >= 1 이어야 한다")
         if not 0.0 <= self.eval_score_threshold <= 1.0:
             raise ValueError("eval_score_threshold 는 [0, 1] 범위여야 한다")
+        if not 0.0 <= self.eval_ap_score_floor <= 1.0:
+            raise ValueError("eval_ap_score_floor 는 [0, 1] 범위여야 한다")
         if self.freeze_backbone_epochs < 0:
             raise ValueError("freeze_backbone_epochs >= 0 이어야 한다")

@@ -90,11 +90,13 @@ OpenAPI 문서는 `http://127.0.0.1:8100/docs`.
 
 ```json
 {"status":"ok","version":"0.1.0","demo":true,"torch":true,"cuda":true,
- "device":"NVIDIA GeForce RTX 4050 Laptop GPU",
+ "device":"NVIDIA GeForce RTX 4050 Laptop GPU","gpu_error":null,
  "jobs":{"queued":0,"running":0,"done":3,"failed":0,"frames":1}}
 ```
 
 torch/CUDA 조회는 프로세스당 **한 번만** 하고 캐시한다(torch import가 수 초 걸린다).
+
+`gpu_error`는 시작 뒤 처음 난 CUDA 실패다(Rust 서버만 채운다). 라이브 모드의 Rust 서버는 5초마다 작은 libtorch 연산으로 GPU를 확인한다. 드라이버 리셋 등으로 GPU를 잃으면 그 오류의 첫 줄을 여기에 남기고 `cuda`를 `false`로 바꾼다. 이 상태에서도 복원과 UNet은 CPU로 계속 돌지만 훨씬 느리다. gRPC `HealthResponse.gpu_error`도 같은 값이고, 코어는 이를 `ServerStatus.model_gpu_error`로 화면에 넘긴다.
 
 ---
 

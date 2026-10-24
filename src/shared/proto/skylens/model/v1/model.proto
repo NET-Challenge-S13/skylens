@@ -1,0 +1,244 @@
+// Contract between skylens_core (Go) and skylens_model (Rust).
+//
+// The first four RPCs mirror the REST endpoints of app.py one to one, so the
+// job model is the same whichever transport the caller uses. The last two carry
+// the live path: frames in, incremental chunks out.
+//
+// Payloads the core only stores and forwards (points, mesh blocks, detections)
+// are opaque bytes. The core routes them by the metadata next to them and never
+// decodes them; their encoding is owned by src/shared and decoded by viewers.
+syntax = "proto3";
+
+package skylens.model.v1;
+
+option go_package = "github.com/NET-Challenge-S13/skylens/src/skylens_core/gen/skylens/model/v1;modelv1";
+
+service ModelService {
+  // POST /recon/jobs
+  rpc SubmitRecon(ReconJobRequest) returns (JobAccepted);
+  // POST /detect/jobs
+  rpc SubmitDetect(DetectJobRequest) returns (JobAccepted);
+  // GET /jobs/{job_id}
+  rpc GetJob(GetJobRequest) returns (JobStatus);
+  // GET /health
+  rpc Health(HealthRequest) returns (HealthResponse);
+
+  // Live input: each FrameSet is declared to the CompositionHost node.
+  // Re-sending a set that was already accepted is a no-op.
+  rpc PushFrames(stream FrameSet) returns (PushFramesSummary);
+  // Incremental output: point chunks, mesh blocks and detections as they are produced.
+  rpc SubscribeChunks(SubscribeRequest) returns (stream Chunk);
+
+  // A new mission starts: drop what was reconstructed and begin a new run.
+  //
+  // The live display is a stream of differences that a viewer has to apply from
+  // its first message, and the model never sends a message twice. So a core that
+  // empties its own store cannot empty the screens' live points by itself: what
+  // it drops is gone, and what arrives afterwards only moves points that the
+  // screens no longer have. Only the model can start the world over, by doing
+  // here what it does when the process starts: a new engine, a new stream id,
+  // and messages from seq 1 again.
+  //
+  // It is a reset, not a configuration change: the mission's route, cameras and
+  // settings are unaffected. In-flight subscriptions end; the core resubscribes
+  // and receives the new run from its beginning.
+  rpc StartMission(StartMissionRequest) returns (StartMissionResponse);
+}
+
+// ---- shared shapes ----------------------------------------------------------
+
+message Gps {
+  double lat = 1;
+  double lon = 2;
+  double alt = 3; // metres, used as-is for Up
+}
+
+enum DroneStation {
+  DRONE_STATION_UNSPECIFIED = 0;
+  DRONE_STATION_LEFT = 1;
+  DRONE_STATION_CENTER = 2;
+  DRONE_STATION_RIGHT = 3;
+}
+
+message DroneTelemetry {
+  uint32 drone_id = 1;
+  DroneStation station = 2;
+  Gps gps = 3;
+  double heading_deg = 4;
+  double speed = 5; // ground speed, m/s
+  double battery_pct = 6;
+  int64 t_ms = 7; // unix ms at the drone
+}
+
+enum Level {
+  LEVEL_UNSPECIFIED = 0;
+  LEVEL_PREVIEW = 1;
+  LEVEL_REFINED = 2;
+}
+
+// ---- job API (mirrors app.py) ----------------------------------------------
+
+message Source {
+  string uri = 1;
+  repeated DroneTelemetry poses = 2;
+}
+
+message ReconJobRequest {
+  uint32 segment = 1;
+  repeated Source sources = 2;
+  repeated Gps track = 3; // route stretch this segment covers, start to end
+  // Kept for app.py parity. Selects the level to produce (preview or refined);
+  // the mapping from steps to level is defined by skylens_model.
+  uint32 steps = 4;
+  optional string anchor_frame = 5; // unset for the first job
+}
+
+message DetectJobRequest {
+  uint32 segment = 1;
+  repeated Source sources = 2;
+}
+
+message JobAccepted {
+  string job_id = 1;
+  uint32 queued = 2; // queue position at accept time
+}
+
+message GetJobRequest {
+  string job_id = 1;
+}
+
+enum JobState {
+  JOB_STATE_UNSPECIFIED = 0;
+  JOB_STATE_QUEUED = 1;
+  JOB_STATE_RUNNING = 2;
+  JOB_STATE_DONE = 3;
+  JOB_STATE_FAILED = 4;
+}
+
+message Align {
+  optional Gps anchor = 1;
+  repeated double position = 2; // [x, y, z]
+  repeated double rotation = 3; // quaternion [x, y, z, w]
+  repeated double scale = 4;    // [x, y, z]
+}
+
+message ReconJobResult {
+  uint32 segment = 1;
+  uint32 steps = 2;
+  string url = 3;
+  uint64 bytes = 4;
+  Align align = 5;
+  string anchor_frame = 6;
+}
+
+message DetectJobResult {
+  uint32 segment = 1;
+  bytes detections = 2; // skylens.payload.v1.DetectionBatch, opaque to the core
+}
+
+message JobStatus {
+  string job_id = 1;
+  JobState state = 2;
+  double progress = 3;
+  oneof result {
+    ReconJobResult recon = 4;
+    DetectJobResult detect = 5;
+  }
+  optional string error = 6;
+}
+
+message StartMissionRequest {}
+
+message StartMissionResponse {
+  // The point slot stream the new run writes: higher than every id this process
+  // handed out, so the core and the screens know to start over on it.
+  uint32 stream_id = 1;
+  // Every chunk of the new run has a sequence above this one.
+  uint64 sequence_base = 2;
+}
+
+message HealthRequest {}
+
+message HealthResponse {
+  bool ok = 1;
+  bool gpu = 2; // false once the GPU was lost (gpu_error)
+  string version = 3;
+  // First CUDA failure after start (driver reset, GPU dropped off the bus).
+  // The server keeps running on the CPU, much slower. Empty while the GPU works.
+  string gpu_error = 4;
+}
+
+// ---- live path --------------------------------------------------------------
+
+message FrameKey {
+  string source_id = 1; // drone
+  uint64 sequence = 2;
+  uint32 revision = 3;
+}
+
+enum ImageFormat {
+  IMAGE_FORMAT_UNSPECIFIED = 0;
+  IMAGE_FORMAT_JPEG = 1;
+  IMAGE_FORMAT_PNG = 2;
+  IMAGE_FORMAT_RGB8 = 3;
+}
+
+message LiveImage {
+  string camera = 1;
+  ImageFormat format = 2;
+  bytes data = 3;
+  uint32 width = 4;  // required for RGB8
+  uint32 height = 5; // required for RGB8
+  optional Gps gps = 6;
+}
+
+message FrameSet {
+  FrameKey key = 1;
+  repeated LiveImage images = 2;
+  int64 captured_at_ms = 3;
+}
+
+message PushFramesSummary {
+  uint64 ingested = 1;
+  uint64 ignored = 2; // re-declared or superseded sets
+  uint64 pending = 3; // waiting for missing cameras
+}
+
+message SubscribeRequest {
+  // Resume point: chunks with a sequence at or below this are not re-sent.
+  uint64 after_sequence = 1;
+}
+
+enum ChunkKind {
+  CHUNK_KIND_UNSPECIFIED = 0;
+  CHUNK_KIND_POINTS = 1;     // pointblitz chunk
+  CHUNK_KIND_MESH_BLOCK = 2; // skylens.payload.v1.MeshBlock
+  CHUNK_KIND_DETECTIONS = 3; // skylens.payload.v1.DetectionBatch
+  CHUNK_KIND_TERRAIN = 4;    // skylens.payload.v1.TerrainTile, from the core terrain feed (control tower only)
+  CHUNK_KIND_BUILDINGS = 5;  // skylens.payload.v1.BuildingSet, from the core terrain feed (control tower only)
+  // pointblitz slot diff message: the 32-byte "PBSD" header in front of one event pack of the
+  // cumulus3d live diff stream v4 (stable display). Every shown point owns a slot id; adds and
+  // moves write slots, removes hide them. Not compacted: a viewer applies every message of a
+  // stream in order. segment = the zone that triggered the event, level = refined,
+  // version = the message seq (1, 2, ...), generation = the stream id (one per model run; a new
+  // id starts a new stream at seq 1). A reader that joins a stream after its start, which is what
+  // a new mission leaves behind, starts at the first message it is given: the ones before it are
+  // never sent again, so it shows the slots written from there on.
+  CHUNK_KIND_POINT_SLOTS = 6;
+}
+
+// Routing metadata is all the core reads. payload goes to viewers unchanged.
+message Chunk {
+  uint64 sequence = 1; // monotonic per model server
+  ChunkKind kind = 2;
+  uint32 segment = 3;
+  Level level = 4;
+  repeated int32 block_id = 5; // [x, y, z] for mesh blocks
+  uint32 version = 6;          // mesh block version; keep only if newer. Point slots: message seq
+  uint32 generation = 7;       // refined snapshot generation; replaces older ones. Point slots: stream id
+  bytes payload = 8;
+  // Point slots only (CHUNK_KIND_POINT_SLOTS; 0 and 0 for every other kind). Metadata about the
+  // slot message in payload; the PBSD/v4 bytes carry none of it. The core never reads them.
+  uint32 slot_kind = 9;        // why the message was emitted: 1 refined, 2 replace, 3 final (empty message, last of the run), 4 preview (sparse zone preview, replaced by that zone's refined delta)
+  uint32 slot_t_ms = 10;       // cumulus3d session time of the delta, milliseconds since the run's start
+}

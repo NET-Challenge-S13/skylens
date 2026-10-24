@@ -1,0 +1,86 @@
+# MediaMTX on the bridge, relay mode: pull the video from Daejeon and re-send it
+# as WebRTC on the operator LAN.
+#
+# Why this file exists. In ingest mode (mediamtx-bridge.yml) the drones publish
+# SRT here and Daejeon pulls it; the browsers then take WebRTC straight from
+# Daejeon. That last hop is UDP from 116.89.187.181:10189, and it does not cross
+# the VPN and KOREN boundary - the screens show NO SIGNAL while the signalling
+# itself answers fine. So the bridge becomes the WebRTC egress for the LAN: it
+# pulls each path over the SSH tunnel as RTSP (TCP, which does cross) and serves
+# WHEP from here, one short hop from the viewers.
+#
+# The two modes are exclusive, the same way Daejeon has mediamtx.yml (stage 1)
+# and mediamtx-pull.yml (stage 2): a path cannot be both `publisher` and a
+# puller. VIDEO_MODE in bridge.env picks which file is installed.
+#   VIDEO_MODE=ingest   drones publish here, Daejeon pulls (mediamtx-bridge.yml)
+#   VIDEO_MODE=relay    this file: Daejeon holds the video, the bridge pulls it
+#
+# setup-bridge.sh substitutes __SRT_PORT__, __PUBLISH_PASS__, __WHEP_PORT__,
+# __RTSP_TUNNEL_PORT__ and __WEBRTC_HOSTS__.
+
+logLevel: info
+logDestinations: [stdout]
+
+api: no
+metrics: no
+pprof: no
+playback: no
+rtsp: no
+rtmp: no
+hls: no
+moq: no
+
+# ---- SRT (still listening, so a drone that shows up is not refused) ----
+srt: yes
+srtAddress: :__SRT_PORT__
+
+# ---- WebRTC (egress to the operator LAN) ----
+# The media leaves from this host, so the ICE candidates have to be this host's
+# LAN addresses - that is what __WEBRTC_HOSTS__ carries.
+webrtc: yes
+webrtcAddress: :__WHEP_PORT__
+webrtcEncryption: no               # nginx terminates TLS in front of this
+webrtcAllowOrigins: ['*']
+webrtcTrustedProxies: [127.0.0.1]
+webrtcLocalUDPAddress: :10189
+webrtcLocalTCPAddress: ''
+webrtcIPsFromInterfaces: yes
+webrtcAdditionalHosts: [__WEBRTC_HOSTS__]
+webrtcICEServers2: []              # same LAN, so no STUN
+webrtcHandshakeTimeout: 10s
+webrtcTrackGatherTimeout: 2s
+
+# ---- authentication ----
+# A drone could still publish with the password; reads are local only, because
+# only nginx on this host talks to the WHEP port.
+authMethod: internal
+authInternalUsers:
+  - user: drone
+    pass: __PUBLISH_PASS__
+    ips: []
+    permissions:
+      - action: publish
+  - user: any
+    pass:
+    # viewers behind nginx /live/ reach MediaMTX with their real IP (webrtcTrustedProxies + X-Forwarded-For), so LAN/VPN ranges must be allowed for anonymous WHEP read
+    ips: ['127.0.0.1/32', '::1/128', '116.89.187.181/32', '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16']
+    permissions:
+      - action: read
+
+# ---- paths ----
+# Pulled from the Daejeon MediaMTX through the tunnel (local __RTSP_TUNNEL_PORT__
+# -> Daejeon 8554). TCP transport, because the tunnel carries TCP only. Pulled on
+# demand, so nothing crosses the line until a screen asks for that camera.
+pathDefaults:
+  sourceOnDemand: yes
+  sourceOnDemandStartTimeout: 10s
+  sourceOnDemandCloseAfter: 30s
+  rtspTransport: tcp
+
+paths:
+  drone1:
+    source: rtsp://127.0.0.1:__RTSP_TUNNEL_PORT__/drone1
+  drone2:
+    source: rtsp://127.0.0.1:__RTSP_TUNNEL_PORT__/drone2
+  drone3:
+    source: rtsp://127.0.0.1:__RTSP_TUNNEL_PORT__/drone3

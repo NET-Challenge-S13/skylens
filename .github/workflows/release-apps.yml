@@ -1,0 +1,175 @@
+name: release apps
+
+# Builds the native screens for people, not for the servers: the status board
+# and the control tower as desktop binaries for Linux, Windows and macOS, and
+# the status board as an Android APK.
+#
+# Nothing here is part of the path from a push to a running server. Daejeon and
+# the bridge take the web builds from ci-screens; these are for someone who
+# wants to run a screen on their own machine without a toolchain.
+#
+# Not on push, by design. A desktop build is minutes of Rust per platform and
+# nobody is waiting on it, so it runs on a tag or when someone asks for it.
+#
+# A manual run (workflow_dispatch) is only offered once this file is on the
+# default branch, which is how GitHub registers the button; a tag push works
+# from any branch. scripts/sync-main.sh is what carries it to main.
+#
+# What the downloads are not: signed by anyone. On macOS both screens come as
+# .app bundles in one dmg (macos-dmg.sh), with an ad-hoc signature (codesign
+# -s -, no certificate), which Apple Silicon needs before it runs anything;
+# Gatekeeper still asks, so the first start is right-click > Open, or
+# `xattr -dr com.apple.quarantine <app>`. The Linux binaries are unsigned. The
+# APK is signed with the project's own key (secrets ANDROID_KEYSTORE_BASE64 and
+# ANDROID_KEYSTORE_PASSWORD, a PKCS12 keystore with one key), the same on every
+# release, so a new version installs over the old one; without those secrets it
+# falls back to a debug key made on the runner, which differs every run. The
+# APK has not been checked on a real device yet.
+
+on:
+  push:
+    tags: ['v*', 'develop/v*']
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Attach the binaries to a release (off: build only)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-apps-${{ github.ref }}
+  cancel-in-progress: false # a release build is not worth cancelling
+
+jobs:
+  desktop:
+    strategy:
+      fail-fast: false # one platform failing should not hide the others
+      matrix:
+        include:
+          - os: ubuntu-latest
+            suffix: linux-x86_64
+          - os: windows-latest
+            suffix: windows-x86_64
+          - os: macos-latest
+            suffix: macos-arm64 # the runner is Apple Silicon; Intel would be a second entry
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: desktop-${{ matrix.suffix }}
+
+      - name: Linux build dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          # What a windowed wgpu application needs to link on a bare runner.
+          # fontconfig and freetype are for the text layout in blitz, which is
+          # what the first build of this workflow tripped over.
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            pkg-config libfontconfig1-dev libfreetype6-dev \
+            libx11-dev libxkbcommon-dev libxcb1-dev libwayland-dev \
+            libxrandr-dev libxi-dev libxcursor-dev libxinerama-dev \
+            libgl1-mesa-dev libasound2-dev libudev-dev
+
+      - name: Build
+        run: cargo build --release -p skylens-client -p skylens-control
+
+      - name: Collect
+        shell: bash
+        run: |
+          mkdir -p out
+          for n in skylens-client skylens-control; do
+            if [ -f "target/release/$n.exe" ]; then
+              cp "target/release/$n.exe" "out/$n-${{ matrix.suffix }}.exe"
+            else
+              cp "target/release/$n" "out/$n-${{ matrix.suffix }}"
+            fi
+          done
+          ls -l out
+
+      - name: App bundles, ad-hoc signature and dmg (macOS)
+        if: runner.os == 'macOS'
+        run: bash .github/workflows/macos-dmg.sh out ${{ matrix.suffix }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: screens-${{ matrix.suffix }}
+          path: out/*
+
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/') || inputs.publish
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/workflows/release-attach.sh out/*
+
+  android:
+    # The status board only: the control tower has no Android build.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,x86_64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: android
+
+      - name: Tools
+        run: |
+          # cargo-apk drives the NDK and signs the APK. It is not pinned: it is
+          # a build tool, not a dependency of the artifact, and the lock file
+          # does not cover it.
+          cargo install cargo-apk --locked
+          # The script finds the SDK itself and takes the newest NDK; say which
+          # one that is in the log, so a broken runner image is obvious.
+          ls -1 "$ANDROID_HOME/ndk" || true
+          ls -1 "$ANDROID_HOME/platforms" || true
+
+      - name: Signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          # One key for every release: Android refuses an update signed with a
+          # different key than the installed app.
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWORD" ]; then
+            echo "::warning::ANDROID_KEYSTORE_BASE64 / ANDROID_KEYSTORE_PASSWORD not set; signing with a throwaway debug key"
+            exit 0
+          fi
+          ks="$RUNNER_TEMP/skylens-release.p12"
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$ks"
+          echo "CARGO_APK_RELEASE_KEYSTORE=$ks" >> "$GITHUB_ENV"
+          echo "CARGO_APK_RELEASE_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+
+      - name: Build the APK
+        # aarch64 for phones and x86_64 for an emulator, in one APK.
+        run: bash src/skylens_client/build-android.sh all
+
+      - name: Collect
+        run: |
+          mkdir -p out
+          apk="$(find target -name 'skylens-board.apk' -print -quit)"
+          [ -n "$apk" ] || { echo "no APK was produced" >&2; exit 1; }
+          cp "$apk" out/skylens-board-android.apk
+          ls -l out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: skylens-board-android
+          path: out/*
+
+      - name: Attach to the release
+        if: startsWith(github.ref, 'refs/tags/') || inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bash .github/workflows/release-attach.sh out/*
