@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>직접 돌려보기 | SkyLens</title>
-    <meta name="description" content="npm install 하고 npm run demo 하면 파이프라인 전체가 데모 모드로 떠요. 접속 주소와 쿼리 옵션을 정리했어요." />
+    <meta name="description" content="Windows · macOS · Linux · Android 앱 받는 곳과, 데모 런처로 파이프라인 전체를 내 컴퓨터에서 돌리는 방법을 정리했어요." />
     <link rel="canonical" href="https://net-challenge-s13.github.io/skylens/run.html" />
 
     <meta property="og:type" content="website" />
@@ -12,7 +12,7 @@
     <meta property="og:locale" content="ko_KR" />
     <meta property="og:url" content="https://net-challenge-s13.github.io/skylens/run.html" />
     <meta property="og:title" content="직접 돌려보기 | SkyLens" />
-    <meta property="og:description" content="npm install 하고 npm run demo 하면 파이프라인 전체가 데모 모드로 떠요. 접속 주소와 쿼리 옵션을 정리했어요." />
+    <meta property="og:description" content="Windows · macOS · Linux · Android 앱 받는 곳과, 데모 런처로 파이프라인 전체를 내 컴퓨터에서 돌리는 방법을 정리했어요." />
     <meta property="og:image" content="https://net-challenge-s13.github.io/skylens/assets/og.png" />
     <meta property="og:image:secure_url" content="https://net-challenge-s13.github.io/skylens/assets/og.png" />
     <meta property="og:image:type" content="image/png" />
@@ -22,7 +22,7 @@
 
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="직접 돌려보기 | SkyLens" />
-    <meta name="twitter:description" content="npm install 하고 npm run demo 하면 파이프라인 전체가 데모 모드로 떠요. 접속 주소와 쿼리 옵션을 정리했어요." />
+    <meta name="twitter:description" content="Windows · macOS · Linux · Android 앱 받는 곳과, 데모 런처로 파이프라인 전체를 내 컴퓨터에서 돌리는 방법을 정리했어요." />
     <meta name="twitter:image" content="https://net-challenge-s13.github.io/skylens/assets/og.png" />
 
     <link rel="stylesheet" href="assets/guide.css" />
@@ -56,27 +56,106 @@
         <div class="seg__body">
           <h1>직접 돌려보기</h1>
           <p class="lede">
-            명령어 두 줄이면 파이프라인 전체가 떠요. 드론부터 게이트웨이·프록시·코어·모델 API·두
-            화면까지 전부 실제 코드로 돌아가요.
+            화면만 보고 싶으면 앱을 받아서 열면 되고, 파이프라인 전체를 내 컴퓨터에서 돌리고
+            싶으면 데모 런처를 쓰면 돼요. 데모도 드론 영상부터 코어 · 모델 서버 · 두 화면까지
+            전부 실제 코드로 돌아가요.
           </p>
+        </div>
+      </section>
+
+      <section class="seg" aria-labelledby="apps">
+        <div class="seg__rail"><span class="tick tick--lv4"></span></div>
+        <div class="seg__body">
+          <h2 id="apps">앱으로 받기</h2>
+
+          <div class="prose">
+            <p>
+              두 화면은 Windows · macOS · Linux 데스크톱 앱으로 나와 있고, 현황판은 Android 앱도
+              있어요. <a href="https://github.com/NET-Challenge-S13/skylens/releases/latest" rel="noreferrer">최신 릴리스</a>에서
+              받아요.
+            </p>
+          </div>
+
+          <div class="table-scroll">
+            <table>
+              <caption>릴리스 파일</caption>
+              <thead>
+                <tr>
+                  <th scope="col">운영체제</th>
+                  <th scope="col">현황판</th>
+                  <th scope="col">관제탑</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <th scope="row">Windows (x86_64)</th>
+                  <td><code>skylens-client-windows-x86_64.exe</code></td>
+                  <td><code>skylens-control-windows-x86_64.exe</code></td>
+                </tr>
+                <tr>
+                  <th scope="row">macOS (Apple Silicon)</th>
+                  <td colspan="2"><code>SkyLens-macos-arm64.dmg</code> 하나에 두 앱이 다 들어 있어요</td>
+                </tr>
+                <tr>
+                  <th scope="row">Linux (x86_64)</th>
+                  <td><code>skylens-client-linux-x86_64</code></td>
+                  <td><code>skylens-control-linux-x86_64</code></td>
+                </tr>
+                <tr>
+                  <th scope="row">Android</th>
+                  <td><code>skylens-board-android.apk</code></td>
+                  <td>없음</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div class="prose">
+            <p>
+              현황판 앱은 실행하면 먼저 배치된 브리지 서버에 붙고, 거기가 응답하지 않으면 이
+              컴퓨터에서 도는 데모(<code>127.0.0.1:8080</code>)에 붙어요. 관제탑 앱은 이 컴퓨터의
+              코어에 붙어요. 다른 곳에 붙이려면 <code>--core</code>로 주소를 줘요.
+            </p>
+          </div>
+
+          <pre><code>skylens-client --core 192.168.0.10:8080
+skylens-control --core ws://192.168.0.10:8080/control</code></pre>
+
+          <div class="note note--info">
+            <p>
+              <b>서명은 없어요.</b> macOS에서는 처음 열 때 오른쪽 클릭 후 <code>열기</code>를
+              누르거나 <code>xattr -dr com.apple.quarantine &lt;앱&gt;</code>을 실행해 주세요.
+              Android 앱은 실제 기기에서는 아직 확인하지 않았어요.
+            </p>
+          </div>
         </div>
       </section>
 
       <section class="seg" aria-labelledby="start">
         <div class="seg__rail"><span class="tick tick--lv4"></span></div>
         <div class="seg__body">
-          <h2 id="start">시작하기</h2>
-
-          <pre><code>npm install
-npm run demo</code></pre>
+          <h2 id="start">데모 직접 돌리기</h2>
 
           <div class="prose">
-            <p>그러면 이 주소들이 열려요.</p>
+            <p>
+              Rust 1.99 이상, Go, MediaMTX, ffmpeg가 필요해요. 모델 서버의 UNet 추론에 쓰는
+              libtorch는 빌드할 때 알아서 받아요. 촬영 영상도 처음 실행할 때 릴리스에서 받아요.
+            </p>
+          </div>
+
+          <pre><code>(cd src/skylens_core &amp;&amp; go build -o ../../target/skylens-core .)
+cargo run --release -p skylens-demo -- --native</code></pre>
+
+          <div class="prose">
+            <p>
+              <code>--native</code>를 붙이면 관제탑과 현황판 앱 창이 함께 떠요. 빼면 브라우저로
+              봐요.
+            </p>
           </div>
 
           <div class="table-scroll">
             <table>
-              <caption>접속 주소</caption>
+              <caption>브라우저 주소</caption>
               <thead>
                 <tr>
                   <th scope="col">화면</th>
@@ -86,15 +165,11 @@ npm run demo</code></pre>
               <tbody>
                 <tr>
                   <th scope="row">관제탑</th>
-                  <td><code>http://localhost:8080/res/static/control.html</code></td>
+                  <td><code>http://localhost:8080/</code> (코어가 보내 줘요)</td>
                 </tr>
                 <tr>
                   <th scope="row">현황판</th>
-                  <td><code>http://localhost:8090/res/static/status.html</code></td>
-                </tr>
-                <tr>
-                  <th scope="row">드론 패널</th>
-                  <td><code>http://localhost:5173/src/skylens_drone/index.html</code></td>
+                  <td><code>http://localhost:8090/</code> (게이트웨이 역할을 하는 런처 내장 서버)</td>
                 </tr>
               </tbody>
             </table>
@@ -102,8 +177,9 @@ npm run demo</code></pre>
 
           <div class="note note--info">
             <p>
-              <b><code>/</code>는 아무것도 안 띄워요.</b> 랜딩 페이지를 자동으로 서빙하지 않아요.
-              위 주소를 그대로 쳐 주세요.
+              <b>끌 때는 <code>Ctrl+C</code> 한 번이면 돼요.</b> 런처가 띄운 것을 역순으로 내려요.
+              어느 하나가 죽으면 나머지도 같이 정리해요. 반쯤 죽은 파이프라인을 멀쩡한 것처럼 두면
+              진단이 더 어렵기 때문이에요.
             </p>
           </div>
         </div>
@@ -116,29 +192,33 @@ npm run demo</code></pre>
 
           <ol class="track">
             <li>
-              <h3>시작하면 멈춰 있어요</h3>
-              <p>아직 아무 일도 일어나지 않아요. 경로가 지정되기를 기다리는 상태예요.</p>
-            </li>
-            <li>
-              <h3>관제탑에서 경로를 지정해요</h3>
+              <h3>시작하면 경로를 기다려요</h3>
               <p>
-                <code>경로 계획 · ROUTE</code>에서 웨이포인트를 찍고 배정하면 "태스크 지정 완료"로
-                바뀌어요. 드론이 현장에 도착해 연결되면 작업이 시작된다는 안내가 떠요.
+                관제탑의 미션 단계가 "대기"예요. 촬영한 비행 경로가 경로 계획에 미리 들어가 있어요.
               </p>
             </li>
             <li>
-              <h3>약 10초 뒤 드론이 붙어요</h3>
+              <h3>관제탑에서 경로를 배정해요</h3>
               <p>
-                "드론 연결됨" 알림이 뜨고 주행이 시작돼요. 지정한 경로를 왕복해요. 드론은
-                이동하는 동안에도 위치를 계속 보내지만, 코어는 도착 인사(<code>drone-hello</code>)를
-                보낸 드론만 도착으로 세요.
+                <code>경로 계획 · ROUTE</code>에서 <code>Assign</code>을 누르면 "태스크 지정"으로
+                바뀌어요. 배정이 새 미션의 시작이라, 지난 미션의 결과는 여기서 지워져요.
+                <code>--auto</code>를 붙이면 런처가 3초 뒤에 대신 눌러요.
               </p>
             </li>
             <li>
-              <h3>지나간 구간부터 현황판이 채워져요</h3>
+              <h3>드론이 붙고 영상이 들어와요</h3>
               <p>
-                드론이 한 구간을 통과할 때마다 그 구간의 수준 1이 확정되고, 이어서 수준이
-                올라가요. 좌측 상단 패널에서 구간별 현재 수준을 볼 수 있어요.
+                드론 세 대가 도착 인사(<code>drone_hello</code>)를 보내면 "임무 수행"이 되고,
+                관제탑 오른쪽 아래에 카메라 영상이 떠요. 현황판은 이때부터 "3D 공간 생성 중"
+                대기 시간을 재요.
+              </p>
+            </li>
+            <li>
+              <h3>지나간 구역부터 현황판이 채워져요</h3>
+              <p>
+                구역마다 거친 미리보기가 먼저 뜨고, 이어서 정제된 점과 메시로 바뀌어요. 왼쪽 위
+                서버 패널의 진행 단계 격자에서 구역마다 어디까지 왔는지 볼 수 있어요. 사람이나
+                위험구역이 잡히면 카메라가 그 지점으로 다가가요.
               </p>
             </li>
           </ol>
@@ -148,7 +228,7 @@ npm run demo</code></pre>
       <section class="seg" aria-labelledby="demo-mode">
         <div class="seg__rail"><span class="tick tick--lv3"></span></div>
         <div class="seg__body">
-          <h2 id="demo-mode">데모에서 바뀌는 건 두 가지뿐이에요</h2>
+          <h2 id="demo-mode">데모에서 바뀌는 건 기체 쪽뿐이에요</h2>
 
           <div class="prose">
             <p>
@@ -168,14 +248,24 @@ npm run demo</code></pre>
               </thead>
               <tbody>
                 <tr>
-                  <th scope="row">드론 촬영</th>
-                  <td>기체 카메라 → H.265 실시간 인코딩</td>
-                  <td>미리 인코딩해 둔 영상 파일</td>
+                  <th scope="row">촬영</th>
+                  <td>기체 카메라 → SRT</td>
+                  <td>실제 촬영본(드론 세 방향, 첫 비행 약 53초)을 SRT로 송출</td>
                 </tr>
                 <tr>
-                  <th scope="row">3D 복원</th>
-                  <td>GPU 서버에서 gsplat 학습</td>
-                  <td>미리 만들어 둔 구간 × 수준 자산</td>
+                  <th scope="row">비행</th>
+                  <td>DJI Fly 웨이포인트 비행</td>
+                  <td>촬영본에 기록된 GPS · 고도 · 방위를 영상과 맞춰 재생</td>
+                </tr>
+                <tr>
+                  <th scope="row">경로 계획</th>
+                  <td>운용자가 지도에서 지정</td>
+                  <td>촬영 경로가 미리 들어가 있고, 운용자는 배정만 눌러요</td>
+                </tr>
+                <tr>
+                  <th scope="row">게이트웨이 · 프록시</th>
+                  <td>브리지와 대전의 nginx</td>
+                  <td>런처 안의 현황판 서버가 대신해요</td>
                 </tr>
               </tbody>
             </table>
@@ -183,29 +273,22 @@ npm run demo</code></pre>
 
           <div class="prose">
             <p>
-              나머지는 전부 실제 경로예요. 드론이 게이트웨이에 붙고, 프록시가 코어로 중계하고,
-              코어가 모델 API에 잡을 발행하고, 현황판이 릴레이를 통해 받아요.
-            </p>
-            <p>
-              데모 자산이 없으면 현황판은 단일 장면 스트림으로 알아서 돌아가요. 딜레이 패턴만
-              안 보이고 나머지는 그대로예요.
+              복원 · 탐지 · 메시 · 배포는 데모에서도 실제 경로예요. 영상이 코어에서 프레임으로
+              뽑히고, 모델 서버가 점 · 메시 · 탐지를 만들어 코어로 돌려주고, 코어가 두 화면에
+              나눠 보내요. 모델 서버가 없으면 화면은 그 자리를 비워 두고 없다고 표시해요.
             </p>
           </div>
         </div>
       </section>
 
-      <section class="seg" aria-labelledby="query">
+      <section class="seg" aria-labelledby="options">
         <div class="seg__rail"><span class="tick tick--lv4"></span></div>
         <div class="seg__body">
-          <h2 id="query">주소 뒤에 붙이는 옵션</h2>
-
-          <div class="prose">
-            <p>주소 끝에 <code>?옵션</code>을 붙이면 동작을 바꿀 수 있어요.</p>
-          </div>
+          <h2 id="options">자주 쓰는 옵션</h2>
 
           <div class="table-scroll">
             <table>
-              <caption>자주 쓰는 옵션</caption>
+              <caption>데모 런처 (<code>skylens-demo</code>)</caption>
               <thead>
                 <tr>
                   <th scope="col">옵션</th>
@@ -213,47 +296,21 @@ npm run demo</code></pre>
                 </tr>
               </thead>
               <tbody>
-                <tr>
-                  <th scope="row"><code>?demo</code></th>
-                  <td>자동 데모로 돌아가요</td>
-                </tr>
-                <tr>
-                  <th scope="row"><code>?room=&lt;이름&gt;</code></th>
-                  <td>두 화면을 같은 방 이름으로 열면 서로 연결돼요</td>
-                </tr>
-                <tr>
-                  <th scope="row"><code>?splat=off|demo|cdn|light|&lt;url&gt;</code></th>
-                  <td>3D 장면 자산을 어디서 가져올지 정해요</td>
-                </tr>
-                <tr>
-                  <th scope="row"><code>?delay=off</code></th>
-                  <td>딜레이 패턴을 끄고 장면 하나로 봐요</td>
-                </tr>
-                <tr>
-                  <th scope="row"><code>?reveal=on|off</code></th>
-                  <td>장면이 드러나는 마스크를 켜고 꺼요</td>
-                </tr>
-                <tr>
-                  <th scope="row"><code>?spin=off</code></th>
-                  <td>카메라 자동 회전을 꺼요</td>
-                </tr>
-                <tr>
-                  <th scope="row"><code>?up=&lt;preset|euler&gt;</code></th>
-                  <td>3D 장면의 위쪽 방향을 맞춰요</td>
-                </tr>
-                <tr>
-                  <th scope="row"><code>?level=on</code></th>
-                  <td>장면 수평을 자동으로 맞춰요 (PCA)</td>
-                </tr>
+                <tr><th scope="row"><code>--native</code></th><td>관제탑 · 현황판 앱 창도 같이 띄워요</td></tr>
+                <tr><th scope="row"><code>--auto</code></th><td>미리 계획된 경로를 런처가 배정해서 사람 없이 끝까지 돌아요</td></tr>
+                <tr><th scope="row"><code>--no-loop</code></th><td>촬영본을 한 번만 보내요. 끝나면 드론은 마지막 위치에 머물러요</td></tr>
+                <tr><th scope="row"><code>--publish-delay S</code></th><td>영상과 드론을 S초 늦게 시작해요. 화면을 다 띄운 뒤 시작하고 싶을 때 써요</td></tr>
+                <tr><th scope="row"><code>--full-footage</code></th><td>낮게 난 두 번째 비행까지 보내요</td></tr>
+                <tr><th scope="row"><code>--no-model</code></th><td>모델 서버 없이 화면만 띄워요</td></tr>
+                <tr><th scope="row"><code>--model-addr H:P</code></th><td>이미 떠 있는 모델 서버(예: GPU 서버로 가는 터널)를 써요</td></tr>
+                <tr><th scope="row"><code>--online</code></th><td>내 컴퓨터가 아니라 KOREN 위에 배치된 서버에 붙어서 돌아요 (VPN 필요)</td></tr>
               </tbody>
             </table>
           </div>
 
-          <h3>실지형 지도 옵션</h3>
-
           <div class="table-scroll">
             <table>
-              <caption><code>?map</code>을 쓸 때 함께 쓰는 옵션</caption>
+              <caption>관제탑 앱 (<code>skylens-control</code>)</caption>
               <thead>
                 <tr>
                   <th scope="col">옵션</th>
@@ -261,26 +318,9 @@ npm run demo</code></pre>
                 </tr>
               </thead>
               <tbody>
-                <tr>
-                  <th scope="row"><code>?map</code></th>
-                  <td>실지형 씬을 켜요. <code>?map=uljin|gangneung|서,남,동,북</code>으로 지역을 고를 수 있어요</td>
-                </tr>
-                <tr>
-                  <th scope="row"><code>?tex=sat|off</code></th>
-                  <td>지형 위에 위성 영상을 입힐지 정해요</td>
-                </tr>
-                <tr>
-                  <th scope="row"><code>?drone=&lt;n&gt;</code></th>
-                  <td>드론 아이콘 크기예요. 기본값은 0.15</td>
-                </tr>
-                <tr>
-                  <th scope="row"><code>?ring=off</code></th>
-                  <td>씬 바깥의 배경 지형 링을 꺼요</td>
-                </tr>
-                <tr>
-                  <th scope="row"><code>?bld=off</code></th>
-                  <td>3D 건물을 안 그려요</td>
-                </tr>
+                <tr><th scope="row"><code>--core URL</code></th><td>붙을 코어. 기본은 <code>ws://127.0.0.1:8080/control</code></td></tr>
+                <tr><th scope="row"><code>--display points|black|aerial</code></th><td>건물 표시 방식(점 · 검정 텍스처 · 실사 항공뷰)</td></tr>
+                <tr><th scope="row"><code>--video off</code></th><td>카메라 영상 패널을 꺼요. 영상은 ffmpeg로 받아요</td></tr>
               </tbody>
             </table>
           </div>
@@ -294,25 +334,23 @@ npm run demo</code></pre>
 
           <div class="prose">
             <p>
-              위성 영상과 건물 데이터는 VWorld 인증 키가 필요해요. 키는 저장소 안이 아니라
-              <strong>저장소의 부모 폴더</strong>에 둬요.
+              관제탑의 위성 영상과 건물 데이터는 VWorld 인증 키가 필요해요. 코어가 키를 읽어서
+              VWorld에 대신 요청하기 때문에 <strong>키는 화면 쪽으로 나가지 않아요.</strong>
+            </p>
+            <p>
+              코어는 <code>VWORLD_KEY</code> 환경변수를 먼저 보고, 없으면
+              <code>SKYLENS_VWORLD_ENV</code>가 가리키는 파일, 그것도 없으면 저장소 부모 폴더의
+              <code>.env.vworld</code>를 읽어요.
             </p>
           </div>
 
           <pre><code># 저장소 바로 바깥 디렉터리에서
 cat &gt; .env.vworld &lt;&lt; EOF
 VWORLD_KEY=&lt;vworld.kr에서 발급한 인증키&gt;
-VWORLD_DOMAIN=http://localhost:5173
 EOF</code></pre>
 
           <div class="prose">
-            <p>
-              키가 없어도 괜찮아요. 지형과 건물만 안 그려지고 나머지는 그대로 돌아가요.
-            </p>
-            <p>
-              키는 개발 서버의 프록시가 서버 쪽에서만 끼워 넣어요.
-              <strong>프론트엔드 번들에는 절대 들어가지 않아요.</strong>
-            </p>
+            <p>키가 없어도 괜찮아요. 지형과 건물만 안 그려지고 나머지는 그대로 돌아가요.</p>
           </div>
         </div>
       </section>
@@ -320,11 +358,11 @@ EOF</code></pre>
       <section class="seg" aria-labelledby="commands">
         <div class="seg__rail"><span class="tick tick--lv4"></span></div>
         <div class="seg__body">
-          <h2 id="commands">명령어 전체</h2>
+          <h2 id="commands">빌드와 테스트</h2>
 
           <div class="table-scroll">
             <table>
-              <caption>TypeScript 쪽</caption>
+              <caption>Rust · Go</caption>
               <thead>
                 <tr>
                   <th scope="col">명령</th>
@@ -332,41 +370,17 @@ EOF</code></pre>
                 </tr>
               </thead>
               <tbody>
-                <tr>
-                  <th scope="row"><code>npm run demo</code></th>
-                  <td>전 컴포넌트를 데모 모드로 조립해서 띄워요</td>
-                </tr>
-                <tr>
-                  <th scope="row"><code>npm run dev</code></th>
-                  <td>Vite 개발 서버만 띄워요 (HMR, LAN 노출)</td>
-                </tr>
-                <tr>
-                  <th scope="row"><code>npm run core</code> 등</th>
-                  <td>
-                    컴포넌트를 하나씩 띄워요. <code>core</code> · <code>client</code> ·
-                    <code>gateway</code> · <code>proxy</code> · <code>drone</code> ·
-                    <code>model</code>
-                  </td>
-                </tr>
-                <tr>
-                  <th scope="row"><code>npm run build</code></th>
-                  <td>타입체크하고 빌드해요</td>
-                </tr>
-                <tr>
-                  <th scope="row"><code>npm test</code></th>
-                  <td>Playwright E2E를 돌려요. <code>npm run test:headed</code>면 브라우저가 보여요</td>
-                </tr>
-                <tr>
-                  <th scope="row"><code>npm run demo:clean</code></th>
-                  <td>데모로 띄운 프로세스를 정리해요</td>
-                </tr>
+                <tr><th scope="row"><code>cargo build --workspace</code></th><td>공통 계약 · 드론 · 모델 서버 · 두 화면 · 데모를 빌드해요</td></tr>
+                <tr><th scope="row"><code>cargo test --workspace</code></th><td>테스트를 돌려요</td></tr>
+                <tr><th scope="row"><code>cargo clippy --workspace --all-targets</code></th><td>린트를 돌려요</td></tr>
+                <tr><th scope="row"><code>go build ./...</code> · <code>go test ./...</code></th><td><code>src/skylens_core</code>에서 코어를 빌드하고 테스트해요</td></tr>
               </tbody>
             </table>
           </div>
 
           <div class="table-scroll">
             <table>
-              <caption>Python 쪽: 의존성은 uv로 관리해요</caption>
+              <caption>Python: UNet 학습 코드, 의존성은 uv로 관리해요</caption>
               <thead>
                 <tr>
                   <th scope="col">명령</th>
@@ -374,22 +388,10 @@ EOF</code></pre>
                 </tr>
               </thead>
               <tbody>
-                <tr>
-                  <th scope="row"><code>uv sync</code></th>
-                  <td><code>.venv/</code>를 만들고 패키지를 설치해요</td>
-                </tr>
-                <tr>
-                  <th scope="row"><code>uv run pytest</code></th>
-                  <td>테스트를 돌려요</td>
-                </tr>
-                <tr>
-                  <th scope="row"><code>uv run ruff check src/</code></th>
-                  <td>린트를 돌려요</td>
-                </tr>
-                <tr>
-                  <th scope="row"><code>uv run jupyter lab</code></th>
-                  <td>학습 노트북(<code>train.ipynb</code>)을 열어요</td>
-                </tr>
+                <tr><th scope="row"><code>uv sync</code></th><td><code>.venv/</code>를 만들고 패키지를 설치해요</td></tr>
+                <tr><th scope="row"><code>uv run pytest</code></th><td>테스트를 돌려요</td></tr>
+                <tr><th scope="row"><code>uv run ruff check src/</code></th><td>린트를 돌려요</td></tr>
+                <tr><th scope="row"><code>uv run jupyter lab</code></th><td>학습 노트북(<code>train.ipynb</code>)을 열어요</td></tr>
               </tbody>
             </table>
           </div>
@@ -412,13 +414,10 @@ EOF</code></pre>
           <div class="prose">
             <p>
               관제탑과 현황판은 각자 다른 컴퓨터에서 전체화면으로 띄우는 걸 전제로 만들었어요.
-              <code>npm run dev</code>는 LAN에 열려 있으니까 같은 네트워크의 다른 컴퓨터에서
-              <code>http://&lt;IP&gt;:5173/res/static/control.html?room=demo</code> 같은 주소로
-              접속하면 돼요.
-            </p>
-            <p>
-              두 화면의 <code>room</code> 값만 같으면 연결돼요. <code>&amp;demo</code>를 붙이면
-              자동 데모로 돌아가요.
+              데모를 돌리는 컴퓨터의 IP가 <code>192.168.0.10</code>이라면, 같은 네트워크의 다른
+              컴퓨터에서 브라우저로 <code>http://192.168.0.10:8080/</code>(관제탑)이나
+              <code>http://192.168.0.10:8090/</code>(현황판)을 열거나, 앱에
+              <code>--core</code>로 그 주소를 주면 돼요.
             </p>
           </div>
         </div>

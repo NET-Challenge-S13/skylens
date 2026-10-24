@@ -1392,6 +1392,99 @@ figcaption {
 }
 
 /* ==========================================================================
+   Charts (assets/charts.js) and the detection gallery
+   ========================================================================== */
+
+.chart {
+  position: relative;
+  margin: 0 0 30px;
+  padding: 18px 18px 10px;
+  border: 1px solid var(--l3);
+  background: var(--void-lift);
+}
+
+.chart__plot {
+  position: relative;
+  min-height: 120px;
+}
+
+.chart__plot svg {
+  display: block;
+  overflow: visible;
+  font-family: var(--font-mono);
+}
+
+.chart__plot svg [tabindex]:focus {
+  outline: none;
+  stroke: var(--text-primary);
+  stroke-width: 1.5;
+}
+
+.chart__tip {
+  position: absolute;
+  z-index: 2;
+  min-width: 140px;
+  max-width: 260px;
+  padding: 10px 12px;
+  border: 1px solid var(--l4);
+  background: rgba(5, 7, 10, 0.94);
+  pointer-events: none;
+  font-family: var(--font-mono);
+  font-size: var(--hud-sm);
+  line-height: 1.5;
+}
+
+.chart__tip p {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.chart__tip .chart__tip-title {
+  margin-bottom: 4px;
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+}
+
+.chart__tip b {
+  margin-right: 8px;
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+/* A dialog cut out of a screen: tall, so it is held to a phone-like width. */
+.figure--dialog {
+  max-width: 440px;
+}
+
+.gallery {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 22px;
+  margin: 0 0 30px;
+}
+
+.gallery figure {
+  margin: 0;
+}
+
+.gallery figcaption {
+  font-size: var(--hud-md);
+}
+
+.gallery--wide {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@media (max-width: 720px) {
+  .gallery {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .chart {
+    padding: 14px 10px 6px;
+  }
+}
+
+/* ==========================================================================
    Narrow screens
    ========================================================================== */
 
