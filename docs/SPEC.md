@@ -165,9 +165,9 @@ related: "[[INTENT.md]], [[COMPONENTS.md]], [[ARCHITECTURE.md]], [[NETWORK_ARCHI
 - 노드는 `ReconNode::declare()`로 선언하고 `CompositionHost`가 id로 들고 있는다. 프레임 묶음(`LiveFrameSet`, 키는 `FrameKey(드론, 순번, 개정)`)을 `compose`하면 새 묶음만 한 번 들어가고, 재선언은 무시되며, 카메라가 빠진 묶음은 기다린다.
 - 늦게 오거나 고쳐진 프레임은 노드의 reconcile 정책(append-only / replay window / zone invalidation / strict)을 따른다.
 - 구간은 `zones(span, overlap)`으로 나눈다. 같은 구간 번호는 항상 같은 공간 조각을 가리킨다.
-- 메시는 deltamesh `SdfMesher`(GPU는 `GpuMesher`, 프로세스당 장치 하나)다. 0.1 m 복셀(deltamesh 기본값 0.2 m의 절반, 점 묶음 0.05 m·영향 반경 0.2 m도 함께 절반), 32³ 블록. 경계 정점이 이웃 블록과 비트 단위로 같아 균열 없이 이어진다.
+- 메시는 deltamesh `SdfMesher`(GPU는 `GpuMesher`, 프로세스당 장치 하나)다. 0.05 m 복셀(deltamesh 기본값 0.2 m의 1/4, 점 묶음 0.025 m·영향 반경 0.1 m도 같은 비율), 32³ 블록. 경계 정점이 이웃 블록과 비트 단위로 같아 균열 없이 이어진다.
 - deltamesh는 crates.io 릴리스(0.1.1)를 쓴다. 유니폼 간격을 GPU 정렬값의 배수로 맞추는 수정(정렬값 64바이트 GPU에서 첫 구간이 멈추던 문제)이 릴리스에 들어 있다. 벤더 복사본은 없다.
-- 렌더링은 pointblitz(0.3)다. 점 청크는 16비트 위치(포맷 v2)이고 파싱은 메인 스레드 밖에서 한다. 점 슬롯은 `SlotScene` 하나(칸 = 슬롯 id, 칸당 16바이트)에 쌓고, 같은 패스에서 점 청크 장면들과 함께 그린다. 메시 블록은 pointblitz에 더한 메시 렌더 경로가 조명 없이 정점 색 그대로 그린다. 현황판의 메시 표시는 메시를 바닥면으로 깔고 그 위에 점을 함께 그린다(세부와 색은 점, 점 사이 빈틈은 메시). 점 표시는 메시를 그리지 않는다.
+- 렌더링은 pointblitz(0.3)다. 점 청크는 16비트 위치(포맷 v2)이고 파싱은 메인 스레드 밖에서 한다. 점 슬롯은 `SlotScene` 하나(칸 = 슬롯 id, 칸당 16바이트)에 쌓고, 같은 패스에서 점 청크 장면들과 함께 그린다. 메시 블록은 pointblitz에 더한 메시 렌더 경로가 정점 색에 흰 빛(고른 빛 0.85 + 위에서 오는 빛 0.15)만 얹어 그린다. 현황판의 메시 표시는 메시를 바닥면으로 깔고 그 위에 점을 함께 그린다(세부와 색은 점, 점 사이 빈틈은 메시). 점 표시는 메시를 그리지 않는다.
 - cumulus3d는 crates.io 릴리스(0.11)를 쓴다. 전체 GPU SIFT, CUDA BA·희소 단계는 릴리스에 들어 있고 `.gpu()`가 고른다. 벤더 복사본은 없다. 새 릴리스는 `cumulus3d-sync.yml`이 `deps/cumulus3d-v<버전>` PR로 따라간다(`docs/CUMULUS3D_SYNC.md`).
 - 라이브 노드 기본값: 특징 선행(lookahead) 4, 백로그 묶음(`SKYLENS_BACKLOG_BATCH`) 1 = 끔, 구간 미리보기(`SKYLENS_ZONE_PREVIEW`) 끔, 표시 솎기(`SKYLENS_LIVE_STRIDE`) 2. 묶음을 끈 이유: cumulus3d 0.11.0에서 batch > 1이면 V100 라이브의 표시 축척이 약 30배 줄었다(원인 미확인. cumulus3d 0.11.1이 노드 기본값을 1로 바꾸고 축척 회귀 테스트를 더했지만, 이 저장소의 락은 0.11.0이라 `SKYLENS_BACKLOG_BATCH` 기본값으로 직접 1을 준다). 카메라 내부값은 `SKYLENS_CAMERA_JSON`이 없으면 내장 DJI FC9589 1920×1080(fx 1505 · fy 1510 · cx 960 · cy 540)이다.
 - 점 슬롯 스트림 id는 모델 실행마다 늘어난다(시작 시각 초, 같은 프로세스에서는 앞선 id + 1 이상). 코어와 화면은 더 큰 id의 첫 메시지가 오면 옛 실행의 메시지를 버리고 빈 점 버퍼에서 시작한다. 라이브 노드는 파일을 쓰지 않는다.

@@ -174,12 +174,13 @@ pub fn spawn_poller(node: ReconNode, stop: Arc<AtomicBool>) -> anyhow::Result<Jo
     })
 }
 
-/// The mesher's settings: deltamesh's defaults at half the voxel (0.1 m instead of 0.2 m), with
-/// the bin and the splat radius halved with it so the field keeps its shape at the finer grid.
-/// At 0.2 m one vertex colour averaged tens of the display's points and the surface read as
-/// blurred next to the points it was built from.
+/// The mesher's settings: deltamesh's defaults at a quarter of the voxel (0.05 m instead of
+/// 0.2 m), with the bin and the splat radius scaled with it so the field keeps its shape at the
+/// finer grid. At 0.2 m one vertex colour averaged tens of the display's points and the surface
+/// read as blurred next to the points it was built from; 0.1 m was clearly better, 0.05 m sharper
+/// still at about four times its blocks.
 fn mesh_config() -> deltamesh::Config {
-    deltamesh::Config { voxel: 0.1, bin: 0.05, splat_radius: 0.2, ..deltamesh::Config::default() }
+    deltamesh::Config { voxel: 0.05, bin: 0.025, splat_radius: 0.1, ..deltamesh::Config::default() }
 }
 
 /// Creates the mesher: deltamesh's GPU mesher when asked and built with the

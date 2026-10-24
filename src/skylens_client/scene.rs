@@ -48,11 +48,27 @@ pub fn mesh_opacity(fade: f32, display: Display) -> f32 {
     }
 }
 
-/// The mesh surface: the reconstruction's own vertex colours, unlit, so the surface has the same
-/// colours as the points drawn over it (lit, it came out darker and warmer than the scene).
+/// The mesh light: even fill and the faint key from above (they add to 1).
+pub const SURFACE_EVEN: f32 = 0.85;
+pub const SURFACE_KEY: f32 = 0.15;
+
+/// The mesh surface: the reconstruction's own vertex colours under a neutral light that is mostly
+/// even (0.85) with a faint key from above (0.15), so the colours stay those of the points drawn
+/// over it while the surface's relief still reads. The old warm 0.35 + 0.5 light came out darker
+/// and yellower than the scene; fully unlit, the surface looked flat.
 pub fn surface(alpha: f32) -> Material {
+    let white = config::rgb(0xffffff);
+    let d = DVec3::new(10.0, -8.0, 20.0).normalize();
     Material {
-        shading: Shading::Unlit,
+        shading: Shading::Lambert {
+            sky: white,
+            ground: white,
+            hemi_intensity: SURFACE_EVEN,
+            sun_dir: [d.x as f32, d.y as f32, d.z as f32],
+            sun_color: white,
+            sun_intensity: SURFACE_KEY,
+            emissive: [0.0; 3],
+        },
         tint: [1.0, 1.0, 1.0, alpha],
         blend: if alpha >= 1.0 { Blend::Opaque } else { Blend::Alpha },
         double_sided: true,
@@ -367,9 +383,13 @@ mod tests {
     }
 
     #[test]
-    fn the_mesh_surface_is_unlit_in_its_own_colours() {
+    fn the_mesh_surface_keeps_its_colours_under_a_faint_white_key() {
         let m = surface(1.0);
-        assert_eq!((m.shading, m.blend, m.tint), (Shading::Unlit, Blend::Opaque, [1.0; 4]));
+        assert_eq!((m.blend, m.tint), (Blend::Opaque, [1.0; 4]));
+        let Shading::Lambert { sky, ground, sun_color, hemi_intensity, sun_intensity, .. } = m.shading else { panic!("lit") };
+        assert!(sky == ground && ground == sun_color);
+        // Full brightness facing the key light, never brighter than the colour itself.
+        assert!((hemi_intensity + sun_intensity - 1.0).abs() < 1e-6 && sun_intensity < 0.2);
         assert_eq!(surface(0.5).blend, Blend::Alpha);
     }
 

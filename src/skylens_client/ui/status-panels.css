@@ -22,7 +22,8 @@
 .board-row {
   display: flex;
   align-items: flex-start;
-  gap: 16px;
+  /* The toolbar's own gap: when the two ends meet they sit as close as the buttons do. */
+  gap: 8px;
   overflow-x: auto;
   overflow-y: hidden;
 }

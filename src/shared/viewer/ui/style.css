@@ -262,6 +262,9 @@ html {
 .pane-label {
   top: 14px;
   left: 16px;
+  /* The toolbar buttons' padding (.control-toolbar__btn, .board-toolbar__btn), so the screen's
+     name and the buttons across the top row are one height on both screens. */
+  padding: 8px 14px;
   z-index: 5;
   pointer-events: none;
   user-select: none;
