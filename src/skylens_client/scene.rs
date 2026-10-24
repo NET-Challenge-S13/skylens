@@ -322,7 +322,7 @@ impl ViewScreen for StatusScene {
             self.touched = true;
         }
         match *input {
-            ViewInput::PointerDown { x, y, button, shift } => self.orbit.pointer_down(x, y, button == 2, button == 1, shift),
+            ViewInput::PointerDown { x, y, button, pan_key } => self.orbit.pointer_down(x, y, button == 2, button == 1, pan_key),
             ViewInput::PointerMove { x, y, pressed } => {
                 if pressed {
                     self.orbit.pointer_move(x, y, self.css_height);

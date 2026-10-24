@@ -12,7 +12,7 @@ use crate::peniko::{Color, Fill};
 use blitz_dom::node::ComputedStyles;
 use blitz_dom::Widget;
 use skylens_viewer::shell::UiInput;
-use skylens_viewer::{Dom, q};
+use skylens_viewer::{Dom, NodeId, q};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
@@ -240,6 +240,7 @@ impl LivePanels {
     pub fn mount(&mut self, dom: &mut Dom<'_>) {
         dom.append_html(q("section.pane"), &pl::live_markup());
         dom.append_html(q("section.pane"), &pl::settings_markup(&self.settings.borrow()));
+        dom.append_html(q("section.pane"), &pl::help_markup());
         if let Some(c) = dom.find("live-wait-wave") {
             dom.mount_widget(c, WaveWidget::boxed(self.wait_cfg.clone(), WavePalette::CYAN, 84, 52, 2.4));
         }
@@ -268,6 +269,21 @@ impl LivePanels {
             }
             "settings-close" => {
                 self.set_settings_open(dom, false);
+                return true;
+            }
+            "help" => {
+                dom.remove_class("board-help", "is-hidden");
+                return true;
+            }
+            "help-close" => {
+                dom.add_class("board-help", "is-hidden");
+                return true;
+            }
+            // Like the settings backdrop: only a click on the dimmed area itself closes.
+            "help-backdrop" => {
+                if input.target().map(|t| t.node) == dom.find("board-help") {
+                    dom.add_class("board-help", "is-hidden");
+                }
                 return true;
             }
             // Only a click on the dimmed backdrop itself closes; one inside the panel does nothing.
@@ -358,12 +374,18 @@ impl LivePanels {
         self.match_toolbar_width(dom);
     }
 
-    /// The monitor is exactly as wide as the toolbar row above it (camera-state chip and settings
-    /// button at their text's width), so the right column has one width that follows the chips.
+    /// The monitor is exactly as wide as the camera-state chip and the settings button above it
+    /// (at their text's width), so the right column has one width that follows the chips. The
+    /// guide button left of them stays out of it.
     fn match_toolbar_width(&mut self, dom: &mut Dom<'_>) {
-        let Some(bar) = dom.find("board-toolbar") else { return };
+        let (Some(cam), Some(btn)) = (dom.find(q("#board-toolbar .cam-state")), dom.find("board-settings-btn")) else { return };
         // Blitz lays out in CSS pixels.
-        let width = dom.doc_ref().get_node(bar).map_or(0.0, |n| f64::from(n.final_layout().size.width));
+        let doc = dom.doc_ref();
+        let span = |n: NodeId| doc.get_node(n).map(|n| (f64::from(n.absolute_position(0.0, 0.0).x), f64::from(n.final_layout().size.width)));
+        let width = match (span(cam), span(btn)) {
+            (Some((cam_x, _)), Some((btn_x, btn_w))) => btn_x + btn_w - cam_x,
+            _ => 0.0,
+        };
         let px = width.round() as i64;
         if px > 0 && self.shown.monitor_width != Some(px) {
             dom.set_style("live-monitor", "width", &format!("{px}px"));

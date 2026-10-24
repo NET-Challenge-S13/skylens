@@ -531,7 +531,7 @@ mod tests {
         assert_eq!(p.stylesheets.last().map(String::as_str), Some(LIVE_PANELS_CSS));
         assert!(p.stylesheets.iter().any(|c| c == STATUS_PANELS_CSS));
         let html = p.html();
-        for id in ["status-view", "overlay-status", "board-toolbar", "board-settings-btn", "server-status", "board-waiting", "toast-root"] {
+        for id in ["status-view", "overlay-status", "board-toolbar", "board-help-btn", "board-settings-btn", "server-status", "board-waiting", "toast-root"] {
             assert!(html.contains(&format!("id=\"{id}\"")), "{id}");
         }
     }

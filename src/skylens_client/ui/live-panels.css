@@ -324,6 +324,52 @@
   color: var(--text-primary);
 }
 
+/* Controls guide: what to do on the left (key caps, a mouse with the button lit, words), what
+   it does on the right. One fixed first column so every section lines up. */
+.board-help__list {
+  display: grid;
+  grid-template-columns: 250px 1fr;
+  column-gap: 12px;
+  row-gap: 8px;
+  align-items: center;
+  margin: 0 0 4px;
+  font-size: var(--text-sm);
+}
+.board-help__list dt {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-primary);
+}
+.board-help__list dd {
+  margin: 0;
+  color: var(--text-secondary);
+}
+.board-help__mouse {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 20px;
+}
+.board-help__key {
+  display: inline-block;
+  min-width: 22px;
+  padding: 1px 6px;
+  border: 1px solid var(--border-strong);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--surface-inset);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 16px;
+  text-align: center;
+  color: var(--text-primary);
+}
+.board-help__note {
+  display: block;
+  margin-top: 16px;
+  line-height: 1.5;
+}
+
 .board-settings__note {
   font-size: var(--text-xs);
   color: var(--text-tertiary);

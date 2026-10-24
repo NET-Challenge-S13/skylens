@@ -317,6 +317,85 @@ pub fn settings_markup(s: &LiveSettings) -> String {
     )
 }
 
+/// A mouse with one part lit, for the controls guide.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum MousePart {
+    Left,
+    Right,
+    Wheel,
+}
+
+/// Inline SVG of a mouse (14 x 20 CSS px) with `part` filled in the board ink.
+fn mouse_svg(part: MousePart) -> String {
+    let lit = match part {
+        MousePart::Left => "<path d=\"M7 1.6 A5.4 5.4 0 0 0 1.6 7 L1.6 8 L7 8 Z\" fill=\"#d9cba8\"/>",
+        MousePart::Right => "<path d=\"M7 1.6 A5.4 5.4 0 0 1 12.4 7 L12.4 8 L7 8 Z\" fill=\"#d9cba8\"/>",
+        MousePart::Wheel => "<rect x=\"5.9\" y=\"3\" width=\"2.2\" height=\"4\" rx=\"1.1\" fill=\"#d9cba8\"/>",
+    };
+    format!(
+        "<svg class=\"board-help__mouse\" width=\"14\" height=\"20\" viewBox=\"0 0 14 20\">{lit}         <rect x=\"1\" y=\"1\" width=\"12\" height=\"18\" rx=\"6\" fill=\"none\" stroke=\"#93a5c2\" stroke-width=\"1.2\"/>         <line x1=\"1\" y1=\"8\" x2=\"13\" y2=\"8\" stroke=\"#93a5c2\" stroke-width=\"1.2\"/>         <line x1=\"7\" y1=\"1\" x2=\"7\" y2=\"8\" stroke=\"#93a5c2\" stroke-width=\"1.2\"/></svg>"
+    )
+}
+
+/// A key cap.
+fn key(label: &str) -> String {
+    format!("<kbd class=\"board-help__key\">{label}</kbd>")
+}
+
+/// The guide's sections: title, then (how, what it does) rows. `how` is markup (key caps, the
+/// mouse picture, words).
+fn help_sections() -> Vec<(&'static str, Vec<(String, &'static str)>)> {
+    let with = |icon: String, words: &str| format!("{icon}<span>{words}</span>");
+    vec![
+        (
+            "메인 화면 · 마우스",
+            vec![
+                (with(mouse_svg(MousePart::Left), "왼쪽 드래그"), "회전"),
+                (with(mouse_svg(MousePart::Right), "오른쪽 드래그"), "이동"),
+                (format!("{}<span>또는</span>{}<span>+</span>{}<span>드래그</span>", key("Shift"), key("Ctrl"), mouse_svg(MousePart::Left)), "이동"),
+                (with(mouse_svg(MousePart::Wheel), "휠 · 가운데 버튼 드래그"), "확대 · 축소"),
+            ],
+        ),
+        (
+            "메인 화면 · 터치",
+            vec![("<span>한 손가락 드래그</span>".to_string(), "회전"), ("<span>두 손가락 벌리기 · 오므리기</span>".to_string(), "확대 · 축소")],
+        ),
+        (
+            "미니맵",
+            vec![
+                (with(mouse_svg(MousePart::Left), "드래그"), "회전"),
+                (with(mouse_svg(MousePart::Wheel), "휠"), "확대 · 축소"),
+                (with(mouse_svg(MousePart::Left), "더블클릭"), "처음 시점으로"),
+            ],
+        ),
+    ]
+}
+
+/// The controls guide: a dialog like the settings one, opened from the toolbar's guide button.
+pub fn help_markup() -> String {
+    let mut sections = String::new();
+    for (title, rows) in help_sections() {
+        sections.push_str(&format!("<div class=\"board-settings__section\">{title}</div><dl class=\"board-help__list\">"));
+        for (how, what) in rows {
+            sections.push_str(&format!("<dt>{how}</dt><dd>{what}</dd>"));
+        }
+        sections.push_str("</dl>");
+    }
+    format!(
+        concat!(
+            "<div id=\"board-help\" class=\"board-settings-overlay is-hidden\" data-live=\"help-backdrop\">",
+            "<div class=\"sl-surface sl-surface--modal board-settings\">",
+            "<button type=\"button\" class=\"board-settings__close\" data-live=\"help-close\" aria-label=\"조작 안내 닫기\">×</button>",
+            "<div class=\"board-settings__title\">조작 · Guide</div>",
+            "{sections}",
+            "<div class=\"board-settings__note board-help__note\">화면을 직접 움직이면 자동 카메라(CAM)가 잠시 멈춥니다. ",
+            "설정의 전체 보기를 누르면 복원된 범위 전체로 돌아갑니다.</div>",
+            "</div></div>",
+        ),
+        sections = sections,
+    )
+}
+
 /// Waiting screen and monitor, in this order.
 pub fn live_markup() -> String {
     format!(
@@ -598,6 +677,15 @@ mod tests {
             assert!(m.contains(&format!("id=\"{id}\"")), "{id}");
         }
         assert!(m.contains("3D 공간 생성 중") && m.contains("sl-surface--panel live-monitor"));
+    }
+
+    #[test]
+    fn the_guide_lists_mouse_touch_and_minimap_controls() {
+        let m = help_markup();
+        assert!(m.contains("id=\"board-help\"") && m.contains("data-live=\"help-close\"") && m.contains("data-live=\"help-backdrop\""));
+        for text in ["메인 화면 · 마우스", "메인 화면 · 터치", "미니맵", ">Shift</kbd>", ">Ctrl</kbd>", "<dd>이동</dd>", "더블클릭", "<svg class=\"board-help__mouse\""] {
+            assert!(m.contains(text), "{text}");
+        }
     }
 
     #[test]

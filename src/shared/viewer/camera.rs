@@ -395,7 +395,7 @@ pub enum DragKind {
     Dolly,
 }
 
-/// Operator navigation like three.js `OrbitControls` (left drag rotates, right or shift drag pans,
+/// Operator navigation like three.js `OrbitControls` (left drag rotates, right, Shift or Ctrl drag pans,
 /// wheel zooms, `enableDamping` with `dampingFactor` 0.08), plus the status board's rule that the
 /// automatic camera pauses while dragging and for 3.5 s after.
 #[derive(Debug, Clone, PartialEq)]
@@ -471,12 +471,12 @@ impl UserOrbit {
         self.scale = 1.0;
     }
 
-    /// Pointer pressed on the view (CSS px). `secondary` is the right button; `shift` turns a
-    /// left drag into a pan, `middle` dollies.
-    pub fn pointer_down(&mut self, x: f32, y: f32, secondary: bool, middle: bool, shift: bool) {
+    /// Pointer pressed on the view (CSS px). `secondary` is the right button; `pan_key` (Shift or
+    /// Ctrl) turns a left drag into a pan, `middle` dollies.
+    pub fn pointer_down(&mut self, x: f32, y: f32, secondary: bool, middle: bool, pan_key: bool) {
         let kind = if middle {
             DragKind::Dolly
-        } else if secondary || shift {
+        } else if secondary || pan_key {
             DragKind::Pan
         } else {
             DragKind::Rotate

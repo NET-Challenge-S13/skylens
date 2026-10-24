@@ -523,8 +523,9 @@ pub struct FrameSpec {
 /// Pointer input on the view, in CSS pixels relative to its top-left corner.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ViewInput {
-    /// `button`: 0 main, 1 middle, 2 right.
-    PointerDown { x: f32, y: f32, button: u8, shift: bool },
+    /// `button`: 0 main, 1 middle, 2 right. `pan_key`: Shift or Ctrl held, which turns a main
+    /// button drag into a pan.
+    PointerDown { x: f32, y: f32, button: u8, pan_key: bool },
     PointerMove { x: f32, y: f32, pressed: bool },
     PointerUp { x: f32, y: f32, button: u8 },
     /// Browser convention: `delta_y > 0` scrolls down (zoom out).
@@ -787,7 +788,7 @@ impl<S: ViewScreen> Widget for View3d<S> {
                     _ => 3,
                 };
                 self.press = Some((x, y, button));
-                ViewInput::PointerDown { x, y, button, shift: e.mods.shift() }
+                ViewInput::PointerDown { x, y, button, pan_key: e.mods.shift() || e.mods.ctrl() }
             }
             UiEvent::PointerMove(e) => {
                 let pressed = !e.buttons.is_empty();
