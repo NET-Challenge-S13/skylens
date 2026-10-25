@@ -39,7 +39,7 @@ SkyLens는 여러 대의 드론이 재난 현장을 분할 탐색하며 보낸 �
 
 두 화면은 같은 코드로 웹, Windows · macOS · Linux 데스크톱 앱으로 돌고, 현황판은 Android 앱도 있습니다. 앱은 [릴리스](https://github.com/NET-Challenge-S13/skylens/releases/latest)에서 받습니다.
 
-> 📄 기획·설계: [INTENT.md](docs/INTENT.md) · [ARCHITECTURE.md](docs/ARCHITECTURE.md) · [PROJECT.md](PROJECT.md)
+> 📄 기획·설계: [INTENT.md](https://github.com/NET-Challenge-S13/skylens/blob/develop/docs/INTENT.md) · [ARCHITECTURE.md](https://github.com/NET-Challenge-S13/skylens/blob/develop/docs/ARCHITECTURE.md) · [PROJECT.md](https://github.com/NET-Challenge-S13/skylens/blob/develop/PROJECT.md)
 
 ---
 
