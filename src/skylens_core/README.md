@@ -49,6 +49,7 @@
 | `SKYLENS_CORE_FRAME_SOURCE_ID` | `formation` | `FrameKey.source_id` |
 | `SKYLENS_CORE_PUSH_QUEUE` | `256` | 모델이 없을 때 쌓아 두는 묶음 수 |
 | `SKYLENS_CORE_PUSH_REDECLARE` | `32` | 다시 붙을 때 재선언하는 최근 묶음 수 |
+| `SKYLENS_CORE_INPUT_IDLE_SEC` | `20` | 미션 중 이 시간 동안 어느 영상에서도 프레임이 없으면 모델에 입력 끝(`EndInput`)을 알린다. 마지막 구역이 닫히고 최종 메시지가 나간다. `0`이면 끈다 |
 | `SKYLENS_CORE_WHEP_BASE` | `/live/{path}/whep` | 화면에 알리는 WHEP 주소. `{path}`·`{id}`·`{station}` |
 | `SKYLENS_CORE_ASSIGNED_HOLD_MS` | `2000` | "태스크 지정 완료"를 보여 주는 시간 |
 | `SKYLENS_CORE_DRONE_ETA_SEC` | `10` | 드론 대기 카운트다운. 0이면 표시하지 않는다 |

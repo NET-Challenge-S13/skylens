@@ -120,6 +120,10 @@ func (m *fakeModel) StartMission(context.Context) (*modelv1.StartMissionResponse
 	return &modelv1.StartMissionResponse{StreamId: 7, SequenceBase: 7 << 32}, nil
 }
 
+func (m *fakeModel) EndInput(context.Context) (*modelv1.EndInputResponse, error) {
+	return &modelv1.EndInputResponse{}, nil
+}
+
 func (m *fakeModel) Health(context.Context) (*modelv1.HealthResponse, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

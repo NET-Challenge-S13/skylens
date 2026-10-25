@@ -43,6 +43,14 @@ service ModelService {
   // settings are unaffected. In-flight subscriptions end; the core resubscribes
   // and receives the new run from its beginning.
   rpc StartMission(StartMissionRequest) returns (StartMissionResponse);
+
+  // The live input of the current run is over: the core saw no frame from any
+  // video feed for a while. The model closes the zones still open, lets the
+  // refinements still running finish and ends the point slot stream with its
+  // final message, so the screens can show the run as complete. Frames that
+  // arrive later are ignored until the next StartMission. A second call is a
+  // no-op. It returns at once; what is left arrives on SubscribeChunks.
+  rpc EndInput(EndInputRequest) returns (EndInputResponse);
 }
 
 // ---- shared shapes ----------------------------------------------------------
@@ -155,6 +163,13 @@ message StartMissionResponse {
   uint32 stream_id = 1;
   // Every chunk of the new run has a sequence above this one.
   uint64 sequence_base = 2;
+}
+
+message EndInputRequest {}
+
+message EndInputResponse {
+  // True when the run had already been ended (by an earlier call).
+  bool already_ended = 1;
 }
 
 message HealthRequest {}
