@@ -36,6 +36,7 @@ const (
 	ModelService_PushFrames_FullMethodName      = "/skylens.model.v1.ModelService/PushFrames"
 	ModelService_SubscribeChunks_FullMethodName = "/skylens.model.v1.ModelService/SubscribeChunks"
 	ModelService_StartMission_FullMethodName    = "/skylens.model.v1.ModelService/StartMission"
+	ModelService_EndInput_FullMethodName        = "/skylens.model.v1.ModelService/EndInput"
 )
 
 // ModelServiceClient is the client API for ModelService service.
@@ -69,6 +70,13 @@ type ModelServiceClient interface {
 	// settings are unaffected. In-flight subscriptions end; the core resubscribes
 	// and receives the new run from its beginning.
 	StartMission(ctx context.Context, in *StartMissionRequest, opts ...grpc.CallOption) (*StartMissionResponse, error)
+	// The live input of the current run is over: the core saw no frame from any
+	// video feed for a while. The model closes the zones still open, lets the
+	// refinements still running finish and ends the point slot stream with its
+	// final message, so the screens can show the run as complete. Frames that
+	// arrive later are ignored until the next StartMission. A second call is a
+	// no-op. It returns at once; what is left arrives on SubscribeChunks.
+	EndInput(ctx context.Context, in *EndInputRequest, opts ...grpc.CallOption) (*EndInputResponse, error)
 }
 
 type modelServiceClient struct {
@@ -161,6 +169,16 @@ func (c *modelServiceClient) StartMission(ctx context.Context, in *StartMissionR
 	return out, nil
 }
 
+func (c *modelServiceClient) EndInput(ctx context.Context, in *EndInputRequest, opts ...grpc.CallOption) (*EndInputResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(EndInputResponse)
+	err := c.cc.Invoke(ctx, ModelService_EndInput_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // ModelServiceServer is the server API for ModelService service.
 // All implementations must embed UnimplementedModelServiceServer
 // for forward compatibility.
@@ -192,6 +210,13 @@ type ModelServiceServer interface {
 	// settings are unaffected. In-flight subscriptions end; the core resubscribes
 	// and receives the new run from its beginning.
 	StartMission(context.Context, *StartMissionRequest) (*StartMissionResponse, error)
+	// The live input of the current run is over: the core saw no frame from any
+	// video feed for a while. The model closes the zones still open, lets the
+	// refinements still running finish and ends the point slot stream with its
+	// final message, so the screens can show the run as complete. Frames that
+	// arrive later are ignored until the next StartMission. A second call is a
+	// no-op. It returns at once; what is left arrives on SubscribeChunks.
+	EndInput(context.Context, *EndInputRequest) (*EndInputResponse, error)
 	mustEmbedUnimplementedModelServiceServer()
 }
 
@@ -222,6 +247,9 @@ func (UnimplementedModelServiceServer) SubscribeChunks(*SubscribeRequest, grpc.S
 }
 func (UnimplementedModelServiceServer) StartMission(context.Context, *StartMissionRequest) (*StartMissionResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method StartMission not implemented")
+}
+func (UnimplementedModelServiceServer) EndInput(context.Context, *EndInputRequest) (*EndInputResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method EndInput not implemented")
 }
 func (UnimplementedModelServiceServer) mustEmbedUnimplementedModelServiceServer() {}
 func (UnimplementedModelServiceServer) testEmbeddedByValue()                      {}
@@ -352,6 +380,24 @@ func _ModelService_StartMission_Handler(srv interface{}, ctx context.Context, de
 	return interceptor(ctx, in, info, handler)
 }
 
+func _ModelService_EndInput_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(EndInputRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(ModelServiceServer).EndInput(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: ModelService_EndInput_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(ModelServiceServer).EndInput(ctx, req.(*EndInputRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // ModelService_ServiceDesc is the grpc.ServiceDesc for ModelService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -378,6 +424,10 @@ var ModelService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "StartMission",
 			Handler:    _ModelService_StartMission_Handler,
+		},
+		{
+			MethodName: "EndInput",
+			Handler:    _ModelService_EndInput_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

@@ -289,3 +289,44 @@ func TestDronesSorted(t *testing.T) {
 		t.Fatalf("drones %v", got)
 	}
 }
+
+// Two drones saying hello at the same time: the status that leaves last must be
+// the one with both drones. Statuses used to be computed under the lock and
+// published after it, so the count of the first hello could reach the screens
+// after the count of the second and stay there.
+func TestConcurrentHellosPublishInOrder(t *testing.T) {
+	var (
+		mu      sync.Mutex
+		calls   int
+		counts  []uint32
+		blocked = make(chan struct{})
+		release = make(chan struct{})
+	)
+	m := New(Options{OnChange: func(s *viewerv1.MissionStatus) {
+		mu.Lock()
+		calls++
+		first := calls == 1
+		mu.Unlock()
+		if first {
+			close(blocked)
+			<-release // the first publish is slow; the second hello runs meanwhile
+		}
+		mu.Lock()
+		counts = append(counts, s.GetDronesOnline())
+		mu.Unlock()
+	}})
+	done := make(chan struct{})
+	go func() { m.Hello(1, modelv1.DroneStation_DRONE_STATION_LEFT); close(done) }()
+	<-blocked
+	second := make(chan struct{})
+	go func() { m.Hello(2, modelv1.DroneStation_DRONE_STATION_CENTER); close(second) }()
+	time.Sleep(50 * time.Millisecond)
+	close(release)
+	<-done
+	<-second
+	mu.Lock()
+	defer mu.Unlock()
+	if len(counts) != 2 || counts[0] != 1 || counts[1] != 2 {
+		t.Fatalf("published drone counts %v, want [1 2]", counts)
+	}
+}

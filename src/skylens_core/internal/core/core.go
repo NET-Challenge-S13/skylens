@@ -82,6 +82,7 @@ type Core struct {
 	grouper *frames.Grouper
 	pusher  *modelclient.Pusher
 	sub     *modelclient.Subscriber
+	input   inputWatch
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -100,6 +101,7 @@ type Core struct {
 	framesIn       uint64
 	latencyMs      *float64
 	modelUp        bool
+	lateLogged     bool // frames after the end of input were logged this run
 	health         *modelv1.HealthResponse
 	healthErr      string
 }
@@ -119,6 +121,7 @@ func New(opts Options) *Core {
 		cancel:   cancel,
 		start:    time.Now(),
 		owners:   map[uint32]*ws.Peer{},
+		input:    inputWatch{idle: opts.Config.InputIdle},
 	}
 	c.lastSite = c.Site()
 	c.Mission = mission.New(mission.Options{
@@ -142,7 +145,10 @@ func New(opts Options) *Core {
 		Period:   period,
 		MaxWait:  opts.Config.FrameMaxWait,
 		Expected: func() []string { return c.frames.Cameras() },
-		Emit:     c.pusher.Push,
+		Emit: func(fs *modelv1.FrameSet) {
+			c.noteFrameSet(c.input.seen(time.Now()))
+			c.pusher.Push(fs)
+		},
 	}
 	c.frames = frames.NewManager(opts.Frames, c.acceptFrame)
 	c.sub = &modelclient.Subscriber{
@@ -173,6 +179,7 @@ func (c *Core) Run(ctx context.Context) {
 		spawn(c.sub.Run)
 		spawn(c.pusher.Run)
 		spawn(c.healthLoop)
+		spawn(c.inputLoop)
 	}
 	spawn(c.grouper.Run)
 	spawn(c.statusLoop)
@@ -446,6 +453,10 @@ func (c *Core) resetReconstruction() {
 			log.Printf("[core] new mission: model slot stream %d, chunks above %d", started.GetStreamId(), started.GetSequenceBase())
 		}()
 	}
+	c.input.reset()
+	c.mu.Lock()
+	c.lateLogged = false
+	c.mu.Unlock()
 	dropped := c.Store.ResetModel()
 	if dropped == 0 {
 		return

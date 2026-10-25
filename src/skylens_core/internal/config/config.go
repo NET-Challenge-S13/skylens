@@ -37,6 +37,9 @@ type Config struct {
 	FrameSourceID string        // SKYLENS_CORE_FRAME_SOURCE_ID
 	PushQueue     int           // SKYLENS_CORE_PUSH_QUEUE
 	PushRedeclare int           // SKYLENS_CORE_PUSH_REDECLARE
+	// InputIdle ends the model's run after this long without a frame from any
+	// feed (the last zone closes, the final message goes out). 0 turns it off.
+	InputIdle time.Duration // SKYLENS_CORE_INPUT_IDLE_SEC
 
 	// Live video for screens.
 	WHEPBase string // SKYLENS_CORE_WHEP_BASE, {path} {id} {station}
@@ -218,6 +221,7 @@ func Load(getenv func(string) string, cwd string) (Config, error) {
 		FrameSourceID: str("SKYLENS_CORE_FRAME_SOURCE_ID", "formation"),
 		PushQueue:     int(num("SKYLENS_CORE_PUSH_QUEUE", 256)),
 		PushRedeclare: int(num("SKYLENS_CORE_PUSH_REDECLARE", 32)),
+		InputIdle:     time.Duration(num("SKYLENS_CORE_INPUT_IDLE_SEC", 20) * float64(time.Second)),
 
 		WHEPBase: str("SKYLENS_CORE_WHEP_BASE", "/live/{path}/whep"),
 

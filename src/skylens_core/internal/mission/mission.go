@@ -62,8 +62,9 @@ type Options struct {
 	// DroneETA is the expected wait for a drone; the status carries the
 	// remaining part as eta_seconds. Zero means no eta.
 	DroneETA time.Duration
-	// OnChange receives every status the machine publishes. It is called
-	// without any internal lock held.
+	// OnChange receives every status the machine publishes, one at a time and
+	// in the order the changes happened. The state lock is not held, so it may
+	// read the mission (Status, Phase); it must not change it.
 	OnChange func(*viewerv1.MissionStatus)
 	// Clock defaults to the wall clock.
 	Clock Clock
@@ -73,6 +74,11 @@ type Options struct {
 type Mission struct {
 	opts Options
 
+	// pub orders publishing: a change and the statuses it publishes go out
+	// before the next change starts. Taken before mu, held across OnChange.
+	// Without it two drones saying hello at once could publish their counts in
+	// the wrong order and leave screens on the smaller one.
+	pub           sync.Mutex
 	mu            sync.Mutex
 	phase         viewerv1.MissionPhase
 	awaitingSince time.Time
@@ -130,6 +136,8 @@ func (m *Mission) Status() *viewerv1.MissionStatus {
 // awaiting-drone, and straight to active if a drone is already on station.
 // Assigning again restarts the sequence.
 func (m *Mission) RouteAssigned() {
+	m.pub.Lock()
+	defer m.pub.Unlock()
 	m.mu.Lock()
 	var out []*viewerv1.MissionStatus
 	m.stopHoldLocked()
@@ -147,6 +155,8 @@ func (m *Mission) RouteAssigned() {
 }
 
 func (m *Mission) holdElapsed(gen uint64) {
+	m.pub.Lock()
+	defer m.pub.Unlock()
 	m.mu.Lock()
 	if gen != m.holdGen || m.phase != viewerv1.MissionPhase_MISSION_PHASE_ASSIGNED {
 		m.mu.Unlock()
@@ -167,6 +177,8 @@ func (m *Mission) holdElapsed(gen uint64) {
 // not start a mission. The status is re-published even when the phase holds,
 // because it carries drones_online.
 func (m *Mission) Hello(droneID uint32, station modelv1.DroneStation) {
+	m.pub.Lock()
+	defer m.pub.Unlock()
 	m.mu.Lock()
 	m.drones[droneID] = station
 	var out []*viewerv1.MissionStatus
@@ -182,6 +194,8 @@ func (m *Mission) Hello(droneID uint32, station modelv1.DroneStation) {
 // Gone records that a drone's uplink closed. The last drone leaving an active
 // mission sends it back to waiting, with the eta restarted.
 func (m *Mission) Gone(droneID uint32) {
+	m.pub.Lock()
+	defer m.pub.Unlock()
 	m.mu.Lock()
 	if _, ok := m.drones[droneID]; !ok {
 		m.mu.Unlock()
@@ -200,6 +214,8 @@ func (m *Mission) Gone(droneID uint32) {
 
 // Reset goes back to idle.
 func (m *Mission) Reset() {
+	m.pub.Lock()
+	defer m.pub.Unlock()
 	m.mu.Lock()
 	m.stopHoldLocked()
 	out := m.toLocked(viewerv1.MissionPhase_MISSION_PHASE_IDLE, nil)
