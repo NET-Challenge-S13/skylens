@@ -275,7 +275,7 @@
           <div class="gallery gallery--wide">
             <figure>
               <img
-                src="assets/detect/collapse-road-1.jpg"
+                src="assets/detect/collapse-road.jpg"
                 alt="허리케인이 지나간 해안 주택가를 위에서 찍은 사진 두 장. 왼쪽 정답에는 무너진 집들이 파란색, 가운데 도로가 노란색으로 칠해져 있고, 오른쪽 모델 출력도 같은 집과 도로를 칠했지만 더 넓게 칠했습니다."
                 width="1032"
                 height="547"
@@ -288,42 +288,92 @@
             </figure>
             <figure>
               <img
-                src="assets/detect/collapse-road-2.jpg"
-                alt="잔해가 흩어진 주택가 사진 두 장. 왼쪽 정답에는 무너진 집 네 채가 파란색으로 칠해져 있고, 오른쪽 모델 출력은 같은 집들에 더해 길 일부를 노란색으로 칠했습니다."
+                src="assets/detect/fire.jpg"
+                alt="불길이 치솟는 거실 사진 두 장. 왼쪽 정답과 오른쪽 모델 출력 모두 소파 옆 벽면의 불길 영역을 표시하고 있습니다."
                 width="1032"
                 height="550"
                 loading="lazy"
               />
               <figcaption>
-                같은 데이터의 다른 장면. 붕괴는 정답과 거의 같은 자리에 칠했고, 정답에 없는 도로
-                차단도 일부 칠했어요.
+                화재 검증 이미지. 불이 차지한 넓이를 정답 42.1%, 모델 40.6%로 거의 같게 잡았어요.
               </figcaption>
             </figure>
           </div>
 
-          <div class="gallery">
+          <h3>사람은 상자가 아니라 점으로 찾아요</h3>
+          <div class="prose">
+            <p>
+              드론은 사람을 위에서 비스듬히 내려다봐요. 데모 촬영본도 이륙 지점에서 40m 넘게 떠서
+              카메라를 아래로 약 60° 숙여 찍었어요. 이 각도에서는 사람을 감싸는 상자의 모양이
+              <strong>촬영 각에 따라 계속 바뀌어요.</strong> 바로 위에서 보면 머리와 어깨만 작게
+              보이고, 비스듬히 보면 키만큼 길어지고, 누워 있거나 풀과 잔해에 반쯤 가린 사람은
+              어디까지가 몸인지 경계가 흐려요. 같은 사람이라도 드론과 각도가 바뀔 때마다 "맞는
+              상자"가 달라지는 셈이에요.
+            </p>
+            <p>
+              반면 <strong>사람이 어디 있는지</strong>는 어느 각도에서 봐도 같아요. 그리고
+              SkyLens가 실제로 쓰는 것도 그 위치 하나예요. 점을 복원된 3D 위로 투영해 GPS 좌표로
+              바꾸고, 여러 드론이 다른 각도에서 본 것을 그 좌표에서 합쳐요. 상자의 크기는 이 과정
+              어디에도 쓰이지 않아요.
+            </p>
+            <p>
+              실험으로도 확인했어요. 상자 크기를 맞추는 학습이 공유 백본을 흔들지 않게 끊었더니
+              상자 품질은 떨어졌지만, SARD 재현율은 0.8813에서 0.9012로, 도로 차단 IoU는
+              0.3249에서 0.4175로 올랐어요. 그래서 사람 성능도 점이 사람 몸 위에 있는지로
+              판정해요.
+            </p>
+          </div>
+
+          <figure class="figure--dialog">
+            <img
+              src="assets/detect/person-lying-zoom.jpg"
+              alt="풀밭에 옆으로 누운 사람을 확대한 사진. 정답 상자는 옆으로 넓은 초록 사각형이고, 모델이 낸 상자는 세로로 긴 빨간 사각형으로 모양이 다르지만, 모델의 빨간 점은 누운 사람의 몸 한가운데에 찍혀 있습니다."
+              width="816"
+              height="448"
+              loading="lazy"
+            />
+            <figcaption>
+              아래 첫 사진의 누운 사람을 확대했어요. 모델의 상자(빨강)는 정답(초록)과 모양이 전혀
+              다르지만, 점은 몸 한가운데에 있어요. 3D로 옮기는 데 필요한 건 이 점이에요.
+            </figcaption>
+          </figure>
+
+          <div class="gallery gallery--wide">
             <figure>
               <img
-                src="assets/detect/person-sard.jpg"
-                alt="돌무더기 옆 흙길을 비스듬히 내려다본 드론 사진. 길 위와 돌무더기 위의 사람 네 명에 빨간 상자가 쳐져 있습니다."
+                src="assets/detect/person-sard-1.jpg"
+                alt="연못가 풀밭을 비스듬히 내려다본 드론 사진. 서 있는 사람 둘과 풀밭에 누운 사람 하나에 빨간 상자가 쳐져 있습니다."
                 width="1360"
                 height="803"
                 loading="lazy"
               />
               <figcaption>
-                수색 구조 데이터 SARD. 돌무더기와 길 위의 네 명을 모두 찾았어요.
+                수색 구조 데이터 SARD. 연못가 풀밭의 세 명을 모두 찾았어요. 가운데는 누워 있는
+                사람이에요.
               </figcaption>
             </figure>
             <figure>
               <img
-                src="assets/detect/person-city.jpg"
-                alt="도심 대로를 높은 곳에서 내려다본 드론 사진. 인도와 횡단보도의 작은 사람들에 빨간 상자가 여러 개 쳐져 있습니다."
+                src="assets/detect/person-sard-2.jpg"
+                alt="돌무더기와 흙길을 내려다본 드론 사진. 돌무더기 위 한 명과 길 위의 네 명에 빨간 상자가 쳐져 있습니다."
                 width="1360"
                 height="803"
                 loading="lazy"
               />
               <figcaption>
-                VisDrone 도심. 정답 28명 중 22명을 맞혔어요. 멀리 있는 작은 사람일수록 놓쳐요.
+                SARD. 돌무더기와 흙길 위의 다섯 명을 모두 찾았어요.
+              </figcaption>
+            </figure>
+            <figure>
+              <img
+                src="assets/detect/person-sard-3.jpg"
+                alt="키 큰 풀이 덮인 비탈을 내려다본 드론 사진. 풀숲 곳곳에 작게 보이는 사람 세 명에 빨간 상자가 쳐져 있습니다."
+                width="1360"
+                height="803"
+                loading="lazy"
+              />
+              <figcaption>
+                SARD. 키 큰 풀숲에 몸이 반쯤 가린 세 명을 모두 찾았어요.
               </figcaption>
             </figure>
           </div>
