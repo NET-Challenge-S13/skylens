@@ -196,7 +196,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -207,7 +207,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -1099,9 +1099,9 @@ dependencies = [
 
 [[package]]
 name = "cumulus3d-align"
-version = "0.11.0"
+version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d4bd8338d9144944d8bfbb3af6f0b7e6bee79fc617b2a505d7670283ff2dc303"
+checksum = "83386cd0d54c35174b1f2f6ed65d4ca0faa6db8cefa3977a1bf703a83d445b4a"
 dependencies = [
  "cumulus3d-core",
  "nalgebra",
@@ -1111,9 +1111,9 @@ dependencies = [
 
 [[package]]
 name = "cumulus3d-ba"
-version = "0.11.0"
+version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ff61e6a9bfb3a6005c1ea99a75452da9a7aeea108894a0ed3a31f9e749fcf7f5"
+checksum = "fa8504398713d611583938c027e198534f88918ee43e576c1f31529087593d95"
 dependencies = [
  "cumulus3d-core",
  "faer",
@@ -1124,9 +1124,9 @@ dependencies = [
 
 [[package]]
 name = "cumulus3d-cli"
-version = "0.11.0"
+version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b732e39860248eafc54a94514e3b40592acaec2fe5a6d7628e5987ab354bf74"
+checksum = "81c719b5e0c630ccdae06c21e55f4a4902e875ce77b0c3ca47a7d027bc71f5a6"
 dependencies = [
  "clap",
  "cumulus3d-align",
@@ -1146,9 +1146,9 @@ dependencies = [
 
 [[package]]
 name = "cumulus3d-core"
-version = "0.11.0"
+version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "17a29e3db1d31cc52e2e6554e2e02da53ba628ad2bfc2a0f3bda602517ef7027"
+checksum = "faf88908975bff3dfb0f9b47ff05d53786292c04f40c789d9f7e3828ebeabb97"
 dependencies = [
  "nalgebra",
  "rand 0.10.3",
@@ -1159,9 +1159,9 @@ dependencies = [
 
 [[package]]
 name = "cumulus3d-cuda"
-version = "0.11.0"
+version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "48b92052c7886f1667e15db9596829be638b3a2902419a5b53c764fe41416fde"
+checksum = "afe1b683173b070cded1b71f0f02ddaafbebf345a73cf8e5662da13a1b8fdf5f"
 dependencies = [
  "cudarc",
  "cumulus3d-ba",
@@ -1177,9 +1177,9 @@ dependencies = [
 
 [[package]]
 name = "cumulus3d-dense"
-version = "0.11.0"
+version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b9342a17ecfac32574e473ebcf73fe665d062040b1b226cf06b31c02d6e7179f"
+checksum = "cea6fe641b5ed10ce6c490c65a407f87c93f74c21a9d7b0643f04c0b2354785f"
 dependencies = [
  "cumulus3d-core",
  "image",
@@ -1190,9 +1190,9 @@ dependencies = [
 
 [[package]]
 name = "cumulus3d-features"
-version = "0.11.0"
+version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3f98c07b2c35c439b871e89569e851139fa35c5e3e7f22f351d2c199526f9280"
+checksum = "ce4184f163a1d0971dcc0290760413826d92fd09a1983cf0a689354243441fde"
 dependencies = [
  "cumulus3d-core",
  "image",
@@ -1204,9 +1204,9 @@ dependencies = [
 
 [[package]]
 name = "cumulus3d-matching"
-version = "0.11.0"
+version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d474d4c948481be5c45d717213d8b1fee583ae3e28f077cedd4e2604141e3bb8"
+checksum = "dff65fbc6b77c03f39e53f11c75c1f8b607154afe5dc1ba8e2cd1499f692a539"
 dependencies = [
  "cumulus3d-core",
  "nalgebra",
@@ -1218,9 +1218,9 @@ dependencies = [
 
 [[package]]
 name = "cumulus3d-sfm"
-version = "0.11.0"
+version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5bd3794097ec7ac10831635e06ee51a1175bd1e3286cc96c6176d55bff651371"
+checksum = "ffea89f121965ba73e9fba0bd3c27fa3570fab872d50f661a9c3ff9e54275bc6"
 dependencies = [
  "cumulus3d-ba",
  "cumulus3d-core",
@@ -1548,7 +1548,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3435,7 +3435,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -4530,7 +4530,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4910,7 +4910,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5489,7 +5489,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -5530,7 +5530,7 @@ dependencies = [
  "cfg-if",
  "libc",
  "psm",
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -5897,7 +5897,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5915,7 +5915,7 @@ version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d8c27177b12a6399ffc08b98f76f7c9a1f4fe9fc967c784c5a071fa8d93cf7e1"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -7247,7 +7247,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
