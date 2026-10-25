@@ -163,7 +163,48 @@ pub struct Engine {
     inject: Mutex<Option<std::sync::mpsc::Sender<live::Msg>>>,
     /// Jobs run one at a time.
     job_lock: Mutex<()>,
+    /// Set by [`Engine::end_input`]: the live input of this run is over.
+    input_ended: AtomicBool,
+    /// Pushes running now and when the last one finished, so the end of input waits for the
+    /// sets the core already sent (see [`Engine::end_input`]).
+    pushes: Arc<PushActivity>,
 }
+
+/// How busy the frame pushes are. Shared with the end-of-input thread.
+#[derive(Default)]
+struct PushActivity {
+    running: std::sync::atomic::AtomicUsize,
+    last_done: Mutex<Option<std::time::Instant>>,
+}
+
+impl PushActivity {
+    /// No push running and none finished for `quiet`.
+    fn quiet_for(&self, quiet: std::time::Duration) -> bool {
+        self.running.load(Ordering::SeqCst) == 0 && lock(&self.last_done).is_none_or(|t| t.elapsed() >= quiet)
+    }
+}
+
+/// Marks one push as running until dropped.
+struct PushGuard<'a>(&'a PushActivity);
+
+impl<'a> PushGuard<'a> {
+    fn new(a: &'a PushActivity) -> Self {
+        a.running.fetch_add(1, Ordering::SeqCst);
+        Self(a)
+    }
+}
+
+impl Drop for PushGuard<'_> {
+    fn drop(&mut self) {
+        *lock(&self.0.last_done) = Some(std::time::Instant::now());
+        self.0.running.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// How long the frame pushes must be idle before the end of input is declared: the core's
+/// stream reads the next set within milliseconds of the last one finishing, so a pause this long
+/// means nothing is left in it.
+const END_INPUT_QUIET: std::time::Duration = std::time::Duration::from_secs(3);
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|p| p.into_inner())
@@ -281,6 +322,8 @@ impl Engine {
             stream,
             inject: Mutex::new(Some(tx)),
             job_lock: Mutex::new(()),
+            input_ended: AtomicBool::new(false),
+            pushes: Arc::new(PushActivity::default()),
         })
     }
 
@@ -325,6 +368,7 @@ impl Engine {
     /// blocking context. Cameras may arrive in separate pushes with the same key:
     /// the set is declared once all of them are there.
     pub fn push(&self, set: FrameSet) -> anyhow::Result<PushOutcome> {
+        let _busy = PushGuard::new(&self.pushes);
         self.note_gps(&set);
         let assembled = lock(&self.assembler).offer(set)?;
         let state = match assembled {
@@ -342,6 +386,52 @@ impl Engine {
         };
         let outcome = self.node.compose(state).map_err(|e| anyhow!("compose: {e}"))?;
         Ok(PushOutcome::from_compose(&outcome))
+    }
+
+    /// Ends the live input of this run (gRPC EndInput): cumulus3d closes the zones still open,
+    /// lets the refinements still running finish and emits its final events, which go out on the
+    /// subscription like any other (the last zone, then the empty final slot message). Frames
+    /// pushed afterwards are ignored.
+    ///
+    /// The model runs slower than the video, so when the core calls this the sets it already sent
+    /// may still be on the push stream. The end waits until no push is running and none has
+    /// finished for [`END_INPUT_QUIET`], so it lands after them instead of cutting them off.
+    ///
+    /// Returns at once, on a thread of its own, because the wait and the draining of the
+    /// refinements take as long as they do; returns false when the input was already ended.
+    pub fn end_input(&self) -> bool {
+        if self.input_ended.swap(true, Ordering::SeqCst) {
+            return false;
+        }
+        let node = self.node.clone();
+        let pushes = Arc::clone(&self.pushes);
+        let spawned = std::thread::Builder::new().name("end-input".into()).spawn(move || {
+            let asked = std::time::Instant::now();
+            while !pushes.quiet_for(END_INPUT_QUIET) {
+                std::thread::sleep(std::time::Duration::from_millis(200));
+            }
+            let started = std::time::Instant::now();
+            tracing::info!(
+                "live input: the pushes went quiet {:.1}s after the end was asked; closing the last zones",
+                asked.elapsed().as_secs_f64()
+            );
+            match node.compose(FrameState::End) {
+                Ok(outcome) => tracing::info!(
+                    "live input ended: last zones closed in {:.1}s ({outcome:?})",
+                    started.elapsed().as_secs_f64()
+                ),
+                Err(e) => tracing::warn!("ending the live input: {e}"),
+            }
+        });
+        if let Err(e) = spawned {
+            tracing::warn!("ending the live input: no thread for it: {e}");
+        }
+        true
+    }
+
+    /// Whether [`Engine::end_input`] was called on this run.
+    pub fn input_ended(&self) -> bool {
+        self.input_ended.load(Ordering::SeqCst)
     }
 
     /// Chunks with a sequence above `after_sequence`, then every new one as it is
@@ -452,6 +542,18 @@ impl Drop for Engine {
 mod tests {
     use super::*;
     use cumulus3d_cli::compose::IgnoreReason;
+
+    #[test]
+    fn push_activity_is_quiet_only_when_idle_long_enough() {
+        let a = PushActivity::default();
+        assert!(a.quiet_for(END_INPUT_QUIET), "no push yet");
+        {
+            let _busy = PushGuard::new(&a);
+            assert!(!a.quiet_for(std::time::Duration::ZERO), "a push is running");
+        }
+        assert!(a.quiet_for(std::time::Duration::ZERO));
+        assert!(!a.quiet_for(std::time::Duration::from_secs(60)), "one just finished");
+    }
 
     #[test]
     fn compose_outcomes_map_to_push_outcomes() {

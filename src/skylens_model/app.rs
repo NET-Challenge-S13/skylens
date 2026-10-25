@@ -426,6 +426,20 @@ impl ModelService for ModelGrpc {
         tracing::info!("new mission: slot stream {stream_id}, chunks above {sequence_base}");
         Ok(tonic::Response::new(pb::StartMissionResponse { stream_id, sequence_base }))
     }
+
+    async fn end_input(
+        &self,
+        _request: tonic::Request<pb::EndInputRequest>,
+    ) -> Result<tonic::Response<pb::EndInputResponse>, Status> {
+        let engine = engine_status(&self.state)?;
+        let already_ended = !engine.end_input();
+        if already_ended {
+            tracing::info!("end of input asked again: this run had already ended");
+        } else {
+            tracing::info!("end of input: closing the last zones of slot stream {}", engine.stream_id());
+        }
+        Ok(tonic::Response::new(pb::EndInputResponse { already_ended }))
+    }
 }
 
 // ---------------------------------------------------------------------------
